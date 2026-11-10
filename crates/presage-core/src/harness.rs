@@ -10,6 +10,7 @@ use crate::economy::prices_for;
 use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
 use crate::lessons::LessonBook;
 use crate::provider::Provider;
+use crate::provider::mock::MockProvider;
 use crate::provider::openai::OpenAiProvider;
 use crate::script::{Approvals, Autonomy};
 use crate::state::{Features, Session};
@@ -78,6 +79,9 @@ pub struct StartRequest {
     /// True when a person is present to answer questions and approvals.
     #[serde(default)]
     pub interactive: bool,
+    /// Mechanisms to switch off, for ablation runs (see `Features::NAMES`).
+    #[serde(default)]
+    pub without: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -125,6 +129,8 @@ struct Live {
     log: Mutex<Option<std::fs::File>>,
     input: mpsc::UnboundedSender<String>,
     cancel: Mutex<CancellationToken>,
+    /// Cancelled when the session is closed for good.
+    closed: CancellationToken,
     approvals: Arc<Approvals>,
 }
 
@@ -197,6 +203,13 @@ impl Harness {
 
     pub fn at(data_dir: PathBuf) -> Self {
         let config = Config::load(&data_dir.join("config.json"));
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()) }) }
+    }
+
+    /// A harness with this one's keys and defaults that keeps its sessions and lessons elsewhere,
+    /// so that benchmark runs do not mix with the user's own.
+    pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
+        let config = self.inner.config.lock().unwrap().clone();
         Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()) }) }
     }
 
@@ -284,10 +297,25 @@ impl Harness {
         self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
     }
 
+    /// Starts a session whose model is a scripted stand-in, for tests and offline benchmark runs.
+    /// Its numbers are fabricated and the session is marked as simulated.
+    pub fn start_scripted(&self, req: StartRequest, provider: MockProvider) -> Result<SessionMeta, String> {
+        let effort = req.effort.clone();
+        self.launch(req, Provider::Mock(provider), "scripted", "scripted stand-in", effort)
+    }
+
     fn launch(&self, req: StartRequest, provider: Provider, provider_id: &str, model: &str, effort: Option<String>) -> Result<SessionMeta, String> {
         let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
         let classic = matches!(req.mode.as_deref(), Some("classic"));
-        let features = if classic { Features::classic() } else { Features::presage() };
+        let mut features = if classic { Features::classic() } else { Features::presage() };
+        for name in &req.without {
+            features = features.without(name).ok_or_else(|| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", ")))?;
+        }
+        let mode = match (classic, req.without.is_empty()) {
+            (true, _) => "classic".to_string(),
+            (false, true) => "presage".to_string(),
+            (false, false) => format!("presage without {}", req.without.join(", ")),
+        };
         let effort = match effort.as_deref() {
             Some(e) => EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?,
             None => EffortPolicy::Ratchet(crate::provider::Effort::High),
@@ -322,7 +350,7 @@ impl Harness {
             cwd: cwd.clone(),
             provider: provider_id.to_string(),
             model: model.to_string(),
-            mode: if classic { "classic" } else { "presage" }.to_string(),
+            mode,
             effort: effort.label(),
             simulated,
             created: now,
@@ -336,7 +364,7 @@ impl Harness {
         let (input, mut inbox) = mpsc::unbounded_channel::<String>();
         let approvals = Arc::new(Approvals::default());
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
-        let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), approvals: approvals.clone() });
+        let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone() });
         live.save_meta();
         live.emit(EventKind::SessionStart {
             id: id.clone(),
@@ -355,7 +383,12 @@ impl Harness {
         let mut agent = Agent::new(provider, sess, cfg, sink, approvals);
         let worker = live.clone();
         tokio::spawn(async move {
-            while let Some(text) = inbox.recv().await {
+            loop {
+                let text = tokio::select! {
+                    text = inbox.recv() => text,
+                    _ = worker.closed.cancelled() => None,
+                };
+                let Some(text) = text else { break };
                 let cancel = CancellationToken::new();
                 *worker.cancel.lock().unwrap() = cancel.clone();
                 worker.set_status(SessionStatus::Running);
@@ -388,6 +421,15 @@ impl Harness {
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
         self.live(id)?.cancel.lock().unwrap().cancel();
+        Ok(())
+    }
+
+    /// Ends a session for good: stops its current run, kills its background jobs and frees its
+    /// memory. The log stays on disk and can still be replayed.
+    pub fn close(&self, id: &str) -> Result<(), String> {
+        let live = self.inner.sessions.lock().unwrap().remove(id).ok_or_else(|| format!("session {id} is not running in this process"))?;
+        live.cancel.lock().unwrap().cancel();
+        live.closed.cancel();
         Ok(())
     }
 
@@ -558,6 +600,36 @@ mod tests {
         assert!(h.start(StartRequest { cwd: "/tmp".into(), task: "  ".into(), ..Default::default() }).unwrap_err().contains("empty"));
         h.set_key("openrouter", "").unwrap();
         assert!(!h.state().providers.iter().find(|p| p.id == "openrouter").unwrap().has_key || std::env::var("OPENROUTER_API_KEY").is_ok());
+    }
+
+    #[tokio::test]
+    async fn scripted_sessions_can_switch_mechanisms_off_and_be_closed() {
+        use crate::provider::mock::MockTurn;
+        use serde_json::json;
+        let h = harness("scripted");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let cwd = ws.to_string_lossy().into_owned();
+        let turns = vec![MockTurn::calls("", vec![("write", json!({"path": "a.txt", "content": "x"})), ("shell", json!({"cmd": "test -f a.txt", "expect_exit": "0"})), ("finish", json!({"summary": "wrote a.txt"}))])];
+        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into()], ..Default::default() };
+        let meta = h.start_scripted(req, MockProvider::scripted(turns)).unwrap();
+        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch", true));
+        let done = until_idle(&h, &meta.id).await;
+        assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
+
+        // Closing frees the session; its log can still be replayed.
+        h.close(&meta.id).unwrap();
+        assert!(h.meta(&meta.id).is_err() && h.close(&meta.id).is_err());
+        assert!(h.events(&meta.id).unwrap().iter().any(|e| matches!(e.kind, EventKind::Finish { .. })));
+
+        let bad = StartRequest { cwd, task: "x".into(), without: vec!["telepathy".into()], ..Default::default() };
+        assert!(h.start_scripted(bad, MockProvider::scripted(vec![])).unwrap_err().contains("unknown mechanism"));
+
+        // A harness that shares the keys but keeps its sessions elsewhere.
+        h.set_key("openrouter", "sk-test").unwrap();
+        let other = h.with_data_dir(h.inner.data_dir.join("elsewhere"));
+        assert!(other.state().providers.iter().any(|p| p.id == "openrouter" && p.has_key));
+        assert!(other.list().is_empty());
     }
 
     #[tokio::test]
