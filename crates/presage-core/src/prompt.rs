@@ -147,7 +147,7 @@ fn presage_tools(watch: bool, job: bool) -> Value {
     }
     tools.push(tool(
         "finish",
-        "Declare the task complete. Refused unless a check has passed since your last change.",
+        "Declare the task complete. It can follow your edits in the same reply: watched tests are re-run first, and it is refused unless a check has passed since your last change.",
         json!({
             "summary": {"type": "string", "description": "What was done, in a few lines."},
             "unverified": {"type": "string", "description": "Only when no check is possible: the reason."}

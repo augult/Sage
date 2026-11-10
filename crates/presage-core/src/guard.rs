@@ -18,7 +18,7 @@ pub enum ExitExpect {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Expect {
-    /// `None` means the default: exit code 0.
+    /// `None` means the default: exit code 0, or any exit code when only output text is predicted.
     pub exit: Option<ExitExpect>,
     pub has: Vec<String>,
     pub lacks: Vec<String>,
@@ -135,13 +135,22 @@ impl Expect {
         }
     }
 
+    /// The exit code this prediction is about. One that names only output text leaves the exit code
+    /// open: a model expecting a failure often says just what the failure will print, and holding it
+    /// to "exit 0" would call a correct prediction a surprise. (Whether a run counts as a passing
+    /// check is decided on its real exit code, in `script.rs`.)
+    fn exit_expected(&self) -> ExitExpect {
+        self.exit.unwrap_or(if self.has.is_empty() && self.lacks.is_empty() { ExitExpect::Code(0) } else { ExitExpect::Any })
+    }
+
     pub fn describe(&self) -> String {
-        let mut parts = vec![match self.exit {
-            None | Some(ExitExpect::Code(0)) => "exit 0".to_string(),
-            Some(ExitExpect::Code(c)) => format!("exit {c}"),
-            Some(ExitExpect::Nonzero) => "exit ≠ 0".to_string(),
-            Some(ExitExpect::Any) => "any exit".to_string(),
-        }];
+        let mut parts = Vec::new();
+        match (self.exit, self.exit_expected()) {
+            (None, ExitExpect::Any) => {}
+            (_, ExitExpect::Code(c)) => parts.push(format!("exit {c}")),
+            (_, ExitExpect::Nonzero) => parts.push("exit ≠ 0".to_string()),
+            (_, ExitExpect::Any) => parts.push("any exit".to_string()),
+        }
         parts.extend(self.has.iter().map(|h| format!("has {h:?}")));
         parts.extend(self.lacks.iter().map(|l| format!("lacks {l:?}")));
         parts.join(" · ")
@@ -179,7 +188,7 @@ pub fn check(expect: Option<&Expect>, exit: Option<i32>, output: &str) -> Verdic
         Some(c) => format!("exit {c}"),
         None => "no exit (still running or killed)".to_string(),
     };
-    match (e.exit.unwrap_or(ExitExpect::Code(0)), exit) {
+    match (e.exit_expected(), exit) {
         (ExitExpect::Any, _) => {}
         (ExitExpect::Code(want), Some(c)) if c == want => {}
         (ExitExpect::Nonzero, Some(c)) if c != 0 => {}
@@ -230,7 +239,7 @@ mod tests {
         assert_eq!((e.exit, e.has.as_slice()), (Some(ExitExpect::Nonzero), &["FAILED".to_string()][..]));
         assert!(Expect::from_args(&json!({"cmd": "x"})).is_none());
         assert!(Expect::from_args(&json!({"cmd": "x", "expect_has": ""})).is_none());
-        assert_eq!(Expect::from_args(&json!({"expect_lacks": "Error"})).unwrap().describe(), "exit 0 · lacks \"Error\"");
+        assert_eq!(Expect::from_args(&json!({"expect_lacks": "Error"})).unwrap().describe(), "lacks \"Error\"");
 
         // Seen live from GLM-5.3: the nested object arrives as a string in its native call syntax.
         let e = Expect::from_args(&json!({"expect": "exit</arg_key><arg_value>nonzero"})).unwrap();
@@ -250,11 +259,17 @@ mod tests {
     }
 
     #[test]
-    fn content_prediction_does_not_waive_the_exit_code() {
-        // "5 passing, 1 failing" contains "passing" but the run failed: this must not count as evidence.
+    fn a_prediction_about_the_output_alone_leaves_the_exit_code_open() {
+        // Seen live: GLM-5.3, expecting a failing test run, said only that the output would lack "OK".
+        let e = Expect::from_args(&json!({"expect_lacks": "OK"})).unwrap();
+        assert!(check(Some(&e), Some(1), "FAILED (failures=3)").held);
+        assert!(!check(Some(&e), Some(0), "OK").held);
+        // A failed run can still never pass as a check: that is decided on its exit code, in `script.rs`.
         let e = Expect::from_value(&json!({"has": "passing"})).unwrap();
-        let v = check(Some(&e), Some(1), "5 passing, 1 failing");
-        assert!(!v.held);
+        assert!(check(Some(&e), Some(1), "5 passing, 1 failing").held);
+        // Naming an exit code makes it part of the prediction again.
+        let e = Expect::from_value(&json!({"exit": 0, "has": "passing"})).unwrap();
+        assert!(!check(Some(&e), Some(1), "5 passing, 1 failing").held);
     }
 
     #[test]
@@ -279,6 +294,9 @@ mod tests {
     #[test]
     fn describe_is_compact() {
         let e = Expect::from_value(&json!({"has": "ok"})).unwrap();
+        assert_eq!(e.describe(), "has \"ok\"");
+        let e = Expect::from_value(&json!({"exit": 0, "has": "ok"})).unwrap();
         assert_eq!(e.describe(), "exit 0 · has \"ok\"");
+        assert_eq!(Expect::default().describe(), "exit 0");
     }
 }

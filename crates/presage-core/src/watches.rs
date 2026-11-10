@@ -279,7 +279,7 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
         (Some(_), _) => format!("watch {AUTO_NAME}: FAIL · it now follows `{shown}`."),
         (None, WatchState::Pass) => format!("watch {AUTO_NAME}: PASS · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again."),
         (None, _) => format!(
-            "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. `finish` is accepted once it passes: send it in the same reply as your fix."
+            "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. Send `finish` in the same reply as your fix: the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead."
         ),
     };
     report.detail = notice.clone();
@@ -309,7 +309,7 @@ pub fn named_in(task: &str) -> Option<&str> {
 }
 
 /// What the model is told after a preflight, below the result.
-pub const PREFLIGHT_NOTE: &str = "The harness ran the test command the task names and watches it from now on: it re-runs by itself after every change and you hear about it when the result changes, so do not run it yourself. `finish` is accepted when it passes: put `finish` in the same reply as your edits.";
+pub const PREFLIGHT_NOTE: &str = "The harness ran the test command the task names and watches it from now on: it re-runs by itself after every change and you hear about it when the result changes, so do not run it yourself. Send `finish` in the same reply as your fix: the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead.";
 
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(60);
 

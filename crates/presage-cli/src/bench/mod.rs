@@ -4,6 +4,7 @@
 mod tasks;
 
 use crate::{k, pct};
+use presage_core::economy::{peak_multiplier, prices_for};
 use presage_core::events::{Event, EventKind, FinishStatus, Stats};
 use presage_core::harness::{Harness, StartRequest};
 use presage_core::prompt::prefix_tokens;
@@ -204,6 +205,9 @@ pub struct Run {
     pub verify_tail: String,
     /// Set when the provider failed and the run has no result. Such runs are left out of the medians.
     pub error: Option<String>,
+    /// What the run would have cost at list price had the provider served nothing from its cache.
+    /// Takes the luck of the cache out of a comparison.
+    pub cost_uncached: f64,
     pub stats: Stats,
 }
 
@@ -216,6 +220,7 @@ pub struct Medians {
     pub output_tokens: f64,
     pub reasoning_tokens: f64,
     pub cost: f64,
+    pub cost_uncached: f64,
     pub elapsed_ms: f64,
 }
 
@@ -448,6 +453,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         failure: None,
         verify_tail: String::new(),
         error: None,
+        cost_uncached: 0.0,
         stats: Stats::default(),
     };
     let ws = shared.dir.join("work").join(format!("{}-{}-{}-{}", job.seq, job.task.id, job.variant.name, retry));
@@ -479,6 +485,8 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
                     run.outcome = outcome_name(end.status).to_string();
                     run.harness_verified = end.status == FinishStatus::Done && end.verified;
                     run.stats = end.stats;
+                    let refund = prices_for(&job.model).map_or(0.0, |p| run.stats.cached_tokens as f64 * (p.miss - p.hit) / 1e6);
+                    run.cost_uncached = run.stats.cost + refund * peak_multiplier(&job.model, now_ms() / 1000);
                     if end.status == FinishStatus::Error {
                         let message = end.error.unwrap_or_else(|| "the run failed".into());
                         // A provider that failed gave no result; a model that failed gave a bad one.
@@ -541,8 +549,7 @@ fn median(mut xs: Vec<f64>) -> f64 {
 
 fn cell(model: &str, task: &str, variant: &str, runs: &[&Run]) -> Cell {
     let done: Vec<&Run> = runs.iter().copied().filter(|r| r.error.is_none()).collect();
-    let med = |value: fn(&Stats) -> f64| median(done.iter().map(|r| value(&r.stats)).collect());
-    Cell {
+    let med = |value: fn(&Stats) -> f64| median(done.iter().map(|r| value(&r.stats)).collect());    Cell {
         model: model.to_string(),
         task: task.to_string(),
         variant: variant.to_string(),
@@ -559,6 +566,7 @@ fn cell(model: &str, task: &str, variant: &str, runs: &[&Run]) -> Cell {
             output_tokens: med(|s| s.output_tokens as f64),
             reasoning_tokens: med(|s| s.reasoning_tokens as f64),
             cost: med(|s| s.cost),
+            cost_uncached: median(done.iter().map(|r| r.cost_uncached).collect()),
             elapsed_ms: med(|s| s.elapsed_ms as f64),
         },
     }
@@ -701,15 +709,15 @@ pub fn render(r: &Report) -> String {
     for model in &r.models {
         let cells = |task: &str, variant: &str| r.summary.iter().find(|c| &c.model == model && c.task == task && c.variant == variant).filter(|c| c.runs > 0);
         out.push(String::new());
-        out.push(format!("{model}   medians per run; solved = the held-out verification passed after the run"));
-        out.push(format!("{:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>7}", "task", "variant", "solved", "turns", "in tok", "cached", "out tok", "cost", "time"));
+        out.push(format!("{model}   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing"));
+        out.push(format!("{:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>9} {:>7}", "task", "variant", "solved", "turns", "in tok", "cached", "out tok", "cost", "no cache", "time"));
         let mut previous = "";
         for c in r.summary.iter().filter(|c| &c.model == model) {
             let m = &c.median;
             let label = if c.task == previous { "" } else { c.task.as_str() };
             previous = &c.task;
             let mut line = format!(
-                "{label:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>7}",
+                "{label:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>9} {:>7}",
                 c.variant,
                 format!("{}/{}", c.solved, c.runs),
                 num(m.turns),
@@ -717,6 +725,7 @@ pub fn render(r: &Report) -> String {
                 pct(m.cached_tokens as u64, m.prompt_tokens as u64),
                 k(m.output_tokens as u64),
                 format!("${:.4}", m.cost),
+                format!("${:.4}", m.cost_uncached),
                 fmt_duration(m.elapsed_ms as u64)
             );
             if c.task == ALL && c.solved > 0 {
@@ -736,11 +745,12 @@ pub fn render(r: &Report) -> String {
             let Some(c) = cells(ALL, variant) else { continue };
             let (a, b) = (&c.median, &base.median);
             out.push(format!(
-                "{variant} against classic: turns {}, input tokens {}, output tokens {}, cost {}, time {}; solved {}/{} against {}/{}",
+                "{variant} against classic: turns {}, input tokens {}, output tokens {}, cost {} ({} with no cache), time {}; solved {}/{} against {}/{}",
                 delta(a.turns, b.turns),
                 delta(a.prompt_tokens, b.prompt_tokens),
                 delta(a.output_tokens, b.output_tokens),
                 delta(a.cost, b.cost),
+                delta(a.cost_uncached, b.cost_uncached),
                 delta(a.elapsed_ms, b.elapsed_ms),
                 c.solved,
                 c.runs,
@@ -750,12 +760,14 @@ pub fn render(r: &Report) -> String {
             let pairs: Vec<(&Cell, &Cell)> = r.tasks.iter().filter_map(|t| Some((cells(t, variant)?, cells(t, "classic")?))).collect();
             let count = |better: fn(&Medians, &Medians) -> bool| pairs.iter().filter(|(x, y)| better(&x.median, &y.median)).count();
             out.push(format!(
-                "  by task ({}): fewer turns on {}, more on {}; cheaper on {}, dearer on {}",
+                "  by task ({}): fewer turns on {}, more on {}; cheaper on {}, dearer on {} (with no cache: {} and {})",
                 pairs.len(),
                 count(|x, y| x.turns < y.turns),
                 count(|x, y| x.turns > y.turns),
                 count(|x, y| x.cost < y.cost),
-                count(|x, y| x.cost > y.cost)
+                count(|x, y| x.cost > y.cost),
+                count(|x, y| x.cost_uncached < y.cost_uncached),
+                count(|x, y| x.cost_uncached > y.cost_uncached)
             ));
         }
     }
@@ -930,12 +942,13 @@ mod tests {
             failure: None,
             verify_tail: String::new(),
             error: error.map(String::from),
+            cost_uncached: cost * 2.0,
             stats: Stats { turns, cost, ..Stats::default() },
         };
         let runs = [run(3, 0.01, true, None), run(5, 0.03, false, None), run(4, 0.02, true, None), run(0, 0.0, false, Some("provider returned HTTP 502: overloaded"))];
         let c = cell("m", "t", "presage", &runs.iter().collect::<Vec<_>>());
         assert_eq!((c.runs, c.errors, c.solved, c.false_done), (3, 1, 2, 1));
-        assert_eq!((c.median.turns, c.median.cost), (4.0, 0.02));
+        assert_eq!((c.median.turns, c.median.cost, c.median.cost_uncached), (4.0, 0.02, 0.04));
         assert!((c.total_cost - 0.06).abs() < 1e-12);
         assert_eq!(median(vec![1.0, 9.0, 2.0, 4.0]), 3.0);
         assert_eq!((delta(3.0, 5.0), delta(1.0, 0.0), num(2.5), num(3.0)), ("-40%".into(), "n/a".into(), "2.5".into(), "3".into()));
