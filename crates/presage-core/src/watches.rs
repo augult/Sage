@@ -8,6 +8,7 @@ use crate::guard::{self, Expect};
 use crate::locate;
 use crate::state::Session;
 use crate::text::{bound, squeeze, tail};
+use crate::tools::Completed;
 use crate::tools::jobs::kill_group;
 use crate::tools::shell::{ExecEnd, StateKind, exec};
 use crate::util::{fnv64, one_line};
@@ -49,6 +50,8 @@ pub struct Watch {
     /// Workspace epoch this watch last ran against.
     pub epoch: u64,
     pub summary: String,
+    /// Set up by the harness from the model's own test command, not by the `watch` tool.
+    pub auto: bool,
 }
 
 #[derive(Default)]
@@ -68,6 +71,11 @@ pub struct WatchReport {
 
 const WATCH_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Name of the watch the harness keeps on the model's test command.
+pub const AUTO_NAME: &str = "tests";
+/// A test run slower than this is not repeated after every change.
+const AUTO_MAX_MS: u64 = 60_000;
+
 static VOLATILE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\d+(?:\.\d+)?\s*(?:ms|µs|us|ns|s|sec|secs|seconds|m|min|mins)\b|\b\d{1,2}:\d{2}(?::\d{2})?\b|0x[0-9a-fA-F]+|\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?|/tmp/[\w./-]+").unwrap()
 });
@@ -80,7 +88,7 @@ fn digest(text: &str) -> u64 {
 
 impl Watches {
     pub fn set(&mut self, name: &str, cmd: &str, cwd: PathBuf, expect: Option<Expect>) -> usize {
-        let fresh = Watch { name: name.to_string(), cmd: cmd.to_string(), cwd, expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new() };
+        let fresh = Watch { name: name.to_string(), cmd: cmd.to_string(), cwd, expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: false };
         match self.items.iter().position(|w| w.name == name) {
             Some(i) => {
                 self.items[i] = fresh;
@@ -101,6 +109,11 @@ impl Watches {
 
     pub fn all_pass(&self) -> bool {
         !self.items.is_empty() && self.items.iter().all(|w| w.state == WatchState::Pass)
+    }
+
+    /// Every watch passes and has seen the workspace as it is at `epoch`.
+    pub fn all_pass_at(&self, epoch: u64) -> bool {
+        self.all_pass() && self.items.iter().all(|w| w.epoch == epoch)
     }
 
     pub fn names(&self) -> String {
@@ -131,8 +144,15 @@ pub async fn run_one(sess: &mut Session, idx: usize, cancel: &CancellationToken)
         },
     };
 
-    let lines = squeeze(&text);
-    let new_digest = digest(&text);
+    settle(sess, idx, state, &text, &why, Some(&spill))
+}
+
+/// Records a result for watch `idx` and words what changed. Without a `spill` handle the output is
+/// one the model has just been shown (it ran the command itself), so none of it is repeated.
+fn settle(sess: &mut Session, idx: usize, state: WatchState, text: &str, why: &str, spill: Option<&str>) -> WatchReport {
+    let w = sess.watches.items[idx].clone();
+    let lines = squeeze(text);
+    let new_digest = digest(text);
     let change = match (w.state, state) {
         (WatchState::Unknown, _) => WatchChange::New,
         (a, b) if a != b => WatchChange::Flip,
@@ -142,11 +162,12 @@ pub async fn run_one(sess: &mut Session, idx: usize, cancel: &CancellationToken)
     let last = tail(&lines, 1).first().map(|l| one_line(l, 160)).unwrap_or_default();
 
     let excerpt = |sess: &mut Session| {
-        let view = bound(&lines, sess.limits.fail_head / 2, sess.limits.fail_tail / 2, sess.limits.fail_chars / 2, Some(&spill));
-        let mut s = view.text.trim_end().to_string();
+        let Some(spill) = spill else { return String::new() };
+        let view = bound(&lines, sess.limits.fail_head / 2, sess.limits.fail_tail / 2, sess.limits.fail_chars / 2, Some(spill));
+        let mut s = format!("\n{}", view.text.trim_end());
         if sess.features.expand {
             let step = sess.step;
-            let block = locate::expand(&text, &sess.ws, &mut sess.seen, step, sess.limits.expand_radius, sess.limits.expand_windows, sess.limits.expand_chars);
+            let block = locate::expand(text, &sess.ws, &mut sess.seen, step, sess.limits.expand_radius, sess.limits.expand_windows, sess.limits.expand_chars);
             if !block.is_empty() {
                 s.push_str("\n--- where (current file content; anchors work in edit) ---\n");
                 s.push_str(block.trim_end());
@@ -160,9 +181,9 @@ pub async fn run_one(sess: &mut Session, idx: usize, cancel: &CancellationToken)
         (WatchState::Pass, WatchChange::New) => format!("watch {name}: PASS · {last}"),
         (WatchState::Pass, WatchChange::Flip) => format!("watch {name}: FAIL → PASS · {last}"),
         (WatchState::Pass, _) => String::new(),
-        (WatchState::Fail, WatchChange::New) => format!("watch {name}: FAIL ({why})\n{}", excerpt(sess)),
-        (WatchState::Fail, WatchChange::Flip) => format!("watch {name}: PASS → FAIL ({why}) — the change you just made broke it\n{}", excerpt(sess)),
-        (WatchState::Fail, WatchChange::Changed) => format!("watch {name}: still FAIL ({why}), but the output changed\n{}", excerpt(sess)),
+        (WatchState::Fail, WatchChange::New) => format!("watch {name}: FAIL ({why}){}", excerpt(sess)),
+        (WatchState::Fail, WatchChange::Flip) => format!("watch {name}: PASS → FAIL ({why}) — the change you just made broke it{}", excerpt(sess)),
+        (WatchState::Fail, WatchChange::Changed) => format!("watch {name}: still FAIL ({why}), but the output changed{}", excerpt(sess)),
         (WatchState::Fail, WatchChange::Same) => format!("watch {name}: still FAIL, same output as before"),
         (WatchState::Unknown, _) => format!("watch {name}: not run ({why})"),
     };
@@ -203,6 +224,134 @@ pub async fn run_stale(sess: &mut Session, cancel: &CancellationToken) -> (Vec<W
         text.push(format!("watches still passing: {}", quiet.join(", ")));
     }
     (reports, text.join("\n"))
+}
+
+/// What `observe` made of a finished run.
+#[derive(Default)]
+pub struct Observed {
+    /// Changes to show in the UI. Not for the model: it has the step's own output.
+    pub reports: Vec<WatchReport>,
+    /// One line for the model when its test command has just become a watch.
+    pub notice: Option<String>,
+}
+
+/// Folds a foreground run that left the workspace untouched into the watches. A watch on the same
+/// command takes the result as its own instead of running a second time. With `auto_watch`, the
+/// model's test command becomes a watch by itself, which is what lets a reply that only edits come
+/// back with the test result attached.
+pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
+    let mut out = Observed::default();
+    let epoch = sess.evidence.epoch;
+    let same: Vec<usize> = (0..sess.watches.items.len()).filter(|i| sess.watches.items[*i].cmd == cmd && sess.watches.items[*i].cwd == run.cwd).collect();
+    for idx in &same {
+        let verdict = guard::check(sess.watches.items[*idx].expect.as_ref(), run.code, &run.text);
+        let state = if verdict.held { WatchState::Pass } else { WatchState::Fail };
+        let report = settle(sess, *idx, state, &run.text, &verdict.violations.join("; "), None);
+        sess.watches.items[*idx].epoch = epoch;
+        if report.change != WatchChange::Same {
+            out.reports.push(report);
+        }
+    }
+
+    // A runner that could not start (126, 127) says nothing about the code.
+    let promote = same.is_empty() && sess.features.auto_watch && run.ms <= AUTO_MAX_MS && !matches!(run.code, None | Some(126 | 127)) && test_like(cmd);
+    let previous = sess.watches.items.iter().find(|w| w.auto).map(|w| w.cmd.clone());
+    // A watch the model itself named `tests` is the model's, and of two runs the broader is kept.
+    let owned = sess.watches.items.iter().any(|w| w.name == AUTO_NAME && !w.auto);
+    if !promote || owned || previous.as_deref().is_some_and(|old| narrows(old, cmd)) {
+        return out;
+    }
+    let idx = sess.watches.set(AUTO_NAME, cmd, run.cwd.clone(), None);
+    sess.watches.items[idx].auto = true;
+    let state = if run.code == Some(0) { WatchState::Pass } else { WatchState::Fail };
+    let mut report = settle(sess, idx, state, &run.text, "", None);
+    sess.watches.items[idx].epoch = epoch;
+
+    let shown = one_line(cmd, 80);
+    let notice = match (previous, state) {
+        (Some(_), WatchState::Pass) => format!("watch {AUTO_NAME}: PASS · it now follows `{shown}`."),
+        (Some(_), _) => format!("watch {AUTO_NAME}: FAIL · it now follows `{shown}`."),
+        (None, WatchState::Pass) => format!("watch {AUTO_NAME}: PASS · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again."),
+        (None, _) => format!(
+            "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. `finish` is accepted once it passes: send it in the same reply as your fix."
+        ),
+    };
+    report.detail = notice.clone();
+    out.reports.push(report);
+    out.notice = Some(notice);
+    out
+}
+
+/// True when `new` is `old` with more arguments: the same run restricted to a part.
+fn narrows(old: &str, new: &str) -> bool {
+    new.strip_prefix(old).is_some_and(|rest| rest.starts_with(char::is_whitespace))
+}
+
+const RUNNERS: &[&str] = &["pytest", "py.test", "tox", "nox", "nose2", "nosetests", "jest", "vitest", "mocha", "ava", "phpunit", "rspec", "ctest", "bats", "behave"];
+/// Tools whose test run is spelled `<tool> test`.
+const TEST_SUBCOMMAND: &[&str] = &["go", "deno", "dotnet", "mix", "swift", "flutter", "dart", "stack", "cabal", "lein", "sbt", "bazel", "bun", "composer", "just", "task", "rake"];
+
+fn base(word: &str) -> &str {
+    word.rsplit('/').next().unwrap_or(word)
+}
+
+/// `run_tests.sh`, `test_calc.py`, `check`: a file whose name says it tests something.
+fn test_name(path: &str) -> bool {
+    base(path).to_ascii_lowercase().split(['.', '_', '-']).any(|t| matches!(t, "test" | "tests" | "spec" | "specs" | "check" | "checks" | "verify" | "runtests" | "unittest" | "unittests"))
+}
+
+/// True when `cmd` is a test run whose exit status is its verdict: the last command on the line is a
+/// known test runner or a script named like one. Deliberately narrow, because the result is accepted
+/// as verification: anything that could exit 0 without the tests passing is left out.
+pub fn test_like(cmd: &str) -> bool {
+    if cmd.contains("||") {
+        return false;
+    }
+    let Some(last) = cmd.split(['\n', ';']).flat_map(|part| part.split("&&")).map(str::trim).filter(|part| !part.is_empty()).last() else { return false };
+    if last.ends_with('&') {
+        return false;
+    }
+    // In `tests | tail` the first stage runs the tests, and `exec` reports its failure.
+    let stage = last.split('|').next().unwrap_or("").trim_matches(['(', ')', '{', '}', ' ']);
+    let mut w: Vec<&str> = stage.split_whitespace().collect();
+
+    // Leading `VAR=value` settings and wrappers that only set the stage.
+    loop {
+        match w.first().copied() {
+            Some(x) if x.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) => drop(w.remove(0)),
+            Some("env" | "time" | "nice" | "sudo" | "command" | "exec" | "npx" | "bunx" | "xvfb-run" | "timeout") => {
+                w.remove(0);
+                while w.first().is_some_and(|x| x.starts_with(|c: char| c == '-' || c.is_ascii_digit())) {
+                    w.remove(0);
+                }
+            }
+            Some("uv" | "poetry" | "pipenv" | "hatch" | "pdm" | "rye" | "bundle") if matches!(w.get(1).copied(), Some("run" | "exec")) => drop(w.drain(..2)),
+            Some("pnpm" | "yarn") if matches!(w.get(1).copied(), Some("exec" | "dlx")) => drop(w.drain(..2)),
+            _ => break,
+        }
+    }
+    let Some(first) = w.first().copied() else { return false };
+    let args: Vec<&str> = w[1..].iter().copied().filter(|a| !a.starts_with('-')).collect();
+    let arg = |i: usize| args.get(i).copied().unwrap_or("");
+    match base(first) {
+        h if RUNNERS.contains(&h) => true,
+        h if h.starts_with("python") || h.starts_with("pypy") => match w.iter().position(|a| *a == "-m") {
+            Some(i) => matches!(w.get(i + 1).copied(), Some("pytest" | "unittest" | "nose2" | "tox" | "nox" | "doctest")),
+            None => !w.contains(&"-c") && (test_name(arg(0)) || (base(arg(0)) == "manage.py" && arg(1) == "test")),
+        },
+        "node" => w.contains(&"--test") || test_name(arg(0)),
+        "ruby" | "php" | "bash" | "sh" | "zsh" | "dash" | "ksh" => !w.contains(&"-c") && (test_name(arg(0)) || (base(arg(0)) == "artisan" && arg(1) == "test")),
+        "cargo" => matches!(if arg(0).starts_with('+') { arg(1) } else { arg(0) }, "test" | "nextest" | "t"),
+        "npm" | "pnpm" | "yarn" => {
+            let script = if matches!(arg(0), "run" | "run-script") { arg(1) } else { arg(0) };
+            script == "t" || script == "test" || script.starts_with("test:")
+        }
+        "zig" => arg(0) == "test" || (arg(0) == "build" && arg(1) == "test"),
+        h if TEST_SUBCOMMAND.contains(&h) => matches!(arg(0), "test" | "spec"),
+        "make" | "gmake" | "mvn" | "mvnw" | "gradle" | "gradlew" | "ant" => args.iter().any(|a| matches!(*a, "test" | "tests" | "check" | "verify")),
+        // A script run directly: `./run_tests.sh`, `bin/test`.
+        _ => first.contains('/') && test_name(first),
+    }
 }
 
 #[cfg(all(test, unix))]

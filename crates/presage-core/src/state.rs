@@ -21,6 +21,8 @@ pub struct Features {
     pub expand: bool,
     /// `watch` tool and automatic re-runs after changes.
     pub watches: bool,
+    /// The model's own test command becomes a watch without being asked. Needs `watches`.
+    pub auto_watch: bool,
     /// `finish` requires a passing check since the last change.
     pub gate: bool,
     /// Error→fix pairs are learned per project and recalled.
@@ -37,11 +39,34 @@ pub struct Features {
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false }
+    }
+
+    /// The mechanisms `without` can switch off.
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap"];
+
+    /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
+    pub fn without(mut self, name: &str) -> Option<Self> {
+        let slot = match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "scripts" => &mut self.scripts,
+            "receipts" => &mut self.receipts,
+            "expand" => &mut self.expand,
+            "watches" => &mut self.watches,
+            "auto_watch" => &mut self.auto_watch,
+            "gate" => &mut self.gate,
+            "lessons" => &mut self.lessons,
+            "anchors" => &mut self.anchors,
+            "dedup" => &mut self.dedup,
+            "post_edit_check" => &mut self.post_edit_check,
+            "bootstrap" => &mut self.bootstrap,
+            _ => return None,
+        };
+        *slot = false;
+        Some(self)
     }
 }
 
