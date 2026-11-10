@@ -510,6 +510,11 @@ mod tests {
         let (res, _, _) = run(&mut s, &[("shell", json!({"cmd": "echo all good", "expect": {"has": "good"}})), ("finish", json!({"summary": "done"}))]).await;
         assert!(res.finished.is_none());
 
+        // Nor is a run that failed, even if what the model said it would print was printed.
+        let (res, _, events) = run(&mut s, &[("shell", json!({"cmd": "sh -c \"echo '5 passing, 1 failing'; exit 1\"", "expect_has": "passing"})), ("finish", json!({"summary": "done"}))]).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Surprise]);
+        assert!(res.finished.is_none());
+
         // A check that passed, then another change: stale again.
         run(&mut s, &[("shell", json!({"cmd": "grep -qx 2 n.txt", "expect": {"exit": "0"}}))]).await;
         assert!(s.evidence.fresh());

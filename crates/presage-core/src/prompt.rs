@@ -147,7 +147,7 @@ fn presage_tools(watch: bool, job: bool) -> Value {
     }
     tools.push(tool(
         "finish",
-        "Declare the task complete. Refused unless a check has passed since your last change.",
+        "Declare the task complete. Watched tests are re-run first; it is refused unless a check has passed since your last change.",
         json!({
             "summary": {"type": "string", "description": "What was done, in a few lines."},
             "unverified": {"type": "string", "description": "Only when no check is possible: the reason."}
@@ -261,7 +261,7 @@ mod tests {
         }
         // The fixed prefix is paid for on every turn of every session: keep it lean.
         let (presage, classic) = (prefix_tokens(&Features::presage()), prefix_tokens(&Features::classic()));
-        assert!(presage < 1_200, "the Presage prefix is ~{presage} tokens");
+        assert!(presage < 1_250, "the Presage prefix is ~{presage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
         assert!(!tool_schemas(&Features::classic(), false).to_string().contains("expect"));
     }
