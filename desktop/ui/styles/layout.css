@@ -1,0 +1,368 @@
+/* The three columns: sidebar, main view, inspector. */
+
+#app {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 304px;
+  height: 100vh;
+}
+
+@media (max-width: 1120px) {
+  #app {
+    grid-template-columns: 200px minmax(0, 1fr) 248px;
+  }
+}
+
+/* Sidebar */
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 8px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.brand-version {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.side-label {
+  padding: 8px 8px 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#session-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  /* Room for the focus ring, which the scroll container would clip. */
+  margin: 0 -4px;
+  padding: 2px 4px;
+  overflow-y: auto;
+}
+
+.side-empty {
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-item {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-item:hover {
+  background: var(--raised);
+}
+
+.session-item[aria-current="page"] {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--violet);
+}
+
+.session-item .glyph {
+  margin-top: 2px;
+}
+
+.session-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.session-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.session-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim {
+  flex: none;
+  padding: 0 3px;
+  border: 1px solid rgba(245, 165, 36, 0.45);
+  border-radius: 3px;
+  color: var(--amber);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 13px;
+}
+
+.side-link {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.side-link:hover,
+.side-link[aria-current="page"] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+/* Main view */
+
+#main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.view-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.view-head h1 {
+  margin-right: auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.view-body {
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.view-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.view-message {
+  margin: 48px auto;
+  max-width: 480px;
+  color: var(--muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.view-message .btn {
+  margin-top: 12px;
+}
+
+/* Inspector */
+
+#inspector {
+  min-height: 0;
+  padding: 4px 16px 24px;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow-y: auto;
+}
+
+.side-section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.side-section:last-child {
+  border-bottom: 0;
+}
+
+.side-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.side-title .badge {
+  margin-left: auto;
+}
+
+.side-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.stat-label {
+  flex: none;
+  color: var(--muted);
+}
+
+.stat-value {
+  min-width: 0;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.stat-value.tone-amber {
+  color: var(--amber);
+}
+
+.stat-sub {
+  color: var(--muted);
+}
+
+/* A two-part share bar under a stat. */
+.bar {
+  display: flex;
+  height: 3px;
+  margin: 2px 0 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.bar span {
+  height: 100%;
+  background: var(--tone);
+}
+
+.watch,
+.note {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.watch-body,
+.note-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.watch-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.watch-cmd,
+.watch-detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* The full text is in the timeline; here two lines are enough. */
+.watch-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.note-label {
+  flex: none;
+  width: 56px;
+  padding-top: 2px;
+  color: var(--tone-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.note-body {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 10px;
+  align-items: start;
+  font-size: 12px;
+}
+
+.legend-mark {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 68px;
+  padding-top: 1px;
+}
+
+.legend b {
+  font-weight: 600;
+}
+
+.legend span.muted {
+  display: block;
+}
