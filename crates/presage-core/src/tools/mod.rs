@@ -80,6 +80,17 @@ pub enum StepStatus {
     Denied,
 }
 
+/// A foreground command that ran to its end: what a watch needs to take the run as its own result.
+#[derive(Clone, Debug, Default)]
+pub struct Completed {
+    /// Directory the command started in.
+    pub cwd: std::path::PathBuf,
+    pub code: Option<i32>,
+    pub ms: u64,
+    /// The whole cleaned output.
+    pub text: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ShellMeta {
     pub cmd: String,
@@ -87,6 +98,8 @@ pub struct ShellMeta {
     /// The model predicted the outcome and was right: this counts as evidence.
     pub held_explicit: bool,
     pub output_tail: String,
+    /// Present only while watches are in use.
+    pub completed: Option<Completed>,
 }
 
 #[derive(Clone, Debug, Default)]

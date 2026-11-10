@@ -369,11 +369,11 @@ impl Agent {
                 use crate::tools::Tool;
                 let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
                 let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
-                let passing_check_last = tools.last() == Some(&Tool::Shell) && self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
-                let hint = if only_changes && self.sess.watches.items.is_empty() {
+                let checked = self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
+                let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
+                    Some("Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails.")
+                } else if only_changes && self.sess.watches.items.is_empty() {
                     Some("Tip: next time put the check (shell with expect_exit) and `finish` in the same reply as the edits. If an edit or the check fails, the rest is skipped automatically, so chaining costs nothing.")
-                } else if passing_check_last {
-                    Some("Tip: that check passed, so `finish` could have been in the same reply. It is skipped automatically whenever the check before it fails.")
                 } else {
                     None
                 };
