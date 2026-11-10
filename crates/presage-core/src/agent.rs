@@ -110,6 +110,8 @@ pub struct Agent {
     budget_marks: u8,
     /// How many more times the model is reminded that steps can be chained.
     chain_hints: u8,
+    /// The `job` tool was in the list sent with the previous request.
+    offered_job_tool: bool,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -119,7 +121,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(prompt::system_prompt(&cfg.features));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2 }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, offered_job_tool: false }
     }
 
     pub fn effort(&self) -> Effort {
@@ -245,8 +247,11 @@ impl Agent {
             let turn = self.turn;
             self.sink.emit(EventKind::TurnStart { turn, effort: self.effort.as_str().to_string() });
 
-            let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages));
-            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features), effort: self.effort, max_tokens: self.cfg.max_tokens };
+            // A longer tool list changes the very start of the prompt, just as a rewritten message does.
+            let jobs = self.sess.jobs.any_started();
+            let tools_stable = std::mem::replace(&mut self.offered_job_tool, jobs) == jobs;
+            let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages)) && tools_stable;
+            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs), effort: self.effort, max_tokens: self.cfg.max_tokens };
             let sink = self.sink.clone();
             let mut on_delta = move |d: Delta| match d {
                 Delta::Reasoning(text) => sink.emit(EventKind::Delta { turn, channel: Channel::Reasoning, text }),
@@ -369,11 +374,11 @@ impl Agent {
                 use crate::tools::Tool;
                 let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
                 let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
-                let passing_check_last = tools.last() == Some(&Tool::Shell) && self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
-                let hint = if only_changes && self.sess.watches.items.is_empty() {
+                let checked = self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
+                let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
+                    Some("Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails.")
+                } else if only_changes && self.sess.watches.items.is_empty() {
                     Some("Tip: next time put the check (shell with expect_exit) and `finish` in the same reply as the edits. If an edit or the check fails, the rest is skipped automatically, so chaining costs nothing.")
-                } else if passing_check_last {
-                    Some("Tip: that check passed, so `finish` could have been in the same reply. It is skipped automatically whenever the check before it fails.")
                 } else {
                     None
                 };
@@ -581,6 +586,20 @@ mod tests {
         // The note reaches the model as a footer on the observation, not as a rewritten message.
         let tools: Vec<&Message> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::Tool).collect();
         assert!(tools[1].content.contains("\n--- harness ---\nThe same step has now failed twice"), "{}", tools[1].content);
+    }
+
+    #[tokio::test]
+    async fn the_job_tool_is_offered_once_a_job_exists_at_the_price_of_one_cache_restart() {
+        let turns = vec![
+            fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "sleep 30", "background": true}))])),
+            fixed(MockTurn::calls("", vec![("job", json!({"id": "bg:1", "kill": true}))])),
+            fixed(MockTurn::say("Started it and stopped it again.")),
+        ];
+        let mut r = rig("agent-jobs", AgentConfig::new("mock"), turns);
+        r.agent.run("start the server, then stop it".into(), &CancellationToken::new()).await;
+        let cache: Vec<(bool, CacheVerdict)> = events(&r).iter().filter_map(|e| if let EventKind::Cache { prefix_stable, verdict, .. } = e { Some((*prefix_stable, *verdict)) } else { None }).collect();
+        assert_eq!(cache, vec![(true, CacheVerdict::First), (false, CacheVerdict::Bust), (true, CacheVerdict::Hit)]);
+        assert_eq!(r.agent.stats.cache_busts, 1);
     }
 
     #[tokio::test]

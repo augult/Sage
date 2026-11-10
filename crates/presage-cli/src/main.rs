@@ -140,7 +140,7 @@ impl Printer {
                     eprintln!("{}", indent(content.trim(), "    ", 40));
                 }
             }
-            EventKind::Cache { verdict: CacheVerdict::Bust, .. } => eprintln!("    {}", p.yellow("context was trimmed: the provider cache restarts from that point")),
+            EventKind::Cache { verdict: CacheVerdict::Bust, .. } => eprintln!("    {}", p.yellow("the start of the prompt changed (old output trimmed, or a tool added): the provider cache restarts from there")),
             EventKind::StepStart { tool, summary, expect, .. } => self.pending = Some((tool.clone(), summary.clone(), expect.clone())),
             EventKind::StepEnd { status, observation, ms, violations, .. } => {
                 let (tool, summary, expect) = self.pending.take().unwrap_or_default();
