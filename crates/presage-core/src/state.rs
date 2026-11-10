@@ -23,6 +23,8 @@ pub struct Features {
     pub watches: bool,
     /// The model's own test command becomes a watch without being asked. Needs `watches`.
     pub auto_watch: bool,
+    /// A test command named in the task is run and watched before the first turn. Needs `auto_watch`.
+    pub preflight: bool,
     /// `finish` requires a passing check since the last change.
     pub gate: bool,
     /// Error→fix pairs are learned per project and recalled.
@@ -39,15 +41,15 @@ pub struct Features {
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false }
     }
 
     /// The mechanisms `without` can switch off.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(mut self, name: &str) -> Option<Self> {
@@ -57,6 +59,7 @@ impl Features {
             "expand" => &mut self.expand,
             "watches" => &mut self.watches,
             "auto_watch" => &mut self.auto_watch,
+            "preflight" => &mut self.preflight,
             "gate" => &mut self.gate,
             "lessons" => &mut self.lessons,
             "anchors" => &mut self.anchors,

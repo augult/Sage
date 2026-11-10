@@ -14,7 +14,7 @@ use crate::tools::shell::{ExecEnd, StateKind, exec};
 use crate::util::{fnv64, one_line};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -123,28 +123,33 @@ impl Watches {
 
 /// Runs one watch and classifies the result against its previous one.
 pub async fn run_one(sess: &mut Session, idx: usize, cancel: &CancellationToken) -> WatchReport {
+    run_within(sess, idx, WATCH_TIMEOUT, cancel).await.0
+}
+
+/// As `run_one`, with a time limit. Also returns the exit code if the command ran to its end.
+async fn run_within(sess: &mut Session, idx: usize, limit: Duration, cancel: &CancellationToken) -> (WatchReport, Option<i32>) {
     let w = sess.watches.items[idx].clone();
     sess.evidence.before_command(&sess.ws);
-    let result = exec(sess, &w.cmd, &w.cwd, StateKind::ReadOnly, WATCH_TIMEOUT, cancel).await;
+    let result = exec(sess, &w.cmd, &w.cwd, StateKind::ReadOnly, limit, cancel).await;
     sess.evidence.after_command(&sess.ws, &w.cmd);
 
-    let (state, text, why, spill) = match result {
-        Err(e) => (WatchState::Fail, String::new(), format!("could not start: {e}"), String::new()),
+    let (state, text, why, spill, code) = match result {
+        Err(e) => (WatchState::Fail, String::new(), format!("could not start: {e}"), String::new(), None),
         Ok(ex) => match ex.end {
             ExecEnd::Exited(exit) => {
                 let verdict = guard::check(w.expect.as_ref(), exit.code, &ex.text);
                 let state = if verdict.held { WatchState::Pass } else { WatchState::Fail };
-                (state, ex.text, verdict.violations.join("; "), ex.spill)
+                (state, ex.text, verdict.violations.join("; "), ex.spill, exit.code)
             }
             ExecEnd::TimedOut(running) => {
                 kill_group(running.pid);
-                (WatchState::Fail, ex.text, format!("did not finish within {}s", WATCH_TIMEOUT.as_secs()), ex.spill)
+                (WatchState::Fail, ex.text, format!("did not finish within {}s", limit.as_secs()), ex.spill, None)
             }
-            ExecEnd::Cancelled => (WatchState::Unknown, ex.text, "cancelled".to_string(), ex.spill),
+            ExecEnd::Cancelled => (WatchState::Unknown, ex.text, "cancelled".to_string(), ex.spill, None),
         },
     };
 
-    settle(sess, idx, state, &text, &why, Some(&spill))
+    (settle(sess, idx, state, &text, &why, Some(&spill)), code)
 }
 
 /// Records a result for watch `idx` and words what changed. Without a `spill` handle the output is
@@ -241,6 +246,7 @@ pub struct Observed {
 /// back with the test result attached.
 pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
     let mut out = Observed::default();
+    let cmd = without_cd(cmd, &run.cwd);
     let epoch = sess.evidence.epoch;
     let same: Vec<usize> = (0..sess.watches.items.len()).filter(|i| sess.watches.items[*i].cmd == cmd && sess.watches.items[*i].cwd == run.cwd).collect();
     for idx in &same {
@@ -285,6 +291,50 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
 /// True when `new` is `old` with more arguments: the same run restricted to a part.
 fn narrows(old: &str, new: &str) -> bool {
     new.strip_prefix(old).is_some_and(|rest| rest.starts_with(char::is_whitespace))
+}
+
+/// `cd <the directory it already runs in> && rest` is just `rest`.
+fn without_cd<'a>(cmd: &'a str, cwd: &Path) -> &'a str {
+    let stripped = cmd.trim_start().strip_prefix("cd ").and_then(|rest| rest.split_once("&&"));
+    match stripped {
+        Some((dir, rest)) if Path::new(dir.trim().trim_matches(['"', '\''])) == cwd => rest.trim_start(),
+        _ => cmd,
+    }
+}
+
+/// The test command a task names: the first `backticked` span that is a plain test run. Nothing
+/// chained, piped, quoted or redirected qualifies, because it is run before the model has said a word.
+pub fn named_in(task: &str) -> Option<&str> {
+    task.split('`').skip(1).step_by(2).map(str::trim).find(|span| test_like(span) && !span.contains(|c: char| ";&|<>$(){}\\\"'\n".contains(c)))
+}
+
+/// What the model is told after a preflight, below the result.
+pub const PREFLIGHT_NOTE: &str = "The harness ran the test command the task names and watches it from now on: it re-runs by itself after every change and you hear about it when the result changes, so do not run it yourself. `finish` is accepted when it passes: put `finish` in the same reply as your edits.";
+
+const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Runs the test command the task names before the first model turn and keeps it as the watch. The
+/// model then starts from the failing output instead of spending a turn to get it, and its first
+/// edit already comes back checked. `None` when the task names no such command or it cannot be run.
+pub async fn preflight(sess: &mut Session, task: &str, cancel: &CancellationToken) -> Option<WatchReport> {
+    if !(sess.features.watches && sess.features.auto_watch && sess.features.preflight) {
+        return None;
+    }
+    let cmd = named_in(task)?;
+    let cwd = sess.ws.cwd.clone();
+    let idx = sess.watches.set(AUTO_NAME, cmd, cwd, None);
+    sess.watches.items[idx].auto = true;
+    let (report, code) = run_within(sess, idx, PREFLIGHT_TIMEOUT, cancel).await;
+    // Too slow to repeat after every change, or a runner that could not start: not a usable watch.
+    if matches!(code, None | Some(126 | 127)) {
+        sess.watches.remove(AUTO_NAME);
+        return None;
+    }
+    sess.watches.items[idx].epoch = sess.evidence.epoch;
+    if report.state == WatchState::Pass {
+        sess.evidence.passed(format!("watch {AUTO_NAME}"));
+    }
+    Some(report)
 }
 
 const RUNNERS: &[&str] = &["pytest", "py.test", "tox", "nox", "nose2", "nosetests", "jest", "vitest", "mocha", "ava", "phpunit", "rspec", "ctest", "bats", "behave"];
@@ -496,6 +546,41 @@ mod tests {
         let seen = observe(&mut s, "python3 -m unittest", &run);
         assert_eq!(seen.notice.as_deref(), Some("watch tests: FAIL · it now follows `python3 -m unittest`."));
         assert_eq!((s.watches.items.len(), s.watches.items[0].cmd.as_str()), (1, "python3 -m unittest"));
+
+        // `cd` into the directory it already runs in is not a different command.
+        let run = finished(&s, 0, "OK");
+        let wrapped = format!("cd {} && python3 -m unittest", s.ws.cwd.display());
+        let seen = observe(&mut s, &wrapped, &run);
+        assert!(seen.notice.is_none() && s.watches.items[0].state == WatchState::Pass);
+    }
+
+    #[tokio::test]
+    async fn the_test_command_a_task_names_is_run_and_watched_before_the_first_turn() {
+        assert_eq!(named_in("`python3 -m unittest` fails here. Fix `pager.py`."), Some("python3 -m unittest"));
+        assert_eq!(named_in("Fix `summary.sh` so that `sh check.sh` passes."), Some("sh check.sh"));
+        // Code, files, and anything chained or piped are not a command to run unasked.
+        for task in ["Create `roman.py` with `to_roman(n)`.", "Run `rm -rf build && pytest`.", "`pytest | tail -3` shows the failure", "no backticks: pytest fails", "an unbalanced ` tick"] {
+            assert_eq!(named_in(task), None, "{task}");
+        }
+
+        let mut s = test_session("watch-preflight", Features::presage());
+        let cancel = CancellationToken::new();
+        std::fs::write(s.ws.root.join("check.sh"), "test -f ok && echo PASS || { echo 'FAIL: ok is missing'; exit 1; }\n").unwrap();
+        let report = preflight(&mut s, "`sh check.sh` fails. Make it pass.", &cancel).await.expect("the task names a test command");
+        assert_eq!((report.state, report.change), (WatchState::Fail, WatchChange::New));
+        assert_eq!(report.detail, "watch tests: FAIL (expected exit 0, got exit 1)\nFAIL: ok is missing");
+        assert!(s.watches.items[0].auto);
+
+        // From here on it behaves like any watch.
+        std::fs::write(s.ws.root.join("ok"), "").unwrap();
+        s.evidence.changed("edit");
+        assert_eq!(run_stale(&mut s, &cancel).await.1, "watch tests: FAIL → PASS · PASS");
+
+        // A command that cannot start is not kept, and the mechanism can be switched off.
+        let mut s = test_session("watch-preflight-missing", Features::presage());
+        assert!(preflight(&mut s, "`./run_tests.sh` fails.", &cancel).await.is_none() && s.watches.items.is_empty());
+        let mut s = test_session("watch-preflight-off", Features::presage().without("preflight").unwrap());
+        assert!(preflight(&mut s, "`sh check.sh` fails.", &cancel).await.is_none());
     }
 
     #[tokio::test]

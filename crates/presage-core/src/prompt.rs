@@ -29,11 +29,15 @@ Rules:
 - After a surprise, find the cause before retrying. Never repeat a failed step unchanged.
 - Be brief: no preamble, no recap of tool output, no explanation unless asked.";
 
-fn presage_prompt(auto_watch: bool) -> String {
+fn presage_prompt(auto_watch: bool, preflight: bool) -> String {
     let (chain, watch, finish) = if auto_watch {
         (
             "read + read + shell (run the tests); then edit + edit + finish",
-            "Tests are watched for you. Once you have run a test command, the harness re-runs it by itself after every change and tells you when its result changes, so do not run it again yourself.",
+            if preflight {
+                "Tests are watched for you. The harness runs the test command the task names (or else takes the first one you run) and re-runs it by itself after every change, telling you when its result changes. Do not run it again yourself."
+            } else {
+                "Tests are watched for you. Once you have run a test command, the harness re-runs it by itself after every change and tells you when its result changes, so do not run it again yourself."
+            },
             "Once the tests are watched, put `finish` in the same reply as your edits: it is refused if they fail.",
         )
     } else {
@@ -46,8 +50,9 @@ fn presage_prompt(auto_watch: bool) -> String {
     SYSTEM_PRESAGE.replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", finish)
 }
 
-static PRESAGE_AUTO: LazyLock<String> = LazyLock::new(|| presage_prompt(true));
-static PRESAGE_MANUAL: LazyLock<String> = LazyLock::new(|| presage_prompt(false));
+static PRESAGE_PREFLIGHT: LazyLock<String> = LazyLock::new(|| presage_prompt(true, true));
+static PRESAGE_AUTO: LazyLock<String> = LazyLock::new(|| presage_prompt(true, false));
+static PRESAGE_MANUAL: LazyLock<String> = LazyLock::new(|| presage_prompt(false, false));
 
 pub const SYSTEM_CLASSIC: &str = "\
 You are a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
@@ -209,10 +214,12 @@ static TOOLS_CLASSIC: LazyLock<Value> = LazyLock::new(|| {
 pub fn system_prompt(features: &Features) -> &'static str {
     if !features.scripts {
         SYSTEM_CLASSIC
-    } else if features.watches && features.auto_watch {
-        PRESAGE_AUTO.as_str()
-    } else {
+    } else if !(features.watches && features.auto_watch) {
         PRESAGE_MANUAL.as_str()
+    } else if features.preflight {
+        PRESAGE_PREFLIGHT.as_str()
+    } else {
+        PRESAGE_AUTO.as_str()
     }
 }
 
@@ -275,10 +282,12 @@ mod tests {
     #[test]
     fn the_prompt_describes_the_mechanisms_that_are_switched_on() {
         let auto = system_prompt(&Features::presage());
+        let promoted = system_prompt(&Features::presage().without("preflight").unwrap());
         let manual = system_prompt(&Features::presage().without("auto_watch").unwrap());
-        assert!(auto.contains("Tests are watched for you") && !auto.contains("`watch`"));
+        assert!(auto.contains("Tests are watched for you") && auto.contains("the task names") && !auto.contains("`watch`"));
+        assert!(promoted.contains("Tests are watched for you") && !promoted.contains("the task names"));
         assert!(manual.contains("`watch` any check you would otherwise re-run") && !manual.contains("watched for you"));
-        for prompt in [auto, manual] {
+        for prompt in [auto, promoted, manual] {
             assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
         }
         assert_eq!(system_prompt(&Features::presage().without("scripts").unwrap()), SYSTEM_CLASSIC);

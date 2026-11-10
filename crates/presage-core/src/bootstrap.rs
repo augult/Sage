@@ -118,7 +118,8 @@ pub async fn snapshot(sess: &Session) -> String {
     } else {
         format!(" (git: {branch}, {dirty} uncommitted changes)")
     };
-    out.push_str(&format!("cwd: {}{git}\n", root.display()));
+    // Without this, models `cd` to the absolute path and spell it out in every call.
+    out.push_str(&format!("cwd: {}{git}; every tool already runs here, so give paths relative to it\n", root.display()));
     out.push_str(&format!("os: {} {} · date: {}\n", std::env::consts::OS, std::env::consts::ARCH, date_string(now_ms() / 1000)));
     if !present.is_empty() {
         out.push_str(&format!("installed: {}\n", present.join(", ")));
