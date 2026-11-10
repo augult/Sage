@@ -1,0 +1,716 @@
+/* The session view: header, timeline, turn cards with the step rail, composer. */
+
+.session-head {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.session-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--tone-ink);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.session-cwd {
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font: 11.5px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Timeline */
+
+.timeline-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.timeline-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 16px 24px 24px;
+}
+
+.jump {
+  position: absolute;
+  right: 24px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--tone-line);
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  color: var(--tone-ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.user {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--violet);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.user-text {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A disclosure line: the environment snapshot, reasoning, multi-line chips. */
+.fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold-toggle:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.fold-toggle > .icon {
+  transition: transform 0.12s;
+}
+
+.fold-toggle[aria-expanded="true"] > .icon {
+  transform: rotate(90deg);
+}
+
+.fold-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--well);
+  color: #c9cedb;
+  font: 12px/1.55 var(--mono);
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* Turn card */
+
+.turn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.turn.is-live {
+  border-color: rgba(124, 92, 255, 0.6);
+}
+
+.turn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.turn-no {
+  font-weight: 600;
+}
+
+.turn-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-facts b {
+  color: var(--soft);
+  font-weight: 500;
+}
+
+.thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--violet-ink);
+}
+
+.turn-stream:empty,
+.script:empty {
+  display: none;
+}
+
+.reasoning {
+  padding: 6px 12px 0 8px;
+}
+
+.reasoning .label {
+  flex: none;
+}
+
+.reasoning .fold-preview {
+  font-style: italic;
+}
+
+.reasoning-body {
+  margin: 4px 0 2px 11px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reply {
+  padding: 8px 12px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  background: var(--violet);
+  vertical-align: -2px;
+  animation: blink 1s steps(1) infinite;
+}
+
+/* The script: step rows on a rail, with chips and approval requests where they happened. */
+
+.script {
+  position: relative;
+  padding: 8px 12px;
+}
+
+.script::before {
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  left: 21px;
+  width: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.row {
+  position: relative;
+  padding-left: 28px;
+}
+
+/* A node on the rail: a ring in the step's tone, filled where the step needs attention. */
+.step-glyph {
+  position: absolute;
+  top: 5px;
+  left: 1px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--tone-line);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--tone-ink);
+}
+
+.step-glyph .icon {
+  stroke-width: 2;
+}
+
+.step-glyph .spinner {
+  width: 10px;
+  height: 10px;
+}
+
+.step.is-surprise > .step-glyph {
+  border-color: var(--amber);
+  background: var(--amber);
+  color: #201503;
+}
+
+.step.is-error > .step-glyph,
+.step.is-denied > .step-glyph {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
+
+.step.is-skipped > .step-glyph,
+.step.is-unfinished > .step-glyph {
+  border-style: dashed;
+}
+
+.step-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+
+/* Summary and prediction flow as text, so a long summary wraps under itself. */
+.step-main {
+  flex: 1;
+  min-width: 0;
+}
+
+button.step-line {
+  cursor: pointer;
+}
+
+button.step-line:hover {
+  background: var(--raised);
+}
+
+.step-no {
+  flex: none;
+  width: 14px;
+  color: var(--faint);
+  font: 11px var(--mono);
+  text-align: right;
+}
+
+.step-tool {
+  flex: none;
+  min-width: 44px;
+  color: var(--soft);
+  font: 600 12px var(--mono);
+}
+
+.step-summary {
+  margin-right: 8px;
+  font: 12px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.step-main .tag {
+  margin-right: 8px;
+}
+
+.step-took {
+  flex: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.expect {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(124, 92, 255, 0.5);
+  border-radius: 10px;
+  background: var(--violet-soft);
+  color: var(--violet-ink);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+
+.expect-text {
+  min-width: 0;
+  padding: 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.expect-verdict {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0 8px 0 6px;
+  border-left: 1px solid;
+  font-weight: 600;
+}
+
+.expect.is-held {
+  border-color: rgba(45, 212, 191, 0.45);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.expect.is-violated {
+  border-color: rgba(245, 165, 36, 0.55);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.step.is-surprise > .step-line {
+  background: var(--amber-soft);
+}
+
+.step.is-skipped .step-no,
+.step.is-skipped .step-tool,
+.step.is-skipped .step-summary,
+.step.is-unfinished > .step-line {
+  opacity: 0.55;
+}
+
+.step-note {
+  padding: 0 6px 4px 28px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.step-detail {
+  padding: 2px 6px 6px;
+}
+
+.step-detail .block {
+  margin-top: 0;
+}
+
+.step.is-surprise .block {
+  border-left-color: var(--amber);
+}
+
+.step.is-error .block,
+.step.is-denied .block {
+  border-left-color: var(--red);
+}
+
+.step-violation {
+  margin-bottom: 4px;
+  color: var(--amber);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.step-foot {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* The leading status token of an observation, e.g. [SURPRISE]. */
+.obs-tag {
+  color: var(--tone-ink);
+  font-weight: 700;
+}
+
+.out-link {
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: var(--violet-ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.queued {
+  padding: 2px 6px 2px 34px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Slim chips: watch changes, notes, lessons, effort changes, trims, retries, unknown events. */
+
+.chip {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chip-dot {
+  position: absolute;
+  top: 9px;
+  left: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 3px var(--card);
+}
+
+.timeline > .chip {
+  padding-left: 22px;
+}
+
+.timeline > .chip .chip-dot {
+  box-shadow: none;
+}
+
+.chip-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+button.chip-line {
+  cursor: pointer;
+}
+
+button.chip-line:hover {
+  background: var(--raised);
+}
+
+.chip-label {
+  flex: none;
+  color: var(--tone-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chip-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip-more {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform 0.12s;
+}
+
+.chip-line[aria-expanded="true"] .chip-more {
+  transform: rotate(90deg);
+}
+
+.chip .block {
+  margin: 0 6px 6px;
+}
+
+/* Approval request */
+
+.approval-card {
+  margin: 4px 6px 8px;
+  padding: 12px;
+  border: 1px solid rgba(245, 165, 36, 0.6);
+  border-radius: 8px;
+  background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--raised);
+}
+
+.approval-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.approval-what {
+  margin-top: 6px;
+  font: 12px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.approval-what b {
+  margin-right: 8px;
+  color: var(--soft);
+}
+
+.approval-why {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.approval-actions .form-error {
+  margin-right: auto;
+}
+
+/* Result card */
+
+.result {
+  padding: 12px;
+  border: 1px solid var(--tone-line);
+  border-left: 3px solid var(--tone);
+  border-radius: 8px;
+  background: linear-gradient(var(--tone-soft), var(--tone-soft)), var(--card);
+}
+
+.result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.result-status {
+  color: var(--tone-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.result-evidence {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.result-summary {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Footer: follow-up box, or the read-only note. */
+
+.session-foot {
+  flex: none;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.composer,
+.foot-note {
+  max-width: 832px;
+  margin: 0 auto;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer textarea {
+  min-height: 34px;
+  max-height: 160px;
+  resize: none;
+}
+
+.composer .form-error {
+  margin-bottom: 8px;
+}
+
+.foot-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Full output viewer */
+
+.output {
+  width: min(960px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+}
+
+.output-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 16px;
+  overflow: auto;
+  background: var(--well);
+  color: #c9cedb;
+  font: 12px/1.55 var(--mono);
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output-body.is-error {
+  color: var(--red-ink);
+}
