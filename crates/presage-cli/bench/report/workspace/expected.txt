@@ -1,0 +1,3 @@
+books 32.00
+games 99.97
+toys 12.75
