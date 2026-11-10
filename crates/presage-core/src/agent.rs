@@ -10,6 +10,7 @@ use crate::repair;
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::state::{Features, Session};
 use crate::util::now_ms;
+use crate::watches;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -223,7 +224,16 @@ impl Agent {
                     self.sink.emit(EventKind::Lesson { learned: false, text: lesson.describe() });
                 }
             }
-            format!("{env}\n\n<task>\n{task}\n</task>")
+            // A test command the task names is run before the model has spent anything on it. Only
+            // where commands run unasked anyway.
+            let preflight = if self.cfg.autonomy == Autonomy::Auto { watches::preflight(&mut self.sess, &task, cancel).await } else { None };
+            match preflight {
+                Some(r) => {
+                    self.sink.emit(EventKind::Watch { turn: self.turn, name: r.name, cmd: r.cmd, state: r.state, change: r.change, detail: r.detail.clone() });
+                    format!("{env}\n\n<tests>\n{}\n</tests>\n{}\n\n<task>\n{task}\n</task>", r.detail, watches::PREFLIGHT_NOTE)
+                }
+                None => format!("{env}\n\n<task>\n{task}\n</task>"),
+            }
         } else {
             task
         };
@@ -378,7 +388,7 @@ impl Agent {
                 let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
                     Some("Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails.")
                 } else if only_changes && self.sess.watches.items.is_empty() {
-                    Some("Tip: next time put the check (shell with expect_exit) and `finish` in the same reply as the edits. If an edit or the check fails, the rest is skipped automatically, so chaining costs nothing.")
+                    Some("Tip: send the check (shell with expect_exit) and `finish` together in your next reply: if the check fails, `finish` is skipped automatically. They can ride along with the edits just the same.")
                 } else {
                     None
                 };
@@ -533,7 +543,7 @@ mod tests {
         assert_eq!(nudges.len(), 1);
         // The lone edit also drew the reminder that the check and finish could have ridden along.
         let tool = r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap();
-        assert!(tool.content.contains("--- harness ---\nTip: next time put the check"), "{}", tool.content);
+        assert!(tool.content.contains("--- harness ---\nTip: send the check"), "{}", tool.content);
 
         // With a person watching, prose simply hands the turn back.
         let mut cfg = AgentConfig::new("mock");
@@ -600,6 +610,38 @@ mod tests {
         let cache: Vec<(bool, CacheVerdict)> = events(&r).iter().filter_map(|e| if let EventKind::Cache { prefix_stable, verdict, .. } = e { Some((*prefix_stable, *verdict)) } else { None }).collect();
         assert_eq!(cache, vec![(true, CacheVerdict::First), (false, CacheVerdict::Bust), (true, CacheVerdict::Hit)]);
         assert_eq!(r.agent.stats.cache_busts, 1);
+    }
+
+    #[tokio::test]
+    async fn the_test_command_the_task_names_is_checked_before_the_first_turn() {
+        let turns = || {
+            vec![
+                fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"}))])),
+                fixed(MockTurn::calls("", vec![("finish", json!({"summary": "upper-cased beta"}))])),
+            ]
+        };
+        let check = "grep -qx BETA n.txt && echo PASS || { echo 'FAIL: no BETA line'; exit 1; }\n";
+        let task = "`sh check.sh` fails. Upper-case the second line of n.txt.";
+
+        let mut r = rig("agent-preflight", AgentConfig::new("mock"), turns());
+        std::fs::write(r.agent.sess.ws.root.join("check.sh"), check).unwrap();
+        let out = r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, out.evidence.as_str()), (FinishStatus::Done, true, "verified by watch tests"));
+        assert_eq!(r.agent.stats.turns, 2, "no turn was spent on running the check");
+        // The model starts from the failing output, and its edit alone comes back with the verdict.
+        let first = &requests(&r)[0][1].content;
+        assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\nFAIL: no BETA line\n</tests>\nThe harness ran the test command"), "{first}");
+        assert!(first.starts_with("<env>\ncwd: ") && first.ends_with("</task>"));
+        let tool = r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap();
+        assert!(tool.content.contains("--- harness ---\nwatch tests: FAIL → PASS · PASS\nTip: every check passes"), "{}", tool.content);
+
+        // Where every command waits for approval, none is run unasked.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.autonomy = Autonomy::Ask;
+        let mut r = rig("agent-preflight-ask", cfg, turns());
+        std::fs::write(r.agent.sess.ws.root.join("check.sh"), check).unwrap();
+        r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert!(!requests(&r)[0][1].content.contains("<tests>"));
     }
 
     #[tokio::test]
