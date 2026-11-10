@@ -169,7 +169,7 @@ impl Runner<'_> {
             self.sess.step += 1;
             let tool_name = call.tool.map(|t| t.name().to_string()).unwrap_or_else(|| call.raw_name.clone());
             let expect = if self.sess.features.receipts && matches!(call.tool, Some(Tool::Shell | Tool::Watch)) {
-                call.args.get("expect").and_then(Expect::from_value).map(|e| e.describe())
+                Expect::from_args(&call.args).map(|e| e.describe())
             } else {
                 None
             };
@@ -330,7 +330,7 @@ impl Runner<'_> {
         let Some(cmd) = str_arg(args, "cmd").map(str::trim).filter(|c| !c.is_empty()) else {
             return StepOutput::error("`cmd` is required: the check command to run");
         };
-        let expect = if self.sess.features.receipts { args.get("expect").and_then(Expect::from_value) } else { None };
+        let expect = if self.sess.features.receipts { Expect::from_args(args) } else { None };
         let cwd = self.sess.ws.cwd.clone();
         let idx = self.sess.watches.set(&name, cmd, cwd, expect);
         let report = watches::run_one(self.sess, idx, self.cancel).await;
@@ -378,7 +378,7 @@ impl Runner<'_> {
         }
         ev.warned = true;
         let text = format!(
-            "[gate] finish refused: nothing has been checked since {}. Run a check with `expect` and call finish after it in the same reply. If no check is possible, call finish again with `unverified` set to the reason.",
+            "[gate] finish refused: nothing has been checked since {}. Run a check (shell with expect_exit / expect_has) and call finish right after it in the same reply. If no check is possible, call finish again with `unverified` set to the reason.",
             ev.last_change
         );
         StepOutput { status: StepStatus::Surprise, violations: vec!["no check has passed since the last change".into()], stub: text.clone(), observation: text, ..Default::default() }

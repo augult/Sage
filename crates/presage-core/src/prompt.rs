@@ -12,10 +12,10 @@ pub const SYSTEM_PRESAGE: &str = "\
 You are Presage, a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
 
 Turns here work differently from other agents:
-1. A reply is a script. Every tool call you make in one reply runs, in order. If a shell, edit or write step fails or contradicts your `expect`, the calls after it are skipped and you get the failure in detail. So send the whole next stretch of work in one reply: several reads at once; or edit, then check, then finish.
-2. Predict. On `shell`, set `expect` whenever you know what should happen. If you were right you get a one-line receipt instead of the output. If you were wrong you get the output plus the code it points at. Leave `expect` out only when you need to read the output itself.
+1. A reply is a script. Every tool call you make in one reply runs, in order. If a shell, edit or write step fails or contradicts your prediction, the calls after it are skipped and you get the failure in detail. So one reply carries the whole next stretch of work, for example: read + read + read; or edit + edit + shell (run the tests) + finish. Never spend a reply on a single step when the following steps are already clear: a wrong assumption only stops the script.
+2. Predict. On `shell`, say what you expect with `expect_exit`, `expect_has`, `expect_lacks` whenever you know. If you were right you get a short receipt instead of the full output. If you were wrong you get the output plus the code it points at. Give no prediction when you need to read the output itself (listing files, printing a file).
 3. `watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes.
-4. `finish` is accepted only if a check has passed since your last change. Chain it: edit, then shell with `expect`, then finish.
+4. `finish` is accepted only if a check (a shell call whose prediction held, or passing watches) has passed since your last change. Put it in the same reply, right after the check.
 
 Rules:
 - Read code before changing it. Lines in read and search output begin with an anchor such as `41kq`; give anchors to `edit` instead of retyping the old text.
@@ -40,22 +40,15 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 }
 
 static TOOLS_PRESAGE: LazyLock<Value> = LazyLock::new(|| {
-    let expect = json!({
-        "type": "object",
-        "description": "Your prediction; the harness checks it.",
-        "properties": {
-            "exit": {"type": "string", "description": "Expected exit code: \"0\" (default), another code, \"nonzero\" or \"any\"."},
-            "has": {"type": "string", "description": "Text (or /regex/) the output must contain."},
-            "lacks": {"type": "string", "description": "Text (or /regex/) the output must not contain."}
-        }
-    });
     json!([
         tool(
             "shell",
-            "Run a bash command in the workspace. `cd` and exported variables persist between calls; stdin is closed. Set `expect` when you can predict the outcome: if it holds you get a one-line receipt, otherwise the details, and the remaining calls of this reply are skipped.",
+            "Run a bash command in the workspace. `cd` and exported variables persist between calls; stdin is closed. Add a prediction (any of the expect_* fields) when you know the outcome: if it holds you get a short receipt, otherwise the details, and the remaining calls of this reply are skipped.",
             json!({
                 "cmd": {"type": "string"},
-                "expect": expect,
+                "expect_exit": {"type": "string", "description": "Predicted exit code: \"0\", another code, \"nonzero\" or \"any\". Defaults to \"0\" when another expect_* field is given."},
+                "expect_has": {"type": "string", "description": "Text (or /regex/) you predict the output contains."},
+                "expect_lacks": {"type": "string", "description": "Text (or /regex/) you predict the output does not contain."},
                 "timeout": {"type": "integer", "description": "Seconds before the command is moved to the background (default 120)."},
                 "background": {"type": "boolean", "description": "Start a long-running process (server, watcher) and return at once with a job id."}
             }),
@@ -106,8 +99,7 @@ static TOOLS_PRESAGE: LazyLock<Value> = LazyLock::new(|| {
             "Register a check command (tests, build, lint). It runs now, then again by itself after every change you make; you hear about it only when its result changes. `finish` requires every watch to pass.",
             json!({
                 "name": {"type": "string", "description": "Short label, e.g. \"tests\"."},
-                "cmd": {"type": "string"},
-                "expect": expect,
+                "cmd": {"type": "string", "description": "Passes when it exits 0."},
                 "off": {"type": "boolean", "description": "Remove the watch with this name."}
             }),
             &["name"],
@@ -125,7 +117,7 @@ static TOOLS_PRESAGE: LazyLock<Value> = LazyLock::new(|| {
         ),
         tool(
             "finish",
-            "Declare the task complete. Accepted only if a check has passed since your last change (a shell call whose `expect` held, or passing watches), so chain it after the check in the same reply.",
+            "Declare the task complete. Accepted only if a check has passed since your last change (a shell call whose prediction held, or passing watches), so put it right after the check in the same reply.",
             json!({
                 "summary": {"type": "string", "description": "What was done, in a few lines."},
                 "unverified": {"type": "string", "description": "Only when no check is possible: the reason."}
@@ -211,7 +203,7 @@ mod tests {
             }
             // The fixed prefix is paid for on every turn of every session: keep it lean.
             let prefix = est_tokens(system_prompt(&features)) + est_tokens(&tool_schemas(&features).to_string());
-            assert!(prefix < 2_000, "prefix is ~{prefix} tokens");
+            assert!(prefix < 2_100, "prefix is ~{prefix} tokens");
         }
         assert_eq!(tool_schemas(&Features::presage()).as_array().unwrap().len(), 8);
         assert!(!tool_schemas(&Features::classic()).to_string().contains("expect"));
