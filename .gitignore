@@ -1,0 +1,11 @@
+target/
+node_modules/
+release/
+.presage/
+*.log
+.env
+.env.*
+.DS_Store
+desktop/src-tauri/gen/
+.hoplite/runtime/
+.hoplite/artifacts/

@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/presage-core", "crates/presage-cli", "desktop/src-tauri"]
+default-members = ["crates/presage-core", "crates/presage-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[workspace.dependencies]
+presage-core = { path = "crates/presage-core" }
+anyhow = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.4"
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+libc = "0.2"
+regex = "1.13"
+# native-tls: OS TLS on macOS/Windows, system OpenSSL on Linux. Smallest build and binary.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "json", "system-proxy"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "sync", "time", "net", "signal"] }
+tokio-util = "0.7"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

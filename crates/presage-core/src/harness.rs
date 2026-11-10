@@ -1,0 +1,578 @@
+//! The public facade: everything a front end (desktop app, CLI) needs, and nothing else.
+//!
+//! A session is a long-lived task that owns its agent. Events are appended to `events.jsonl`,
+//! kept in memory for late subscribers, and broadcast live.
+
+use crate::agent::{Agent, AgentConfig, EffortPolicy};
+use crate::config::{Config, PROVIDERS, data_dir};
+use crate::demo;
+use crate::economy::prices_for;
+use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
+use crate::lessons::LessonBook;
+use crate::provider::Provider;
+use crate::provider::openai::OpenAiProvider;
+use crate::script::{Approvals, Autonomy};
+use crate::state::{Features, Session};
+use crate::util::{civil_date, fnv64, home_dir, now_ms, one_line, rand_hex};
+use crate::workspace::Workspace;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Running,
+    /// Waiting for the next message; the agent and its context are still alive.
+    Idle,
+    /// Loaded from disk: viewable, not resumable.
+    Closed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionMeta {
+    pub id: String,
+    pub title: String,
+    pub cwd: String,
+    pub provider: String,
+    pub model: String,
+    pub mode: String,
+    pub effort: String,
+    pub simulated: bool,
+    pub created: u64,
+    pub updated: u64,
+    pub status: SessionStatus,
+    /// How the most recent run ended, once it has.
+    pub outcome: Option<FinishStatus>,
+    pub verified: Option<bool>,
+    pub stats: Stats,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StartRequest {
+    pub cwd: String,
+    pub task: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// `low`, `high`, `max`, `off`, or `ratchet[-low|-high]`.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// `presage` (default) or `classic`, the conventional baseline loop.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// `auto` (default) or `ask`.
+    #[serde(default)]
+    pub autonomy: Option<String>,
+    #[serde(default)]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub time_budget_secs: Option<u64>,
+    /// True when a person is present to answer questions and approvals.
+    #[serde(default)]
+    pub interactive: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub key_env: String,
+    pub has_key: bool,
+    pub models: Vec<String>,
+    pub note: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AppState {
+    pub version: String,
+    pub providers: Vec<ProviderInfo>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub effort: String,
+    pub data_dir: String,
+    pub home: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DirListing {
+    pub path: String,
+    pub parent: Option<String>,
+    pub dirs: Vec<DirEntry>,
+    pub is_git: bool,
+}
+
+struct Live {
+    dir: PathBuf,
+    meta: Mutex<SessionMeta>,
+    events: Mutex<Vec<Event>>,
+    seq: AtomicU64,
+    tx: broadcast::Sender<Event>,
+    log: Mutex<Option<std::fs::File>>,
+    input: mpsc::UnboundedSender<String>,
+    cancel: Mutex<CancellationToken>,
+    approvals: Arc<Approvals>,
+}
+
+impl Live {
+    fn save_meta(&self) {
+        let meta = self.meta.lock().unwrap().clone();
+        if let Ok(body) = serde_json::to_string_pretty(&meta) {
+            let _ = std::fs::write(self.dir.join("meta.json"), body);
+        }
+    }
+
+    fn set_status(&self, status: SessionStatus) {
+        {
+            let mut m = self.meta.lock().unwrap();
+            m.status = status;
+            m.updated = now_ms();
+        }
+        self.save_meta();
+    }
+}
+
+impl Sink for Live {
+    fn emit(&self, kind: EventKind) {
+        let transient = kind.transient();
+        // Holding the backlog lock across the broadcast lets `subscribe` take a snapshot and a
+        // receiver with nothing lost or duplicated in between.
+        let mut backlog = self.events.lock().unwrap();
+        let event = Event { seq: self.seq.fetch_add(1, Ordering::SeqCst) + 1, ts: now_ms(), kind };
+        if !transient {
+            if let (Some(file), Ok(line)) = (self.log.lock().unwrap().as_mut(), serde_json::to_string(&event)) {
+                let _ = writeln!(file, "{line}");
+            }
+            match &event.kind {
+                EventKind::Stats { stats } => self.meta.lock().unwrap().stats = stats.clone(),
+                EventKind::Finish { status, verified, .. } => {
+                    let mut m = self.meta.lock().unwrap();
+                    m.outcome = Some(*status);
+                    m.verified = Some(*verified);
+                }
+                _ => {}
+            }
+            backlog.push(event.clone());
+        }
+        let _ = self.tx.send(event);
+    }
+}
+
+struct Inner {
+    data_dir: PathBuf,
+    config: Mutex<Config>,
+    sessions: Mutex<HashMap<String, Arc<Live>>>,
+}
+
+#[derive(Clone)]
+pub struct Harness {
+    inner: Arc<Inner>,
+}
+
+fn session_id() -> String {
+    let secs = now_ms() / 1000;
+    let (y, m, d) = civil_date(secs);
+    let t = secs % 86_400;
+    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{}", t / 3600, (t % 3600) / 60, t % 60, rand_hex(2))
+}
+
+impl Harness {
+    pub fn new() -> Self {
+        Self::at(data_dir())
+    }
+
+    pub fn at(data_dir: PathBuf) -> Self {
+        let config = Config::load(&data_dir.join("config.json"));
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()) }) }
+    }
+
+    fn config_path(&self) -> PathBuf {
+        self.inner.data_dir.join("config.json")
+    }
+
+    pub fn state(&self) -> AppState {
+        let cfg = self.inner.config.lock().unwrap();
+        let mut providers: Vec<ProviderInfo> = PROVIDERS
+            .iter()
+            .map(|d| ProviderInfo {
+                id: d.id.into(),
+                name: d.name.into(),
+                base_url: d.base_url.into(),
+                key_env: d.key_env.into(),
+                has_key: cfg.has_key(d),
+                models: d.models.iter().map(|m| m.to_string()).collect(),
+                note: d.note.into(),
+            })
+            .collect();
+        if let Some(c) = &cfg.custom {
+            providers.push(ProviderInfo { id: "custom".into(), name: "Custom endpoint".into(), base_url: c.base_url.clone(), key_env: "PRESAGE_API_KEY".into(), has_key: true, models: c.models.clone(), note: String::new() });
+        }
+        let provider = cfg.default_provider();
+        let model = cfg.resolve(provider.as_deref(), None).ok().map(|r| r.model);
+        AppState {
+            version: env!("CARGO_PKG_VERSION").into(),
+            providers,
+            provider,
+            model,
+            effort: cfg.effort.clone().unwrap_or_else(|| "ratchet".into()),
+            data_dir: self.inner.data_dir.to_string_lossy().into_owned(),
+            home: home_dir().to_string_lossy().into_owned(),
+        }
+    }
+
+    /// Stores (or, with an empty key, removes) an API key.
+    pub fn set_key(&self, provider: &str, key: &str) -> Result<(), String> {
+        if provider != "custom" && !PROVIDERS.iter().any(|d| d.id == provider) {
+            return Err(format!("unknown provider {provider:?}"));
+        }
+        let mut cfg = self.inner.config.lock().unwrap();
+        if key.trim().is_empty() {
+            cfg.keys.remove(provider);
+        } else {
+            cfg.keys.insert(provider.to_string(), key.trim().to_string());
+        }
+        cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
+    }
+
+    pub fn set_defaults(&self, provider: Option<String>, model: Option<String>, effort: Option<String>) -> Result<(), String> {
+        if let Some(e) = &effort {
+            EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?;
+        }
+        let mut cfg = self.inner.config.lock().unwrap();
+        cfg.provider = provider.or(cfg.provider.take());
+        cfg.model = model.or(cfg.model.take());
+        cfg.effort = effort.or(cfg.effort.take());
+        cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
+    }
+
+    fn lessons_path(&self, root: &Path) -> PathBuf {
+        self.inner.data_dir.join("projects").join(format!("{:016x}", fnv64(root.as_os_str().as_encoded_bytes()))).join("lessons.jsonl")
+    }
+
+    /// Starts a session on a real provider and begins working on the task.
+    pub fn start(&self, req: StartRequest) -> Result<SessionMeta, String> {
+        if req.task.trim().is_empty() {
+            return Err("the task is empty".into());
+        }
+        let resolved = self.inner.config.lock().unwrap().resolve(req.provider.as_deref(), req.model.as_deref())?;
+        let provider = Provider::OpenAi(OpenAiProvider::new(&resolved.base_url, &resolved.key, &resolved.model, resolved.dialect).map_err(|e| e.to_string())?);
+        let effort = req.effort.clone().or_else(|| self.inner.config.lock().unwrap().effort.clone());
+        self.launch(req, provider, &resolved.id, &resolved.model, effort)
+    }
+
+    /// Starts the scripted walkthrough in a throwaway workspace. No key, no network.
+    pub fn demo(&self) -> Result<SessionMeta, String> {
+        let root = self.inner.data_dir.join("demo").join(session_id());
+        demo::create_workspace(&root).map_err(|e| format!("could not create the demo workspace: {e}"))?;
+        let real = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+        let provider = Provider::Mock(demo::provider(real, 22));
+        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, ..Default::default() };
+        self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
+    }
+
+    fn launch(&self, req: StartRequest, provider: Provider, provider_id: &str, model: &str, effort: Option<String>) -> Result<SessionMeta, String> {
+        let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
+        let classic = matches!(req.mode.as_deref(), Some("classic"));
+        let features = if classic { Features::classic() } else { Features::presage() };
+        let effort = match effort.as_deref() {
+            Some(e) => EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?,
+            None => EffortPolicy::Ratchet(crate::provider::Effort::High),
+        };
+        let autonomy = match req.autonomy.as_deref() {
+            Some("ask") => Autonomy::Ask,
+            Some("auto") | None => Autonomy::Auto,
+            Some(other) => return Err(format!("unknown autonomy {other:?}; use auto or ask")),
+        };
+
+        let id = session_id();
+        let dir = self.inner.data_dir.join("sessions").join(&id);
+        let lessons = if features.lessons { LessonBook::load(self.lessons_path(&ws.root)) } else { LessonBook::in_memory() };
+        let simulated = provider.simulated();
+        let cwd = ws.root.to_string_lossy().into_owned();
+        let sess = Session::new(ws, dir.clone(), features, lessons, prices_for(model)).map_err(|e| format!("could not create the session directory: {e}"))?;
+
+        let mut cfg = AgentConfig::new(model);
+        cfg.features = features;
+        cfg.effort = effort;
+        cfg.autonomy = autonomy;
+        cfg.interactive = req.interactive;
+        if let Some(n) = req.max_turns {
+            cfg.max_turns = n.max(1);
+        }
+        cfg.time_budget = req.time_budget_secs.filter(|s| *s > 0).map(Duration::from_secs);
+
+        let now = now_ms();
+        let meta = SessionMeta {
+            id: id.clone(),
+            title: one_line(&req.task, 72),
+            cwd: cwd.clone(),
+            provider: provider_id.to_string(),
+            model: model.to_string(),
+            mode: if classic { "classic" } else { "presage" }.to_string(),
+            effort: effort.label(),
+            simulated,
+            created: now,
+            updated: now,
+            status: SessionStatus::Running,
+            outcome: None,
+            verified: None,
+            stats: Stats::default(),
+        };
+        let (tx, _) = broadcast::channel(4096);
+        let (input, mut inbox) = mpsc::unbounded_channel::<String>();
+        let approvals = Arc::new(Approvals::default());
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
+        let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), approvals: approvals.clone() });
+        live.save_meta();
+        live.emit(EventKind::SessionStart {
+            id: id.clone(),
+            title: meta.title.clone(),
+            cwd,
+            provider: meta.provider.clone(),
+            model: meta.model.clone(),
+            effort: meta.effort.clone(),
+            mode: meta.mode.clone(),
+            autonomy: if autonomy == Autonomy::Ask { "ask" } else { "auto" }.to_string(),
+            simulated,
+        });
+        self.inner.sessions.lock().unwrap().insert(id, live.clone());
+
+        let sink: Arc<dyn Sink> = live.clone();
+        let mut agent = Agent::new(provider, sess, cfg, sink, approvals);
+        let worker = live.clone();
+        tokio::spawn(async move {
+            while let Some(text) = inbox.recv().await {
+                let cancel = CancellationToken::new();
+                *worker.cancel.lock().unwrap() = cancel.clone();
+                worker.set_status(SessionStatus::Running);
+                agent.run(text, &cancel).await;
+                worker.set_status(SessionStatus::Idle);
+            }
+            agent.sess.jobs.kill_all();
+        });
+        live.input.send(req.task).map_err(|_| "the session ended before it started".to_string())?;
+        Ok(meta)
+    }
+
+    fn live(&self, id: &str) -> Result<Arc<Live>, String> {
+        self.inner.sessions.lock().unwrap().get(id).cloned().ok_or_else(|| format!("session {id} is not running in this process"))
+    }
+
+    /// Sends a follow-up message to an idle session.
+    pub fn send(&self, id: &str, text: &str) -> Result<(), String> {
+        let live = self.live(id)?;
+        if text.trim().is_empty() {
+            return Err("the message is empty".into());
+        }
+        if live.meta.lock().unwrap().status == SessionStatus::Running {
+            return Err("the session is still working; stop it first or wait".into());
+        }
+        // Mark it running now so a second message cannot slip in before the worker picks this one up.
+        live.set_status(SessionStatus::Running);
+        live.input.send(text.to_string()).map_err(|_| "the session has ended".to_string())
+    }
+
+    pub fn stop(&self, id: &str) -> Result<(), String> {
+        self.live(id)?.cancel.lock().unwrap().cancel();
+        Ok(())
+    }
+
+    pub fn approve(&self, id: &str, approval: u64, allow: bool) -> Result<(), String> {
+        if self.live(id)?.approvals.resolve(approval, allow) { Ok(()) } else { Err("that approval request is no longer pending".into()) }
+    }
+
+    /// Everything so far plus a live feed, with no gap between the two.
+    pub fn subscribe(&self, id: &str) -> Result<(Vec<Event>, broadcast::Receiver<Event>), String> {
+        let live = self.live(id)?;
+        let backlog = live.events.lock().unwrap();
+        Ok((backlog.clone(), live.tx.subscribe()))
+    }
+
+    /// Stored events of any session, running or past.
+    pub fn events(&self, id: &str) -> Result<Vec<Event>, String> {
+        if let Ok(live) = self.live(id) {
+            return Ok(live.events.lock().unwrap().clone());
+        }
+        if id.contains(['/', '\\', '.']) {
+            return Err("invalid session id".into());
+        }
+        let path = self.inner.data_dir.join("sessions").join(id).join("events.jsonl");
+        let text = std::fs::read_to_string(&path).map_err(|_| format!("no session {id}"))?;
+        Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+    }
+
+    pub fn meta(&self, id: &str) -> Result<SessionMeta, String> {
+        self.live(id).map(|l| l.meta.lock().unwrap().clone())
+    }
+
+    /// All sessions, newest first. Ones from earlier runs of the app are listed as closed.
+    pub fn list(&self) -> Vec<SessionMeta> {
+        let live: HashMap<String, SessionMeta> = self.inner.sessions.lock().unwrap().iter().map(|(id, l)| (id.clone(), l.meta.lock().unwrap().clone())).collect();
+        let mut all: Vec<SessionMeta> = live.values().cloned().collect();
+        for entry in std::fs::read_dir(self.inner.data_dir.join("sessions")).into_iter().flatten().flatten() {
+            let Ok(name) = entry.file_name().into_string() else { continue };
+            if live.contains_key(&name) {
+                continue;
+            }
+            if let Some(mut meta) = std::fs::read_to_string(entry.path().join("meta.json")).ok().and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok()) {
+                meta.status = SessionStatus::Closed;
+                all.push(meta);
+            }
+        }
+        all.sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
+        all
+    }
+
+    /// Full text of an output the model was shown only in part (`out:N`).
+    pub fn read_output(&self, id: &str, handle: &str) -> Result<String, String> {
+        let n: u32 = handle.trim().trim_start_matches("out:").parse().map_err(|_| format!("{handle:?} is not an output handle"))?;
+        if id.contains(['/', '\\', '.']) {
+            return Err("invalid session id".into());
+        }
+        let path = self.inner.data_dir.join("sessions").join(id).join("out").join(format!("{n}.log"));
+        let bytes = std::fs::read(&path).map_err(|_| format!("no saved output {handle} in session {id}"))?;
+        Ok(crate::text::clean(&bytes[..bytes.len().min(2 * 1024 * 1024)]))
+    }
+
+    /// Sub-directories of `path`, for the in-app folder picker.
+    pub fn list_dir(&self, path: Option<&str>) -> Result<DirListing, String> {
+        let dir = match path.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) if p == "~" => home_dir(),
+            Some(p) => p.strip_prefix("~/").map(|rest| home_dir().join(rest)).unwrap_or_else(|| PathBuf::from(p)),
+            None => home_dir(),
+        };
+        let dir = std::fs::canonicalize(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        if !dir.is_dir() {
+            return Err(format!("{} is not a directory", dir.display()));
+        }
+        let mut dirs: Vec<DirEntry> = std::fs::read_dir(&dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                (!name.starts_with('.')).then(|| DirEntry { path: e.path().to_string_lossy().into_owned(), name })
+            })
+            .collect();
+        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(DirListing { is_git: dir.join(".git").exists(), parent: dir.parent().map(|p| p.to_string_lossy().into_owned()), path: dir.to_string_lossy().into_owned(), dirs })
+    }
+}
+
+impl Default for Harness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn harness(name: &str) -> Harness {
+        Harness::at(std::env::temp_dir().join(format!("presage-harness-{name}-{}", rand_hex(4))))
+    }
+
+    async fn until_idle(h: &Harness, id: &str) -> SessionMeta {
+        for _ in 0..400 {
+            let m = h.meta(id).unwrap();
+            if m.status == SessionStatus::Idle {
+                return m;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("session did not become idle");
+    }
+
+    #[tokio::test]
+    async fn demo_session_streams_persists_and_can_be_listed_and_replayed() {
+        let h = harness("demo");
+        let meta = h.demo().unwrap();
+        assert!(meta.simulated);
+        let (backlog, mut rx) = h.subscribe(&meta.id).unwrap();
+        assert!(matches!(backlog.first().map(|e| &e.kind), Some(EventKind::SessionStart { simulated: true, .. })));
+
+        let mut live_seqs = Vec::new();
+        let mut saw_delta = false;
+        loop {
+            let ev = tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("events keep coming").unwrap();
+            saw_delta |= ev.kind.transient();
+            live_seqs.push(ev.seq);
+            if matches!(ev.kind, EventKind::Finish { .. }) {
+                break;
+            }
+        }
+        assert!(saw_delta, "reasoning is streamed");
+        assert!(live_seqs.windows(2).all(|w| w[1] == w[0] + 1), "no gaps in the live feed");
+
+        let done = until_idle(&h, &meta.id).await;
+        assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
+        assert_eq!((done.stats.turns, done.stats.surprises), (3, 1));
+
+        // The log on disk holds every stored event, in order, and no streaming deltas.
+        let stored = h.events(&meta.id).unwrap();
+        assert!(stored.iter().all(|e| !e.kind.transient()));
+        assert!(stored.windows(2).all(|w| w[1].seq > w[0].seq));
+        let on_disk = std::fs::read_to_string(h.inner.data_dir.join("sessions").join(&meta.id).join("events.jsonl")).unwrap();
+        assert_eq!(on_disk.lines().count(), stored.len());
+
+        // A fresh process sees it as a closed session and can replay it.
+        let later = Harness::at(h.inner.data_dir.clone());
+        let listed = later.list();
+        assert_eq!((listed.len(), listed[0].status, listed[0].verified), (1, SessionStatus::Closed, Some(true)));
+        assert_eq!(later.events(&meta.id).unwrap().len(), stored.len());
+        assert!(later.send(&meta.id, "more").is_err(), "closed sessions cannot be continued");
+        assert!(later.read_output(&meta.id, "out:1").unwrap().contains("FAIL: expected 60, got 16"));
+        assert!(later.events("../../etc").is_err());
+    }
+
+    #[tokio::test]
+    async fn keys_defaults_and_start_validation() {
+        let h = harness("keys");
+        assert!(h.set_key("nope", "k").is_err());
+        h.set_key("openrouter", "sk-test").unwrap();
+        let state = h.state();
+        assert!(state.providers.iter().find(|p| p.id == "openrouter").unwrap().has_key);
+        assert!(!serde_json::to_string(&state).unwrap().contains("sk-test"), "keys never leave through the state");
+        assert!(h.set_defaults(None, None, Some("turbo".into())).is_err());
+        h.set_defaults(Some("openrouter".into()), Some("z-ai/glm-5.3".into()), Some("max".into())).unwrap();
+        let state = Harness::at(h.inner.data_dir.clone()).state();
+        assert_eq!((state.provider.as_deref(), state.model.as_deref(), state.effort.as_str()), (Some("openrouter"), Some("z-ai/glm-5.3"), "max"));
+
+        let bad_dir = h.start(StartRequest { cwd: "/definitely/not/here".into(), task: "x".into(), provider: Some("openrouter".into()), ..Default::default() });
+        assert!(bad_dir.unwrap_err().contains("cannot use"));
+        assert!(h.start(StartRequest { cwd: "/tmp".into(), task: "  ".into(), ..Default::default() }).unwrap_err().contains("empty"));
+        h.set_key("openrouter", "").unwrap();
+        assert!(!h.state().providers.iter().find(|p| p.id == "openrouter").unwrap().has_key || std::env::var("OPENROUTER_API_KEY").is_ok());
+    }
+
+    #[tokio::test]
+    async fn folder_picker_lists_visible_directories() {
+        let h = harness("dirs");
+        let root = h.inner.data_dir.join("tree");
+        for d in ["beta", "Alpha", ".hidden", "gamma/.git"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("file.txt"), "").unwrap();
+        let listing = h.list_dir(Some(root.to_str().unwrap())).unwrap();
+        assert_eq!(listing.dirs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "beta", "gamma"]);
+        assert!(listing.parent.is_some() && !listing.is_git);
+        assert!(h.list_dir(Some(root.join("gamma").to_str().unwrap())).unwrap().is_git);
+        assert!(h.list_dir(Some(root.join("file.txt").to_str().unwrap())).is_err());
+        assert!(h.list_dir(None).is_ok());
+    }
+}
