@@ -1,5 +1,7 @@
 //! `presage`: run the harness from a terminal.
 
+mod bench;
+
 use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, Stats};
 use presage_core::harness::{Harness, SessionStatus, StartRequest};
 use presage_core::tools::StepStatus;
@@ -13,6 +15,7 @@ presage — an expectation-driven agent harness
 USAGE
   presage run [options] <task…>     work on a task in a directory, unattended
   presage demo                      play the scripted walkthrough (no key, no network)
+  presage bench [options]           compare harness variants on built-in tasks (presage bench --help)
   presage sessions                  list sessions
   presage show <session-id>         replay a session's log
   presage providers                 list providers and whether a key is set
@@ -24,6 +27,7 @@ OPTIONS for run
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts high, rises on repeated surprises)
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
+      --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
       --max-turns <n>      model replies allowed (default 80)
       --time-budget <s>    seconds allowed
       --ask                ask before every step that changes something
@@ -215,6 +219,7 @@ fn parse_run(args: &[String]) -> Result<RunArgs, String> {
             "-m" | "--model" => req.model = Some(value(a)?),
             "-e" | "--effort" => req.effort = Some(value(a)?),
             "--classic" => req.mode = Some("classic".into()),
+            "--without" => req.without.push(value(a)?),
             "--ask" => {
                 req.autonomy = Some("ask".into());
                 req.interactive = false;
@@ -361,6 +366,7 @@ async fn main() -> ExitCode {
             Err(e) => fail(e),
             Ok(meta) => follow(&h, &meta.id, true, args.iter().any(|a| a == "-v" || a == "--verbose"), args.iter().any(|a| a == "--json"), false).await,
         },
+        Some("bench") => bench::command(&h, &args[1..]).await,
         Some("sessions") => {
             for m in h.list() {
                 let state = match (m.status, m.outcome, m.verified) {
