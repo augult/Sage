@@ -39,7 +39,7 @@ Honest state as of the last commit:
   could not be tested: Logfare's route for it answered 429/502 "overloaded" for the whole session.
   The native DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are
   untested.
-- **Desktop app**: the Tauri shell builds and renders; see the commit history for the UI state.
+- **Desktop app**: only the Tauri shell scaffold exists (it builds and renders a placeholder). The UI is not built yet; the spec is in `docs/DESKTOP_UI_BRIEF.md`.
 - Not implemented: resuming a session after restarting the app, Windows-specific shell handling,
   OS-level sandboxing of commands (there is a tripwire for catastrophic commands, nothing more).
 
