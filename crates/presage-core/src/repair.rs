@@ -163,6 +163,9 @@ const ALIASES: &[(Tool, &[(&str, &[&str])])] = &[
             ("timeout", &["timeout_secs", "timeout_seconds", "timeout_s"]),
             ("background", &["run_in_background", "bg", "detach", "is_background"]),
             ("expect", &["expected", "expects", "expectation", "predict"]),
+            ("expect_exit", &["exit", "exit_code", "expected_exit"]),
+            ("expect_has", &["has", "contains", "expected_output"]),
+            ("expect_lacks", &["lacks", "not_contains"]),
         ],
     ),
     (
@@ -233,7 +236,20 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             }
         }
     }
+    // A nested object that leaked out in GLM's native call syntax (see `guard::unleak`).
+    for value in map.values_mut() {
+        if let Some(obj) = value.as_str().and_then(crate::guard::unleak) {
+            *value = obj;
+        }
+    }
     let num = |m: &Map<String, Value>, k: &str| m.get(k).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
+    // `read {"out": 1}`: the model means the saved output `out:1`.
+    if tool == Tool::Read && !map.contains_key("path") {
+        if let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
+            map.remove("out");
+            map.insert("path".into(), json!(format!("out:{n}")));
+        }
+    }
     if tool == Tool::Read && !map.contains_key("lines") {
         let start = num(&map, "start_line").or_else(|| num(&map, "start")).or_else(|| num(&map, "offset")).or_else(|| num(&map, "from"));
         let end = num(&map, "end_line").or_else(|| num(&map, "end")).or_else(|| num(&map, "to"));
@@ -380,6 +396,11 @@ mod tests {
         assert_eq!((&shell["cmd"], &shell["timeout"]), (&json!("ls"), &json!(91)));
         assert_eq!(normalize_args(Tool::Shell, json!("pwd")).unwrap(), json!({"cmd": "pwd"}));
         assert!(normalize_args(Tool::Edit, json!("x")).is_err());
+
+        // Seen live from GLM-5.3.
+        assert_eq!(normalize_args(Tool::Read, json!({"out": "1"})).unwrap(), json!({"path": "out:1"}));
+        let leaked = normalize_args(Tool::Shell, json!({"cmd": "x", "expect": "exit</arg_key><arg_value>nonzero"})).unwrap();
+        assert_eq!(leaked["expect"], json!({"exit": "nonzero"}));
 
         // A canonical name is never overwritten by an alias that happens to be present too.
         let both = normalize_args(Tool::Write, json!({"path": "a", "content": "real", "text": "other"})).unwrap();

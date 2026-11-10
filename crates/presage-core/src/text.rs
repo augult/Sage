@@ -229,7 +229,7 @@ pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill
     }
     if hidden > 0 {
         match spill {
-            Some(name) => text.push_str(&format!("… [{hidden} lines hidden · read {name} for all of it] …\n")),
+            Some(name) => text.push_str(&format!("… [{hidden} lines hidden · read path \"{name}\" for all of it] …\n")),
             None => text.push_str(&format!("… [{hidden} lines hidden] …\n")),
         }
         for l in &lines[total - tail..] {
@@ -296,7 +296,7 @@ mod tests {
         let lines: Vec<String> = (1..=100).map(|i| format!("line {i}")).collect();
         let b = bound(&lines, 3, 2, 10_000, Some("out:4"));
         assert_eq!(b.hidden_lines, 95);
-        assert!(b.text.starts_with("line 1\nline 2\nline 3\n… [95 lines hidden · read out:4 for all of it] …\nline 99\nline 100\n"));
+        assert!(b.text.starts_with("line 1\nline 2\nline 3\n… [95 lines hidden · read path \"out:4\" for all of it] …\nline 99\nline 100\n"));
 
         let all = bound(&lines[..4], 3, 2, 10_000, None);
         assert_eq!(all.hidden_lines, 0);

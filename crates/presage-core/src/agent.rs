@@ -108,6 +108,8 @@ pub struct Agent {
     edits: HashMap<String, u32>,
     first_message: bool,
     budget_marks: u8,
+    /// How many more times the model is reminded that steps can be chained.
+    chain_hints: u8,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -117,7 +119,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(prompt::system_prompt(&cfg.features));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0 }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2 }
     }
 
     pub fn effort(&self) -> Effort {
@@ -361,6 +363,25 @@ impl Agent {
             self.surprise_streak = if result.surprised { self.surprise_streak + 1 } else { 0 };
             let mut footer = result.footer.clone();
             let mut notes = self.stall_notes(&result);
+            // Models are trained to wait for each result. Show, on their own behaviour, that here
+            // they need not: twice at most, then it is their call.
+            if features.scripts && self.chain_hints > 0 && result.finished.is_none() && !result.surprised {
+                use crate::tools::Tool;
+                let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
+                let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
+                let passing_check_last = tools.last() == Some(&Tool::Shell) && self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
+                let hint = if only_changes && self.sess.watches.items.is_empty() {
+                    Some("Tip: next time put the check (shell with expect_exit) and `finish` in the same reply as the edits. If an edit or the check fails, the rest is skipped automatically, so chaining costs nothing.")
+                } else if passing_check_last {
+                    Some("Tip: that check passed, so `finish` could have been in the same reply. It is skipped automatically whenever the check before it fails.")
+                } else {
+                    None
+                };
+                if let Some(h) = hint {
+                    self.chain_hints -= 1;
+                    notes.push(h.to_string());
+                }
+            }
             notes.extend(self.budget_notes(run_started, turns_used));
             for n in &notes {
                 self.note("harness", n);
@@ -505,6 +526,9 @@ mod tests {
         assert_eq!(out.evidence, "not checked since the edit of n.txt");
         let nudges: Vec<&Message> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::User && m.content.starts_with("[harness] You replied without calling finish")).collect();
         assert_eq!(nudges.len(), 1);
+        // The lone edit also drew the reminder that the check and finish could have ridden along.
+        let tool = r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap();
+        assert!(tool.content.contains("--- harness ---\nTip: next time put the check"), "{}", tool.content);
 
         // With a person watching, prose simply hands the turn back.
         let mut cfg = AgentConfig::new("mock");
