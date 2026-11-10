@@ -5,7 +5,7 @@
 //! tail-biased output, the source locations it names with edit anchors, and any lesson this project
 //! has already learned about that error.
 
-use super::jobs::{Exit, Running, StateMode, Waited, drain, kill_group, spawn, wait_exit};
+use super::jobs::{Exit, Running, StateMode, Waited, drain, kill_group, masked_failure, spawn, wait_exit};
 use super::{ShellMeta, StepOutput, StepStatus, bool_arg, str_arg, u64_arg};
 use crate::guard::{self, Expect};
 use crate::locate;
@@ -31,6 +31,8 @@ pub struct Exec {
     pub total_bytes: u64,
     pub ms: u64,
     pub spill: String,
+    /// The reported exit code comes from an earlier stage of a pipeline whose last stage exited 0.
+    pub masked: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,11 +54,17 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
     let mut run = spawn(cmd, cwd, &sess.shell_env, mode, &spill_path)?;
     let waited = wait_exit(&mut run.exit, timeout, cancel).await;
     let ms = run.started.elapsed().as_millis() as u64;
+    let mut masked = false;
     let end = match waited {
-        Waited::Exited(exit) => {
+        Waited::Exited(mut exit) => {
             drain(&mut run.readers).await;
             if state == StateKind::Session {
                 adopt_cwd(sess);
+            }
+            // `tests | tail` exits 0 even when the tests failed. Report the failure, not the tail.
+            if let (Some(0), Some(code)) = (exit.code, masked_failure(&spill_path)) {
+                exit.code = Some(code);
+                masked = true;
             }
             ExecEnd::Exited(exit)
         }
@@ -67,12 +75,12 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
         Waited::TimedOut => {
             let (raw, _) = run.buf.lock().unwrap().snapshot();
             let total_bytes = run.buf.lock().unwrap().total;
-            return Ok(Exec { end: ExecEnd::TimedOut(run), text: clean(&raw), total_bytes, ms, spill });
+            return Ok(Exec { end: ExecEnd::TimedOut(run), text: clean(&raw), total_bytes, ms, spill, masked: false });
         }
     };
     let (raw, _) = run.buf.lock().unwrap().snapshot();
     let total_bytes = run.buf.lock().unwrap().total;
-    Ok(Exec { end, text: clean(&raw), total_bytes, ms, spill })
+    Ok(Exec { end, text: clean(&raw), total_bytes, ms, spill, masked })
 }
 
 /// Follows a `cd` the command performed, if it left the shell in a directory that still exists.
@@ -114,8 +122,9 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
     None
 }
 
-fn exit_text(exit: Exit) -> String {
+fn exit_text(exit: Exit, masked: bool) -> String {
     match (exit.code, exit.signal) {
+        (Some(c), _) if masked => format!("exit {c} (from an earlier command of the pipeline; the last one exited 0)"),
         (Some(c), _) => format!("exit {c}"),
         (None, Some(s)) => format!("killed by signal {s}"),
         _ => "no exit status".to_string(),
@@ -127,7 +136,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         return StepOutput::error("`cmd` is required: the bash command to run");
     };
     let cmd = cmd.to_string();
-    let expect = if sess.features.receipts { args.get("expect").and_then(Expect::from_value) } else { None };
+    let expect = if sess.features.receipts { Expect::from_args(args) } else { None };
     let timeout = u64_arg(args, "timeout").unwrap_or(sess.limits.default_timeout_secs).clamp(1, sess.limits.max_timeout_secs);
     let cwd = sess.ws.cwd.clone();
 
@@ -184,20 +193,23 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 // Conventional rendering: status line plus a bounded view, success or not.
                 let view = bound(&lines, sess.limits.ok_head, sess.limits.ok_tail, sess.limits.ok_chars, Some(&ex.spill));
                 out.status = if ok { StepStatus::Ok } else { StepStatus::Error };
-                out.observation = format!("{} · {dur}\n{}", exit_text(exit), if lines.is_empty() { "(no output)\n".into() } else { view.text });
-                out.stub = format!("{} ({})", exit_text(exit), ex.spill);
+                out.observation = format!("{} · {dur}\n{}", exit_text(exit, ex.masked), if lines.is_empty() { "(no output)\n".into() } else { view.text });
+                out.stub = format!("{} ({})", exit_text(exit, ex.masked), ex.spill);
                 out.hidden_bytes = shown_all.saturating_sub(out.observation.len() as u64);
                 return out;
             }
 
             if verdict.held {
-                let head = format!("[ok] {} · {dur}", exit_text(exit));
-                let small = lines.len() <= 8 && ex.text.len() <= 600;
+                let head = format!("[ok] {} · {dur}", exit_text(exit, ex.masked));
+                // Hiding a short output saves little and costs a turn if the model wanted it after all.
+                let small = lines.len() <= 30 && ex.text.len() <= 2_000;
                 out.observation = if lines.is_empty() {
                     format!("{head} · no output")
-                } else if verdict.explicit && !small {
-                    let last = tail(&lines, 3).iter().map(|l| one_line(l, 200)).collect::<Vec<_>>().join("\n");
-                    format!("{head} · {} lines not shown, your prediction held (read {} to see them)\n…\n{last}", lines.len(), ex.spill)
+                } else if verdict.explicit && !small && ok {
+                    // Only a predicted *success* is reduced to a receipt. A predicted failure (the
+                    // model reproducing a bug) is something it still has to read.
+                    let last = tail(&lines, 5).iter().map(|l| one_line(l, 200)).collect::<Vec<_>>().join("\n");
+                    format!("{head} · {} lines not shown, your prediction held (read path \"{}\" shows them)\n…\n{last}", lines.len(), ex.spill)
                 } else {
                     let view = bound(&lines, sess.limits.ok_head, sess.limits.ok_tail, sess.limits.ok_chars, Some(&ex.spill));
                     format!("{head}\n{}", view.text.trim_end())
@@ -207,7 +219,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 let head = if verdict.explicit {
                     format!("[SURPRISE] {} · {dur}", verdict.violations.join("; "))
                 } else {
-                    format!("[FAILED] {} · {dur}", exit_text(exit))
+                    format!("[FAILED] {} · {dur}", exit_text(exit, ex.masked))
                 };
                 let view = bound(&lines, sess.limits.fail_head, sess.limits.fail_tail, sess.limits.fail_chars, Some(&ex.spill));
                 let mut obs = format!("{head}\n{}", if lines.is_empty() { "(no output)".into() } else { view.text.trim_end().to_string() });
@@ -256,7 +268,7 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
     match early {
         Waited::Exited(exit) => {
             let ok = exit.code == Some(0);
-            let observation = format!("[{}] the background command ended immediately: {}\n{shown}", if ok { "ok" } else { "FAILED" }, exit_text(exit));
+            let observation = format!("[{}] the background command ended immediately: {}\n{shown}", if ok { "ok" } else { "FAILED" }, exit_text(exit, false));
             StepOutput {
                 status: if ok { StepStatus::Ok } else { StepStatus::Surprise },
                 stub: one_line(&observation, 160),
@@ -295,9 +307,9 @@ mod tests {
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.explicit);
         assert!(out.observation.starts_with("[ok] exit 0 · "), "{}", out.observation);
-        assert!(out.observation.contains("201 lines not shown, your prediction held (read out:1 to see them)"));
+        assert!(out.observation.contains("201 lines not shown, your prediction held (read path \"out:1\" shows them)"));
         assert!(out.observation.ends_with("200 passed in 1.2s"));
-        assert!(out.observation.len() < 220, "a receipt, not the log: {}", out.observation.len());
+        assert!(out.observation.len() < 300, "a receipt, not the log: {}", out.observation.len());
         assert!(out.hidden_bytes > 2_000);
         assert!(out.shell.as_ref().unwrap().held_explicit);
         // The full output is still one read away.
@@ -311,7 +323,7 @@ mod tests {
         let out = sh(&mut s, json!({"cmd": "seq 1 500"})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(!out.explicit);
-        assert!(out.observation.contains("\n1\n2\n") && out.observation.contains("lines hidden · read out:1"));
+        assert!(out.observation.contains("\n1\n2\n") && out.observation.contains("lines hidden · read path \"out:1\""));
         assert!(out.observation.trim_end().ends_with("500"));
 
         let small = sh(&mut s, json!({"cmd": "echo hello", "expect": {"has": "hello"}})).await;
@@ -345,6 +357,20 @@ mod tests {
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.observation.starts_with("[ok] exit 1 · "));
         assert!(!out.shell.unwrap().ok, "exit 1 is not a passing check even though the prediction held");
+    }
+
+    #[tokio::test]
+    async fn a_test_run_piped_through_tail_cannot_pass_as_success() {
+        let mut s = test_session("masked", Features::presage());
+        let out = sh(&mut s, json!({"cmd": "sh -c 'echo FAILED 2 tests; exit 1' | tail -5", "expect_exit": "0"})).await;
+        assert_eq!(out.status, StepStatus::Surprise);
+        assert!(out.observation.contains("expected exit 0, got exit 1"), "{}", out.observation);
+        assert!(!out.shell.unwrap().held_explicit);
+
+        // The same shape, predicted correctly: the model said it would fail.
+        let out = sh(&mut s, json!({"cmd": "sh -c 'echo FAILED; exit 1' | tail -5", "expect_exit": "nonzero", "expect_has": "FAILED"})).await;
+        assert_eq!(out.status, StepStatus::Ok);
+        assert!(out.observation.starts_with("[ok] exit 1 (from an earlier command of the pipeline; the last one exited 0)"), "{}", out.observation);
     }
 
     #[tokio::test]

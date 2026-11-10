@@ -67,7 +67,45 @@ fn strings(v: &Value) -> Vec<String> {
     }
 }
 
+/// GLM's native tool-call syntax sometimes leaks into a string where a nested object was meant:
+/// `exit</arg_key><arg_value>nonzero`. Recover the key/value pairs.
+pub fn unleak(s: &str) -> Option<Value> {
+    const SEP: &str = "</arg_key><arg_value>";
+    if !s.contains(SEP) {
+        return None;
+    }
+    let mut map = serde_json::Map::new();
+    for pair in s.split("</arg_value><arg_key>") {
+        let (k, v) = pair.split_once(SEP)?;
+        let k = k.trim().trim_start_matches("<arg_key>").trim();
+        let v = v.trim().trim_end_matches("</arg_value>").trim();
+        if k.is_empty() {
+            return None;
+        }
+        map.insert(k.to_string(), Value::String(v.to_string()));
+    }
+    Some(Value::Object(map))
+}
+
 impl Expect {
+    /// The prediction attached to a call: the flat `expect_exit` / `expect_has` / `expect_lacks`
+    /// fields (what the schema advertises: flat strings survive every tool-call format), merged with a
+    /// legacy nested `expect` if the model sent one.
+    pub fn from_args(args: &Value) -> Option<Expect> {
+        let mut e = args.get("expect").and_then(Expect::from_value);
+        let present = |k: &str| args.get(k).filter(|v| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty()));
+        if let Some(v) = present("expect_exit") {
+            e.get_or_insert_with(Expect::default).exit = parse_exit(v);
+        }
+        if let Some(v) = present("expect_has") {
+            e.get_or_insert_with(Expect::default).has.extend(strings(v));
+        }
+        if let Some(v) = present("expect_lacks") {
+            e.get_or_insert_with(Expect::default).lacks.extend(strings(v));
+        }
+        e
+    }
+
     /// Lenient parse of whatever the model put in `expect`. Cheap models get this slightly wrong in
     /// predictable ways (a bare string, an alias for a field name), and rejecting a turn over that would
     /// cost far more than accepting it. Returns `None` when there is no usable prediction.
@@ -89,7 +127,10 @@ impl Expect {
             // A bare word is either an exit prediction or free text we cannot check; free text still
             // counts as an explicit "I expect this to work".
             Value::String(s) if s.trim().is_empty() => None,
-            Value::String(s) => Some(Expect { exit: parse_exit_word(s), ..Default::default() }),
+            Value::String(s) => match unleak(s) {
+                Some(obj) => Expect::from_value(&obj),
+                None => Some(Expect { exit: parse_exit_word(s), ..Default::default() }),
+            },
             other => parse_exit(other).map(|x| Expect { exit: Some(x), ..Default::default() }),
         }
     }
@@ -181,6 +222,22 @@ mod tests {
         // Uncheckable free text still counts as a prediction of success.
         let free = Expect::from_value(&json!("all tests are green")).unwrap();
         assert_eq!(free, Expect::default());
+    }
+
+    #[test]
+    fn flat_fields_and_leaked_glm_syntax_are_understood() {
+        let e = Expect::from_args(&json!({"cmd": "x", "expect_exit": "nonzero", "expect_has": "FAILED"})).unwrap();
+        assert_eq!((e.exit, e.has.as_slice()), (Some(ExitExpect::Nonzero), &["FAILED".to_string()][..]));
+        assert!(Expect::from_args(&json!({"cmd": "x"})).is_none());
+        assert!(Expect::from_args(&json!({"cmd": "x", "expect_has": ""})).is_none());
+        assert_eq!(Expect::from_args(&json!({"expect_lacks": "Error"})).unwrap().describe(), "exit 0 · lacks \"Error\"");
+
+        // Seen live from GLM-5.3: the nested object arrives as a string in its native call syntax.
+        let e = Expect::from_args(&json!({"expect": "exit</arg_key><arg_value>nonzero"})).unwrap();
+        assert_eq!(e.exit, Some(ExitExpect::Nonzero));
+        let e = Expect::from_args(&json!({"expect": "has</arg_key><arg_value>OK</arg_value><arg_key>exit</arg_key><arg_value>0"})).unwrap();
+        assert_eq!((e.exit, e.has.as_slice()), (Some(ExitExpect::Code(0)), &["OK".to_string()][..]));
+        assert!(unleak("plain text").is_none());
     }
 
     #[test]

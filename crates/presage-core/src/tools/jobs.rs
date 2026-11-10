@@ -106,13 +106,35 @@ pub enum StateMode<'a> {
 
 // The state file is sourced, then rewritten on exit. PWD-like variables are excluded so a restored
 // environment can never disagree with the directory the command actually runs in.
+//
+// Both variants also record PIPESTATUS of the last pipeline next to the spill file, so a failure
+// hidden behind `| tail` can be told apart from a success (see `masked_failure`).
 #[cfg(unix)]
-const RESTORE: &str = r#"__ps="$PRESAGE_STATE"; unset PRESAGE_STATE
+const RESTORE: &str = r#"__ps="$PRESAGE_STATE"; __pp="$PRESAGE_PIPE"; unset PRESAGE_STATE PRESAGE_PIPE
 [ -f "$__ps.env" ] && . "$__ps.env" >/dev/null 2>&1
 "#;
 #[cfg(unix)]
-const SAVE: &str = r#"trap '__rc=$?; pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; exit $__rc' EXIT
+const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; exit $__rc' EXIT
 "#;
+#[cfg(unix)]
+const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT
+"#;
+
+/// If the command's last pipeline exited 0 only because its final stage did (`pytest | tail`),
+/// returns the exit code of the stage that failed. SIGPIPE (141) is not a failure: `cat big | head`.
+pub fn masked_failure(spill: &Path) -> Option<i32> {
+    let text = std::fs::read_to_string(pipe_file(spill)).ok()?;
+    let codes: Vec<i32> = text.split_whitespace().filter_map(|c| c.parse().ok()).collect();
+    let (last, earlier) = codes.split_last()?;
+    if *last != 0 {
+        return None;
+    }
+    earlier.iter().copied().find(|c| *c != 0 && *c != 141)
+}
+
+fn pipe_file(spill: &Path) -> std::path::PathBuf {
+    spill.with_extension("pipe")
+}
 
 #[cfg(unix)]
 fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
@@ -124,7 +146,7 @@ fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
         }
         StateMode::ReadOnly(p) => {
             c.env("PRESAGE_STATE", p);
-            format!("{RESTORE}{cmd}")
+            format!("{RESTORE}{NOTE_PIPE}{cmd}")
         }
         StateMode::None => cmd.to_string(),
     };
@@ -152,6 +174,7 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<OutBuf>>) {
 
 pub fn spawn(cmd: &str, cwd: &Path, envs: &[(String, String)], state: StateMode<'_>, spill: &Path) -> std::io::Result<Running> {
     let mut c = shell_command(cmd, state);
+    c.env("PRESAGE_PIPE", pipe_file(spill));
     c.current_dir(cwd)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .stdin(Stdio::null())
@@ -359,6 +382,31 @@ mod tests {
         assert!(matches!(waited, Waited::Exited(Exit { code: Some(0), .. })));
         assert!(started.elapsed() < Duration::from_secs(5), "must not wait for the backgrounded sleep");
         kill_group(run.pid);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failure_hidden_by_a_pipe_is_recovered_but_sigpipe_is_not_a_failure() {
+        let dir = spill("pipes").parent().unwrap().to_path_buf();
+        let state = dir.join("shell");
+        let cancel = CancellationToken::new();
+        let cases = [
+            ("sh -c 'echo boom; exit 3' | tail -5", Some(0), Some(3)),
+            ("echo fine | tail -5", Some(0), None),
+            ("yes | head -1", Some(0), None),
+            ("true | sh -c 'exit 4'", Some(4), None),
+            ("echo a && sh -c 'exit 2' | cat", Some(0), Some(2)),
+            ("exit 5", Some(5), None),
+        ];
+        for (i, (cmd, code, masked)) in cases.iter().enumerate() {
+            let log = dir.join(format!("p{i}.log"));
+            for mode in [StateMode::ReadWrite(&state), StateMode::ReadOnly(&state)] {
+                let mut run = spawn(cmd, &dir, &[], mode, &log).unwrap();
+                let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &cancel).await;
+                assert_eq!(waited, Waited::Exited(Exit { code: *code, signal: None }), "{cmd}");
+                assert_eq!(masked_failure(&log), *masked, "{cmd}");
+            }
+        }
     }
 
     #[cfg(unix)]

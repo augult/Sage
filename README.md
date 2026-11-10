@@ -15,7 +15,7 @@ and the model's attention is spent only where reality diverged.**
 | Mechanism | What it does | Where |
 |---|---|---|
 | **A reply is a script** | All tool calls in one reply run in order. The first step that fails or contradicts its prediction halts the rest (`set -e` semantics). The model can commit to "edit, check, finish" in one round of thinking, safely. | `script.rs` |
-| **Predictions and receipts** | `shell` takes `expect` (exit code, text that must / must not appear). A prediction that held is answered with a one-line receipt instead of the output; a violated one (a *surprise*) gets the output, the source lines it points at with edit anchors, and any lesson already learned about that error. Output size is proportional to surprise. | `guard.rs`, `tools/shell.rs`, `locate.rs` |
+| **Predictions and receipts** | `shell` takes a prediction (`expect_exit`, `expect_has`, `expect_lacks`). A predicted success that held is answered with a one-line receipt instead of the output; a violated one (a *surprise*) gets the output, the source lines it points at with edit anchors, and any lesson already learned about that error. Output size is proportional to surprise. | `guard.rs`, `tools/shell.rs`, `locate.rs` |
 | **Watches** | Checks registered once and re-run by the harness after every change. They report only state changes: a regression is announced the moment it is introduced. | `watches.rs` |
 | **Evidence gate** | `finish` is accepted only if a check has passed since the last change to the workspace (tracked with a cheap fingerprint). With fresh evidence it is accepted in the same reply as the check. | `state.rs`, `script.rs` |
 | **Anchored edits** | Lines are shown as `41kq|…` (line number + 2-letter content hash). Edits address anchors, so the model never retypes old text, and a stale or shifted anchor is detected or relocated instead of corrupting the file. | `anchors.rs`, `tools/edit.rs` |
@@ -31,17 +31,49 @@ and tools, so every claim above can be measured rather than believed.
 
 Honest state as of the last commit:
 
-- **Engine and CLI**: implemented; `cargo test` runs 129 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 132 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
 - **Walkthrough**: `presage demo` plays a three-turn scripted session through the real harness
   (reproduce, a wrong fix that is caught and halts the script, the right fix accepted with evidence).
-- **Live models**: the wire format (streaming, multi-call replies carrying `expect`, reasoning
-  replay, cache accounting) was verified with probes against GLM-5.3 on Logfare. See the commit
-  history for whether full live task runs and A/B numbers have been added yet; until they are,
-  **no performance or cost claim is made**.
-- **Desktop app**: the Tauri shell builds and renders; the UI is in progress.
+- **Live models**: runs end to end on GLM-5.3 through Logfare (results below). DeepSeek V4.1 Flash
+  could not be tested: Logfare's route for it answered 429/502 "overloaded" for the whole session.
+  The native DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are
+  untested.
+- **Desktop app**: the Tauri shell builds and renders; see the commit history for the UI state.
 - Not implemented: resuming a session after restarting the app, Windows-specific shell handling,
   OS-level sandboxing of commands (there is a tripwire for catastrophic commands, nothing more).
+
+### Live results so far: no advantage demonstrated yet
+
+One small task (fix two bugs in a two-module Python package so six unit tests pass), GLM-5.3 via
+Logfare, effort `high`. Every run produced a correct fix (checked afterwards with the pristine tests).
+
+| Run | Mode | Turns | Steps | Input tok (cached) | Output tok (thinking) | List-price cost | Time |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | Presage (before fixes below) | 6 | 8 | 16,136 (3,392) | 831 (382) | $0.0224 | 15.6 s |
+| 2 | Presage | 6 | 11 | 17,970 (6,464) | 1,038 (655) | $0.0224 | 15.9 s |
+| 3 | Presage | 5 | 10 | 17,843 (8,704) | 758 (276) | $0.0184 | 10.7 s |
+| 4 | Classic | 7 | 11 | 13,785 (0) | 1,293 (750) | $0.0250 | 22.8 s |
+| 5 | Classic | 5 | 9 | 10,438 (4,032) | 731 (242) | $0.0132 | 58.9 s |
+
+Five runs of one task are an anecdote, not a benchmark, and what they show is parity at best:
+
+- **The central bet has not paid off yet.** GLM-5.3 batches reads and makes predictions, but it did
+  not chain edit → check → finish into one reply, so turns were not saved. It works step by step as
+  it was trained to. Getting it to chain (or having the harness run the check itself after edits) is
+  the main open problem.
+- **Presage's fixed prefix is about 1,000 tokens larger** (system prompt and eight tool schemas).
+  With a working prefix cache that is nearly free; on this gateway the cache missed on most turns
+  (the harness's prefix was byte-stable; the audit classifies these as provider-side misses), so it
+  was paid for repeatedly.
+- What Presage did deliver here: completion backed by harness-checked evidence (`verified by …`),
+  where the classic loop ended on the model's say-so.
+
+The first live run also exposed four defects that no scripted test would have, all fixed since:
+GLM-5.3 mangles nested tool arguments (`"exit</arg_key><arg_value>nonzero"`), so predictions are now
+flat fields; `tests | tail` hid a failing exit code, so the harness now reads `PIPESTATUS`; the model
+called `read {"out": "1"}`; and a correctly predicted *failure* was reduced to a receipt although its
+output was exactly what the model needed.
 
 ## Build and run
 
