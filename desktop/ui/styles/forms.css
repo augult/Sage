@@ -1,0 +1,338 @@
+/* New session, Settings and the folder picker. */
+
+.hero {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(124, 92, 255, 0.45);
+  border-radius: 8px;
+  background: linear-gradient(var(--violet-soft), var(--violet-soft)), var(--card);
+}
+
+.hero-mark {
+  flex: none;
+  margin-top: 2px;
+}
+
+.hero h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hero p {
+  margin-top: 4px;
+  color: var(--soft);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.panel {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.panel-title {
+  margin-bottom: 12px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+}
+
+.field-label {
+  padding-top: 5px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.field-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.field-hint code {
+  color: var(--soft);
+  font: 11.5px var(--mono);
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Buttons beside an input take its height. */
+.field-row .btn,
+.picker-path .btn {
+  height: auto;
+}
+
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recent button {
+  max-width: 100%;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soft);
+  font: 11.5px/18px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recent button:hover {
+  background: var(--raised);
+}
+
+/* A radio group drawn as chips; `.segmented` joins them into one control. */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-option {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.chip-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.chip-option input:disabled {
+  cursor: default;
+}
+
+.chip-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--soft);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.chip-option:hover input:not(:disabled) + .chip-face {
+  border-color: #3d485c;
+  color: var(--text);
+}
+
+.chip-option input:checked + .chip-face {
+  border-color: var(--violet);
+  background: var(--violet-soft);
+  color: var(--text);
+}
+
+.chip-option input:focus-visible + .chip-face {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+
+.chip-option input:disabled + .chip-face {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.chip-tag {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chips.segmented {
+  gap: 0;
+}
+
+.chips.segmented .chip-face {
+  margin-left: -1px;
+  border-radius: 0;
+}
+
+.chips.segmented .chip-option:first-child .chip-face {
+  margin-left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.chips.segmented .chip-option:last-child .chip-face {
+  border-radius: 0 6px 6px 0;
+}
+
+/* The selected segment's border must sit above its neighbours'. */
+.chips.segmented input:checked + .chip-face {
+  position: relative;
+  z-index: 1;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.form-actions .form-error {
+  flex: 1;
+  min-width: 0;
+}
+
+.kbd {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* Settings */
+
+.provider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.provider:last-child {
+  padding-bottom: 0;
+}
+
+.provider-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.provider-name {
+  font-weight: 600;
+}
+
+.provider-url {
+  min-width: 0;
+  color: var(--muted);
+  font: 11.5px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.provider-head .tag {
+  margin-left: auto;
+}
+
+/* Folder picker */
+
+.picker {
+  width: min(560px, calc(100vw - 48px));
+  height: min(560px, calc(100vh - 48px));
+}
+
+.picker-path {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 12px 16px 8px;
+}
+
+.picker-path .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker > .form-error {
+  flex: none;
+  margin: 0 16px 8px;
+}
+
+.folder-list {
+  flex: 1;
+  min-height: 0;
+  padding: 2px 8px 8px;
+  overflow-y: auto;
+}
+
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder:hover {
+  background: var(--raised);
+}
+
+.folder .icon {
+  color: var(--muted);
+}
+
+.folder span {
+  min-width: 0;
+  overflow: hidden;
+  font: 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-empty {
+  padding: 8px;
+  font-size: 12px;
+}
+
+.picker .dialog-foot > :first-child {
+  margin-right: auto;
+  font-size: 12px;
+}
