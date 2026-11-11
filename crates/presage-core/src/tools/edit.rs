@@ -426,6 +426,7 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
         }
     };
     out.changed_files = true;
+    out.change = Some(crate::diff::change(&shown, Some(&ft.lines), &lines));
     out
 }
 
@@ -458,6 +459,10 @@ mod tests {
         let now = std::fs::read_to_string(&p).unwrap();
         assert_eq!(now, "def divide(a, b):\n    if b == 0:\n        raise ZeroDivisionError('b')\n    return a / b\n\ndef add(a, b):\n    return a + b\n");
         assert!(out.observation.starts_with("[ok] calc.txt: lines 2-2 replaced (1 → 3 lines)\n"), "{}", out.observation);
+        // The UI's diff keeps the line that is still there and adds the two before it.
+        let change = out.change.as_ref().expect("an edit carries its diff");
+        assert_eq!((change.path.as_str(), change.created, change.added, change.removed), ("calc.txt", false, 2, 0));
+        assert_eq!(change.hunks[0].lines, [" def divide(a, b):", "+    if b == 0:", "+        raise ZeroDivisionError('b')", "     return a / b", " ", " def add(a, b):"]);
         assert!(out.observation.contains(&format!("  {}|    if b == 0:", at(&now, 2))), "{}", out.observation);
     }
 
