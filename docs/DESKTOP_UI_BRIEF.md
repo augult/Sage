@@ -125,7 +125,9 @@ At start-up, and on every change of background or appearance, `backdrop.js` take
 at 320px, softens it, presses its brightness into a band (14–76 of 255 for dark, 198–248 for
 light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
 much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
-background in `themes.js`), stretched without smoothing so that its dots stay square. The panes
+background in `themes.js`), stretched without smoothing so that its dots stay square.
+The dots drift behind the sidebar and the inspector only: the canvas is cut away (`clip-path`)
+over the column between them, so the sheet has the painting behind it and nothing that moves. The panes
 are translucent fills: the veil over everything, and in the middle the sheet, the reading
 surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
 None.
@@ -134,17 +136,17 @@ The three choices (appearance, background, motion) are kept in `localStorage` (`
 and put on `<html>` before the first paint (`ui/js/boot.js`).
 
 Contrast is part of the material. Over a 5,832-colour grid of what the pressed backdrop can be,
-with its grain and under a dither dot, the lowest ratios are:
+with its grain and, on the glass, under a dither dot, the lowest ratios are:
 
 | Surface | `--ink` | `--soft` | `--muted` | `--faint` |
 | --- | --- | --- | --- | --- |
 | Light, glass (sidebar, inspector) | 10.8 | 8.1 | 5.5 | 3.5 |
-| Light, sheet | 17.5 | 11.3 | 6.6 | 3.3 |
+| Light, sheet | 17.7 | 11.5 | 6.7 | 3.3 |
 | Dark, glass | 7.1 | 5.9 | 4.7 | 3.2 |
-| Dark, sheet | 15.5 | 11.1 | 7.4 | 4.5 |
+| Dark, sheet | 15.9 | 11.4 | 7.6 | 4.7 |
 
 So `--ink`, `--soft` and `--muted` keep 4.5:1 everywhere; `--faint` is for marks, placeholders
-and key hints. On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1. Change a band in `backdrop.js`, a pane's
+and key hints. On the sheet `--danger` keeps 6.3:1, `--add` 4.8:1 and `--del` 6.2:1. Change a band in `backdrop.js`, a pane's
 fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
@@ -152,12 +154,14 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
    heading per day (title, model, status glyph, relative time), and Settings.
 2. **Main**:
-   - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
-     it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
+   - *New session*: the chosen background, uncovered, in a 3:1 band with the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
      workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
      then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
      which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
-     (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu lists models under their provider
+     (Auto / Ask), and Start. Enter in the task starts the session and Ctrl/Cmd+Enter (or
+     Shift+Enter) breaks the line, unless Settings turns the two round (`ui/js/keys.js`); the
+     same goes for the follow-up box of a session. Beside each box is the key a user would not
+     guess: "Ctrl+Enter for a new line", or "Ctrl+Enter to send". The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
@@ -222,7 +226,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
-     applies at once). Then **API keys**, a line per provider: a check and the name in full ink
+     applies at once). Then **Messages**: "Send with" Enter or Ctrl/Cmd+Enter
+     (`#settings-messages`). Then **API keys**, a line per provider: a check and the name in full ink
      when it has a key, a ring and grey when it has none; its address; a password field; and
      Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider

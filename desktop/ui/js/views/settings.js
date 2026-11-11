@@ -1,4 +1,4 @@
-// Settings: how the window looks, an API key per provider, the defaults for new sessions, and the
+// Settings: how the window looks, which key sends a message, an API key per provider, the defaults for new sessions, and the
 // text the model is given: skills, the system prompt and the user's instructions.
 // Keys only ever travel towards the engine; a stored key is never read back or shown.
 //
@@ -9,6 +9,7 @@
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
+import { chooseSendKey, sendKey, SEND_KEYS } from '../keys.js';
 import * as themes from '../themes.js';
 import { track, watchUnsaved } from '../unsaved.js';
 import { effortOptions, field, hint, modelOptions, picker, providerOptions, radioChips } from './controls.js';
@@ -58,7 +59,7 @@ export function mountSettings(main, app) {
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
     h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
-    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
+    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), messagesSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
   );
 
   /** Reloads the engine state and redraws, since a key changes what both sections offer. */
@@ -111,6 +112,16 @@ function appearanceSection() {
     field('Background', backgrounds),
     field('Dither', choice('dither', 'Dither', ['on', 'off'], pick.dither)),
     field('Motion', choice('motion', 'Motion', ['on', 'off'], pick.motion)),
+  );
+}
+
+/** Which key sends a message; the other one starts a new line. Kept by the window, like the appearance. */
+function messagesSection() {
+  return h(
+    'section.panel',
+    { id: 'settings-messages' },
+    h('h2.section-title', 'Messages'),
+    field('Send with', radioChips({ name: 'send', label: 'Send with', segmented: true, options: SEND_KEYS, value: sendKey(), onChange: chooseSendKey })),
   );
 }
 

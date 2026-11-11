@@ -58,9 +58,9 @@ export function current() {
   };
 }
 
-/** The dither for a look, as js/dither.js takes it. `inks` replaces the appearance's own. */
-export function ditherLook(now, cell = 3, inks = INKS[now.scheme]) {
-  return { cell, ...(now.background.dither ?? QUIET_DITHER), ...inks };
+/** The dither for a look, as js/dither.js takes it. */
+export function ditherLook(now) {
+  return { cell: 3, ...(now.background.dither ?? QUIET_DITHER), ...INKS[now.scheme] };
 }
 
 function apply() {
