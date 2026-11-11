@@ -3,8 +3,6 @@
 import { h, icon, spinner } from '../dom.js';
 import { pendingApprovals } from '../model.js';
 
-export const MOD_KEY = navigator.platform.startsWith('Mac') ? 'Cmd' : 'Ctrl';
-
 // Tones carry meaning without hue (styles/base.css): `good` held or done, `alert` wants a look,
 // `quiet` is the model's side at work, `danger` failed, `plain` is none of these.
 

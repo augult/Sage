@@ -1,14 +1,15 @@
 // The New session view: one composer. The workspace sits above the task; the model, skills, effort,
-// mode and autonomy are pickers in the bar below it, next to Start. Above the composer the chosen
+// mode and autonomy are pickers in the bar below it, next to Start. Enter in the task starts the
+// session, unless Settings says Ctrl/Cmd+Enter does (js/keys.js). Above the composer the chosen
 // background hangs uncovered, with its dither moving over it and the picker that changes it.
 // With no key configured the view leads with the walkthrough and the way to add a key.
 
 import { api } from '../api.js';
 import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
+import { onSendKey, sendHint } from '../keys.js';
 import { plainPath, tilde } from '../format.js';
 import * as themes from '../themes.js';
-import { MOD_KEY } from './common.js';
 import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
 
 const MODES = [
@@ -206,6 +207,9 @@ export function mountNewSession(main, app) {
     'div.new-session',
     {
       onkeydown: (event) => {
+        // In the task the chosen key starts the session and the other breaks the line.
+        if (event.target === task) return void onSendKey(event, start);
+        // Anywhere else in the form Ctrl/Cmd+Enter starts it; Enter is the control's own.
         if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
         start();
@@ -225,7 +229,7 @@ export function mountNewSession(main, app) {
         startButton,
       ),
     ),
-    h('div.composer-foot', recentRow, h('span.kbd', `${MOD_KEY}+Enter`)),
+    h('div.composer-foot', recentRow, h('span.kbd', sendHint())),
     error,
   );
 

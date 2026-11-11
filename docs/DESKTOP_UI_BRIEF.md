@@ -157,7 +157,10 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
      then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
      which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
-     (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu lists models under their provider
+     (Auto / Ask), and Start. Enter in the task starts the session and Ctrl/Cmd+Enter (or
+     Shift+Enter) breaks the line, unless Settings turns the two round (`ui/js/keys.js`); the
+     same goes for the follow-up box of a session. Beside each box is the key a user would not
+     guess: "Ctrl+Enter for a new line", or "Ctrl+Enter to send". The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
@@ -222,7 +225,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
-     applies at once). Then **API keys**, a line per provider: a check and the name in full ink
+     applies at once). Then **Messages**: "Send with" Enter or Ctrl/Cmd+Enter
+     (`#settings-messages`). Then **API keys**, a line per provider: a check and the name in full ink
      when it has a key, a ring and grey when it has none; its address; a password field; and
      Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider
