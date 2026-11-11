@@ -1,5 +1,6 @@
 //! The agent loop: one model reply, one script, repeat until the task is finished or handed back.
 
+use crate::attach;
 use crate::bootstrap;
 use crate::context::Context;
 use crate::economy::peak_multiplier;
@@ -10,6 +11,7 @@ use crate::repair;
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::state::{Features, Session};
 use crate::util::now_ms;
+use crate::watches;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -110,6 +112,8 @@ pub struct Agent {
     budget_marks: u8,
     /// How many more times the model is reminded that steps can be chained.
     chain_hints: u8,
+    /// The `job` tool was in the list sent with the previous request.
+    offered_job_tool: bool,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -119,7 +123,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(prompt::system_prompt(&cfg.features));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2 }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, offered_job_tool: false }
     }
 
     pub fn effort(&self) -> Effort {
@@ -205,6 +209,42 @@ impl Agent {
         self.sink.emit(EventKind::Stats { stats });
     }
 
+    /// The first message of a session: the task, after everything the harness can find out before
+    /// the model has spent anything (the environment, the files the task names, the result of the
+    /// test command it names). With none of that, it is the task as given.
+    async fn opening(&mut self, task: &str, cancel: &CancellationToken) -> String {
+        let features = self.cfg.features;
+        let mut parts: Vec<String> = Vec::new();
+        if features.bootstrap {
+            let env = bootstrap::snapshot(&self.sess).await;
+            self.sink.emit(EventKind::Env { text: env.clone() });
+            if features.lessons {
+                for lesson in self.sess.lessons.top(5) {
+                    self.sink.emit(EventKind::Lesson { learned: false, text: lesson.describe() });
+                }
+            }
+            parts.push(env);
+        }
+        // Before the test command is run: the source lines its failing output points at are then on
+        // record as shown wherever they are in an attached file, and are not printed a second time.
+        if let Some(files) = attach::attach(&mut self.sess, task) {
+            self.note("attach", &files.summary);
+            parts.push(files.text);
+        }
+        // A test command the task names is run before the model has spent anything on it. Only
+        // where commands run unasked anyway.
+        let preflight = if features.bootstrap && self.cfg.autonomy == Autonomy::Auto { watches::preflight(&mut self.sess, task, cancel).await } else { None };
+        if let Some(r) = preflight {
+            self.sink.emit(EventKind::Watch { turn: self.turn, name: r.name, cmd: r.cmd, state: r.state, change: r.change, detail: r.detail.clone() });
+            parts.push(format!("<tests>\n{}\n</tests>\n{}", r.detail, watches::PREFLIGHT_NOTE));
+        }
+        if parts.is_empty() {
+            return task.to_string();
+        }
+        parts.push(format!("<task>\n{task}\n</task>"));
+        parts.join("\n\n")
+    }
+
     /// Handles one user message: runs model turns until the task is finished, handed back, stopped,
     /// or out of budget.
     pub async fn run(&mut self, text: String, cancel: &CancellationToken) -> Outcome {
@@ -213,18 +253,7 @@ impl Agent {
         let features = self.cfg.features;
         let task = text.trim().to_string();
         self.sink.emit(EventKind::User { text: task.clone() });
-        let composed = if std::mem::take(&mut self.first_message) && features.bootstrap {
-            let env = bootstrap::snapshot(&self.sess).await;
-            self.sink.emit(EventKind::Env { text: env.clone() });
-            if features.lessons {
-                for lesson in self.sess.lessons.top(5) {
-                    self.sink.emit(EventKind::Lesson { learned: false, text: lesson.describe() });
-                }
-            }
-            format!("{env}\n\n<task>\n{task}\n</task>")
-        } else {
-            task
-        };
+        let composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
 
@@ -245,8 +274,11 @@ impl Agent {
             let turn = self.turn;
             self.sink.emit(EventKind::TurnStart { turn, effort: self.effort.as_str().to_string() });
 
-            let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages));
-            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features), effort: self.effort, max_tokens: self.cfg.max_tokens };
+            // A longer tool list changes the very start of the prompt, just as a rewritten message does.
+            let jobs = self.sess.jobs.any_started();
+            let tools_stable = std::mem::replace(&mut self.offered_job_tool, jobs) == jobs;
+            let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages)) && tools_stable;
+            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs), effort: self.effort, max_tokens: self.cfg.max_tokens };
             let sink = self.sink.clone();
             let mut on_delta = move |d: Delta| match d {
                 Delta::Reasoning(text) => sink.emit(EventKind::Delta { turn, channel: Channel::Reasoning, text }),
@@ -369,11 +401,11 @@ impl Agent {
                 use crate::tools::Tool;
                 let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
                 let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
-                let passing_check_last = tools.last() == Some(&Tool::Shell) && self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
-                let hint = if only_changes && self.sess.watches.items.is_empty() {
-                    Some("Tip: next time put the check (shell with expect_exit) and `finish` in the same reply as the edits. If an edit or the check fails, the rest is skipped automatically, so chaining costs nothing.")
-                } else if passing_check_last {
-                    Some("Tip: that check passed, so `finish` could have been in the same reply. It is skipped automatically whenever the check before it fails.")
+                let checked = self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
+                let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
+                    Some("Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails.")
+                } else if only_changes && self.sess.watches.items.is_empty() {
+                    Some("Tip: send the check (shell with expect_exit) and `finish` together in your next reply: if the check fails, `finish` is skipped automatically. They can ride along with the edits just the same.")
                 } else {
                     None
                 };
@@ -528,7 +560,7 @@ mod tests {
         assert_eq!(nudges.len(), 1);
         // The lone edit also drew the reminder that the check and finish could have ridden along.
         let tool = r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap();
-        assert!(tool.content.contains("--- harness ---\nTip: next time put the check"), "{}", tool.content);
+        assert!(tool.content.contains("--- harness ---\nTip: send the check"), "{}", tool.content);
 
         // With a person watching, prose simply hands the turn back.
         let mut cfg = AgentConfig::new("mock");
@@ -581,6 +613,156 @@ mod tests {
         // The note reaches the model as a footer on the observation, not as a rewritten message.
         let tools: Vec<&Message> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::Tool).collect();
         assert!(tools[1].content.contains("\n--- harness ---\nThe same step has now failed twice"), "{}", tools[1].content);
+    }
+
+    #[tokio::test]
+    async fn the_job_tool_is_offered_once_a_job_exists_at_the_price_of_one_cache_restart() {
+        let turns = vec![
+            fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "sleep 30", "background": true}))])),
+            fixed(MockTurn::calls("", vec![("job", json!({"id": "bg:1", "kill": true}))])),
+            fixed(MockTurn::say("Started it and stopped it again.")),
+        ];
+        let mut r = rig("agent-jobs", AgentConfig::new("mock"), turns);
+        r.agent.run("start the server, then stop it".into(), &CancellationToken::new()).await;
+        let cache: Vec<(bool, CacheVerdict)> = events(&r).iter().filter_map(|e| if let EventKind::Cache { prefix_stable, verdict, .. } = e { Some((*prefix_stable, *verdict)) } else { None }).collect();
+        assert_eq!(cache, vec![(true, CacheVerdict::First), (false, CacheVerdict::Bust), (true, CacheVerdict::Hit)]);
+        assert_eq!(r.agent.stats.cache_busts, 1);
+    }
+
+    #[tokio::test]
+    async fn the_test_command_the_task_names_is_checked_before_the_first_turn() {
+        let turns = || {
+            vec![
+                fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"}))])),
+                fixed(MockTurn::calls("", vec![("finish", json!({"summary": "upper-cased beta"}))])),
+            ]
+        };
+        let check = "grep -qx BETA n.txt && echo PASS || { echo 'FAIL: no BETA line'; exit 1; }\n";
+        let task = "`sh check.sh` fails. Upper-case the second line of n.txt.";
+
+        let mut r = rig("agent-preflight", AgentConfig::new("mock"), turns());
+        std::fs::write(r.agent.sess.ws.root.join("check.sh"), check).unwrap();
+        let out = r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, out.evidence.as_str()), (FinishStatus::Done, true, "verified by watch tests"));
+        assert_eq!(r.agent.stats.turns, 2, "no turn was spent on running the check");
+        // The model starts from the failing output, and its edit alone comes back with the verdict.
+        let first = &requests(&r)[0][1].content;
+        assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\nFAIL: no BETA line\n</tests>\nThe harness ran the test command"), "{first}");
+        assert!(first.starts_with("<env>\ncwd: ") && first.ends_with("</task>"));
+        let tool = r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap();
+        assert!(tool.content.contains("--- harness ---\nwatch tests: FAIL → PASS · PASS\nTip: every check passes"), "{}", tool.content);
+
+        // Where every command waits for approval, none is run unasked.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.autonomy = Autonomy::Ask;
+        let mut r = rig("agent-preflight-ask", cfg, turns());
+        std::fs::write(r.agent.sess.ws.root.join("check.sh"), check).unwrap();
+        r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert!(!requests(&r)[0][1].content.contains("<tests>"));
+    }
+
+    #[tokio::test]
+    async fn the_files_the_task_names_are_in_the_first_message_and_can_be_edited_at_once() {
+        let (a1, a2, a3) = (anchor(1, "alpha"), anchor(2, "beta"), anchor(3, "gamma"));
+        let task = "Upper-case the second line of `n.txt`.";
+        let fix = || fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "range": anchor(2, "beta"), "new": "BETA"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "upper-cased beta"}))]));
+        let read = || fixed(MockTurn::calls("", vec![("read", json!({"path": "n.txt"}))]));
+        let first_result = |r: &Rig| r.agent.ctx.messages.iter().find(|m| m.role == Role::Tool).unwrap().content.clone();
+
+        let mut r = rig("agent-attach", AgentConfig::new("mock"), vec![fix()]);
+        let out = r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 1), "nothing had to be read first");
+        assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBETA\ngamma\n");
+        // The file is there as `read` prints it, between the environment and the task.
+        let first = &requests(&r)[0][1].content;
+        let files = format!("\n</env>\n\n<files>\nn.txt · 3 lines\n{a1}|alpha\n{a2}|beta\n{a3}|gamma\n</files>\nThis is `read` output for the file the task names. It is already read and can be edited directly: do not read it first.\n\n<task>\n{task}\n</task>");
+        assert!(first.starts_with("<env>\ncwd: ") && first.ends_with(&files), "{first}");
+        let ev = events(&r);
+        assert!(ev.iter().any(|e| matches!(e, EventKind::Note { turn: 0, kind, text } if kind == "attach" && text == "attached n.txt (3 lines)")));
+        let tools: Vec<String> = ev.iter().filter_map(|e| if let EventKind::StepEnd { tool, .. } = e { Some(tool.clone()) } else { None }).collect();
+        assert_eq!(tools, ["edit", "shell", "finish"]);
+
+        // A model that asks for the file all the same is told that it has it.
+        let mut r = rig("agent-attach-reread", AgentConfig::new("mock"), vec![read(), fixed(MockTurn::say("ok"))]);
+        r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert!(first_result(&r).starts_with("[unchanged] n.txt lines 1-3 are already in your context (shown in the first message)"), "{}", first_result(&r));
+
+        // Switched off, the first message is what it used to be and the file has to be asked for.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.features = Features::presage().without("attach").unwrap();
+        let mut r = rig("agent-no-attach", cfg, vec![read(), fix()]);
+        let out = r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
+        let env = events(&r).iter().find_map(|e| if let EventKind::Env { text } = e { Some(text.clone()) } else { None }).unwrap();
+        assert_eq!(requests(&r)[0][1].content, format!("{env}\n\n<task>\n{task}\n</task>"));
+        assert!(first_result(&r).starts_with("n.txt · 3 lines\n"), "{}", first_result(&r));
+        assert!(!events(&r).iter().any(|e| matches!(e, EventKind::Note { kind, .. } if kind == "attach")));
+    }
+
+    #[tokio::test]
+    async fn an_attached_file_and_the_failing_output_do_not_repeat_each_other() {
+        let turns = || vec![fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("finish", json!({"summary": "upper-cased beta"}))]))];
+        // The check points at the line that is wrong, and at one in a file the task does not name.
+        let check = "grep -qx BETA n.txt && echo PASS || { echo 'n.txt:2: expected BETA'; echo 'see rules.txt:1'; exit 1; }\n";
+        let task = "`sh check.sh` fails. Upper-case the second line of `n.txt`.";
+        let beta = format!("{}|beta", anchor(2, "beta"));
+        let prepare = |r: &Rig| {
+            std::fs::write(r.agent.sess.ws.root.join("check.sh"), check).unwrap();
+            std::fs::write(r.agent.sess.ws.root.join("rules.txt"), "second line in capitals\n").unwrap();
+        };
+
+        let mut r = rig("agent-attach-preflight", AgentConfig::new("mock"), turns());
+        prepare(&r);
+        let out = r.agent.run(task.into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.evidence.as_str(), r.agent.stats.turns), (FinishStatus::Done, "verified by watch tests", 1), "the fix and `finish` in the first reply");
+        // The named file comes whole; of what the output points at, only the other file is added.
+        let first = &requests(&r)[0][1].content;
+        let (files, tests) = (first.find("\n\n<files>\nn.txt · 3 lines\n").expect("attached"), first.find("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\nn.txt:2: expected BETA\n").expect("checked"));
+        assert!(files < tests && first.ends_with("</task>"), "{first}");
+        assert_eq!(first.matches(&beta).count(), 1, "{first}");
+        assert!(first.contains(&format!("\n--- where (current file content; anchors work in edit) ---\nrules.txt\n> {}|second line in capitals\n</tests>\n", anchor(1, "second line in capitals"))), "{first}");
+
+        // Without the attachment the lines come once as well, with the failing output.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.features = Features::presage().without("attach").unwrap();
+        let mut r = rig("agent-preflight-alone", cfg, turns());
+        prepare(&r);
+        r.agent.run(task.into(), &CancellationToken::new()).await;
+        let first = &requests(&r)[0][1].content;
+        assert!(!first.contains("<files>") && first.contains(&format!("\nn.txt\n  {}|alpha\n> {beta}\n", anchor(1, "alpha"))), "{first}");
+        assert_eq!(first.matches(&beta).count(), 1, "{first}");
+    }
+
+    #[tokio::test]
+    async fn a_traceback_reaches_the_model_without_the_workspace_path_and_with_its_source_lines() {
+        let trace = "echo 'Traceback (most recent call last):'; echo \"  File \\\"$PWD/calc.py\\\", line 12, in f\"; echo ZeroDivisionError; exit 1";
+        let turns = || vec![fixed(MockTurn::calls("", vec![("shell", json!({"cmd": trace, "expect_exit": "0"}))])), fixed(MockTurn::say("I see."))];
+        let body: String = (1..=30).map(|i| format!("line_{i} = {i}\n")).collect();
+        let target = format!("\n> {}|line_12 = 12\n", anchor(12, "line_12 = 12"));
+        // What the model was sent for the step, in the request that followed it.
+        let observed = |r: &Rig| requests(r)[1].last().unwrap().content.clone();
+
+        let mut r = rig("agent-short-paths", AgentConfig::new("mock"), turns());
+        let root = r.agent.sess.ws.root.display().to_string();
+        std::fs::write(r.agent.sess.ws.root.join("calc.py"), &body).unwrap();
+        r.agent.run("Run it.".into(), &CancellationToken::new()).await;
+        let seen = observed(&r);
+        assert!(seen.starts_with("[SURPRISE] expected exit 0, got exit 1 · "), "{seen}");
+        assert!(seen.contains("\nTraceback (most recent call last):\n  File \"calc.py\", line 12, in f\nZeroDivisionError\n--- where (current file content; anchors work in edit) ---\ncalc.py\n") && seen.contains(&target), "{seen}");
+        assert!(!seen.contains(&root), "{seen}");
+        // What is kept on disk is what the command printed.
+        let kept = std::fs::read_to_string(r.agent.sess.spill_path("out:1").unwrap()).unwrap();
+        assert!(kept.contains(&format!("  File \"{root}/calc.py\", line 12, in f")), "{kept}");
+
+        // Switched off, the path is there in full, and the lines are found all the same.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.features = Features::presage().without("short-paths").unwrap();
+        let mut r = rig("agent-long-paths", cfg, turns());
+        let root = r.agent.sess.ws.root.display().to_string();
+        std::fs::write(r.agent.sess.ws.root.join("calc.py"), &body).unwrap();
+        r.agent.run("Run it.".into(), &CancellationToken::new()).await;
+        let seen = observed(&r);
+        assert!(seen.contains(&format!("\n  File \"{root}/calc.py\", line 12, in f\n")) && seen.contains(&target), "{seen}");
     }
 
     #[tokio::test]

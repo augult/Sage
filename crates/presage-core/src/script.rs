@@ -285,6 +285,7 @@ impl Runner<'_> {
         if let Err(denied) = self.approve(call, tool).await {
             return denied;
         }
+        let epoch_before = self.sess.evidence.epoch;
         let out = match tool {
             Tool::Shell => tools::shell::run(self.sess, args, self.cancel).await,
             Tool::Read => tools::read::run(self.sess, args),
@@ -315,6 +316,19 @@ impl Runner<'_> {
             if meta.held_explicit && meta.ok && !proves_nothing(&meta.cmd) {
                 self.sess.evidence.passed(format!("`{}`", one_line(&meta.cmd, 100)));
             }
+            // A run that left the workspace alone is also the current result of any watch on that
+            // command, and the model's own test command becomes a watch here.
+            if let (Some(run), true) = (&meta.completed, self.sess.evidence.epoch == epoch_before) {
+                let seen = watches::observe(self.sess, &meta.cmd, run);
+                for r in &seen.reports {
+                    self.sink.emit(EventKind::Watch { turn: self.turn, name: r.name.clone(), cmd: r.cmd.clone(), state: r.state, change: r.change, detail: r.detail.clone() });
+                }
+                res.footer.extend(seen.notice);
+                if self.sess.watches.all_pass_at(self.sess.evidence.epoch) {
+                    let names = self.sess.watches.names();
+                    self.sess.evidence.passed(format!("watch {names}"));
+                }
+            }
         }
         out
     }
@@ -332,6 +346,8 @@ impl Runner<'_> {
         };
         let expect = if self.sess.features.receipts { Expect::from_args(args) } else { None };
         let cwd = self.sess.ws.cwd.clone();
+        // Asking for the check the harness already watches means taking it over under this name.
+        self.sess.watches.items.retain(|w| !(w.auto && w.cmd == cmd && w.cwd == cwd));
         let idx = self.sess.watches.set(&name, cmd, cwd, expect);
         let report = watches::run_one(self.sess, idx, self.cancel).await;
         self.sess.watches.items[idx].epoch = self.sess.evidence.epoch;
@@ -357,10 +373,20 @@ impl Runner<'_> {
             let (reports, text) = watches::run_stale(self.sess, self.cancel).await;
             self.emit_watches(&reports);
             if !self.sess.watches.all_pass() {
-                let failing: Vec<&str> = self.sess.watches.items.iter().filter(|w| w.state != WatchState::Pass).map(|w| w.name.as_str()).collect();
-                let head = format!("[SURPRISE] finish refused: watch {} is not passing.", failing.join(", "));
-                let detail = if text.is_empty() { "Its output has not changed since it was last shown.".to_string() } else { text };
-                return StepOutput { status: StepStatus::Surprise, violations: vec![format!("watch {} is failing", failing.join(", "))], stub: head.clone(), observation: format!("{head}\n{detail}"), ..Default::default() };
+                let failing: Vec<&watches::Watch> = self.sess.watches.items.iter().filter(|w| w.state != WatchState::Pass).collect();
+                let names = failing.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ");
+                // A check the model never asked for must not be able to trap it.
+                let waivable = failing.iter().all(|w| w.auto);
+                if let (true, Some(reason)) = (waivable, str_arg(args, "unverified").map(str::trim).filter(|r| !r.is_empty())) {
+                    res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: {reason} (watch {names} is failing)") });
+                    return StepOutput::ok("[done] accepted without verification");
+                }
+                let head = format!("[SURPRISE] finish refused: watch {names} is not passing.");
+                let mut detail = if text.is_empty() { "Its output has not changed since it was last shown.".to_string() } else { text };
+                if waivable {
+                    detail.push_str("\nFix it. If it cannot pass for a reason outside this task, call finish with `unverified` set to that reason.");
+                }
+                return StepOutput { status: StepStatus::Surprise, violations: vec![format!("watch {names} is failing")], stub: head.clone(), observation: format!("{head}\n{detail}"), ..Default::default() };
             }
         }
         let ev = &mut self.sess.evidence;
@@ -484,6 +510,11 @@ mod tests {
         let (res, _, _) = run(&mut s, &[("shell", json!({"cmd": "echo all good", "expect": {"has": "good"}})), ("finish", json!({"summary": "done"}))]).await;
         assert!(res.finished.is_none());
 
+        // Nor is a run that failed, even if what the model said it would print was printed.
+        let (res, _, events) = run(&mut s, &[("shell", json!({"cmd": "sh -c \"echo '5 passing, 1 failing'; exit 1\"", "expect_has": "passing"})), ("finish", json!({"summary": "done"}))]).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Surprise]);
+        assert!(res.finished.is_none());
+
         // A check that passed, then another change: stale again.
         run(&mut s, &[("shell", json!({"cmd": "grep -qx 2 n.txt", "expect": {"exit": "0"}}))]).await;
         assert!(s.evidence.fresh());
@@ -574,6 +605,59 @@ mod tests {
         let (res, _, events) = run(&mut s, &[("shell", json!({"cmd": "exit 1"})), ("shell", json!({"cmd": "echo still runs"})), ("finish", json!({"summary": "done"}))]).await;
         assert_eq!(statuses(&events), vec![StepStatus::Error, StepStatus::Ok, StepStatus::Ok]);
         assert!(res.finished.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_test_run_becomes_a_watch_so_an_edit_alone_comes_back_checked() {
+        let mut s = test_session("script-auto", Features::presage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        std::fs::write(s.ws.root.join("check.sh"), "grep -qx 2 n.txt && echo PASS || { echo \"FAIL: n is $(cat n.txt)\"; exit 1; }\n").unwrap();
+        let watch_events = |events: &[EventKind]| -> Vec<(WatchState, WatchChange)> { events.iter().filter_map(|e| if let EventKind::Watch { state, change, .. } = e { Some((*state, *change)) } else { None }).collect() };
+
+        // Reproducing the failure sets up the watch from that very run: the command is not run twice.
+        let (res, _, events) = run(&mut s, &[("shell", json!({"cmd": "sh check.sh", "expect_exit": "nonzero"}))]).await;
+        assert_eq!(res.footer.len(), 1);
+        assert!(res.footer[0].starts_with("watch tests: FAIL · `sh check.sh` is now watched"), "{:?}", res.footer);
+        assert_eq!(watch_events(&events), vec![(WatchState::Fail, WatchChange::New)]);
+
+        // An edit on its own is answered with the test result, and that result is evidence.
+        let (res, _, _) = run(&mut s, &[("edit", json!({"path": "n.txt", "old": "1", "new": "2"}))]).await;
+        assert_eq!(res.footer, vec!["watch tests: FAIL → PASS · PASS"]);
+        assert!(s.evidence.fresh());
+
+        // A model that still runs the tests by hand does not make them run a second time.
+        let (res, _, events) = run(&mut s, &[("edit", json!({"path": "n.txt", "old": "2", "new": "9"})), ("shell", json!({"cmd": "sh check.sh", "expect_exit": "nonzero"}))]).await;
+        assert!(res.footer.is_empty(), "{:?}", res.footer);
+        assert_eq!(watch_events(&events), vec![(WatchState::Fail, WatchChange::Flip)]);
+        assert!(!s.evidence.fresh());
+
+        // With the watch in place, `finish` can ride along with the edit: it is judged by the watch.
+        let (res, _, _) = run(&mut s, &[("edit", json!({"path": "n.txt", "old": "9", "new": "2"})), ("finish", json!({"summary": "n is 2"}))]).await;
+        assert_eq!(res.finished.expect("the watch passes").evidence, "verified by watch tests");
+    }
+
+    #[tokio::test]
+    async fn a_failing_watch_the_model_never_asked_for_can_be_waived_with_a_reason() {
+        let mut s = test_session("script-waive", Features::presage());
+        std::fs::write(s.ws.root.join("check.sh"), "echo 'FAIL: the service is unreachable'; exit 1\n").unwrap();
+        run(&mut s, &[("shell", json!({"cmd": "sh check.sh"}))]).await;
+        run(&mut s, &[("write", json!({"path": "a.txt", "content": "x"}))]).await;
+
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done"}))]).await;
+        assert!(res.finished.is_none());
+        assert!(res.observations[0].1.starts_with("[SURPRISE] finish refused: watch tests is not passing."), "{}", res.observations[0].1);
+        assert!(res.observations[0].1.ends_with("call finish with `unverified` set to that reason."), "{}", res.observations[0].1);
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done", "unverified": "check.sh needs a service that is not running here"}))]).await;
+        let done = res.finished.expect("waived");
+        assert!(!done.verified);
+        assert_eq!(done.evidence, "unverified: check.sh needs a service that is not running here (watch tests is failing)");
+
+        // Asking for the same check by name takes it over, and a requested watch stays binding.
+        let (_, _, _) = run(&mut s, &[("watch", json!({"name": "service", "cmd": "sh check.sh"}))]).await;
+        assert_eq!(s.watches.names(), "service");
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done", "unverified": "still unreachable"}))]).await;
+        assert!(res.finished.is_none());
+        assert!(!res.observations[0].1.contains("unverified"), "{}", res.observations[0].1);
     }
 
     #[test]

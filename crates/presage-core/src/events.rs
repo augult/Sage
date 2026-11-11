@@ -45,7 +45,8 @@ pub enum CacheVerdict {
     Partial,
     /// The prefix was byte-identical but the provider reported no cache hit. Not a harness fault.
     Miss,
-    /// The harness itself changed earlier messages (context trimming).
+    /// The harness itself changed what was already sent: old observations were trimmed, or a tool
+    /// was added to the list.
     Bust,
     /// The provider reported no usage.
     Unknown,

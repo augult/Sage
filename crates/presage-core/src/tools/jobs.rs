@@ -286,6 +286,11 @@ impl Jobs {
         id
     }
 
+    /// Whether this session has ever had a background job.
+    pub fn any_started(&self) -> bool {
+        self.next > 0
+    }
+
     pub fn get_mut(&mut self, id: &str) -> Option<&mut Job> {
         let wanted = id.trim().trim_start_matches("bg:");
         self.list.iter_mut().find(|j| j.id.trim_start_matches("bg:") == wanted)

@@ -1,7 +1,7 @@
 # Desktop UI brief
 
-The Tauri shell and front end still have to be built. The engine side is finished: everything the UI
-needs is on `presage_core::harness::Harness`.
+The shell and front end are built; what has and has not been verified is in `docs/HANDOFF.md`. This
+brief remains the specification. Everything the UI needs is on `presage_core::harness::Harness`.
 
 ## Read first
 
@@ -35,7 +35,10 @@ GUI apps start with a minimal `PATH`. On unix, first thing in `main`, resolve th
 `PATH` (`$SHELL -ilc 'printf %s "$PATH"'`, 3 s timeout) and adopt it.
 
 Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the demo),
-`PRESAGE_UI_VIEW=settings|new|session`, `PRESAGE_UI_OPEN=<session id>`.
+`PRESAGE_UI_VIEW=settings|new|session`, `PRESAGE_UI_OPEN=<session id>`. Added while building it:
+`PRESAGE_UI_SIZE=<width>x<height>`, `PRESAGE_UI_SCRIPTED=<file>` (start a session played by a
+scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
+grammar in `desktop/ui/js/hooks.js`).
 
 ## Front end (`desktop/ui`)
 
@@ -86,3 +89,6 @@ timeout 60 xvfb-run -a -s "-screen 0 1320x860x24" bash -c \
 ```
 
 Look at every screenshot. The demo session must show the surprise and the skipped `finish` clearly.
+The walkthrough: reply 1 reads and runs the check (it becomes watch `tests`), reply 2 edits and
+predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (verified by watch
+`tests`).

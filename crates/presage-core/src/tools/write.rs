@@ -46,6 +46,7 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     let broken = if sess.features.post_edit_check { syntax_check(&abs, content).await } else { None };
     let mut out = match broken {
         Some((line, msg)) => {
+            let msg = sess.shown(msg);
             let at = line.map(|l| format!(" at line {l}")).unwrap_or_default();
             let head = format!("[SURPRISE] {verb} {shown}, but it does not parse{at}: {msg}");
             StepOutput { status: StepStatus::Surprise, violations: vec![format!("{shown} does not parse: {msg}")], stub: head.clone(), observation: head, ..Default::default() }

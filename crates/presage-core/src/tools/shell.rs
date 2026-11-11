@@ -6,7 +6,7 @@
 //! has already learned about that error.
 
 use super::jobs::{Exit, Running, StateMode, Waited, drain, kill_group, masked_failure, spawn, wait_exit};
-use super::{ShellMeta, StepOutput, StepStatus, bool_arg, str_arg, u64_arg};
+use super::{Completed, ShellMeta, StepOutput, StepStatus, bool_arg, str_arg, u64_arg};
 use crate::guard::{self, Expect};
 use crate::locate;
 use crate::state::Session;
@@ -26,7 +26,7 @@ pub enum ExecEnd {
 
 pub struct Exec {
     pub end: ExecEnd,
-    /// Cleaned output (escape codes and redraws removed).
+    /// Cleaned output (escape codes and redraws removed), as the model is shown it (`Session::shown`).
     pub text: String,
     pub total_bytes: u64,
     pub ms: u64,
@@ -75,12 +75,13 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
         Waited::TimedOut => {
             let (raw, _) = run.buf.lock().unwrap().snapshot();
             let total_bytes = run.buf.lock().unwrap().total;
-            return Ok(Exec { end: ExecEnd::TimedOut(run), text: clean(&raw), total_bytes, ms, spill, masked: false });
+            return Ok(Exec { end: ExecEnd::TimedOut(run), text: sess.shown(clean(&raw)), total_bytes, ms, spill, masked: false });
         }
     };
     let (raw, _) = run.buf.lock().unwrap().snapshot();
     let total_bytes = run.buf.lock().unwrap().total;
-    Ok(Exec { end, text: clean(&raw), total_bytes, ms, spill, masked })
+    // After a `cd` has been followed, so that paths come out relative to where the next call runs.
+    Ok(Exec { end, text: sess.shown(clean(&raw)), total_bytes, ms, spill, masked })
 }
 
 /// Follows a `cd` the command performed, if it left the shell in a directory that still exists.
@@ -173,7 +174,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 observation,
                 violations: vec![format!("did not finish within {timeout}s")],
                 explicit: expect.is_some(),
-                shell: Some(ShellMeta { cmd, ok: false, held_explicit: false, output_tail: String::new() }),
+                shell: Some(ShellMeta { cmd, ok: false, held_explicit: false, output_tail: String::new(), completed: None }),
                 ..Default::default()
             }
         }
@@ -185,7 +186,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             let mut out = StepOutput {
                 explicit: verdict.explicit,
                 violations: verdict.violations.clone(),
-                shell: Some(ShellMeta { cmd: cmd.clone(), ok, held_explicit: verdict.explicit && verdict.held, output_tail: output_tail.clone() }),
+                shell: Some(ShellMeta { cmd: cmd.clone(), ok, held_explicit: verdict.explicit && verdict.held, output_tail: output_tail.clone(), completed: None }),
                 ..Default::default()
             };
 
@@ -243,6 +244,9 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 out.observation = obs;
             }
             out.hidden_bytes = shown_all.saturating_sub(out.observation.len() as u64);
+            if let (true, Some(meta)) = (sess.features.watches, out.shell.as_mut()) {
+                meta.completed = Some(Completed { cwd, code: exit.code, ms: ex.ms, text: ex.text });
+            }
             out
         }
     }
@@ -262,7 +266,7 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
     }
     let (raw, _) = running.buf.lock().unwrap().snapshot();
     let total = running.buf.lock().unwrap().total;
-    let lines = squeeze(&clean(&raw));
+    let lines = squeeze(&sess.shown(clean(&raw)));
     let view = bound(&lines, 10, 20, 2_500, Some(&spill));
     let shown = if lines.is_empty() { "(no output yet)".to_string() } else { view.text.trim_end().to_string() };
     match early {
@@ -273,7 +277,7 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
                 status: if ok { StepStatus::Ok } else { StepStatus::Surprise },
                 stub: one_line(&observation, 160),
                 observation,
-                shell: Some(ShellMeta { cmd: cmd.to_string(), ok, held_explicit: false, output_tail: tail(&lines, 30).join("\n") }),
+                shell: Some(ShellMeta { cmd: cmd.to_string(), ok, held_explicit: false, output_tail: tail(&lines, 30).join("\n"), completed: None }),
                 ..Default::default()
             }
         }

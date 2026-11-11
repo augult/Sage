@@ -6,6 +6,7 @@ use crate::tools::jobs::Jobs;
 use crate::watches::Watches;
 use crate::workspace::{Seen, Workspace, fingerprint};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,6 +22,10 @@ pub struct Features {
     pub expand: bool,
     /// `watch` tool and automatic re-runs after changes.
     pub watches: bool,
+    /// The model's own test command becomes a watch without being asked. Needs `watches`.
+    pub auto_watch: bool,
+    /// A test command named in the task is run and watched before the first turn. Needs `auto_watch`.
+    pub preflight: bool,
     /// `finish` requires a passing check since the last change.
     pub gate: bool,
     /// Error→fix pairs are learned per project and recalled.
@@ -33,15 +38,45 @@ pub struct Features {
     pub post_edit_check: bool,
     /// The first message carries a snapshot of the environment.
     pub bootstrap: bool,
+    /// The files the task names are in the first message, already read.
+    pub attach: bool,
+    /// Command output is shown without the workspace's absolute path.
+    pub short_paths: bool,
 }
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false }
+    }
+
+    /// The mechanisms `without` can switch off.
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths"];
+
+    /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
+    pub fn without(mut self, name: &str) -> Option<Self> {
+        let slot = match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "scripts" => &mut self.scripts,
+            "receipts" => &mut self.receipts,
+            "expand" => &mut self.expand,
+            "watches" => &mut self.watches,
+            "auto_watch" => &mut self.auto_watch,
+            "preflight" => &mut self.preflight,
+            "gate" => &mut self.gate,
+            "lessons" => &mut self.lessons,
+            "anchors" => &mut self.anchors,
+            "dedup" => &mut self.dedup,
+            "post_edit_check" => &mut self.post_edit_check,
+            "bootstrap" => &mut self.bootstrap,
+            "attach" => &mut self.attach,
+            "short_paths" => &mut self.short_paths,
+            _ => return None,
+        };
+        *slot = false;
+        Some(self)
     }
 }
 
@@ -193,6 +228,29 @@ impl Session {
     pub fn shell_state(&self) -> PathBuf {
         self.dir.join("shell")
     }
+
+    /// Command output as the model is shown it. See `shown`.
+    pub fn shown(&self, text: String) -> String {
+        shown(&self.features, &self.ws, text)
+    }
+}
+
+/// Command output as the model is shown it: with `short_paths`, paths under the directory the tools
+/// run in are relative to it, like the paths the model gives. A long absolute prefix repeated on
+/// every line of a traceback is bought once and then re-read on every later turn. What is kept on
+/// disk (`out:N`) stays as the command printed it.
+///
+/// Takes the two fields rather than the session, so that it can be called while another part of
+/// the session is borrowed.
+pub fn shown(features: &Features, ws: &Workspace, text: String) -> String {
+    if !features.short_paths {
+        return text;
+    }
+    let short = match ws.shorten(&text) {
+        Cow::Owned(short) => Some(short),
+        Cow::Borrowed(_) => None,
+    };
+    short.unwrap_or(text)
 }
 
 /// Environment that keeps tools from waiting on a human or painting the output.
@@ -254,6 +312,30 @@ mod tests {
         assert!(s.evidence.after_command(&s.ws, "make gen"));
         assert!(!s.evidence.fresh());
         assert_eq!(s.evidence.last_change, "`make gen`");
+    }
+
+    #[test]
+    fn every_mechanism_can_be_switched_off_by_name() {
+        for name in Features::NAMES {
+            let without = Features::presage().without(name).unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
+            assert_ne!(without, Features::presage(), "{name}");
+            assert_eq!(Features::presage().without(&name.replace('_', "-")), Some(without), "{name}, spelled with dashes");
+            assert_eq!(Features::classic().without(name), Some(Features::classic()), "{name} is off in the baseline");
+        }
+        assert!(!Features::presage().without("attach").unwrap().attach && !Features::presage().without("short-paths").unwrap().short_paths);
+        assert_eq!(Features::presage().without("telepathy"), None);
+    }
+
+    #[test]
+    fn command_output_loses_the_workspace_path_only_where_that_is_switched_on() {
+        let mut s = test_session("shown", Features::presage());
+        let root = s.ws.root.display().to_string();
+        let raw = format!("  File \"{root}/pager.py\", line 3\nrootdir: {root}\n");
+        assert_eq!(s.shown(raw.clone()), "  File \"pager.py\", line 3\nrootdir: .\n");
+        assert_eq!(s.shown("3 passed".to_string()), "3 passed");
+
+        s.features = Features::presage().without("short_paths").unwrap();
+        assert_eq!(s.shown(raw.clone()), raw);
     }
 
     #[test]

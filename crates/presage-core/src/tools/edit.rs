@@ -297,6 +297,8 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     let broken = if sess.features.post_edit_check { syntax_check(&abs, &updated).await } else { None };
     let mut out = match broken {
         Some((line, msg)) => {
+            // The checker was given the absolute path and may quote it back.
+            let msg = sess.shown(msg);
             let around = line.map(|l| format!("\n{}", nearby(&lines, l, 3).trim_end())).unwrap_or_default();
             let at = line.map(|l| format!(" at line {l}")).unwrap_or_default();
             let head = format!("[SURPRISE] {shown}: {what}, but the file no longer parses{at}: {msg}");
@@ -421,6 +423,14 @@ mod tests {
         assert!(out.changed_files, "the edit is kept so the model can patch it");
         assert!(out.observation.starts_with("[SURPRISE] conf.json: 1 replacement, but the file no longer parses at line 4"), "{}", out.observation);
         assert!(out.observation.contains("|}"), "shows the lines around the error");
+
+        // A checker that quotes the path it was given names the file the way the model does.
+        #[cfg(unix)]
+        {
+            std::fs::write(s.ws.root.join("run.sh"), "if true; then\n  echo ok\nfi\n").unwrap();
+            let out = run(&mut s, &json!({"path": "run.sh", "old": "fi", "new": "done"})).await;
+            assert!(out.observation.starts_with("[SURPRISE] run.sh: 1 replacement, but the file no longer parses at line 3: run.sh: line 3: "), "{}", out.observation);
+        }
     }
 
     #[tokio::test]
