@@ -1,18 +1,20 @@
 //! Per-session mutable state shared by the tools and the script executor.
 
+use crate::anchors::History;
 use crate::economy::Prices;
 use crate::lessons::LessonBook;
+use crate::review::Baseline;
 use crate::tools::jobs::Jobs;
 use crate::watches::Watches;
 use crate::workspace::{Seen, Workspace, fingerprint};
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 /// Switches for each mechanism, so that any of them can be ablated and measured. `classic()` is a
 /// conventional tool loop used as the baseline in A/B runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Features {
     /// Calls in one reply run as a script that halts at the first surprise.
     pub scripts: bool,
@@ -87,7 +89,7 @@ impl Features {
 }
 
 /// Output budgets. Sized so a failure is fully legible and a success is never more than a screenful.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub ok_head: usize,
     pub ok_tail: usize,
@@ -154,6 +156,14 @@ impl Evidence {
         self.epoch == 0 || self.verified.as_ref().is_some_and(|(e, _)| *e == self.epoch)
     }
 
+    /// What stands behind a `fresh` state, in words.
+    pub fn verified_by(&self) -> String {
+        match &self.verified {
+            Some((_, by)) if self.epoch > 0 => format!("verified by {by}"),
+            _ => "no changes were made".to_string(),
+        }
+    }
+
     /// A tool changed files itself.
     pub fn changed(&mut self, what: impl Into<String>) {
         self.epoch += 1;
@@ -196,6 +206,10 @@ pub struct Session {
     pub evidence: Evidence,
     /// The user message being worked on, quoted back by the review.
     pub task: String,
+    /// What was already uncommitted when the session began, so the review shows only its own changes.
+    pub baseline: Option<Baseline>,
+    /// Files changed through `edit` and `write`, for a review where git cannot say what changed.
+    pub touched: Vec<String>,
     pub lessons: LessonBook,
     pub features: Features,
     pub limits: Limits,
@@ -204,6 +218,12 @@ pub struct Session {
     pub dir: PathBuf,
     /// Monotonic step counter across the whole session.
     pub step: u32,
+    /// Counts the replies whose calls have been run: an anchor never refers to an edit of its own reply.
+    pub reply: u32,
+    /// What the tools have changed in each file, so that anchors from before still find their lines.
+    pub histories: HashMap<PathBuf, History>,
+    /// Files the syntax check cannot judge: whether each already failed it before the tools touched it.
+    pub dialects: HashMap<PathBuf, bool>,
     spill_seq: u32,
     pub shell_env: Vec<(String, String)>,
 }
@@ -218,12 +238,17 @@ impl Session {
             watches: Watches::default(),
             evidence: Evidence::default(),
             task: String::new(),
+            baseline: None,
+            touched: Vec::new(),
             lessons,
             features,
             limits: Limits::default(),
             prices,
             dir,
             step: 0,
+            reply: 0,
+            histories: HashMap::new(),
+            dialects: HashMap::new(),
             spill_seq: 0,
             shell_env: non_interactive_env(),
         })

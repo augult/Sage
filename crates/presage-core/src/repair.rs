@@ -146,16 +146,28 @@ pub fn parse_args(raw: &str) -> Result<(Value, bool), String> {
     let decomma = strip_trailing_commas(&escaped);
     let closed = close_truncated(&decomma);
     for candidate in [unfenced, escaped.as_str(), decomma.as_str(), closed.as_str()] {
-        if let Ok(v) = serde_json::from_str::<Value>(candidate) {
-            if v.is_object() {
-                return Ok((v, true));
-            }
+        if let Ok(v) = serde_json::from_str::<Value>(candidate) && v.is_object() {
+            return Ok((v, true));
         }
     }
     Err(first_error)
 }
 
-const ALIASES: &[(Tool, &[(&str, &[&str])])] = &[
+/// True for arguments that stop in the middle: valid JSON only once what they left open is closed.
+/// From a reply that never said it was finished, that is a call the model did not get to the end of.
+pub fn cut_off(raw: &str) -> bool {
+    let s = raw.trim();
+    if s.is_empty() || serde_json::from_str::<Value>(s).is_ok() {
+        return false;
+    }
+    let mended = strip_trailing_commas(&escape_control_in_strings(s.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim()));
+    serde_json::from_str::<Value>(&mended).is_err() && serde_json::from_str::<Value>(&close_truncated(&mended)).is_ok()
+}
+
+/// A tool's argument names, each with the names other harnesses give it.
+type Aliases = &'static [(&'static str, &'static [&'static str])];
+
+const ALIASES: &[(Tool, Aliases)] = &[
     (
         Tool::Shell,
         &[
@@ -244,10 +256,19 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
     }
     let num = |m: &Map<String, Value>, k: &str| m.get(k).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
     // `read {"out": 1}`: the model means the saved output `out:1`.
-    if tool == Tool::Read && !map.contains_key("path") {
-        if let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
-            map.remove("out");
-            map.insert("path".into(), json!(format!("out:{n}")));
+    if tool == Tool::Read && !map.contains_key("path") && let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
+        map.remove("out");
+        map.insert("path".into(), json!(format!("out:{n}")));
+    }
+    if tool == Tool::Read {
+        // `view_range: [400, 420]`, as other harnesses take it.
+        if let Some(Value::Array(ends)) = map.get("lines") {
+            let ends: Vec<u64> = ends.iter().filter_map(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))).collect();
+            match ends.as_slice() {
+                [from, to] => drop(map.insert("lines".into(), json!(format!("{from}-{to}")))),
+                [from] => drop(map.insert("lines".into(), json!(format!("{from}+")))),
+                _ => drop(map.remove("lines")),
+            }
         }
     }
     if tool == Tool::Read && !map.contains_key("lines") {
@@ -260,6 +281,22 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             (Some(s), None, None) => drop(map.insert("lines".into(), json!(format!("{s}+")))),
             (None, _, Some(l)) => drop(map.insert("lines".into(), json!(format!("1-{l}")))),
             _ => {}
+        }
+    }
+    if tool == Tool::Edit {
+        // `range: 12` or `range: [12, 14]`: line numbers where an anchor string was meant.
+        let number = |v: &Value| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().to_string()));
+        let range = match map.get("range") {
+            Some(Value::Number(n)) => Some(n.to_string()),
+            Some(Value::Array(ends)) => match ends.iter().map(number).collect::<Option<Vec<_>>>().as_deref() {
+                Some([from, to]) => Some(format!("{from}-{to}")),
+                Some([only]) => Some(only.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(range) = range {
+            map.insert("range".into(), json!(range));
         }
     }
     if tool == Tool::Shell {
@@ -279,14 +316,12 @@ pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     fn push(found: &mut Vec<ToolCall>, v: &Value) {
         let name = v.get("name").or_else(|| v.get("tool")).or_else(|| v.get("function")).and_then(Value::as_str);
         let args = v.get("arguments").or_else(|| v.get("args")).or_else(|| v.get("parameters")).or_else(|| v.get("input"));
-        if let (Some(name), Some(args)) = (name, args) {
-            if Tool::from_name(name).is_some() {
-                let arguments = match args {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                found.push(ToolCall { id: format!("text_{}", found.len()), name: name.to_string(), arguments });
-            }
+        if let (Some(name), Some(args)) = (name, args) && Tool::from_name(name).is_some() {
+            let arguments = match args {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            found.push(ToolCall { id: format!("text_{}", found.len()), name: name.to_string(), arguments });
         }
     }
     let mut found = Vec::new();
@@ -302,10 +337,8 @@ pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     if found.is_empty() {
         let trimmed = content.trim();
         let body = trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```")).map(|b| b.trim_end_matches("```").trim()).unwrap_or(trimmed);
-        if body.starts_with('{') && body.ends_with('}') {
-            if let Ok(v) = serde_json::from_str::<Value>(body) {
-                push(&mut found, &v);
-            }
+        if body.starts_with('{') && body.ends_with('}') && let Ok(v) = serde_json::from_str::<Value>(body) {
+            push(&mut found, &v);
         }
     }
     found
@@ -333,10 +366,24 @@ pub fn parse_calls(raw: &[ToolCall]) -> (Vec<Call>, u32) {
             if repaired {
                 repairs += 1;
             }
-            let before = args.to_string();
+            // Other harnesses give one editor tool several jobs: its `view` is a read here and its
+            // `create` a write. A tool named for killing a job means just that.
+            let foreign = rc.name.to_ascii_lowercase();
+            let (tool, mut args) = match (tool, args.get("command").and_then(Value::as_str)) {
+                (Tool::Edit, Some("view")) => (Tool::Read, args),
+                (Tool::Edit, Some("create")) => (Tool::Write, args),
+                _ => (tool, args),
+            };
+            if let (Tool::Job, true, Some(map)) = (tool, foreign.contains("kill"), args.as_object_mut()) {
+                map.entry("kill").or_insert(json!(true));
+            }
+            if tool == Tool::Edit && foreign.contains("patch") && args.get("path").is_none() && args.get("file_path").is_none() {
+                return Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: Some(tool), args: Value::Null, error: Some(format!("`{}` takes no patch here. Use edit with `path`, `new` and one of `range`, `old` or `after`: one call for each change.", rc.name)) };
+            }
+            let before = args.clone();
             match normalize_args(tool, args) {
                 Ok(args) => {
-                    if args.to_string() != before {
+                    if args != before {
                         repairs += 1;
                     }
                     Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: Some(tool), args, error: None }
@@ -380,6 +427,38 @@ mod tests {
         assert!(parse_args("not json at all").is_err());
         // A comma inside a string is content, not a trailing comma.
         assert_eq!(strip_trailing_commas(r#"{"a": "x,}", "b": 1,}"#), r#"{"a": "x,}", "b": 1}"#);
+        // Which of these stopped half-way is known, for the reply that ended without saying why.
+        assert!(cut_off(r#"{"path": "a.py", "content": "import os\nprint("#) && cut_off(r#"{"cmd": "x", "expect": {"exit": "0""#));
+        assert!(!cut_off(r#"{"cmd": "ls",}"#) && !cut_off(r#"{"cmd": "ls"}"#) && !cut_off("") && !cut_off("not json at all"));
+    }
+
+    #[test]
+    fn a_line_window_given_as_an_array_is_understood() {
+        let lines = |args: Value| normalize_args(Tool::Read, args).unwrap().get("lines").cloned();
+        assert_eq!(lines(json!({"path": "a.py", "view_range": [400, 402]})), Some(json!("400-402")));
+        assert_eq!(lines(json!({"path": "a.py", "lines": ["7"]})), Some(json!("7+")));
+        assert_eq!(lines(json!({"path": "a.py", "lines": []})), None);
+        let range = |args: Value| normalize_args(Tool::Edit, args).unwrap().get("range").cloned();
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": 2})), Some(json!("2")));
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": [2, "4kq"]})), Some(json!("2-4kq")));
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": "2ab-4kq"})), Some(json!("2ab-4kq")));
+    }
+
+    #[test]
+    fn another_harnesss_tools_are_taken_for_what_they_mean() {
+        let call = |name: &str, args: Value| parse_calls(&[ToolCall { id: "c".into(), name: name.into(), arguments: args.to_string() }]).0.remove(0);
+        // One editor tool with a `command`: viewing is reading, creating is writing.
+        let view = call("str_replace_editor", json!({"command": "view", "path": "a.py", "view_range": [3, 9]}));
+        assert_eq!((view.tool, view.args["lines"].as_str()), (Some(Tool::Read), Some("3-9")));
+        let create = call("str_replace_based_edit_tool", json!({"command": "create", "path": "a.py", "file_text": "x = 1\n"}));
+        assert_eq!((create.tool, create.args["content"].as_str()), (Some(Tool::Write), Some("x = 1\n")));
+        let replace = call("str_replace_editor", json!({"command": "str_replace", "path": "a.py", "old_str": "1", "new_str": "2"}));
+        assert_eq!((replace.tool, replace.args["old"].as_str(), replace.args["new"].as_str()), (Some(Tool::Edit), Some("1"), Some("2")));
+        // A tool for killing a job kills it; a patch is answered with how to edit here.
+        let kill = call("KillShell", json!({"shell_id": "bg:1"}));
+        assert_eq!((kill.tool, kill.args["id"].as_str(), kill.args["kill"].as_bool()), (Some(Tool::Job), Some("bg:1"), Some(true)));
+        let patch = call("apply_patch", json!({"input": "*** Begin Patch\n*** End Patch"}));
+        assert!(patch.error.as_deref().is_some_and(|e| e.contains("takes no patch here") && e.contains("`range`, `old` or `after`")), "{:?}", patch.error);
     }
 
     #[test]

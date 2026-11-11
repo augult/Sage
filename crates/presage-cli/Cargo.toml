@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 presage-core.workspace = true
-anyhow.workspace = true
 libc.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -2613,7 +2613,6 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 name = "presage-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "libc",
  "presage-core",
  "reqwest",
@@ -2626,10 +2625,8 @@ dependencies = [
 name = "presage-core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "futures-util",
  "getrandom 0.4.3",
- "grep-matcher",
  "grep-regex",
  "grep-searcher",
  "ignore",

@@ -19,11 +19,11 @@ and the model's attention is spent only where reality diverged.**
 | **Predictions and receipts** | `shell` takes a prediction (`expect_exit`, `expect_has`, `expect_lacks`). A predicted success that held is answered with a one-line receipt instead of the output; a violated one (a *surprise*) gets the output, the source lines it points at with edit anchors, and any lesson already learned about that error. Output size is proportional to surprise. | `guard.rs`, `tools/shell.rs`, `locate.rs` |
 | **Watches** | Checks registered once and re-run by the harness after every change. They report only state changes: a regression is announced the moment it is introduced. The first test command the model runs becomes a watch without being asked, so an edit-only reply comes back checked. | `watches.rs` |
 | **Before the first turn** | What the harness can find out without the model is in the first message: a snapshot of the environment, the budget in replies, the files the task names (as `read` output, so the first reply can edit them), and the result of a test command the task names, which is watched from then on. A small workspace (up to 40 files) is surveyed: every file is listed with its length, and as much of it as fits in 1,000 lines is attached after the named files, so the model does not spend its first replies asking for files one at a time. | `bootstrap.rs`, `attach.rs`, `watches.rs` |
-| **Evidence gate** | `finish` is accepted only if a check has passed since the last change to the workspace (tracked with a cheap fingerprint). With fresh evidence it is accepted in the same reply as the check. A check is any predicted command with a part that can fail (`cd dir && pytest` counts, `echo ok` does not). The gate cannot trap the model: refused twice for the same change, the third `finish` is accepted as unverified. | `state.rs`, `script.rs` |
-| **Review pass** | The first `finish` after a change is answered once with the task quoted back and a three-point review, instead of being accepted. | `script.rs` |
+| **Evidence gate** | `finish` is accepted only if a check has passed since the last change to the workspace (tracked with a cheap fingerprint). With fresh evidence it is accepted in the same reply as the check. A check is any predicted command with a part that can fail (`cd dir && pytest` counts, `echo ok` does not). The gate cannot trap the model: refused twice for the same change, the third `finish` is accepted as unverified. Nor can the budget swallow the report: the last reply the budget allows is announced one reply ahead, and its `finish` is taken as it stands (no refusal, no review, even behind a failed step), marked verified or not by what is actually known. | `state.rs`, `script.rs`, `agent.rs` |
+| **Review pass** | The first `finish` after a change is answered once, instead of being accepted, with the task quoted back, what the session changed (`git status` and the diff, without anything that was already uncommitted before it began) and a three-point review. The model reviews what is in front of it instead of spending a reply on fetching it. | `review.rs`, `script.rs` |
 | **Skills** | Six hand-written instruction sets (`ui`, `security`, `cleanup`, `debug`, `tests`, `performance`), switched on per session or per message; project and user skills override the built-ins. | `skills.rs`, `skills/*.md` |
 | **Editable system prompt** | The template is a file; a user copy replaces it, and a global and a project `AGENTS.md` are appended. `presage prompt` prints what the model gets. | `prompt.rs`, `prompts/system.md` |
-| **Anchored edits** | Lines are shown as `41kq|…` (line number + 2-letter content hash). Edits address anchors, so the model never retypes old text, and a stale or shifted anchor is detected or relocated instead of corrupting the file. | `anchors.rs`, `tools/edit.rs` |
+| **Anchored edits** | Lines are shown as `41kq|…` (line number + 2-letter content hash). Edits address anchors, so the model never retypes old text. The harness keeps the line shifts of its own edits, so an anchor from before an edit (every anchor of a reply that edits the same file twice) is carried to where its line is now; one that fits nowhere, or in two places, is refused with the current lines. A two-letter hash is checked, never searched for. | `anchors.rs`, `tools/edit.rs` |
 | **Reflex memory** | Error → fix pairs are learned mechanically per project (a command failed, a related one worked, no file was edited in between) and recalled at the next session. No model call involved. | `lessons.rs` |
 | **Price-aware policy** | The harness knows the price vector (cache hit / miss / output). History is append-only and byte-stable so that the provider's cache can hit; every request is audited (harness bust vs provider miss); old observations are trimmed only when the arithmetic says it pays. | `economy.rs`, `context.rs` |
 | **Effort ratchet** | Reasoning effort starts at `high` (below GLM-5.3's default `max`) and rises after repeated surprises. It falls only when a reply is nothing but reasoning: such a reply is cut at about 14,000 tokens of thinking (or at the output limit) and asked for again one level lower. | `agent.rs`, `provider/openai.rs` |
@@ -38,8 +38,11 @@ of tasks. Every claim above can be measured rather than believed.
 State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
 `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 189 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 205 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
+- **Not yet measured**: the changes of the seventh session (the last reply of the budget, the
+  review that carries the diff, anchors carried through edits, the tool fixes listed in
+  `docs/HANDOFF.md`) were made without a benchmark run. The numbers below are from before them.
 - **Benchmark**: `presage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
@@ -102,7 +105,7 @@ presage run -C path/to/project "Fix the failing tests"
 presage run --classic ...       # baseline loop, for comparison
 presage sessions | presage show <id>
 
-presage bench --check           # the tasks fail as shipped and pass with their reference solutions
+presage bench --check --tasks all   # the tasks fail as shipped and pass with their reference solutions
 presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
 ```
 

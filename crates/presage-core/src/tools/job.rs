@@ -12,10 +12,8 @@ use tokio_util::sync::CancellationToken;
 const MAX_WAIT_SECS: u64 = 900;
 
 fn contains(haystack: &str, needle: &str) -> bool {
-    if needle.len() > 2 && needle.starts_with('/') && needle.ends_with('/') {
-        if let Ok(re) = regex::Regex::new(&needle[1..needle.len() - 1]) {
-            return re.is_match(haystack);
-        }
+    if needle.len() > 2 && needle.starts_with('/') && needle.ends_with('/') && let Ok(re) = regex::Regex::new(&needle[1..needle.len() - 1]) {
+        return re.is_match(haystack);
     }
     haystack.to_lowercase().contains(&needle.to_lowercase())
 }

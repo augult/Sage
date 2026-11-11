@@ -5,7 +5,7 @@ a README, write a module that has no tests) under several harness variants. Ever
 fresh copy of the task. When the agent is done, the files it was told to leave alone are put back,
 held-out checks are added and the task's verification is run. Only that counts as solved.
 `presage bench --check` proves that each task fails as shipped and passes with its reference
-solution.
+solution (`--tasks all` for all 24; without it, the seven of the `easy` set).
 
 All runs below: Logfare gateway, effort `ratchet`, 5 runs per task and variant (35 per variant).
 Figures are medians per run unless stated. "No cache" is the list-price cost had the provider
@@ -14,10 +14,15 @@ tables are in `docs/results/`.
 
 ```sh
 cargo build
-target/debug/presage bench --check
+target/debug/presage bench --check --tasks all
 LOGFARE_API_KEY=... PRESAGE_HOME=/tmp/presage-live target/debug/presage bench -p logfare -m glm-5.3 \
   --variants presage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
+
+> **These numbers are from before the seventh session.** The last reply of the budget, the review
+> that carries the diff, the anchor resolver and the tool fixes described in `docs/HANDOFF.md` were
+> made without a benchmark run, and classic is now told its working directory. Re-run before
+> comparing anything with the tables below.
 
 ## Skill and hard task sets, against other harnesses, 11 November 2026 (sixth session)
 

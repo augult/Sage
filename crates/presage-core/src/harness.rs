@@ -529,13 +529,8 @@ impl Harness {
         self.inner.sessions.lock().unwrap().get(id).cloned().ok_or_else(|| format!("session {id} is not running in this process"))
     }
 
-    /// Sends a follow-up message to an idle session.
-    pub fn send(&self, id: &str, text: &str) -> Result<(), String> {
-        self.send_with_skills(id, text, &[])
-    }
-
-    /// `send`, switching on the skills named that the session does not have yet. Its system prompt
-    /// is already sent, so they go in front of this message instead.
+    /// Sends a follow-up message to an idle session, switching on the skills named that it does not
+    /// have yet. Its system prompt is already sent, so they go in front of this message instead.
     pub fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
         let live = self.live(id)?;
         if text.trim().is_empty() {
@@ -633,7 +628,7 @@ impl Harness {
     /// Sub-directories of `path`, for the in-app folder picker.
     pub fn list_dir(&self, path: Option<&str>) -> Result<DirListing, String> {
         let dir = match path.map(str::trim).filter(|p| !p.is_empty()) {
-            Some(p) if p == "~" => home_dir(),
+            Some("~") => home_dir(),
             Some(p) => p.strip_prefix("~/").map(|rest| home_dir().join(rest)).unwrap_or_else(|| PathBuf::from(p)),
             None => home_dir(),
         };
@@ -650,7 +645,7 @@ impl Harness {
                 (!name.starts_with('.')).then(|| DirEntry { path: e.path().to_string_lossy().into_owned(), name })
             })
             .collect();
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        dirs.sort_by_key(|a| a.name.to_lowercase());
         Ok(DirListing { is_git: dir.join(".git").exists(), parent: dir.parent().map(|p| p.to_string_lossy().into_owned()), path: dir.to_string_lossy().into_owned(), dirs })
     }
 }
@@ -717,7 +712,7 @@ mod tests {
         let listed = later.list();
         assert_eq!((listed.len(), listed[0].status, listed[0].verified), (1, SessionStatus::Closed, Some(true)));
         assert_eq!(later.events(&meta.id).unwrap().len(), stored.len());
-        assert!(later.send(&meta.id, "more").is_err(), "closed sessions cannot be continued");
+        assert!(later.send_with_skills(&meta.id, "more", &[]).is_err(), "closed sessions cannot be continued");
         assert!(later.read_output(&meta.id, "out:1").unwrap().contains("FAIL: expected 60, got 16"));
         assert!(later.events("../../etc").is_err());
     }
@@ -818,7 +813,7 @@ mod tests {
         // A template for one run wins over the user's, which wins over the built-in one.
         let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
         h.set_system_prompt(Some("Mine. {finish}")).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. The first `finish` after a change comes back once with a review to carry out; watched tests are re-run first and it is refused if they fail.\n\n# User instructions\n\nUse tabs.");
+        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\nUse tabs.");
         assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), "Be terse.\n\n# User instructions\n\nUse tabs.");
         h.set_system_prompt(None).unwrap();
         assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\nUse tabs."));

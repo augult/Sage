@@ -8,6 +8,7 @@ use crate::events::{CacheVerdict, CallInfo, Channel, EventKind, FinishStatus, Si
 use crate::prompt;
 use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role};
 use crate::repair;
+use crate::review;
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
@@ -125,6 +126,7 @@ pub struct Agent {
 
 const KEEP_RECENT_MESSAGES: usize = 12;
 const MIN_DECAY_TOKENS: u64 = 6_000;
+const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows. Start nothing new: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands.";
 
 impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
@@ -192,7 +194,25 @@ impl Agent {
         notes
     }
 
-    fn budget_notes(&mut self, run_started: Instant, turns_used: u32) -> Vec<String> {
+    /// The reply about to be asked for is the last the budget allows: the turn limit is reached with
+    /// it, or the time left would not see another one through. `turns_used` counts those before it.
+    fn last_reply(&self, run_started: Instant, turns_used: u32, slowest: Duration) -> bool {
+        if turns_used + 1 >= self.cfg.max_turns {
+            return true;
+        }
+        let Some(budget) = self.cfg.time_budget.filter(|_| turns_used > 0) else { return false };
+        let elapsed = run_started.elapsed();
+        // A reply is expected to take twice the average so far, or as long as the slowest if that is less.
+        budget.saturating_sub(elapsed) <= slowest.min(elapsed / turns_used * 2)
+    }
+
+    fn budget_notes(&mut self, run_started: Instant, turns_used: u32, slowest: Duration) -> Vec<String> {
+        // Said before the last reply, not after it: a run that ends at the limit in the middle of
+        // its work leaves nothing behind that says what was done and what was not.
+        if self.budget_marks < 3 && self.last_reply(run_started, turns_used, slowest) {
+            self.budget_marks = 3;
+            return vec![LAST_REPLY_NOTE.to_string()];
+        }
         let mut notes = Vec::new();
         let used = match self.cfg.time_budget {
             Some(budget) if !budget.is_zero() => run_started.elapsed().as_secs_f64() / budget.as_secs_f64(),
@@ -218,9 +238,13 @@ impl Agent {
 
     /// The first message of a session: the task, after everything the harness can find out before
     /// the model has spent anything (the environment, the files the task names, the result of the
-    /// test command it names). With none of that, it is the task as given.
+    /// test command it names). With none of that, it is the working directory and the task.
     async fn opening(&mut self, task: &str, cancel: &CancellationToken) -> String {
         let features = self.cfg.features;
+        // Before anything of the session's own can be in the workspace.
+        if features.review {
+            self.sess.baseline = review::baseline(&self.sess.ws.root).await;
+        }
         let mut parts: Vec<String> = Vec::new();
         if features.bootstrap {
             let env = bootstrap::snapshot(&self.sess).await;
@@ -240,6 +264,10 @@ impl Agent {
                     self.cfg.max_turns
                 ));
             }
+        } else {
+            // Even the plain loop is told where it works: a model that is not goes looking for the
+            // project all over the machine.
+            parts.push(format!("cwd: {}", self.sess.ws.root.display()));
         }
         // Before the test command is run: the source lines its failing output points at are then on
         // record as shown wherever they are in an attached file, and are not printed a second time.
@@ -253,9 +281,6 @@ impl Agent {
         if let Some(r) = preflight {
             self.sink.emit(EventKind::Watch { turn: self.turn, name: r.name, cmd: r.cmd, state: r.state, change: r.change, detail: r.detail.clone() });
             parts.push(format!("<tests>\n{}\n</tests>\n{}", r.detail, watches::PREFLIGHT_NOTE));
-        }
-        if parts.is_empty() {
-            return task.to_string();
         }
         parts.push(format!("<task>\n{task}\n</task>"));
         parts.join("\n\n")
@@ -286,6 +311,7 @@ impl Agent {
         self.budget_marks = 0;
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
+        let mut slowest = Duration::ZERO;
         let outcome = loop {
             if cancel.is_cancelled() {
                 break Outcome { status: FinishStatus::Stopped, summary: "Stopped by the user.".into(), verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
@@ -296,6 +322,8 @@ impl Agent {
                 break Outcome { status: FinishStatus::Budget, summary: format!("Stopped: the {what} was reached before the task was finished."), verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
             }
             self.maybe_decay();
+            let landing = self.last_reply(run_started, turns_used, slowest);
+            let turn_started = Instant::now();
             self.turn += 1;
             turns_used += 1;
             self.stats.turns += 1;
@@ -371,11 +399,13 @@ impl Agent {
             }
             let (mut calls, fixed) = repair::parse_calls(&raw_calls);
             repairs += fixed;
-            if resp.finish == "length" {
-                // A call cut off by the output limit may be a half-written command or file: never run it.
-                if let Some(last) = calls.last_mut() {
-                    last.error = Some("your reply hit the output limit in the middle of this call, so it was not run. Send it again; split large content into smaller steps.".to_string());
-                }
+            // A call the reply did not get to the end of may be half a command or half a file: never
+            // run it. Either the output limit cut it, or the stream ended without a word and left
+            // arguments that only parse once closed.
+            let cut = resp.finish == "length" || (resp.finish.is_empty() && raw_calls.last().is_some_and(|c| repair::cut_off(&c.arguments)));
+            if cut && let Some(last) = calls.last_mut() {
+                let why = if resp.finish == "length" { "hit the output limit" } else { "broke off" };
+                last.error = Some(format!("your reply {why} in the middle of this call, so it was not run. Send it again; split large content into smaller steps."));
             }
             self.stats.repairs += repairs;
             self.sink.emit(EventKind::Model {
@@ -430,8 +460,9 @@ impl Agent {
                     continue;
                 }
                 // Prose only. With nobody watching, there is one reminder: of the gate where changes
-                // are unchecked, and otherwise that a plan announced to nobody is not the work.
-                if features.gate && !self.cfg.interactive && nudges_left > 0 {
+                // are unchecked, and otherwise that a plan announced to nobody is not the work. Not
+                // on the last reply of the budget: there the prose is all the report there will be.
+                if features.gate && !self.cfg.interactive && nudges_left > 0 && !landing {
                     nudges_left -= 1;
                     let msg = match self.sess.evidence.fresh() {
                         false => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
@@ -445,16 +476,19 @@ impl Agent {
             }
             empties = 0;
 
-            let result = Runner { sess: &mut self.sess, sink: self.sink.as_ref(), cancel, approvals: &self.approvals, stats: &mut self.stats, turn, autonomy: self.cfg.autonomy, interactive: self.cfg.interactive }
+            let result = Runner { sess: &mut self.sess, sink: self.sink.as_ref(), cancel, approvals: &self.approvals, stats: &mut self.stats, turn, autonomy: self.cfg.autonomy, interactive: self.cfg.interactive, landing }
                 .run(&calls)
                 .await;
+            slowest = slowest.max(turn_started.elapsed());
 
             self.surprise_streak = if result.surprised { self.surprise_streak + 1 } else { 0 };
             let mut footer = result.footer.clone();
             let mut notes = self.stall_notes(&result);
+            // Advice on how to spend replies is for a run that has some left.
+            let closing = landing || self.last_reply(run_started, turns_used, slowest);
             // Models are trained to wait for each result. Show, on their own behaviour, that here
             // they need not: twice at most, then it is their call.
-            if features.scripts && self.chain_hints > 0 && result.finished.is_none() && !result.surprised {
+            if features.scripts && self.chain_hints > 0 && result.finished.is_none() && !result.surprised && !closing {
                 use crate::tools::Tool;
                 let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
                 let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
@@ -472,7 +506,7 @@ impl Agent {
                 }
             }
             self.solo_streak = if calls.len() == 1 && result.finished.is_none() { self.solo_streak + 1 } else { 0 };
-            if features.scripts && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised {
+            if features.scripts && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised && !closing {
                 self.solo_hints -= 1;
                 self.solo_streak = 0;
                 notes.push(format!(
@@ -480,7 +514,7 @@ impl Agent {
                     self.cfg.max_turns
                 ));
             }
-            notes.extend(self.budget_notes(run_started, turns_used));
+            notes.extend(self.budget_notes(run_started, turns_used, slowest));
             for n in &notes {
                 self.note("harness", n);
             }
@@ -496,12 +530,10 @@ impl Agent {
             if let Some(done) = result.finished {
                 break Outcome { status: FinishStatus::Done, summary: done.summary, verified: done.verified, evidence: done.evidence };
             }
-            if let (EffortPolicy::Ratchet(_), true) = (self.cfg.effort, self.surprise_streak >= 3) {
-                if let Some(next) = self.effort.next() {
-                    self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "three surprises in a row".into() });
-                    self.effort = next;
-                    self.surprise_streak = 0;
-                }
+            if let (EffortPolicy::Ratchet(_), true) = (self.cfg.effort, self.surprise_streak >= 3) && let Some(next) = self.effort.next() {
+                self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "three surprises in a row".into() });
+                self.effort = next;
+                self.surprise_streak = 0;
             }
         };
 
@@ -530,7 +562,7 @@ mod tests {
     fn rig(name: &str, cfg: AgentConfig, turns: Vec<TurnFn>) -> Rig {
         // The review pass has its own test; the others script one reply too few for it.
         let mut cfg = cfg;
-        cfg.features.review = cfg.features.review && name == "agent-review";
+        cfg.features.review = cfg.features.review && name.starts_with("agent-review");
         // Likewise the survey: these workspaces are small, and the tests say what the first message holds.
         cfg.features.survey = cfg.features.survey && name == "agent-survey";
         let sess = test_session(name, cfg.features);
@@ -556,11 +588,30 @@ mod tests {
         assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2), "the review is asked for once, even after a further change");
         let review = requests(&r)[1].last().unwrap().content.clone();
         assert!(review.contains("[review] Not accepted yet") && review.contains("<task>\nUpper-case the second line of n.txt.\n</task>"), "{review}");
+        assert!(review.contains("<changes>\nFiles you changed with edit or write: n.txt\n</changes>"), "what there is to review comes with it: {review}");
         assert_eq!(r.agent.stats.surprises, 0, "a review is not a surprise");
 
         // Nothing changed in answer to the next message, so there is nothing to review.
         let out = r.agent.run("Is it done?".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 3));
+    }
+
+    #[tokio::test]
+    async fn in_a_repository_the_review_comes_with_the_diff_of_the_session() {
+        let turns = vec![
+            fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("write", json!({"path": "scratch.txt", "content": "tmp\n"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
+            fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "rm scratch.txt && grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
+        ];
+        let mut r = rig("agent-review-git", AgentConfig::new("mock"), turns);
+        let git = |script: &str| assert!(std::process::Command::new("bash").arg("-c").arg(script).current_dir(&r.agent.sess.ws.root).output().unwrap().status.success(), "{script}");
+        git("printf 'mine\\n' > wip.txt && git init -q && git add n.txt && git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base");
+
+        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2));
+        let review = requests(&r)[1].last().unwrap().content.clone();
+        // Its own two files and the diff of the tracked one; not the file that lay there before.
+        assert!(review.contains("<changes>\nPaths (`git status --short`):\n M n.txt\n?? scratch.txt\nDiff of the tracked files (`git diff HEAD`):\n"), "{review}");
+        assert!(review.contains("\n-beta\n+BETA\n") && !review.contains("wip.txt"), "{review}");
     }
 
     fn events(r: &Rig) -> Vec<EventKind> {
@@ -692,12 +743,43 @@ mod tests {
         assert_eq!(r.agent.run("x".into(), &cancel).await.status, FinishStatus::Stopped);
 
         let mut cfg = AgentConfig::new("mock");
-        cfg.max_turns = 2;
+        cfg.max_turns = 4;
         let spin = || fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "true"}))]));
-        let mut r = rig("agent-budget", cfg, vec![spin(), spin(), spin()]);
+        let mut r = rig("agent-budget", cfg, vec![spin(), spin(), spin(), spin(), spin()]);
         let out = r.agent.run("x".into(), &CancellationToken::new()).await;
-        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Budget, 2));
-        assert!(events(&r).iter().any(|e| matches!(e, EventKind::Note { text, .. } if text.starts_with("Half of the budget"))));
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Budget, 4));
+        let notes: Vec<String> = events(&r).iter().filter_map(|e| if let EventKind::Note { kind, text, .. } = e { (kind == "harness").then(|| text.clone()) } else { None }).collect();
+        assert_eq!(notes, ["Half of the budget for this task is used.", LAST_REPLY_NOTE], "the last reply is announced once, before it");
+        assert!(requests(&r)[3].last().unwrap().content.ends_with(&format!("\n--- harness ---\n{LAST_REPLY_NOTE}")));
+    }
+
+    #[tokio::test]
+    async fn the_last_reply_of_the_budget_is_the_report_whatever_it_holds() {
+        let edit = || fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"}))]));
+        let two_replies = || {
+            let mut cfg = AgentConfig::new("mock");
+            cfg.max_turns = 2;
+            cfg
+        };
+
+        // A check that fails in front of it, a review still due: `finish` is heard all the same.
+        let last = fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -qx GAMMA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "beta is done, gamma is not"}))]));
+        let mut r = rig("agent-review-landing", two_replies(), vec![edit(), last]);
+        let out = r.agent.run("Upper-case lines two and three of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, out.summary.as_str()), (FinishStatus::Done, false, "beta is done, gamma is not"));
+        assert_eq!(out.evidence, "unverified: nothing was checked after the edit of n.txt before the budget ran out");
+        assert!(!r.agent.ctx.messages.iter().any(|m| m.content.contains("[review]")), "no review that nothing could follow");
+
+        // Checked work is accepted as verified.
+        let last = fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]));
+        let mut r = rig("agent-review-landed", two_replies(), vec![edit(), last]);
+        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, out.evidence.as_str()), (FinishStatus::Done, true, "verified by `grep -qx BETA n.txt`"));
+
+        // Prose is not answered with a reminder that there is no reply left to act on.
+        let mut r = rig("agent-landing-prose", two_replies(), vec![edit(), fixed(MockTurn::say("Line two is done; line three is not."))]);
+        let out = r.agent.run("Upper-case lines two and three of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, out.summary.as_str()), (FinishStatus::Yielded, false, "Line two is done; line three is not."));
     }
 
     #[tokio::test]
@@ -877,7 +959,8 @@ mod tests {
         assert_eq!((out.status, out.verified), (FinishStatus::Done, false));
         let reqs = requests(&r);
         assert_eq!(reqs[0][0].content, prompt::SYSTEM_CLASSIC);
-        assert_eq!(reqs[0][1].content, "fix", "no environment snapshot in the baseline");
+        let root = r.agent.sess.ws.root.display().to_string();
+        assert_eq!(reqs[0][1].content, format!("cwd: {root}\n\n<task>\nfix\n</task>"), "no environment snapshot in the baseline, only where it works");
     }
 
     #[test]

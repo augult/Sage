@@ -62,7 +62,7 @@ reliable multi-session coding result exists yet [28][29].
    command when the task names none). Kept honest by counters, demotion when a remembered command
    fails, invalidation when a manifest changes, and a `presage lessons` list/forget command.
 3. **Human-written notes only.** `AGENTS.md`, `CLAUDE.md` and `.presage.md` are already read
-   (`bootstrap.rs`, capped at 4,000 characters). Add `presage remember "<text>"`.
+   (`prompt.rs`, capped at 12,000 characters). Add `presage remember "<text>"`.
 4. **Offline tuning by the developer** of the prompt and the playbooks, against held-out tasks.
    The blocker is task count, not money: seven tasks would overfit.
 

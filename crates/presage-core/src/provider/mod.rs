@@ -63,8 +63,7 @@ impl Message {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Effort {
     Off,
     Low,
@@ -123,14 +122,6 @@ pub struct Usage {
     pub reasoning: u64,
 }
 
-impl Usage {
-    pub fn add(&mut self, other: &Usage) {
-        self.prompt += other.prompt;
-        self.cached += other.cached;
-        self.output += other.output;
-        self.reasoning += other.reasoning;
-    }
-}
 
 pub struct ChatRequest<'a> {
     pub messages: &'a [Message],

@@ -1,7 +1,7 @@
 //! The `edit` tool: anchored or exact-text replacement, verified against the file as it is now.
 
 use super::{StepOutput, StepStatus, bool_arg, str_arg};
-use crate::anchors::{self, parse_anchor, parse_range, push_anchored};
+use crate::anchors::{self, Past, Splice, parse_anchor, parse_range, push_anchored};
 use crate::state::Session;
 use crate::util::fnv64;
 use serde_json::Value;
@@ -16,19 +16,29 @@ pub(crate) struct FileText {
     pub lines: Vec<String>,
     crlf: bool,
     trailing_newline: bool,
+    /// The file starts with a byte-order mark, which is kept apart from its first line.
+    bom: bool,
 }
 
 pub(crate) fn split(content: &str) -> FileText {
-    let mut lines: Vec<String> = if content.is_empty() { Vec::new() } else { content.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect() };
+    let (bom, content) = match content.strip_prefix('\u{feff}') {
+        Some(rest) => (true, rest),
+        None => (false, content),
+    };
+    // CRLF only where every line ends so. In a file of mixed endings a `\r` stays with its line,
+    // so that an edit leaves the other lines as they are.
+    let crlf = content.contains("\r\n") && content.matches("\r\n").count() == content.matches('\n').count();
+    let mut lines: Vec<String> = if content.is_empty() { Vec::new() } else { content.split('\n').map(|l| if crlf { l.strip_suffix('\r').unwrap_or(l) } else { l }.to_string()).collect() };
     if content.ends_with('\n') {
         lines.pop();
     }
-    FileText { lines, crlf: content.contains("\r\n"), trailing_newline: content.ends_with('\n') || content.is_empty() }
+    FileText { lines, crlf, trailing_newline: content.ends_with('\n') || content.is_empty(), bom }
 }
 
 fn join(ft: &FileText, lines: &[String]) -> String {
     let eol = if ft.crlf { "\r\n" } else { "\n" };
-    let mut s = lines.join(eol);
+    let mut s = if ft.bom { String::from('\u{feff}') } else { String::new() };
+    s.push_str(&lines.join(eol));
     if ft.trailing_newline && !lines.is_empty() {
         s.push_str(eol);
     }
@@ -39,9 +49,10 @@ fn text_lines(text: &str) -> Vec<String> {
     split(text).lines
 }
 
-fn nearby(lines: &[String], around: usize, radius: usize) -> String {
+/// The lines `radius` either side of `around`, with anchors, and which lines those are.
+fn nearby(lines: &[String], around: usize, radius: usize) -> (String, (usize, usize)) {
     if lines.is_empty() {
-        return "(the file is empty)\n".into();
+        return ("(the file is empty)\n".into(), (1, 0));
     }
     let center = around.clamp(1, lines.len());
     let (from, to) = (center.saturating_sub(radius).max(1), (center + radius).min(lines.len()));
@@ -49,22 +60,52 @@ fn nearby(lines: &[String], around: usize, radius: usize) -> String {
     for ln in from..=to {
         push_anchored(&mut out, "  ", ln, &lines[ln - 1], 240);
     }
-    out
+    (out, (from, to))
 }
 
-type Applied = Result<(Vec<String>, String), String>;
+/// Why an edit was not made, and the line windows the refusal prints: their anchors are fresh, so
+/// they count as shown.
+struct Refused {
+    message: String,
+    windows: Vec<(usize, usize)>,
+}
 
-fn apply_range(ft: &FileText, spec: &str, new: &str) -> Applied {
+impl From<String> for Refused {
+    fn from(message: String) -> Self {
+        Refused { message, windows: Vec::new() }
+    }
+}
+
+impl From<&str> for Refused {
+    fn from(message: &str) -> Self {
+        Refused { message: message.to_string(), windows: Vec::new() }
+    }
+}
+
+/// An anchor that fits nowhere, with the current lines around every place it might have meant.
+fn unplaced(ft: &FileText, u: anchors::Unresolved) -> Refused {
+    let mut text = Vec::new();
+    let mut windows: Vec<(usize, usize)> = Vec::new();
+    for line in u.near {
+        let (shown, window) = nearby(&ft.lines, line, 4);
+        if !windows.iter().any(|w| w.0 <= window.0 && w.1 >= window.1) {
+            text.push(shown);
+            windows.push(window);
+        }
+    }
+    Refused { message: format!("{}. Nothing was changed. Current lines there:\n{}", u.message, text.join("  …\n")), windows }
+}
+
+type Applied = Result<(Vec<String>, String), Refused>;
+
+fn apply_range(ft: &FileText, spec: &str, new: &str, past: &Past) -> Applied {
     let Some((a, b)) = parse_range(spec) else {
-        return Err(format!("could not read `range` {spec:?}; use anchors from read/search output, e.g. \"41kq-47px\""));
+        return Err(format!("could not read `range` {spec:?}; use anchors from read/search output, e.g. \"41kq-47px\"").into());
     };
     let refs: Vec<&str> = ft.lines.iter().map(String::as_str).collect();
-    let stale = |e: String, line: usize| format!("{e}. Nothing was changed. Current lines there:\n{}", nearby(&ft.lines, line, 4));
-    let s = anchors::resolve(&refs, a, 0).map_err(|e| stale(e, a.line))?;
-    let hint = s.line as isize - a.line as isize;
-    let e = if a == b { s } else { anchors::resolve(&refs, b, hint).map_err(|e| stale(e, b.line))? };
+    let (s, e) = anchors::resolve_range(&refs, a, b, past).map_err(|u| unplaced(ft, u))?;
     if e.line < s.line {
-        return Err(format!("the range ends (line {}) before it starts (line {})", e.line, s.line));
+        return Err(format!("the range ends (line {}) before it starts (line {})", e.line, s.line).into());
     }
     let repl = text_lines(new);
     let mut out = ft.lines[..s.line - 1].to_vec();
@@ -79,7 +120,7 @@ fn apply_range(ft: &FileText, spec: &str, new: &str) -> Applied {
     Ok((out, what))
 }
 
-fn apply_after(ft: &FileText, spec: &str, new: &str) -> Applied {
+fn apply_after(ft: &FileText, spec: &str, new: &str, past: &Past) -> Applied {
     let repl = text_lines(new);
     if repl.is_empty() {
         return Err("`new` is empty, so there is nothing to insert".into());
@@ -87,9 +128,9 @@ fn apply_after(ft: &FileText, spec: &str, new: &str) -> Applied {
     let at = if matches!(spec.trim(), "0" | "top" | "start") {
         0
     } else {
-        let Some(a) = parse_anchor(spec) else { return Err(format!("could not read `after` {spec:?}; use an anchor such as \"41kq\", or \"0\" for the top of the file")) };
+        let Some(a) = parse_anchor(spec) else { return Err(format!("could not read `after` {spec:?}; use an anchor such as \"41kq\", or \"0\" for the top of the file").into()) };
         let refs: Vec<&str> = ft.lines.iter().map(String::as_str).collect();
-        anchors::resolve(&refs, a, 0).map_err(|e| format!("{e}. Nothing was changed. Current lines there:\n{}", nearby(&ft.lines, a.line, 4)))?.line
+        anchors::resolve_range(&refs, a, a, past).map_err(|u| unplaced(ft, u))?.0.line
     };
     let mut out = ft.lines[..at].to_vec();
     out.extend(repl.iter().cloned());
@@ -139,7 +180,7 @@ fn apply_old(ft: &FileText, old: &str, new: &str, all: bool) -> Applied {
                 break;
             }
         }
-        return Err(format!("`old` matches {count} places (lines {}). Add surrounding text to make it unique, pass all:true, or use `range`.", at.join(", ")));
+        return Err(format!("`old` matches {count} places (lines {}). Add surrounding text to make it unique, pass all:true, or use `range`.", at.join(", ")).into());
     }
 
     // No exact match. Models most often get whitespace wrong, so retry line-wise, ignoring first
@@ -177,8 +218,11 @@ fn apply_old(ft: &FileText, old: &str, new: &str, all: bool) -> Applied {
     let probe = old_lines.iter().find(|l| !l.trim().is_empty()).copied().unwrap_or("");
     let best = ft.lines.iter().enumerate().map(|(i, l)| (similarity(probe, l), i)).filter(|(score, _)| *score >= 0.5).max_by(|a, b| a.0.total_cmp(&b.0));
     Err(match best {
-        Some((_, i)) => format!("`old` was not found (it must match the file exactly). The closest text is around line {}:\n{}Use `range` with these anchors, or copy the text exactly.", i + 1, nearby(&ft.lines, i + 1, 3)),
-        None => "`old` was not found, and nothing similar either. Read the file and use `range` with its anchors.".to_string(),
+        Some((_, i)) => {
+            let (shown, window) = nearby(&ft.lines, i + 1, 3);
+            Refused { message: format!("`old` was not found (it must match the file exactly). The closest text is around line {}:\n{shown}Use `range` with these anchors, or copy the text exactly.", i + 1), windows: vec![window] }
+        }
+        None => "`old` was not found, and nothing similar either. Read the file and use `range` with its anchors.".into(),
     })
 }
 
@@ -197,7 +241,15 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
     let p = path.to_string_lossy().into_owned();
     let line_in = |text: &str, re: &str| regex::Regex::new(re).ok()?.captures(text)?.get(1)?.as_str().parse::<usize>().ok();
     match ext.as_str() {
-        "json" => serde_json::from_str::<Value>(content).err().map(|e| (Some(e.line()), e.to_string())),
+        "json" => {
+            // Configuration that is JSON with comments by convention.
+            let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+            let with_comments = name.starts_with("tsconfig") || name.starts_with("jsconfig") || name == ".eslintrc.json" || name == "devcontainer.json" || path.components().any(|c| c.as_os_str() == ".vscode");
+            if with_comments {
+                return None;
+            }
+            serde_json::from_str::<Value>(content).err().map(|e| (Some(e.line()), e.to_string()))
+        }
         "py" => {
             let script = "import ast,sys\ntry:\n    ast.parse(open(sys.argv[1],encoding='utf-8').read())\nexcept SyntaxError as e:\n    print(f'{e.lineno}:{e.msg}')\n    sys.exit(1)";
             let out = run("python3", vec!["-c".into(), script.into(), p]).await?;
@@ -207,6 +259,11 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
         }
         "js" | "mjs" | "cjs" => {
             let out = run("node", vec!["--check".into(), p]).await?;
+            // JSX, or module syntax an older node will not take from a `.js` file: another dialect,
+            // not a mistake.
+            if out.contains("Unexpected token '<'") || out.contains("outside a module") || out.contains("Unexpected token 'export'") {
+                return None;
+            }
             let msg = out.lines().find(|l| l.contains("Error")).unwrap_or("syntax error").trim().to_string();
             Some((line_in(&out, r"(?m)^[^\n]*:(\d+)\s*$"), msg))
         }
@@ -219,31 +276,59 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
     }
 }
 
-/// The lines that differ after an edit, with a little context and fresh anchors.
-fn snippet(before: &[String], after: &[String]) -> (String, usize, usize) {
+/// A syntax error that a change brought in. A file that did not parse before the tools first touched
+/// it is written in something the checker does not read (a template, a dialect), and every edit to
+/// it would be called a surprise: nothing is reported for such a file.
+pub(crate) async fn broken_by_change(sess: &mut Session, path: &Path, before: Option<&str>, after: &str) -> Option<(Option<usize>, String)> {
+    let Some(found) = syntax_check(path, after).await else {
+        sess.dialects.insert(path.to_path_buf(), false);
+        return None;
+    };
+    let dialect = match sess.dialects.get(path) {
+        Some(known) => *known,
+        None => {
+            let mut already = false;
+            if let (Some(before), Some(ext)) = (before, path.extension().and_then(|e| e.to_str())) {
+                let scratch = sess.dir.join(format!("before-edit.{ext}"));
+                if std::fs::write(&scratch, before).is_ok() {
+                    already = syntax_check(&scratch, before).await.is_some();
+                    let _ = std::fs::remove_file(&scratch);
+                }
+            }
+            sess.dialects.insert(path.to_path_buf(), already);
+            already
+        }
+    };
+    (!dialect).then_some(found)
+}
+
+/// The lines that differ after an edit, with a little context and fresh anchors, and the line
+/// windows actually printed (a long change is shown by its two ends).
+fn snippet(before: &[String], after: &[String]) -> (String, Vec<(usize, usize)>) {
     let prefix = before.iter().zip(after.iter()).take_while(|(a, b)| a == b).count();
     let max_suffix = before.len().min(after.len()) - prefix;
     let suffix = before.iter().rev().zip(after.iter().rev()).take(max_suffix).take_while(|(a, b)| a == b).count();
     if after.is_empty() {
-        return ("  (the file is now empty)\n".into(), 1, 1);
+        return ("  (the file is now empty)\n".into(), Vec::new());
     }
     let from = prefix.saturating_sub(1).max(1).min(after.len());
     let to = (after.len() - suffix + 2).min(after.len()).max(from);
     let mut out = String::new();
     if to - from + 1 > SNIPPET_MAX {
-        for ln in from..from + SNIPPET_MAX / 2 {
+        let (head_end, tail_start) = (from + SNIPPET_MAX / 2 - 1, to + 1 - SNIPPET_MAX / 2);
+        for ln in from..=head_end {
             push_anchored(&mut out, "  ", ln, &after[ln - 1], 240);
         }
         out.push_str(&format!("  … {} lines …\n", to - from + 1 - SNIPPET_MAX));
-        for ln in to + 1 - SNIPPET_MAX / 2..=to {
+        for ln in tail_start..=to {
             push_anchored(&mut out, "  ", ln, &after[ln - 1], 240);
         }
-    } else {
-        for ln in from..=to {
-            push_anchored(&mut out, "  ", ln, &after[ln - 1], 240);
-        }
+        return (out, vec![(from, head_end), (tail_start, to)]);
     }
-    (out, from, to)
+    for ln in from..=to {
+        push_anchored(&mut out, "  ", ln, &after[ln - 1], 240);
+    }
+    (out, vec![(from, to)])
 }
 
 pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
@@ -273,16 +358,32 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     let after_num = args.get("after").and_then(Value::as_u64).map(|n| n.to_string());
     let after = after.or(after_num.as_deref());
     let ft = split(&content);
-    let applied = match (range.filter(|r| !r.trim().is_empty()), old.filter(|o| !o.is_empty()), after.filter(|a| !a.trim().is_empty())) {
-        (Some(r), None, None) => apply_range(&ft, r, new),
-        (None, Some(o), None) => apply_old(&ft, o, new, bool_arg(args, "all")),
-        (None, None, Some(a)) => apply_after(&ft, a, new),
-        (None, None, None) => Err("say where: give exactly one of `range` (anchors, e.g. \"41kq-47px\"), `old` (exact current text) or `after` (anchor to insert after)".into()),
-        _ => Err("give exactly one of `range`, `old`, `after` — not several".into()),
+    // A file changed by anything but these tools has a past the splices do not describe.
+    let hash = fnv64(content.as_bytes());
+    if sess.histories.get(&abs).is_some_and(|h| h.hash != hash) {
+        sess.histories.remove(&abs);
+    }
+    let applied = {
+        let history = sess.histories.get(&abs);
+        let live = |line: usize| sess.seen.covered(&abs, hash, line, line);
+        let frozen = |line: usize| history.is_some_and(|h| h.was_visible(line));
+        let past = history.map_or(Past { splices: &[], seen: 0, shown: &live }, |h| h.past(sess.reply, &live, &frozen));
+        match (range.filter(|r| !r.trim().is_empty()), old.filter(|o| !o.is_empty()), after.filter(|a| !a.trim().is_empty())) {
+            (Some(r), None, None) => apply_range(&ft, r, new, &past),
+            (None, Some(o), None) => apply_old(&ft, o, new, bool_arg(args, "all")),
+            (None, None, Some(a)) => apply_after(&ft, a, new, &past),
+            (None, None, None) => Err("say where: give exactly one of `range` (anchors, e.g. \"41kq-47px\"), `old` (exact current text) or `after` (anchor to insert after)".into()),
+            _ => Err("give exactly one of `range`, `old`, `after` — not several".into()),
+        }
     };
     let (lines, what) = match applied {
         Ok(v) => v,
-        Err(e) => return StepOutput::error(format!("{shown}: {e}")),
+        Err(refused) => {
+            for (from, to) in refused.windows {
+                sess.seen.mark(&abs, hash, from, to, sess.step);
+            }
+            return StepOutput::error(format!("{shown}: {}", refused.message));
+        }
     };
     if lines == ft.lines {
         return StepOutput::ok(format!("[ok] {shown}: no change — the file already has this content"));
@@ -291,22 +392,36 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     if let Err(e) = std::fs::write(&abs, &updated) {
         return StepOutput::error(format!("cannot write {shown}: {e}"));
     }
-    let (snip, from, to) = snippet(&ft.lines, &lines);
-    sess.seen.mark(&abs, fnv64(updated.as_bytes()), from, to, sess.step);
+    let new_hash = fnv64(updated.as_bytes());
+    let visible = sess.seen.windows(&abs, hash);
+    sess.histories.entry(abs.clone()).or_default().record(Splice::between(&ft.lines, &lines), new_hash, sess.reply, visible);
 
-    let broken = if sess.features.post_edit_check { syntax_check(&abs, &updated).await } else { None };
+    let broken = if sess.features.post_edit_check { broken_by_change(sess, &abs, Some(&content), &updated).await } else { None };
     let mut out = match broken {
         Some((line, msg)) => {
             // The checker was given the absolute path and may quote it back.
             let msg = sess.shown(msg);
-            let around = line.map(|l| format!("\n{}", nearby(&lines, l, 3).trim_end())).unwrap_or_default();
+            let around = line.map(|l| nearby(&lines, l, 3));
+            if let Some((_, (from, to))) = &around {
+                sess.seen.mark(&abs, new_hash, *from, *to, sess.step);
+            }
+            let around = around.map(|(text, _)| format!("\n{}", text.trim_end())).unwrap_or_default();
             let at = line.map(|l| format!(" at line {l}")).unwrap_or_default();
             let head = format!("[SURPRISE] {shown}: {what}, but the file no longer parses{at}: {msg}");
             StepOutput { status: StepStatus::Surprise, violations: vec![format!("{shown} no longer parses: {msg}")], stub: head.clone(), observation: format!("{head}{around}"), ..Default::default() }
         }
         None => {
             let head = format!("[ok] {shown}: {what}");
-            let body = if sess.features.anchors { format!("\n{}", snip.trim_end()) } else { String::new() };
+            let body = if sess.features.anchors {
+                // Only what is printed counts as shown: the middle of a long change is not.
+                let (snip, windows) = snippet(&ft.lines, &lines);
+                for (from, to) in windows {
+                    sess.seen.mark(&abs, new_hash, from, to, sess.step);
+                }
+                format!("\n{}", snip.trim_end())
+            } else {
+                String::new()
+            };
             StepOutput { stub: head.clone(), observation: format!("{head}{body}"), ..Default::default() }
         }
     };
@@ -359,6 +474,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn anchors_from_before_an_edit_of_the_same_reply_find_their_lines() {
+        // A range that ends on a brace, after two lines went in above it: the end is not the first
+        // brace that comes along.
+        let src = "a\nb\nfn x() {\n    foo();\n}\n    bar();\n}\ntail\n";
+        let (mut s, p) = fixture("edit-carry-range", src);
+        let range = format!("{}-{}", at(src, 3), at(src, 7));
+        run(&mut s, &json!({"path": "calc.txt", "after": "0", "new": "// one\n// two"})).await;
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": range, "new": "fn x() {}"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "// one\n// two\na\nb\nfn x() {}\ntail\n");
+
+        // The old line number now holds a twin of the anchored line: it is still the other one.
+        let src = "class A:\n    def a(self):\n        return None\n\n    def b(self):\n        return None\n";
+        let (mut s, p) = fixture("edit-carry-twin", src);
+        run(&mut s, &json!({"path": "calc.txt", "after": at(src, 1), "new": "    def z(self):\n        return 0\n\n"})).await;
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": at(src, 6), "new": "        return 'b'"})).await;
+        assert!(out.observation.contains("found at lines 9-9"), "{}", out.observation);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "class A:\n    def z(self):\n        return 0\n\n    def a(self):\n        return None\n\n    def b(self):\n        return 'b'\n");
+
+        // An anchor into lines the reply has already replaced is refused, with what is there now.
+        let (mut s, p) = fixture("edit-carry-gone", SRC);
+        run(&mut s, &json!({"path": "calc.txt", "range": at(SRC, 2), "new": "    return a // b"})).await;
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": at(SRC, 2), "new": "    return 0"})).await;
+        assert_eq!(out.status, StepStatus::Error);
+        assert!(out.observation.contains("an earlier edit of this reply replaced") && out.observation.contains("|    return a // b"), "{}", out.observation);
+        // The anchors the refusal printed are good in the next reply.
+        s.reply += 1;
+        let now = std::fs::read_to_string(&p).unwrap();
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": at(&now, 2), "new": "    return 0"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+
+        // A file changed by something else has no known past: its anchors are taken as they stand.
+        std::fs::write(&p, SRC).unwrap();
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": at(SRC, 5), "new": "    return b + a"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        assert!(std::fs::read_to_string(&p).unwrap().ends_with("def add(a, b):\n    return b + a\n"));
+    }
+
+    #[tokio::test]
+    async fn only_the_lines_a_snippet_prints_count_as_shown() {
+        let body: String = (1..=60).map(|i| format!("line {i}\n")).collect();
+        let (mut s, _) = fixture("edit-shown", &body);
+        let new: String = (1..=40).map(|i| format!("new {i}\n")).collect();
+        let out = run(&mut s, &json!({"path": "calc.txt", "range": format!("{}-{}", at(&body, 5), at(&body, 6)), "new": new})).await;
+        assert!(out.observation.contains("\n  … "), "the middle is left out: {}", out.observation);
+        // So it is printed when asked for, while the head of the change is known already.
+        let middle = crate::tools::read::run(&mut s, &json!({"path": "calc.txt", "lines": "18-24"}));
+        assert!(middle.observation.starts_with("calc.txt · lines 18-24 of 98"), "{}", middle.observation);
+        let head = crate::tools::read::run(&mut s, &json!({"path": "calc.txt", "lines": "5-8"}));
+        assert!(head.observation.starts_with("[unchanged]"), "{}", head.observation);
+    }
+
+    #[tokio::test]
     async fn stale_anchor_is_refused_with_the_current_lines() {
         let (mut s, p) = fixture("edit-stale", SRC);
         let stale = at(SRC, 2);
@@ -395,6 +563,18 @@ mod tests {
         let (mut s, p) = fixture("edit-eol", "one\r\ntwo\r\nthree");
         run(&mut s, &json!({"path": "calc.txt", "old": "two", "new": "2"})).await;
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "one\r\n2\r\nthree");
+
+        // Mixed endings stay as they are line by line, and a byte-order mark stays in front.
+        let (mut s, p) = fixture("edit-mixed", "a\r\nb\nc\n");
+        run(&mut s, &json!({"path": "calc.txt", "old": "b", "new": "B"})).await;
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "a\r\nB\nc\n");
+        let body = "\u{feff}first\nsecond\n";
+        let (mut s, p) = fixture("edit-bom", body);
+        let shown = crate::tools::read::run(&mut s, &json!({"path": "calc.txt"})).observation;
+        assert!(shown.contains(&format!("{}|first\n", anchor(1, "first"))), "{shown}");
+        run(&mut s, &json!({"path": "calc.txt", "range": anchor(1, "first"), "new": "FIRST"})).await;
+        run(&mut s, &json!({"path": "calc.txt", "after": "0", "new": "zero"})).await;
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "\u{feff}zero\nFIRST\nsecond\n");
     }
 
     #[tokio::test]
@@ -431,6 +611,18 @@ mod tests {
             let out = run(&mut s, &json!({"path": "run.sh", "old": "fi", "new": "done"})).await;
             assert!(out.observation.starts_with("[SURPRISE] run.sh: 1 replacement, but the file no longer parses at line 3: run.sh: line 3: "), "{}", out.observation);
         }
+
+        // A file the checker could not read before the edit either is in some dialect of its own
+        // (comments in JSON here): an edit to it is not a surprise.
+        std::fs::write(s.ws.root.join("settings.json"), "{\n  // local\n  \"a\": 1\n}\n").unwrap();
+        let out = run(&mut s, &json!({"path": "settings.json", "old": "\"a\": 1", "new": "\"a\": 2"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        std::fs::write(s.ws.root.join("tsconfig.json"), "{}\n").unwrap();
+        let out = run(&mut s, &json!({"path": "tsconfig.json", "old": "{}", "new": "{\n  // strict\n  \"strict\": true\n}"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        // What an edit breaks in a file that did parse is reported for as long as it stays broken.
+        let out = run(&mut s, &json!({"path": "conf.json", "old": "\"a\": 1,", "new": "\"a\": 1,,"})).await;
+        assert_eq!(out.status, StepStatus::Surprise, "still broken, and still said: {}", out.observation);
     }
 
     #[tokio::test]

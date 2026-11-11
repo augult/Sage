@@ -1,8 +1,83 @@
 # Handoff: Presage
 
-Read this first. State: 11 November 2026, end of the sixth session, which stopped when the Logfare
-key reached its daily limit. Design notes are in `README.md`; every number is in
-`docs/BENCHMARKS.md`; research is in `docs/RESEARCH.md`.
+Read this first. State: 11 November 2026, after the seventh session, which ran no benchmarks: the
+Logfare key was still at the daily limit that had stopped the sixth, whose numbers these are.
+Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
+`docs/RESEARCH.md`.
+
+## Seventh session: changes made without a benchmark (11 November 2026)
+
+The Logfare key was at its limit, so nothing below is measured. Each change rests on the recorded
+runs of the sixth session, on a defect reproduced in a test, or on both; each is covered by tests
+(`cargo test`: 205). Branch `hoplite/epidamnos-dyrrhachion-5e777d04`.
+
+**What the recorded runs said** (`docs/results/2026-11-11-session6/`, DeepSeek, 17 tasks):
+
+- Output is 69% of the cost, 69% of it reasoning; fresh input is 29%, about half of that from
+  provider cache misses (28 in 17 runs) and not from anything the harness sent. Cached input is 3%.
+- Presage sends 1.4 calls per reply (classic 1.3): its fewer turns come from what is in the first
+  message, not from scripts. It writes 82% more output per turn than classic and 25% more in total.
+- Every point Presage lost in the graded answers on a solved task was lost the same way: the run
+  reached the turn limit and ended on the harness's "Stopped: the turn limit was reached" instead
+  of a report of its own (`confdialect`, `mutants`; `connpool` on GLM-5.3).
+
+**Changed for results:**
+
+- **The last reply of the budget.** It is announced one reply ahead ("Your next reply is the last
+  one the budget allows…"), by turns or by the time left. In it `finish` is taken as it stands: no
+  gate refusal, no review, and not skipped behind a failed step; it is marked verified or
+  unverified by what is known. Prose in the last reply is the report rather than the occasion for
+  a reminder nobody can act on. `agent.rs` (`last_reply`), `script.rs` (`landing`).
+- **Anchors are carried, not searched for.** A reply that edits a file twice sent both anchors
+  before either edit ran; the second used to be looked up by its two-letter hash within 60 lines.
+  Reproduced: a range ending on `}` stopped at an earlier brace; an anchor for `return None` hit
+  its twin in another method; 15% of stale anchors were accepted on an unrelated line. All three
+  reported `[ok]`. The harness now keeps the line shifts of its own edits per file and translates
+  an anchor through them (`anchors.rs`: `Splice`, `History`, `resolve_range`). A file changed by
+  anything else has no known past; there a single anchor is looked for 3 lines either way, a range
+  60 lines with both ends at the same distance.
+- **Failure output keeps its end.** When the output fitted by line count but not by size, the cut
+  came off the end: the assertion line was the part left out (`text.rs`, `bound`).
+- **Tool defects reproduced by review and fixed**, each with a test: the syntax check called every
+  edit to JSON-with-comments or JSX a surprise (it now reports only what an edit broke); `search`
+  reported no matches for pasted code such as `divide(a, b)` and rejected `*.{rs,toml}`; lines a
+  long snippet left out were recorded as shown, so reading them answered "[unchanged]"; an
+  `expect_exit` the harness could not read ("not 0") was held to exit 0; `grep … | cat` and
+  `diff … | head` were reported as failed pipelines; `grep 'startup|shutdown'` was refused as a
+  shutdown; `read symbol` cut Python functions at an f-string and long functions silently at 150
+  lines; mixed line endings were rewritten and a byte-order mark dropped; a command that outlived
+  its timeout erased later `export`s when it ended; bash syntax errors were reported three lines
+  late; a call cut off by a stream that ended without a finish reason was repaired and run.
+
+**Changed for cost** (secondary, and only where nothing is given up):
+
+- **The review carries what there is to review.** The first `finish` after a change still comes
+  back once, now with `git status` and the diff of what the session changed (anything already
+  uncommitted before it is left out, so that the model cannot take the user's work for its own and
+  undo it), or the list of edited files outside a repository. The system prompt no longer asks for
+  a `git diff` before `finish`: that was a second review, a reply earlier and without the diff. In
+  the ablation the review cost about two turns; this should make it one. `review.rs`.
+- No advice on batching once the run is at its last reply.
+
+**Fairness of the baseline:** classic is now told its working directory (point 6 below, done).
+
+**Removed:** `--ask` on the CLI (it never asked: the CLI has nobody to ask, and the flag only
+switched preflight off); `Harness::send`, `Usage::add`, `locate::is_source_path`, `Job.cmd`,
+`Bounded.total_lines`; the unused dependencies `anyhow` and `grep-matcher` and tokio's `fs`; three
+compiled Python files committed with the `confdialect` fixture. Clippy is clean.
+
+**Memory:** one defect fixed (a lesson was offered for the very command that had just failed: the
+false hints in `docs/results/memory/lessons-replay.txt` at "a real bug that raises"). Still
+undecided, still without a live run.
+
+**Not changed, on purpose:** the effort default, the survey, the skills, and whether the review
+stays at all. Each needs the ablation; none can be settled by reading.
+
+**To measure first** with a fresh quota, before anything else is touched: `-n 3` on
+`--tasks skill,hard --variants presage,no-review,classic,ext:mini`, both models. Three things to
+look for: runs that end at the turn limit now end `done` with a summary of their own; turns per
+run with the review are within one of `no-review`; `repairs` and edit errors per run do not rise
+(the anchor resolver refuses where it used to guess).
 
 ## What the owner wants
 
@@ -19,7 +94,7 @@ He is terse and watches usage. Work in few turns, report numbers whichever way t
 important work he wants Claude Fable 5.2 subagents; for tedious reading Claude Haiku 5.5, checked
 by Fable 5.2.
 
-## Done this session (branch `hoplite/poseidonia-1c69adaf`, PR #5, tests pass)
+## Done in the sixth session (branch `hoplite/poseidonia-1c69adaf`, PR #5)
 
 - **Desktop UI.** The UI agent of the fifth session had died before committing and nothing of it
   was on GitHub. Its edits were recovered from the transcript, replayed and finished: skills button
@@ -37,7 +112,8 @@ by Fable 5.2.
   a streak of single-call replies is pointed out; a cut-off reply or a plan in prose no longer ends
   an unattended run.
 - **Benchmark**: hard set registered (seven tasks); each run's workspace is a git repository;
-  mini-swe-agent and opencode adapters work and no longer carry the task on their command line.
+  mini-swe-agent and opencode adapters work; mini-swe-agent no longer carries the task on its
+  command line (opencode still does, see point 8 below).
 - **Measured** (one run per task and variant; details and caveats in `docs/BENCHMARKS.md`):
   DeepSeek, 17 tasks: Presage 16/17 in 14.3 turns, classic 15/17 in 20.8, mini-swe-agent 16/17 in
   13.9; Presage is the fastest. Presage before this session's changes: 22.7 turns on the skill
@@ -63,7 +139,8 @@ by Fable 5.2.
    `PRESAGE_HOME` and the bench's working directory outside the repository, delete
    `crates/presage-cli/bench` for the duration of a run (`git checkout -- crates/presage-cli/bench`
    brings it back; the binary embeds the fixtures), and remove old `work/` folders first.
-6. **Classic gets lost** because it is never told where its workspace is. That is a fault of the
+6. **Classic gets lost** (done in the seventh session: it is told its `cwd` now) because it was
+   never told where its workspace is. That is a fault of the
    baseline, not a strength of Presage: give classic the `cwd` line before comparing again.
 7. **Memory**: still undecided, leaning towards removal. No live run; the replay result of the
    fifth session stands (`docs/results/memory/lessons-replay.txt`).

@@ -62,7 +62,7 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
                 adopt_cwd(sess);
             }
             // `tests | tail` exits 0 even when the tests failed. Report the failure, not the tail.
-            if let (Some(0), Some(code)) = (exit.code, masked_failure(&spill_path)) {
+            if let (Some(0), Some(code)) = (exit.code, masked_failure(&spill_path, cmd)) {
                 exit.code = Some(code);
                 masked = true;
             }
@@ -73,6 +73,7 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
             ExecEnd::Cancelled
         }
         Waited::TimedOut => {
+            super::jobs::detach(&spill_path);
             let (raw, _) = run.buf.lock().unwrap().snapshot();
             let total_bytes = run.buf.lock().unwrap().total;
             return Ok(Exec { end: ExecEnd::TimedOut(run), text: sess.shown(clean(&raw)), total_bytes, ms, spill, masked: false });
@@ -95,17 +96,38 @@ fn adopt_cwd(sess: &mut Session) {
     }
 }
 
+/// `cmd` cut at `;`, `&` and `|` outside quotes: the commands of a line, more or less.
+fn commands(cmd: &str) -> Vec<String> {
+    let mut parts = vec![String::new()];
+    let mut quote: Option<char> = None;
+    for c in cmd.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if matches!(c, ';' | '&' | '|' | '\n') => {
+                parts.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        parts.last_mut().unwrap().push(c);
+    }
+    parts
+}
+
 /// Commands whose damage cannot be undone from inside the workspace. A tripwire, not a sandbox.
 pub fn danger(cmd: &str) -> Option<&'static str> {
     let c = cmd.to_ascii_lowercase();
     let c = c.split_whitespace().collect::<Vec<_>>().join(" ");
-    let rm_root = ["rm -rf /", "rm -fr /", "rm -rf ~", "rm -fr ~", "rm -rf $home", "rm -rf /*", "rm -rf --no-preserve-root"];
-    if rm_root.iter().any(|p| {
-        c.match_indices(p).any(|(i, _)| {
-            let rest = &c[i + p.len()..];
-            rest.is_empty() || rest.starts_with([' ', ';', '&', '|', '*']) || p.ends_with("root")
+    // The target is the root or the home directory itself, not something below it.
+    let whole = |prefix: &str| {
+        c.match_indices(prefix).any(|(i, _)| {
+            let rest = &c[i + prefix.len()..];
+            rest.is_empty() || rest.starts_with([' ', ';', '&', '|', '*']) || prefix.ends_with("root")
         })
-    }) {
+    };
+    let rm_root = ["rm -rf /", "rm -fr /", "rm -rf ~", "rm -fr ~", "rm -rf $home", "rm -rf /*", "rm -rf --no-preserve-root"];
+    if rm_root.iter().any(|p| whole(p)) {
         return Some("recursive delete of the filesystem root or home directory");
     }
     if c.contains("mkfs") || c.contains("dd of=/dev/") || c.contains("> /dev/sd") || c.contains("> /dev/nvme") {
@@ -114,10 +136,11 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
     if c.contains(":(){") || c.contains(":() {") {
         return Some("fork bomb");
     }
-    if c.split([';', '&', '|']).any(|part| matches!(part.trim().split(' ').next(), Some("shutdown" | "reboot" | "halt" | "poweroff"))) {
+    // The command word, not the same word inside a quoted pattern: `grep 'startup|shutdown'`.
+    if commands(&c).iter().any(|part| matches!(part.trim().split(' ').next(), Some("shutdown" | "reboot" | "halt" | "poweroff"))) {
         return Some("shuts the machine down");
     }
-    if c.contains("chmod -r 777 /") && !c.contains("chmod -r 777 /tmp") {
+    if whole("chmod -r 777 /") {
         return Some("opens up permissions on the whole filesystem");
     }
     None
@@ -138,7 +161,9 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     };
     let cmd = cmd.to_string();
     let expect = if sess.features.receipts { Expect::from_args(args) } else { None };
-    let timeout = u64_arg(args, "timeout").unwrap_or(sess.limits.default_timeout_secs).clamp(1, sess.limits.max_timeout_secs);
+    // More seconds than a command is ever given is a number of milliseconds, as other harnesses take it.
+    let timeout = u64_arg(args, "timeout").map(|t| if t > sess.limits.max_timeout_secs { t.div_ceil(1000) } else { t });
+    let timeout = timeout.unwrap_or(sess.limits.default_timeout_secs).clamp(1, sess.limits.max_timeout_secs);
     let cwd = sess.ws.cwd.clone();
 
     if bool_arg(args, "background") {
@@ -162,7 +187,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             ..Default::default()
         },
         ExecEnd::TimedOut(running) => {
-            let id = sess.jobs.add(&cmd, &ex.spill, running, ex.total_bytes);
+            let id = sess.jobs.add(&ex.spill, running, ex.total_bytes);
             let view = bound(&lines, 5, 25, 3_000, Some(&ex.spill));
             let observation = format!(
                 "[running] no exit after {timeout}s, so it now runs in the background as {id}. Use job {{\"id\":\"{id}\",\"wait\":…}} to wait for it or {{\"id\":\"{id}\",\"kill\":true}} to stop it. Output so far:\n{}",
@@ -233,11 +258,9 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                         obs.push_str(block.trim_end());
                     }
                 }
-                if sess.features.lessons && !ok {
-                    if let Some(hint) = sess.lessons.hint(&cmd, &output_tail) {
-                        obs.push_str("\nhint: ");
-                        obs.push_str(&hint);
-                    }
+                if sess.features.lessons && !ok && let Some(hint) = sess.lessons.hint(&cmd, &output_tail) {
+                    obs.push_str("\nhint: ");
+                    obs.push_str(&hint);
                 }
                 out.status = StepStatus::Surprise;
                 out.stub = format!("{head} ({})", ex.spill);
@@ -287,7 +310,7 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
         }
         Waited::TimedOut => {
             let pid = running.pid.map(|p| format!(" (pid {p})")).unwrap_or_default();
-            let id = sess.jobs.add(cmd, &spill, running, total);
+            let id = sess.jobs.add(&spill, running, total);
             let observation = format!("[started] {id}{pid} keeps running in the background. Use job {{\"id\":\"{id}\",\"until\":\"text\"}} to wait for output, {{\"id\":\"{id}\",\"kill\":true}} to stop it.\n{shown}");
             StepOutput { stub: format!("[started] {id}"), observation, ..Default::default() }
         }
@@ -388,6 +411,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it() {
+        let mut s = test_session("detached", Features::presage());
+        let out = sh(&mut s, json!({"cmd": "sleep 2", "timeout": 1})).await;
+        assert_eq!(out.status, StepStatus::Running);
+        sh(&mut s, json!({"cmd": "export STAGE=later"})).await;
+        // The job ends now, with the environment it started in.
+        tokio::time::sleep(Duration::from_millis(1800)).await;
+        let out = sh(&mut s, json!({"cmd": "echo \"stage=[$STAGE]\""})).await;
+        assert!(out.observation.contains("stage=[later]"), "{}", out.observation);
+
+        // A syntax error is reported on the line the model wrote it on.
+        let out = sh(&mut s, json!({"cmd": "echo one\necho two\nif then"})).await;
+        assert!(out.observation.contains("line 3: syntax error"), "{}", out.observation);
+        s.jobs.kill_all();
+    }
+
+    #[tokio::test]
     async fn timeout_hands_the_command_over_as_a_job_instead_of_killing_it() {
         let mut s = test_session("timeout", Features::presage());
         let out = sh(&mut s, json!({"cmd": "echo warming up; sleep 20; echo done", "timeout": 1})).await;
@@ -433,5 +473,8 @@ mod tests {
         assert!(danger("rm -rf ./node_modules").is_none());
         assert!(danger("rm -rf ~/project/dist").is_none());
         assert!(danger("git push --force").is_none());
+        // A word in a quoted pattern is not a command, and a directory below the root is not the root.
+        assert!(danger("grep -E 'startup|shutdown|reload' log.txt").is_none());
+        assert!(danger("chmod -R 777 /workspace/out").is_none() && danger("chmod -R 777 /").is_some());
     }
 }

@@ -20,6 +20,7 @@ pub mod locate;
 pub mod prompt;
 pub mod provider;
 pub mod repair;
+pub mod review;
 pub mod script;
 pub mod skills;
 pub mod state;

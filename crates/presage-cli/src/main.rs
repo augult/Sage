@@ -36,7 +36,6 @@ OPTIONS for run
                            leave the project's AGENTS.md out of the system prompt
       --max-turns <n>      model replies allowed (default 80)
       --time-budget <s>    seconds allowed
-      --ask                ask before every step that changes something
   -v, --verbose            also print the model's reasoning and every observation
       --json               print the final result as JSON on stdout
       --events             print every event as a JSON line on stdout
@@ -77,7 +76,7 @@ fn k(n: u64) -> String {
 }
 
 fn pct(part: u64, whole: u64) -> String {
-    if whole == 0 { "–".into() } else { format!("{}%", (part * 100 + whole / 2) / whole) }
+    (part * 100 + whole / 2).checked_div(whole).map_or("–".into(), |p| format!("{p}%"))
 }
 
 fn indent(text: &str, prefix: &str, max_lines: usize) -> String {
@@ -234,10 +233,6 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
                 req.system_prompt = Some(std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?);
             }
             "--no-project-instructions" => req.project_instructions = Some(false),
-            "--ask" => {
-                req.autonomy = Some("ask".into());
-                req.interactive = false;
-            }
             "--max-turns" => req.max_turns = Some(value(a)?.parse().map_err(|_| "--max-turns needs a number")?),
             "--time-budget" => req.time_budget_secs = Some(value(a)?.parse().map_err(|_| "--time-budget needs a number of seconds")?),
             "-v" | "--verbose" => verbose = true,

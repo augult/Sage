@@ -7,14 +7,12 @@
 use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, Role, ToolCall, Usage, is_looping};
 use crate::text::est_tokens;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// How a vendor spells "think this hard" and "here is what I thought before".
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialect {
     /// OpenRouter and gateways shaped like it: `reasoning: {effort}`, reasoning echoed as `reasoning`.
     OpenRouter,

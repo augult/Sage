@@ -245,10 +245,12 @@ pub trait Sink: Send + Sync {
 }
 
 #[derive(Default)]
+#[cfg(test)]
 pub struct MemorySink {
     pub events: std::sync::Mutex<Vec<EventKind>>,
 }
 
+#[cfg(test)]
 impl Sink for MemorySink {
     fn emit(&self, kind: EventKind) {
         self.events.lock().unwrap().push(kind);

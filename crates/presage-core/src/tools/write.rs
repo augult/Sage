@@ -1,6 +1,6 @@
 //! The `write` tool: create a file, or deliberately replace one.
 
-use super::edit::syntax_check;
+use super::edit::broken_by_change;
 use super::{StepOutput, StepStatus, bool_arg, str_arg};
 use crate::state::Session;
 use crate::util::fmt_bytes;
@@ -33,17 +33,16 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
             return StepOutput::error(format!("{shown} already exists ({lines} lines). Use edit to change it, or pass overwrite:true to replace the whole file."));
         }
     }
-    if let Some(parent) = abs.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return StepOutput::error(format!("cannot create {}: {e}", sess.ws.display(parent)));
-        }
+    if let Some(parent) = abs.parent() && let Err(e) = std::fs::create_dir_all(parent) {
+        return StepOutput::error(format!("cannot create {}: {e}", sess.ws.display(parent)));
     }
     if let Err(e) = std::fs::write(&abs, content) {
         return StepOutput::error(format!("cannot write {shown}: {e}"));
     }
     let lines = content.lines().count();
     let verb = if existing.is_some() { "replaced" } else { "wrote" };
-    let broken = if sess.features.post_edit_check { syntax_check(&abs, content).await } else { None };
+    let before = existing.as_deref().map(String::from_utf8_lossy);
+    let broken = if sess.features.post_edit_check { broken_by_change(sess, &abs, before.as_deref(), content).await } else { None };
     let mut out = match broken {
         Some((line, msg)) => {
             let msg = sess.shown(msg);
