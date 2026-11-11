@@ -45,9 +45,11 @@ the built-in back), `instructions()` (`{ system, system_default, system_custom, 
 `set_system_prompt(template?)` (nothing resets to the built-in) and `set_global_instructions(text)`
 (empty deletes the file).
 
-For the glass: `window_place` (where the window's content sits on its monitor, in physical pixels;
-later changes arrive as `window-place` events) and `wallpaper` (the bytes of the desktop wallpaper,
-empty when there is none to read: Windows keeps it at `%APPDATA%\Microsoft\Windows\Themes`).
+For Push: `git_state(id)` (where the session's workspace stands: `{ repo, branch, remote, url,
+github, upstream, ahead, files }`, `github` being `owner/name` when the remote is on github.com) and
+`git_push(id, message)` (commits what is uncommitted under `message`, then pushes the branch,
+setting its upstream; `{ commit, remote, branch, pushed }`). Both run the user's own `git`, with
+the user's credentials (`src/git.rs`).
 
 GUI apps start with a minimal `PATH`. On unix, first thing in `main`, resolve the login shell's
 `PATH` (`$SHELL -ilc 'printf %s "$PATH"'`, 3 s timeout) and adopt it.
@@ -56,7 +58,8 @@ Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the
 `PRESAGE_UI_VIEW=settings|new|session`, `PRESAGE_UI_OPEN=<session id>`. Added while building it:
 `PRESAGE_UI_SIZE=<width>x<height>`, `PRESAGE_UI_SCRIPTED=<file>` (start a session played by a
 scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
-grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_WALLPAPER=<file>` (the picture behind the glass).
+grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESAGE_UI_SCHEME=light|dark`
+(the painting behind the glass and the appearance, for that launch only).
 A scripted session's file may name `skills` to start with.
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
 `#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`. The Skills button
@@ -72,23 +75,24 @@ Static files, no bundler, no framework, no external resources. `window.__TAURI__
 
 ### Look
 
-Neutral dark glass: dense, quiet, and the same grey whatever is behind it.
+Plain glass over a painting: dense, quiet, and without a hue of its own.
 
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
-- **Shape.** 8px grid. Radius grows with the thing: 5 tags, 7 controls and rows, 10 cards,
-  14 composers and dialogs. Nothing is a pill.
-- **Colour is kept for meaning; the chrome has none, and neither has the conversation.** In the
-  sidebar, the inspector and Settings: azure `#6ea8ff` is the model's side (a run in progress),
-  teal `#2dd4bf` held or ok, **amber `#f5a524` surprise**, red `#ef4b55` error, and every state
-  also has a word or a glyph. In the session's main pane (header, timeline, composer) nothing is
-  tinted: a state is a word ("surprise", "failed", "skipped", "held"). The primary button is light
-  on dark with no hue, one per view. No gradients, glows or accent borders.
-- **Boxes are rare.** In the conversation only the user's message, an approval request and
-  verbatim output are boxed; the answer is plain text.
+- **Shape.** 8px grid. Corners are barely turned: 2px tags and marks, 3px controls and rows, 4px
+  cards, menus, dialogs and the sheet. Nothing is a pill.
+- **The interface has no colour.** Ink, paper and the greys between, in a light and a dark
+  appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system). Colour
+  belongs to the painting behind the glass and to one thing that must not be missed, a failure
+  (`--danger`). A state is a word or a glyph ("surprise", "failed", "skipped", "held"); a tone
+  (`.tone-*` in `base.css`) only decides how much ink it gets. Tools are grey: the bar, the
+  rows, and a diff, where an added line is shaded and a removed one hatched. The primary button
+  is ink on paper, one per view. No gradients, glows or accent borders.
+- **Boxes are rare.** In the conversation only the user's message, the bar of a stretch of work,
+  an approval request, verbatim output and diffs are boxed; the answer is plain text.
 - **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
-  240 ms while its chevron (round-ended) turns a quarter. Nothing else moves, and
-  `prefers-reduced-motion` removes those too.
+  180 ms while its chevron turns a quarter. The dither drifts at 20 frames a second. Motion off
+  (Settings, or `prefers-reduced-motion`) holds the dither still and removes the rest.
 - **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Unsaved") or an
   error is shown; a sentence that explains how the product works is not, in a note, a caption, a
   placeholder or a tooltip. Placeholders are a word or two ("Folder", "Task"), empty states two or
@@ -98,29 +102,46 @@ Neutral dark glass: dense, quiet, and the same grey whatever is behind it.
 - **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
   caption buttons where Windows puts them.
 
-### Glass (`ui/js/glass.js`, `ui/styles/glass.css`)
+### Glass (`ui/js/backdrop.js`, `ui/js/dither.js`, `ui/js/themes.js`, `ui/styles/glass.css`)
 
-No `backdrop-filter` and no system acrylic: both blur again on every frame, which is what makes
-acrylic windows lag on Windows 10. The app makes the material once, at start-up. It takes the
-desktop wallpaper (or paints a neutral field when there is none to read), blurs it at 128px,
-presses its brightness into a dark band, and draws the result to one canvas behind the panes. The
-canvas is laid out over the monitor and shifted by the window's position, so it holds still on the
-screen while the window moves over it; only its transform ever changes. The panes are translucent
-fills (sidebar thinnest, main thickest), with no grain over them. It shows the wallpaper, not other
-windows. `prefers-reduced-transparency` swaps in solid panes.
+No `backdrop-filter`, no system acrylic and no window transparency: the first two blur again on
+every frame, which is what makes acrylic windows lag on Windows 10, and the window never shows
+what is behind it. The app brings its own picture. A background is a painting made by a script
+(`desktop/art/<id>.py`, numpy and Pillow, deterministic; it writes `ui/themes/<id>/art.webp` at
+2400×1500 and `thumb.webp` at 480×300): Ember, Orchid, Tide and Graphite, or None for flat panes.
+At start-up, and on every change of background or appearance, `backdrop.js` takes the painting
+at 320px, softens it, presses its brightness into a band (14–76 of 255 for dark, 198–248 for
+light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
+much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
+background in `themes.js`), stretched without smoothing so that its dots stay square. The panes
+are translucent fills: the veil over everything, and in the middle the sheet, the reading
+surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
+None.
 
-Contrast is part of the material. `--text`, `--soft` and `--muted` keep 4.5:1 on every pane for any
-wallpaper (computed over a 5,832-colour grid; the lowest is 4.8:1, muted on the bare sidebar).
-`--faint` holds it only on the main pane and in wells, so it is used for placeholders and key hints
-there and for marks elsewhere. On a hovered or selected row, secondary text steps up to `--soft`.
-Change a tint, the brightness band in `glass.js` or an ink colour, and these have to be recomputed.
+The three choices (appearance, background, motion) are kept in `localStorage` (`ui/js/prefs.js`)
+and put on `<html>` before the first paint (`ui/js/boot.js`).
+
+Contrast is part of the material. Over a 5,832-colour grid of what the pressed backdrop can be,
+with its grain and under a dither dot, the lowest ratios are:
+
+| Surface | `--ink` | `--soft` | `--muted` | `--faint` |
+| --- | --- | --- | --- | --- |
+| Light, glass (sidebar, inspector) | 10.8 | 8.1 | 5.5 | 3.5 |
+| Light, sheet | 17.5 | 11.3 | 6.6 | 3.3 |
+| Dark, glass | 7.1 | 5.9 | 4.7 | 3.2 |
+| Dark, sheet | 15.5 | 11.1 | 7.4 | 4.5 |
+
+So `--ink`, `--soft` and `--muted` keep 4.5:1 everywhere; `--faint` is for marks, placeholders
+and key hints. `--danger` keeps 6.2:1 on the sheet. Change a band in `backdrop.js`, a pane's
+fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
 
 1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
    heading per day (title, model, status glyph, relative time), Settings and the version.
 2. **Main**:
-   - *New session*: one composer. Along its top the workspace field and Browse (an in-app folder
+   - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
+     it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the workspace field and Browse (an in-app folder
      picker on `list_dir`); then the task; then pickers for model, skills, effort (ratchet, low,
      high, max), mode (Presage / Classic) and autonomy (Auto / Ask), and Start (Ctrl/Cmd+Enter). The
      model menu lists models under their provider from `app_state`; a provider without a key is
@@ -133,28 +154,41 @@ Change a tint, the brightness band in `glass.js` or an ink colour, and these hav
      new session starts with no skills, whatever the last one had; Classic takes none, so the
      button is disabled there. With no key configured, the view leads with "Play the walkthrough"
      (`start_demo`) and "Add an API key", and Start is not the primary button.
-   - *Session*: header (title, status, Stop; under it one line: cwd, model, effort, mode, active
-     skills, "asks first", "simulated"). The timeline is a conversation, and by default it shows
-     only what was said: the user's message (a block on the right), each turn's reply text, and
-     the summary the run ended on with one line for the outcome ("Done · verified by watch
-     tests"). Everything else is folded (`ui/js/views/timeline.js`):
-     - **A line per turn** says what the turn did, from its steps (`ui/js/activity.js`): "Read 2
-       files, ran a command", "Edited report.sh". A lone file is named; a `finish` that went
-       through is not counted, since it is the answer. What did not go to plan is appended,
-       because the tree starts folded: "· 1 surprise, 1 skipped". While the turn runs the line
-       has a spinner and says what is happening now ("Thinking 2.1s", "Running sh check.sh
-       0.4s"). A turn with nothing to unfold has no line.
-     - **The line opens the tree**: the reasoning ("Thought", with its first line), a row per
-       step (verb, summary, the state when it was not simply fine, duration), the notes that
-       arrived between them (watch changes, harness notes, lessons, effort changes, trims,
-       retries, answered approvals), and at the foot the turn's numbers (turn, duration, tokens
-       with cached share, cache verdict, effort).
-     - **A row opens its detail**: the prediction and whether it held, then the observation
-       verbatim. `out:N` in it opens the full output via `read_output`.
-     - What arrives outside a turn (the environment snapshot, attach notes, recalled lessons) is
-       gathered into one such line too: "Environment snapshot, 1 note".
-     - An approval request that is waiting is a card with Allow / Deny under the turn's line,
-       never inside a fold.
+   - *Session*: header (title, status, and Push when the folder is a git repository; under it one
+     line: cwd, model, effort, mode, active skills, "asks first", "simulated"). The timeline is a
+     conversation, and by default it shows only what was said: the user's message (a grey block on
+     the right), the agent's words as prose (`ui/js/markdown.js`, `ui/js/views/prose.js`:
+     headings, lists, tables, fenced code with a copy button; a link is copied, never followed),
+     and how the run ended in one line ("Done · verified by watch tests") with a card of the files
+     it edited. Everything else is folded (`ui/js/views/timeline.js`):
+     - **One grey bar per stretch of work** is the master toggle of every tool call the agent ran
+       between two things it said, across as many turns as went by without words. It says what
+       was done, from the steps (`ui/js/activity.js`): "Read 2 files, ran 2 commands, edited
+       report.sh". A lone file is named; a `finish` that went through is not counted, since it
+       is the answer. What did not go to plan is appended, because the bar starts shut:
+       "1 surprise, 1 skipped". While its last turn runs the bar has a spinner and says what is
+       happening now ("Thinking 2.1s", "Running sh check.sh 0.4s").
+     - **The bar opens the rows**: per turn a line of its numbers (turn, duration, tokens with
+       cached share, cache verdict, effort), the reasoning ("Thought", with its first line), a
+       row per step (icon, verb, summary, the state when it was not simply fine, lines added and
+       removed, duration), and the notes that arrived between them (the environment snapshot,
+       watch changes, harness notes, lessons, effort changes, trims, retries, answered
+       approvals). The button at the end of the bar opens every row at once, or shuts them all.
+     - **A row opens its detail, by tool** (`ui/js/views/tools.js`): a command as a prompt line
+       with a copy button, the prediction and whether it held, and the observation verbatim
+       (`out:N` in it opens the full output via `read_output`); a file as it was read, with its
+       anchors in a gutter; an edit or a write as a before and after, Unified or Split (the
+       choice is kept), from the `change` the engine sends with `step_end`
+       (`presage-core/src/diff.rs`), with the observation folded under it; a web search as its
+       query and the sources it found (title, site, snippet, copy link).
+     - **Edited files**: under the result, a card with a row per file the run edited (lines added
+       and removed), each opening into its edits.
+     - An approval request that is waiting is a card with Allow / Deny, never inside a fold.
+     - **Push** (`ui/js/views/push.js`): the button reads "Push to GitHub" when the remote is on
+       github.com, and counts what is waiting (changed files plus commits ahead). Its dialog
+       shows the repository, branch and remote, every file a commit would take and a commit
+       message; one button commits what is uncommitted and pushes the branch.
+     - **Stop** is in the follow-up box, in the place of Send while a run is in progress.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
@@ -162,7 +196,9 @@ Change a tint, the brightness band in `glass.js` or an ink colour, and these hav
      any others picked are switched on with the next message (`send_message` with `skills`). Closed
      sessions are read-only replays from `session_events`, marked "read-only" in the header, with
      no follow-up box.
-   - *Settings*: per provider a password field with Save / Remove (`set_key`), the equivalent
+   - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
+     and None, each as a small picture of itself; Motion: On or Off; each applies at once). Then
+     per provider a password field with Save / Remove (`set_key`), the equivalent
      environment variable, and defaults (`set_defaults`). Never show stored keys. Then three
      sections that edit text files, each a monospace text area with Save (enabled, beside the word
      "Unsaved", only while the text differs from what is stored; a draft survives leaving the view)
@@ -192,9 +228,9 @@ timeout 60 xvfb-run -a -s "-screen 0 1320x860x24" bash -c \
   'target/desktop/debug/presage-desktop & APP=$!; sleep 12; import -window root /tmp/shot.png; kill $APP; wait $APP 2>/dev/null; true'
 ```
 
-Look at every screenshot. The demo session must show only the task, three lines and the answer;
-the second line must say "1 surprise, 1 skipped", and its tree, opened, must show the surprise with
-its prediction and the skipped `finish`.
+Look at every screenshot. The demo session must show only the task, one grey bar, the answer, the
+line for the outcome and the card of the file it edited; the bar must end "1 surprise, 1 skipped",
+and its rows, opened, must show the surprise with its prediction and the skipped `finish`.
 The walkthrough: reply 1 reads and runs the check (it becomes watch `tests`), reply 2 edits and
 predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (verified by watch
 `tests`).
@@ -207,13 +243,19 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `new-session.jpg` | `PRESAGE_UI_VIEW=new`, no key |
 | `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
 | `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
+| `new-session-backgrounds.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-theme'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
-| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:[data-turn="2"] .activity-toggle;;click:[data-step="2.2"] .tree-line;;click:[data-turn="2"] .tree-row:first-child .tree-line'` |
-| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]` and two turns, then a follow-up sent with a third skill (`click:#pick-skills`, `click:#pick-skills-menu [data-value="ui"]`, `type:#followup=>…`, `click:#send-followup`) |
+| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:.work-all;;wait:600;;scroll:[data-step="2.1"]'` |
+| `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
+| `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
+| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="ui"]` |
+| `session-push.jpg` | `PRESAGE_UI_SCRIPTED=<file>` whose `cwd` is a git repository with a github.com remote and whose turns edit files, then `wait:7500;;click:#push` |
 | `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
 | `settings-skills.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
 | `settings-system-prompt.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
-| `settings-instructions.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;scroll:#settings-instructions'` |
+| `settings-instructions.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |
 
+Any of them takes `PRESAGE_UI_THEME=ember|orchid|tide|graphite|none` and
+`PRESAGE_UI_SCHEME=light|dark`; the screenshots go through all four paintings in both appearances.
 The settings shots ran against a `PRESAGE_HOME` holding a user `skills/tests.md` (Edited), a custom
 skill with a long title, and an `AGENTS.md`.

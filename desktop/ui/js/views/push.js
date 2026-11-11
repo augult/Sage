@@ -57,8 +57,8 @@ export function openPush(session, onChange) {
         state.remote && state.branch && h('span.muted', `→ ${state.remote}`),
       ),
       h('div.push-standing', standing),
-      files.length > 0 && h('div.push-files', files.map((file) => h('div.push-file', h('span.push-kind', file.status), h('span.push-path', { title: file.path }, file.path)))),
-      files.length > 0 && message,
+      // Only with something to commit: its files, and the message they go under.
+      ...(files.length > 0 ? [h('div.push-files', files.map((file) => h('div.push-file', h('span.push-kind', file.status), h('span.push-path', { title: file.path }, file.path)))), message] : []),
     );
   }
 

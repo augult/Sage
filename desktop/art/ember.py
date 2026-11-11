@@ -4,10 +4,13 @@
 Molten orange, vermilion and rust ribbons smeared from the lower left to the upper right
 out of a lilac-cream haze, with one deep teal vein in an S-curve just right of centre.
 
-Run:    /tmp/artenv/bin/python desktop/art/ember.py
-        (writes desktop/ui/themes/ember/art.webp and thumb.webp)
+Run:    python3 desktop/art/ember.py      (writes desktop/ui/themes/ember/art.webp and thumb.webp)
 Flags:  --out DIR  --width N  --height N  --preview PATH (small JPEG for quick looks)
 Needs numpy + Pillow only. Deterministic (fixed seed).
+
+The canvas is liquified and read in a stream frame whose streamlines come in on a shallow diagonal
+and turn upward. A "band coordinate" across the stream indexes two hand-made colour ramps (hazy left,
+molten right), pre-blurred at many widths so every pixel picks its own softness; colours mix as ink.
 """
 import argparse
 import time
@@ -16,233 +19,234 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-SEEDS = (11, 12)                  # flow field, streak layout
-ASPECT = 1.6                      # the composition lives on x in [0, 1.6], y in [0, 1] (y down)
-QX, QY = 0.80, 0.53               # pivot of the turn from diagonal to vertical flow
+SEED = 16
+ASPECT = 1.6                                  # the composition lives on x in [0, 1.6], y in [0, 1] (y down)
+QX, QY = 0.84, 0.53                           # pivot of the turn from diagonal to vertical flow
 T1, T2, TM = np.radians([27.0, 80.0, 55.0])   # diagonal branch, vertical branch, mean flow
-G1, K = 0.7, 6.5                  # diagonal ribbons are 1/G1 wider; K = sharpness of the turn
+G1, K = 0.7, 6.5                              # diagonal ribbons are 1/G1 wider; K = sharpness of the turn
+F_LO, F_HI, LUT_N = -0.9, 1.0, 8192           # span of the band coordinate covered by the ramps
+SIGMA0, RATIO, LEVELS = 4e-4, 1.36, 22        # blur pyramid of the ramps: first sigma, step, count
+LANES = (-0.40, -0.196, 0.0, 0.198, 0.498)    # band coordinates that stay crisp (the vein is at 0)
 
-# Liquify pushes (cx, cy, shift x, shift y, radius): paint near (cx, cy) moves by the shift.
-PUSHES = [(0.97, 0.48, 0.09, 0.0, 0.22), (0.99, 0.14, -0.10, 0.0, 0.20), (0.82, 0.74, -0.03, 0.0, 0.18),
-          (1.30, 0.18, 0.09, 0.0, 0.30), (1.25, 0.75, -0.08, 0.0, 0.30), (1.52, 0.55, 0.05, 0.0, 0.22),
-          (0.35, 0.55, 0.0, -0.04, 0.30)]
+# Liquify pushes (cx, cy, shift x, radius): paint near (cx, cy) moves sideways, bending the S-curves.
+PUSHES = [(0.97, 0.48, 0.09, 0.22), (0.99, 0.14, -0.10, 0.20), (0.82, 0.74, -0.03, 0.18),
+          (1.30, 0.18, 0.09, 0.30), (1.25, 0.75, -0.08, 0.30), (1.52, 0.55, 0.05, 0.22)]
 
-# Palette ramps: "position:#hex" stops, interpolated in linear light.
-BASE = """-0.75:#F4E7D8 -0.55:#F8D9BE -0.42:#F6B98A -0.30:#F59D58 -0.18:#F26A1B -0.06:#EF6019
-0.05:#EE5F1A 0.13:#DD4B1C 0.22:#C23A1A 0.32:#A8321A 0.42:#872715 0.52:#6E2012 0.62:#4A160F
-0.74:#6A1F12 0.90:#40130E"""
-AIRY = """-0.80:#D6CEE2 -0.66:#E0D9E8 -0.57:#ECE5EE -0.50:#F5E9DC -0.43:#DCD4E5 -0.36:#F5E7DA
--0.29:#F8D5B9 -0.23:#E6D8E2 -0.17:#F6B98A -0.115:#F9D3B4 -0.07:#F5A867 -0.02:#F8C79F
-0.03:#F4A05C 0.10:#F7BE93 0.18:#F5AC70 0.30:#F6B98A"""
-VEIN = """-1.3:#0B2F2E -0.6:#0B2F2E -0.1:#12564F 0.4:#1B6B62 0.72:#4E9D8C 0.95:#8FC9B8
-1.25:#B5D9C9 1.7:#D5E5D3"""
-# Streak colours for the three zones across the flow: haze side, molten middle, dark side.
-ZONES = [(-0.30, "#D5CCE0 #F4E7D8 #F6D2C2 #F6B98A #F59D58 #F7C9A5 #F2A46B"),
-         (0.14, "#F59D58 #F26A1B #E9551A #F57F2C #F26A1B #EE5F1A #F4C4AE #D2401B"),
-         (9.0, "#CB3F1B #B8371A #7E2412 #4A160F #2E100D #D2401B #9C2E18 #5E1B10 #E9551A #F08A2E #DE8869")]
-# Hand-placed streaks: (u0, b0, length, width, edge l, edge r, colours, alpha)
-PLACED = [(-0.220, 0.15, 0.90, 0.075, 0.060, 0.060, "#F26A1B #F57F2C", 0.75),  # molten band left of it
-          (0.100, 0.20, 0.70, 0.040, 0.035, 0.035, "#F57F2C #F26A1B", 0.90),   # glow right of the vein
-          (0.200, 0.45, 0.45, 0.028, 0.025, 0.025, "#EFA088 #F3BBA8", 0.60),   # soft salmon band
-          (-0.150, 0.30, 0.35, 0.016, 0.010, 0.020, "#EFA58A #F4C4AE", 0.80),  # salmon ribbon
-          (-0.085, 0.22, 0.42, 0.022, 0.012, 0.006, "#F6D2C2 #F0B49C", 0.95),  # blush hugging the vein
-          (0.470, 0.16, 0.30, 0.020, 0.009, 0.015, "#F08A2E #D25A1E", 0.90),   # amber accent, lower right
-          (0.680, 0.50, 0.90, 0.070, 0.060, 0.060, "#4A160F #2E100D", 0.80)]   # dark right edge
+HAZE, MAUVE, CREAM, PEACH, AMBER = "#E3DDEA", "#CDC3DB", "#F4E7D8", "#F6B98A", "#F59A4E"
+MOLTEN, VERMIL, RUST, OXIDE, CHAR = "#F26A1B", "#D9461A", "#B8371A", "#7E2412", "#35110C"
+DEEP, TEAL, SEAFOAM = "#0B2F2E", "#12564F", "#8FC9B8"
 
 
-def to_linear(c):
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
-
-
-def to_srgb(c):
-    c = np.clip(c, 0.0, 1.0)
-    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
-
-
-def hex_linear(hexes):
-    return to_linear(np.array([[int(h[i:i + 2], 16) for i in (1, 3, 5)] for h in hexes]) / 255.0).astype(np.float32)
+def density(hexcol):
+    """sRGB hex -> ink density (absorbance of linear light) per channel. Every blend and blur
+    happens in this space, so two paints mix to a deeper hue instead of a muddy grey."""
+    c = np.array([int(hexcol[i:i + 2], 16) for i in (1, 3, 5)]) / 255.0
+    return -np.log(np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)).astype(np.float32)
 
 
 def smooth(e0, e1, x):
-    t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
+    t = np.clip((x - e0) / (e1 - e0), 0, 1)
+    return t * t * (3 - 2 * t)
 
 
-def ramp(stops, sigmas, n=4096):
-    """Palette LUT: one row per softness level, each the stops blurred along the ramp."""
-    pairs = [s.split(':') for s in stops.split()]
-    ts = np.array([float(p[0]) for p in pairs])
-    rgb = hex_linear([p[1] for p in pairs])
-    lo, hi = ts[0], ts[-1]
-    grid = np.linspace(lo, hi, n)
-    base = np.stack([np.interp(grid, ts, rgb[:, c]) for c in range(3)], 1)
-    rows = []
-    for s in sigmas:
-        r = int(3 * s / (hi - lo) * n) + 1
-        k = np.exp(-0.5 * (np.arange(-r, r + 1) * (hi - lo) / n / s) ** 2)
-        pad = np.pad(base, ((r, r), (0, 0)), mode='edge')
-        rows.append(np.stack([np.convolve(pad[:, c], k / k.sum(), 'valid') for c in range(3)], 1))
-    return lo, hi, np.stack(rows).astype(np.float32)
+class Waves:
+    """Smooth 2-D noise: a sum of randomly rotated sinusoids (no lattice, no tiling).
+    `stretch` divides the frequency along the first axis, giving features elongated along it."""
+
+    def __init__(self, rng, lo, hi, stretch=1.0, n=12):
+        ang = (np.arange(n) + rng.uniform(0, 1, n)) * np.pi / n
+        frq = rng.uniform(lo, hi, n) * 2 * np.pi
+        self.k = np.stack([frq * np.cos(ang) / stretch, frq * np.sin(ang), rng.uniform(0, 2 * np.pi, n)], 1)
+        self.norm = np.float32(np.sqrt(2.0 / n))
+
+    def __call__(self, x, y):
+        out = np.zeros_like(x)
+        for kx, ky, ph in self.k.astype(np.float32):
+            out += np.cos(kx * x + ky * y + ph)
+        return out * self.norm
 
 
-def lookup(lut, t, soft=0.0):
-    """Sample a ramp at position t and softness level soft in [0, 1] (bilinear in both)."""
-    lo, hi, tab = lut
-    levels, n, _ = tab.shape
-    flat = tab.reshape(-1, 3)
-    x = np.clip((t - lo) / (hi - lo), 0.0, 1.0) * (n - 1)
-    i = np.minimum(x.astype(np.int32), n - 2)
-    fx = (x - i)[..., None].astype(np.float32)
-    s = np.clip(soft, 0.0, 1.0) * (levels - 1) + np.zeros_like(x)
-    j = np.minimum(s.astype(np.int32), levels - 2)
-    fs = (s - j)[..., None].astype(np.float32)
-    base = j * n + i
-    a = flat[base] * (1 - fx) + flat[base + 1] * fx
-    b = flat[base + n] * (1 - fx) + flat[base + n + 1] * fx
-    return a + (b - a) * fs
+def ripple(rng, t, lo, hi, n=8):
+    """Smooth 1-D noise along the band coordinate (unit variance)."""
+    k = rng.uniform(lo, hi, n)[:, None] * 2 * np.pi
+    return np.cos(k * t + rng.uniform(0, 2 * np.pi, n)[:, None]).sum(0) * np.sqrt(2.0 / n)
 
 
-def waves(rng, n, lam_lo, lam_hi):
-    """Smooth lattice-free noise: n plane waves, wavelengths log-uniform in [lam_lo, lam_hi],
-    random directions and phases, roughly unit variance."""
-    lam = np.exp(rng.uniform(np.log(lam_lo), np.log(lam_hi), n))
-    ang = rng.uniform(0, 2 * np.pi, n)
-    kx, ky = 2 * np.pi / lam * np.cos(ang), 2 * np.pi / lam * np.sin(ang)
-    ph = rng.uniform(0, 2 * np.pi, n)
-    amp = lam / np.sqrt((lam ** 2).sum() / 2)
-
-    def field(x, y):
-        out = np.zeros(np.broadcast(x, y).shape, np.float32)
-        for a, p, q, r in zip(amp.tolist(), kx.tolist(), ky.tolist(), ph.tolist()):
-            out += a * np.cos(p * x + q * y + r)
-        return out
-    return field
+def ramp(t, stops):
+    """Piecewise smoothstep ramp through (position, hex colour) stops, as ink density."""
+    pos, col = np.array([p for p, _ in stops]), np.array([density(c) for _, c in stops])
+    i = np.clip(np.searchsorted(pos, t) - 1, 0, len(pos) - 2)
+    f = smooth(0, 1, (t - pos[i]) / (pos[i + 1] - pos[i]))[:, None]
+    return col[i] * (1 - f) + col[i + 1] * f
 
 
-def ribbon(col, paint_fn, du, half, e_l, e_r, alpha):
-    """Composite a ribbon over col. du = signed distance across the stream from its centre
-    line, half = half width, e_l / e_r = softness of its two edges (all in stream units)."""
-    a = smooth(-half - e_l, -half + e_l, du) * (1 - smooth(half - e_r, half + e_r, du)) * alpha
-    col += (paint_fn(du / half) - col) * a[..., None]
+def stripe(dens, t, pos, width, colour, amount):
+    """Lay a thin Gaussian line of `colour` into a density ramp."""
+    a = (amount * np.exp(-((t - pos) / width) ** 2))[:, None]
+    return dens * (1 - a) + density(colour) * a
 
 
-def streak(col, u, b, u0, b0, length, width, e_l, e_r, c_a, c_b, alpha, lean=0.0, sway=0.0, phase=0.0):
-    """A long tapered ribbon of paint lying along the flow, shading from c_a to c_b across.
-    Only its bounding box (found on a coarse grid) is touched."""
-    s = max(1, u.shape[1] // 300)
-    uc, bc = u[::s, ::s], b[::s, ::s]
-    hit = (np.abs(bc - b0) < length) & (np.abs(uc - u0 - lean * (bc - b0)) < width + max(e_l, e_r) + sway + 0.02)
-    ys, xs = np.nonzero(hit.any(1))[0], np.nonzero(hit.any(0))[0]
-    if not ys.size:
-        return
-    box = (slice(max(ys[0] - 1, 0) * s, (ys[-1] + 2) * s), slice(max(xs[0] - 1, 0) * s, (xs[-1] + 2) * s))
-    col, u, b = col[box], u[box], b[box]
-    env = np.clip(1 - ((b - b0) / length) ** 2, 0.0, 1.0)
-    half = width * env ** 0.35 + 1e-4
-    du = u - u0 - lean * (b - b0) - sway * np.sin(7.0 * (b - b0) + phase)
-    ribbon(col, lambda v: c_a + (c_b - c_a) * smooth(-1.0, 1.0, v)[..., None], du, half,
-           max(e_l, 0.0015), max(e_r, 0.0015), smooth(0.0, 0.7, env) * alpha)
+def pyramid(base):
+    """Gaussian-blur a ramp [n, c] at LEVELS log-spaced sigmas -> [LEVELS, n, c]."""
+    n = len(base)
+    a = np.pad(base, ((n, n), (0, 0)), mode="edge")
+    spec = np.fft.rfft(a, axis=0)
+    freq = np.fft.rfftfreq(len(a), d=(F_HI - F_LO) / (n - 1))
+    out = []
+    for lv in range(LEVELS):
+        g = np.exp(-2 * (np.pi * freq * SIGMA0 * RATIO ** lv) ** 2)[:, None]
+        out.append(np.fft.irfft(spec * g, len(a), axis=0)[n:2 * n])
+    return np.stack(out).astype(np.float32)
 
 
-def paint(W, H):
-    flow, rng = (np.random.default_rng(s) for s in SEEDS)
-    x = np.broadcast_to(((np.arange(W) + 0.5) / W * ASPECT).astype(np.float32)[None, :], (H, W))
-    y = np.broadcast_to(((np.arange(H) + 0.5) / H).astype(np.float32)[:, None], (H, W))
-    w = [waves(flow, 6, 1.2, 2.6), waves(flow, 6, 1.2, 2.6), waves(flow, 6, 0.5, 1.0), waves(flow, 6, 0.5, 1.0)]
-    d = [waves(flow, 8, 0.6, 1.6) for _ in range(5)]
+def sample(lut, level, pos):
+    """Bilinear lookup of lut[level, pos] for float index arrays."""
+    level, pos = np.clip(level, 0, LEVELS - 1.001), np.clip(pos, 0, LUT_N - 1.001)
+    l0, i0 = level.astype(np.intp), pos.astype(np.intp)
+    lf, pf = (level - l0)[..., None], (pos - i0)[..., None]
+    a = lut[l0, i0] * (1 - pf) + lut[l0, i0 + 1] * pf
+    b = lut[l0 + 1, i0] * (1 - pf) + lut[l0 + 1, i0 + 1] * pf
+    return a * (1 - lf) + b * lf
 
-    # Liquify: a gentle global displacement (calm left, livelier right) plus local pushes.
+
+def build_ramps(rng):
+    """The two curated ramps over the band coordinate (upper left < 0 = vein < right edge), blurred:
+    [LEVELS, LUT_N, 6] densities. The hazy look stays lilac, cream and peach; the molten look deepens
+    from peach through orange to rust and char. Stops a hair apart are the crisp edges (see LANES)."""
+    t = np.linspace(F_LO, F_HI, LUT_N)
+    hazy = ramp(t, [(-0.90, HAZE), (-0.62, HAZE), (-0.56, MAUVE), (-0.51, HAZE), (-0.47, CREAM), (-0.43, HAZE),
+                    (-0.403, MAUVE), (-0.397, CREAM), (-0.355, HAZE), (-0.32, CREAM), (-0.29, PEACH), (-0.26, CREAM),
+                    (-0.225, PEACH), (-0.199, AMBER), (-0.193, CREAM), (-0.15, CREAM), (-0.10, PEACH), (-0.05, CREAM),
+                    (0.00, PEACH), (0.06, AMBER), (0.12, PEACH), (0.18, CREAM), (0.25, PEACH), (0.33, AMBER),
+                    (0.42, PEACH), (1.0, PEACH)])
+    molten = ramp(t, [(-0.90, CREAM), (-0.62, CREAM), (-0.55, PEACH), (-0.49, CREAM), (-0.43, PEACH), (-0.403, AMBER),
+                      (-0.397, CREAM), (-0.36, AMBER), (-0.31, PEACH), (-0.26, AMBER), (-0.215, MOLTEN),
+                      (-0.199, VERMIL), (-0.193, PEACH), (-0.16, AMBER), (-0.11, MOLTEN), (-0.06, AMBER),
+                      (-0.02, PEACH), (0.02, AMBER), (0.05, MOLTEN), (0.085, VERMIL), (0.11, MOLTEN), (0.14, RUST),
+                      (0.165, VERMIL), (0.195, OXIDE), (0.201, AMBER), (0.23, MOLTEN), (0.27, RUST), (0.31, OXIDE),
+                      (0.35, CHAR), (0.40, OXIDE), (0.44, RUST), (0.47, VERMIL), (0.495, MOLTEN), (0.501, CHAR),
+                      (0.55, OXIDE), (0.60, CHAR), (0.66, RUST), (0.71, OXIDE), (0.78, CHAR), (1.0, CHAR)])
+    # marbling: thin lines as (position, width, colour, amount)
+    for line in [(-0.47, 0.005, MAUVE, 0.6), (-0.42, 0.003, CREAM, 0.6), (-0.37, 0.004, PEACH, 0.6),
+                 (-0.31, 0.004, PEACH, 0.6), (-0.18, 0.003, AMBER, 0.6), (-0.165, 0.004, PEACH, 0.6),
+                 (0.03, 0.004, CREAM, 0.7), (0.21, 0.004, CREAM, 0.6)]:
+        hazy = stripe(hazy, t, *line)
+    for line in [(-0.24, 0.004, PEACH, 0.6), (-0.175, 0.003, CREAM, 0.7), (-0.14, 0.004, VERMIL, 0.5),
+                 (0.215, 0.003, PEACH, 0.8), (0.245, 0.004, VERMIL, 0.6), (0.33, 0.004, RUST, 0.7),
+                 (0.42, 0.004, CHAR, 0.6), (0.52, 0.003, VERMIL, 0.8), (0.545, 0.004, MOLTEN, 0.6),
+                 (0.68, 0.004, MOLTEN, 0.6)]:
+        molten = stripe(molten, t, *line)
+    # silk: a 1-D ripple of thin rust ink (broad sheen plus fine parallel streaks), fainter in the haze
+    tint = density(RUST) - density(CREAM)
+    sheen = (0.10 * ripple(rng, t, 3, 10) + 0.05 * ripple(rng, t, 50, 170, n=10))[:, None] * tint / tint.mean()
+    return pyramid(np.concatenate([hazy + 0.5 * sheen, molten + sheen], 1))
+
+
+def render(w, h):
+    """Paint the image; returns float sRGB in [0, 1], shape [h, w, 3]."""
+    rng = np.random.default_rng(SEED)
+    lut = build_ramps(rng)
+    # every noise field of the painting, drawn from the seed in a fixed order
+    swell_x, swell_y, chop_x, chop_y = [Waves(rng, *band) for band in ((0.4, 0.9),) * 2 + ((1.0, 2.0),) * 2]
+    fold, ruffle = Waves(rng, 1.8, 4.0, stretch=10), Waves(rng, 5, 10, stretch=12)
+    haze, busy = Waves(rng, 0.5, 1.1, stretch=3), Waves(rng, 0.6, 1.4, stretch=3)
+    broad, thin = Waves(rng, 1.8, 5, stretch=14), Waves(rng, 5, 16, stretch=22)
+    pool, wobble = Waves(rng, 0.4, 1.0, stretch=2), Waves(rng, 14, 30, stretch=16)
+
+    y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+    x, y, px = (x + 0.5) / w * ASPECT, (y + 0.5) / h, h / 1500.0     # px: one pixel of the 1500-high master
+
+    # liquify: two noise warps (calm on the left, livelier on the right), then the local pushes
     amp = 0.45 + 0.55 * smooth(0.45, 1.05, x)
-    px = x + 0.07 * amp * w[0](x, y)
-    py = y + 0.07 * amp * w[1](x, y)
-    px, py = px + 0.03 * amp * w[2](px, py), py + 0.03 * amp * w[3](px, py)
-    for cx, cy, sx, sy, r in PUSHES:
-        g = np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / r ** 2)
-        px, py = px - sx * g, py - sy * g
+    qx, qy = x + 0.07 * amp * swell_x(x, y), y + 0.07 * amp * swell_y(x, y)
+    qx, qy = qx + 0.03 * amp * chop_x(qx, qy), qy + 0.03 * amp * chop_y(qx, qy)
+    for cx, cy, sx, r in PUSHES:
+        qx = qx - sx * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / r ** 2)
 
-    # Stream coordinates: u across the flow (a soft maximum of two tilted planes, so every
-    # streamline comes in on a shallow diagonal and turns upward), b along it.
-    dx, dy = px - QX, py - QY
-    f1 = G1 * (np.sin(T1) * dx + np.cos(T1) * dy)
-    f2 = np.sin(T2) * dx + np.cos(T2) * dy
+    # stream frame: u across the flow (a soft maximum of two tilted planes, so every streamline
+    # comes in on a shallow diagonal and turns upward), b along it
+    dx, dy = qx - QX, qy - QY
+    f1, f2 = G1 * (np.sin(T1) * dx + np.cos(T1) * dy), np.sin(T2) * dx + np.cos(T2) * dy
     u = ((np.logaddexp(K * f1, K * f2) - np.log(2.0)) / K).astype(np.float32)
     b = (np.cos(TM) * dx - np.sin(TM) * dy).astype(np.float32)
 
-    # Underpainting: broad soft colour zones that meander a little along the flow.
-    col = lookup(ramp(BASE, (0.03, 0.06)), u + 0.05 * d[0](u / 0.3, b / 1.2), 0.5)
+    # band coordinate: u displaced by noise stretched along the flow, so bands swell, pinch and taper
+    f = u + 0.05 * fold(b, u) + 0.014 * ruffle(b, u) + 0.002 * wobble(b, u)
+    grad = np.hypot(*np.gradient(f))                          # band units per pixel
 
-    # Streaks: long tapered ribbons laid along the flow, most of them soft, a few crisp.
-    pals = [(lim, hex_linear(hexes.split())) for lim, hexes in ZONES]
-    for i in range(72):
-        u0, b0 = rng.uniform(-0.75, 0.85), rng.uniform(-0.9, 1.1)
-        pal = next(p for lim, p in pals if u0 < lim)
-        c_a = pal[rng.integers(len(pal))]
-        c_b = 0.5 * (c_a + pal[rng.integers(len(pal))])
-        if i % 4:       # three in four are broad, soft, translucent washes ...
-            width = float(np.exp(rng.uniform(np.log(0.04), np.log(0.12))))
-            e_l, e_r = width * rng.uniform(0.7, 1.2, 2)
-            length, alpha = rng.uniform(0.4, 1.0), rng.uniform(0.35, 0.7)
-        else:           # ... the rest narrower, denser ribbons with one crisp edge
-            width = float(np.exp(rng.uniform(np.log(0.010), np.log(0.03))))
-            e_l, e_r = rng.permutation([rng.uniform(0.004, 0.008), width * rng.uniform(0.3, 0.8)])
-            length, alpha = rng.uniform(0.25, 0.6), rng.uniform(0.7, 0.95)
-        streak(col, u, b, u0, b0, length, width, e_l, e_r, c_a, c_b, alpha,
-               rng.normal(0, 0.03), rng.uniform(0.0, 0.012), rng.uniform(0, 6.28))
-    for u0, b0, length, width, e_l, e_r, hexes, alpha in PLACED:
-        c_a, c_b = hex_linear(hexes.split())
-        streak(col, u, b, u0, b0, length, width, e_l, e_r, c_a, c_b, alpha)
+    # hazy look -> molten look, left to right, through long tongues lying along the flow
+    arg = (qx - 0.62 + 0.2 * (qy - 0.5)) / 0.5 + 0.55 * broad(b, u) + 0.4 * smooth(-0.6, 0.8, busy(b, u)) * thin(b, u)
+    slope = np.hypot(*np.gradient(arg))
 
-    # Haze: the left fades into lilac, cream and peach, the paint still showing through.
-    wash = 0.20 + 0.80 * smooth(0.20, 0.92, px + 0.15 * (py - 0.5) + 0.10 * d[2](u / 0.25, b / 1.2))
-    fog = lookup(ramp(AIRY, (0.02, 0.05)), u + 0.05 * d[3](u / 0.3, b / 1.5), 0.6)
-    col = fog + (col - fog) * wash[..., None]
+    # softness in pixels: crisp along the lanes, hazier away from them, on the left and where `haze` says so
+    lane = np.minimum.reduce([np.abs(f - c) for c in LANES])
+    s = 0.55 * smooth(0.02, 0.30, lane) + 0.6 * smooth(-1.3, 0.6, haze(b, u)) + 0.25 * smooth(0.5, -1.5, arg) - 0.1
+    crisp = 1 - 0.92 * np.exp(-(lane / 0.035) ** 2)
+    soft = np.maximum(1.2, px * 1.6 * (110 / 1.6) ** (np.clip(s, 0, 1) * crisp)).astype(np.float32)
+    # the ramp blur that gives this softness on screen (a little more where the bands are pulled wide)
+    sigma = soft * grad + 0.012 * (1 - smooth(0.2, 0.6, grad * h)) * crisp
+    level = np.log(np.maximum(sigma, SIGMA0) / SIGMA0) / np.log(RATIO)
+    c = sample(lut, level, (f - F_LO) / (F_HI - F_LO) * (LUT_N - 1))
+    m = smooth(-1, 1, arg / np.sqrt(0.15 ** 2 + (soft * slope) ** 2))[..., None]
+    dens = c[..., 0:3] * (1 - m) + c[..., 3:6] * m
 
-    # The teal vein: a thread along the diagonal tail, swelling into a belly after the turn,
-    # and a smaller hint of the same teal near the right edge.
-    vlut = ramp(VEIN, (0.03, 0.06))
-    half = (0.002 + 0.006 * smooth(-0.45, -0.05, b) + 0.024 * smooth(-0.25, 0.15, b)
-            + 0.026 * np.exp(-((b - 0.20) / 0.14) ** 2))
-    ribbon(col, lambda v: lookup(vlut, v), u, half, np.maximum(0.08 * half, 0.0015),
-           np.maximum(0.4 * half, 0.003), smooth(-0.5, -0.1, b))
-    env = np.clip(1 - ((b - 0.62) / 0.28) ** 2, 0.0, 1.0)
-    half2 = 0.028 * env ** 0.5 + 1e-4
-    ribbon(col, lambda v: lookup(vlut, 0.45 * v + 0.3, 1.0), u - 0.50, half2, 0.5 * half2 + 0.003,
-           0.5 * half2 + 0.003, smooth(0.0, 0.5, env))
+    # uneven paint load: slow pools where it runs thinner or thicker, with a smooth floor at white
+    dens = dens * np.exp(0.22 * np.tanh(pool(b, u) / 1.5))[..., None]
+    dens = 0.5 * (dens + np.sqrt(dens * dens + 0.002))
 
-    # Silk: fine tonal striations along the flow, warmer where lighter; faint in the haze.
-    silk = (0.07 * d[1](u / 0.035, b / 1.1) + 0.035 * d[4](u / 0.012, b / 1.4)) * (0.15 + 0.85 * wash)
-    col *= np.exp(silk[..., None] * np.array([0.4, 1.0, 1.3], np.float32))
+    # the teal vein along band 0: a thread on the diagonal that swells into a belly after the turn;
+    # crisp green-black edge on its left, a thin seafoam rim on its right
+    half = (0.0015 + 0.005 * smooth(-0.7, -0.1, b) + 0.018 * smooth(-0.55, 0.25, b)
+            + 0.008 * np.exp(-((b - 0.20) / 0.20) ** 2))
+    silk = 1 + 0.22 * wobble(b, u)[..., None]                 # faint streaks of thinner and thicker ink
+    dens = vein(dens, f, grad, half, smooth(-0.75, -0.2, b), 1.0, silk)
+    # and a hint of the same teal near the right edge
+    env = np.clip(1 - ((b - 0.62) / 0.30) ** 2, 0, 1)
+    dens = vein(dens, f - 0.62, grad, 0.014 * env ** 0.5 + 1e-5, smooth(0.0, 0.5, env), 0.5, silk)
 
+    # finish: subtle vignette, back to sRGB
     r2 = ((x / ASPECT - 0.5) ** 2 + (y - 0.5) ** 2) * 2
-    col *= (1 - 0.10 * smooth(0.3, 1.0, r2))[..., None]
-    return to_srgb(col)
+    rgb = np.clip(np.exp(-dens) * (1 - 0.12 * r2)[..., None], 0, 1)
+    return np.where(rgb <= 0.0031308, rgb * 12.92, 1.055 * rgb ** (1 / 2.4) - 0.055)
+
+
+def vein(dens, f, grad, half, alpha, rim, silk):
+    """Composite a teal ribbon centred on f = 0 with half-width `half` (band units). Edges are
+    anti-aliased in pixels: about 1 px on the left, softer on the right under the seafoam rim."""
+    d, hw = f / np.maximum(grad, 1e-6), half / np.maximum(grad, 1e-6)      # in pixels
+    e = np.maximum(1.5, 0.14 * hw)
+    a = (smooth(-hw - 1.2, -hw + 1.2, d) * (1 - smooth(hw - e, hw + e, d)) * alpha)[..., None]
+    t = (d / np.maximum(hw, 1e-3))[..., None]
+    ink = (density(DEEP) + (density(TEAL) - density(DEEP)) * smooth(-1.0, 0.5, t)) * silk
+    ink = ink + (density(SEAFOAM) - ink) * rim * smooth(0.62, 0.98, t)
+    return dens * (1 - a) + ink * a
+
+
+def to_image(srgb):
+    """Quantise to 8 bits with +-0.5 LSB of dither (enough to break banding, invisible as grain)."""
+    noise = np.random.default_rng(SEED + 1).uniform(-0.5, 0.5, srgb.shape)
+    return Image.fromarray(np.clip(np.rint(srgb * 255 + noise), 0, 255).astype(np.uint8))
 
 
 def main():
     root = Path(__file__).resolve().parents[2]
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--out', type=Path, default=root / 'desktop/ui/themes/ember')
-    ap.add_argument('--width', type=int, default=2400)
-    ap.add_argument('--height', type=int, default=1500)
-    ap.add_argument('--preview', type=Path)
+    ap.add_argument("--out", type=Path, default=root / "desktop/ui/themes/ember")
+    ap.add_argument("--width", type=int, default=2400)
+    ap.add_argument("--height", type=int, default=1500)
+    ap.add_argument("--preview", type=Path, help="also write a small JPEG here")
     args = ap.parse_args()
 
     t0 = time.time()
-    img = paint(args.width, args.height)
-    # at most +-0.5 LSB of dither so 8-bit quantisation never bands
-    noise = np.random.default_rng(SEEDS[0]).random(img.shape, dtype=np.float32)
-    im = Image.fromarray(np.floor(img * 255.0 + noise).clip(0, 255).astype(np.uint8), 'RGB')
+    img = to_image(render(args.width, args.height))
     args.out.mkdir(parents=True, exist_ok=True)
-    im.save(args.out / 'art.webp', quality=90, method=6)
-    tw = 480
-    im.resize((tw, round(tw * args.height / args.width)), Image.LANCZOS).save(args.out / 'thumb.webp', quality=85, method=6)
+    img.save(args.out / "art.webp", "WEBP", quality=92, method=6)
+    small = lambda width: img.resize((width, round(width * args.height / args.width)), Image.LANCZOS)
+    small(480).save(args.out / "thumb.webp", "WEBP", quality=85, method=6)
     if args.preview:
-        pw = min(1000, args.width)
-        im.resize((pw, round(pw * args.height / args.width)), Image.LANCZOS).save(args.preview, quality=92)
-    print(f'ember: {args.width}x{args.height} in {time.time() - t0:.1f}s -> {args.out}')
-    for f in ('art.webp', 'thumb.webp'):
-        print(f'  {f}: {(args.out / f).stat().st_size / 1024:.0f} KB')
+        small(1000).save(args.preview, "JPEG", quality=90)
+    print(f"ember: {args.width}x{args.height} -> {args.out} in {time.time() - t0:.1f}s")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
