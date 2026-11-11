@@ -818,7 +818,7 @@ mod tests {
         // A template for one run wins over the user's, which wins over the built-in one.
         let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
         h.set_system_prompt(Some("Mine. {finish}")).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. Once the tests are watched, put `finish` in the same reply as your edits: it is refused if they fail.\n\n# User instructions\n\nUse tabs.");
+        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. The first `finish` after a change comes back once with a review to carry out; watched tests are re-run first and it is refused if they fail.\n\n# User instructions\n\nUse tabs.");
         assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), "Be terse.\n\n# User instructions\n\nUse tabs.");
         h.set_system_prompt(None).unwrap();
         assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\nUse tabs."));

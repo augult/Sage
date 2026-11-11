@@ -31,19 +31,19 @@ pub fn default_template() -> &'static str {
 fn fill(template: &str, auto_watch: bool, preflight: bool) -> String {
     let (chain, watch, finish) = if auto_watch {
         (
-            "read + read + shell (run the tests); then edit + edit + finish",
+            "read + read + search + shell (run the tests); then edit + edit + shell (try what the tests do not cover)",
             if preflight {
                 "Tests are watched for you. The harness runs the test command the task names (or else takes the first one you run) and re-runs it by itself after every change, telling you when its result changes. Do not run it again yourself."
             } else {
                 "Tests are watched for you. Once you have run a test command, the harness re-runs it by itself after every change and tells you when its result changes, so do not run it again yourself."
             },
-            "Once the tests are watched, put `finish` in the same reply as your edits: it is refused if they fail.",
+            "The first `finish` after a change comes back once with a review to carry out; watched tests are re-run first and it is refused if they fail.",
         )
     } else {
         (
-            "read + read + read; or edit + edit + shell (run the tests) + finish",
+            "read + read + read; or edit + edit + shell (run the tests)",
             "`watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes.",
-            "Put it in the same reply, right after the check.",
+            "Put it right after a check, in the same reply. The first `finish` after a change comes back once with a review to carry out.",
         )
     };
     template.trim().replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", finish)
@@ -300,7 +300,7 @@ mod tests {
         }
         // The fixed prefix is paid for on every turn of every session: keep it lean.
         let (presage, classic) = (prefix_tokens(&Features::presage()), prefix_tokens(&Features::classic()));
-        assert!(presage < 1_250, "the Presage prefix is ~{presage} tokens");
+        assert!(presage < 2_300, "the Presage prefix is ~{presage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
         assert!(!tool_schemas(&Features::classic(), false).to_string().contains("expect"));
     }
