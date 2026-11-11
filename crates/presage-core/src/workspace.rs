@@ -2,6 +2,7 @@
 //! cheap fingerprint that answers "did anything change since the last passing check?".
 
 use crate::util::{fnv64, home_dir};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -10,6 +11,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 pub struct Workspace {
     /// Canonical root the session was started in. Writes are confined to it (and the temp dir).
     pub root: PathBuf,
+    /// The root as the user reached it (through a symlink, say), when that is not its canonical
+    /// form. Commands may print either.
+    pub as_given: Option<PathBuf>,
     /// Current directory; follows `cd` across shell calls.
     pub cwd: PathBuf,
     pub allow_outside_writes: bool,
@@ -55,13 +59,70 @@ fn real_path(p: &Path) -> PathBuf {
     }
 }
 
+/// The directory the user's shell believes it is in, which keeps the symlinks they came through.
+fn logical_cwd() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let same = |p: &PathBuf| p.is_absolute() && std::fs::canonicalize(p).ok() == std::fs::canonicalize(&cwd).ok();
+    Some(std::env::var_os("PWD").map(PathBuf::from).filter(same).unwrap_or(cwd))
+}
+
+/// `given` as an absolute path with its symlinks left in, if that spells `canonical` differently.
+fn as_given(given: &Path, canonical: &Path) -> Option<PathBuf> {
+    let spelled = if given.is_absolute() { normalize(given) } else { normalize(&logical_cwd()?.join(given)) };
+    (spelled != canonical && std::fs::canonicalize(&spelled).is_ok_and(|real| real == canonical)).then_some(spelled)
+}
+
+/// What can sit inside a file name: next to one of these, a path goes on.
+fn in_name(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '+' | '~' | '@' | '%' | '#')
+}
+
+/// True where a path written in running text is over.
+fn ends_path(next: Option<char>) -> bool {
+    next.is_none_or(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')' | ']' | '}' | '>' | '<' | ',' | ';' | ':' | '|' | '&' | '’' | '”'))
+}
+
+/// `text` without `dir` wherever a path starts with it: `dir/x` becomes `x`, `dir` on its own `.`
+/// and `dir/` on its own `./`. `None` when nothing does. A path that only shares the prefix
+/// (`dir-old/x`, `/mnt/dir/x`) is another place and is left as it is.
+fn cut_dir(text: &str, dir: &str) -> Option<String> {
+    let step = dir.chars().next()?.len_utf8();
+    let mut out: Option<String> = None;
+    let (mut copied, mut from) = (0, 0);
+    while let Some(at) = text[from..].find(dir).map(|i| from + i) {
+        from = at + step;
+        let rest = &text[at + dir.len()..];
+        let below = rest.trim_start_matches('/');
+        let slashes = rest.len() - below.len();
+        // Glued to what stands before it, the match is the tail of a longer path.
+        let glued = text[..at].chars().next_back().is_some_and(|c| in_name(c) || matches!(c, '/' | '\\' | '$' | '}' | ')'));
+        let put = match (slashes > 0, ends_path(below.chars().next())) {
+            _ if glued => continue,
+            (true, false) => "",
+            (true, true) => "./",
+            (false, true) => ".",
+            (false, false) => continue,
+        };
+        let short = out.get_or_insert_with(|| String::with_capacity(text.len()));
+        short.push_str(&text[copied..at]);
+        short.push_str(put);
+        copied = at + dir.len() + slashes;
+        from = copied;
+    }
+    out.map(|mut short| {
+        short.push_str(&text[copied..]);
+        short
+    })
+}
+
 impl Workspace {
     pub fn new(root: &Path) -> std::io::Result<Self> {
-        let root = std::fs::canonicalize(root)?;
+        let given = root;
+        let root = std::fs::canonicalize(given)?;
         if !root.is_dir() {
             return Err(std::io::Error::new(std::io::ErrorKind::NotADirectory, "workspace root is not a directory"));
         }
-        Ok(Self { cwd: root.clone(), root, allow_outside_writes: false })
+        Ok(Self { cwd: root.clone(), as_given: as_given(given, &root), root, allow_outside_writes: false })
     }
 
     /// Absolute, normalised path for something the model named (relative paths are relative to cwd).
@@ -85,6 +146,29 @@ impl Workspace {
             Ok(rel) => rel.to_string_lossy().into_owned(),
             Err(_) => abs.to_string_lossy().into_owned(),
         }
+    }
+
+    /// Every absolute spelling of the directory the tools run in. None once a `cd` has left the
+    /// workspace: paths out there are named in full.
+    fn cwd_spellings(&self) -> Vec<String> {
+        let Ok(below) = self.cwd.strip_prefix(&self.root) else { return Vec::new() };
+        let at = |root: &PathBuf| if below.as_os_str().is_empty() { root.clone() } else { root.join(below) };
+        [Some(&self.root), self.as_given.as_ref()].into_iter().flatten().map(at).filter_map(|dir| dir.to_str().map(String::from)).filter(|dir| dir.len() > 1).collect()
+    }
+
+    /// `text` with absolute paths into the directory the tools run in made relative to it, which is
+    /// how `display` names them and how the model is asked to give them: `<cwd>/src/a.py` becomes
+    /// `src/a.py` and a bare `<cwd>` becomes `.`. That directory is the root until a `cd`; after one,
+    /// workspace paths outside the new directory stay absolute, so that every path shown can be used
+    /// as it stands.
+    pub fn shorten<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        let mut short: Option<String> = None;
+        for dir in self.cwd_spellings() {
+            if let Some(cut) = cut_dir(short.as_deref().unwrap_or(text), &dir) {
+                short = Some(cut);
+            }
+        }
+        short.map_or(Cow::Borrowed(text), Cow::Owned)
     }
 
     pub fn contains(&self, abs: &Path) -> bool {
@@ -270,6 +354,53 @@ mod tests {
             assert!(ws.check_writable(&ws.resolve("escape/hosts")).is_err());
         }
         let _ = outside;
+    }
+
+    #[test]
+    fn shortening_cuts_the_tools_directory_from_paths_and_from_nothing_else() {
+        let ws = Workspace::new(&tmp("short")).unwrap();
+        let r = ws.root.display().to_string();
+        let short = |text: String| ws.shorten(&text).into_owned();
+        assert_eq!(short(format!("{r}/x/y.py:12: error")), "x/y.py:12: error");
+        assert_eq!(short(format!("  File \"{r}/pager.py\", line 3, in page\n  File \"{r}/test_pager.py\", line 9")), "  File \"pager.py\", line 3, in page\n  File \"test_pager.py\", line 9");
+        // The directory on its own is `.`, whatever closes it.
+        assert_eq!(short(format!("rootdir: {r}")), "rootdir: .");
+        assert_eq!(short(format!("cd {r} && ls '{r}' {r}/")), "cd . && ls '.' ./");
+        assert_eq!(short(format!("PYTHONPATH={r}:{r}/src")), "PYTHONPATH=.:src");
+        assert_eq!(short(format!("{r}//x.py")), "x.py");
+        // Another place that only shares the prefix, or has it in the middle, is left as it is.
+        for other in [format!("{r}-other/x.py"), format!("{r}.bak"), format!("{r}2/x.py"), format!("/mnt{r}/x.py"), format!("file://{r}/x.html"), format!("see {r}.")] {
+            assert!(matches!(ws.shorten(&other), Cow::Borrowed(_)), "{other}");
+        }
+        assert!(matches!(ws.shorten("3 passed in 0.12s"), Cow::Borrowed(_)), "nothing to cut, nothing copied");
+    }
+
+    #[test]
+    fn shortening_follows_cd_and_knows_the_root_by_the_name_it_was_given() {
+        let root = tmp("short-cd");
+        fs::create_dir_all(root.join("pkg")).unwrap();
+        let mut ws = Workspace::new(&root).unwrap();
+        let r = ws.root.display().to_string();
+        // After `cd pkg` the tools run there: what lies below is relative to it, the rest stays whole.
+        ws.cwd = ws.root.join("pkg");
+        assert_eq!(ws.shorten(&format!("{r}/pkg/a.py {r}/pkg {r}/b.py {r}")), format!("a.py . {r}/b.py {r}"));
+        // Outside the workspace nothing is relative to anything.
+        ws.cwd = ws.root.parent().unwrap().to_path_buf();
+        assert!(matches!(ws.shorten(&format!("{r}/b.py")), Cow::Borrowed(_)));
+
+        #[cfg(unix)]
+        {
+            // Reached through a symlink, the root has two spellings and commands may print either.
+            let link = tmp("short-link").join("project");
+            std::os::unix::fs::symlink(&ws.root, &link).unwrap();
+            let linked = Workspace::new(&link).unwrap();
+            let l = link.display().to_string();
+            assert_eq!((linked.root.display().to_string(), linked.as_given.as_deref()), (r.clone(), Some(link.as_path())));
+            assert_eq!(linked.shorten(&format!("{l}/a.py:3 and {r}/b.py:4 in {l}")), "a.py:3 and b.py:4 in .");
+            assert!(matches!(linked.shorten(&format!("{l}-old/a.py")), Cow::Borrowed(_)));
+            // Given by its canonical name, it has only that one.
+            assert_eq!(Workspace::new(&linked.root).unwrap().as_given, None);
+        }
     }
 
     #[test]

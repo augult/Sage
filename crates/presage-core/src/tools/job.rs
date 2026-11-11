@@ -2,7 +2,7 @@
 
 use super::jobs::kill_group;
 use super::{StepOutput, StepStatus, bool_arg, str_arg, u64_arg};
-use crate::state::Session;
+use crate::state::{Session, shown};
 use crate::text::{bound, clean, squeeze};
 use crate::util::fmt_duration;
 use serde_json::Value;
@@ -49,7 +49,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         let exited = job.run.exit.borrow().is_some();
         if let Some(pattern) = &until {
             // Matched against everything so far: text that appeared before the model asked still counts.
-            let so_far = clean(&job.run.buf.lock().unwrap().snapshot().0);
+            let so_far = shown(&sess.features, &sess.ws, clean(&job.run.buf.lock().unwrap().snapshot().0));
             if contains(&so_far, pattern) {
                 matched = true;
                 break;
@@ -71,7 +71,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     };
     job.read_offset = total;
     let age = fmt_duration(job.run.started.elapsed().as_millis() as u64);
-    let lines = squeeze(&clean(&fresh));
+    let lines = squeeze(&shown(&sess.features, &sess.ws, clean(&fresh)));
     let view = bound(&lines, 10, 60, 6_000, Some(&job.spill));
     let state = match exit {
         Some(e) => match (e.code, e.signal) {
@@ -124,6 +124,21 @@ mod tests {
         let killed = run(&mut s, &json!({"id": "bg:1", "kill": true}), &cancel).await;
         assert_eq!(killed.status, StepStatus::Ok);
         assert!(killed.observation.contains("killed by signal") || killed.observation.contains("exited"), "{}", killed.observation);
+    }
+
+    #[tokio::test]
+    async fn background_output_names_paths_the_way_other_output_does() {
+        let mut s = test_session("job-short-paths", Features::presage());
+        let cancel = CancellationToken::new();
+        let root = s.ws.root.display().to_string();
+        let started = shell::run(&mut s, &json!({"cmd": "echo \"serving $PWD/public\"; sleep 2; echo \"log: $PWD/server.log\"; sleep 30", "background": true}), &cancel).await;
+        assert!(started.observation.ends_with("\nserving public"), "{}", started.observation);
+
+        // The model waits for the text as it would be shown it.
+        let out = run(&mut s, &json!({"id": "bg:1", "until": "log: server.log", "wait": 20}), &cancel).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        assert!(out.observation.ends_with("\nlog: server.log") && !out.observation.contains(&root), "{}", out.observation);
+        s.jobs.kill_all();
     }
 
     #[tokio::test]

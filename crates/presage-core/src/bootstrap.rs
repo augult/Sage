@@ -118,8 +118,10 @@ pub async fn snapshot(sess: &Session) -> String {
     } else {
         format!(" (git: {branch}, {dirty} uncommitted changes)")
     };
-    // Without this, models `cd` to the absolute path and spell it out in every call.
-    out.push_str(&format!("cwd: {}{git}; every tool already runs here, so give paths relative to it\n", root.display()));
+    // Without this, models `cd` to the absolute path and spell it out in every call. Where command
+    // output is cut the same way, say so: a relative path in it is not what the program printed.
+    let output = if sess.features.short_paths { ", as command output does" } else { "" };
+    out.push_str(&format!("cwd: {}{git}; every tool already runs here, so give paths relative to it{output}\n", root.display()));
     out.push_str(&format!("os: {} {} · date: {}\n", std::env::consts::OS, std::env::consts::ARCH, date_string(now_ms() / 1000)));
     if !present.is_empty() {
         out.push_str(&format!("installed: {}\n", present.join(", ")));
@@ -166,11 +168,15 @@ mod tests {
 
         let env = snapshot(&s).await;
         assert!(env.starts_with("<env>\ncwd: "), "{env}");
-        assert!(env.contains("(not a git repository)"));
+        assert!(env.contains("(not a git repository); every tool already runs here, so give paths relative to it, as command output does\n"), "{env}");
         assert!(env.contains(&format!("os: {} {} · date: 20", std::env::consts::OS, std::env::consts::ARCH)));
         assert!(env.contains("installed: ") && env.contains("git"), "{env}");
         assert!(env.contains("files: src/  AGENTS.md  Makefile (targets: all, build, test)  package.json (scripts: test, build)"), "{env}");
         assert!(env.contains("known here: `pytest -q` fails here (bash: pytest: command not found) → `uv run pytest -q` works"), "{env}");
         assert!(env.contains("<project-instructions file=\"AGENTS.md\">\nAlways run `make test` before finishing.\n</project-instructions>"));
+
+        // Where command output keeps its absolute paths, nothing is said about it.
+        s.features = Features::presage().without("short_paths").unwrap();
+        assert!(snapshot(&s).await.contains("(not a git repository); every tool already runs here, so give paths relative to it\n"));
     }
 }

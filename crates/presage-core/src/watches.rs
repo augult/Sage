@@ -584,6 +584,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_watch_reports_paths_the_way_the_model_gives_them() {
+        use crate::anchors::anchor;
+        let mut s = test_session("watch-short-paths", Features::presage());
+        let cancel = CancellationToken::new();
+        let root = s.ws.root.display().to_string();
+        std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
+        std::fs::write(s.ws.root.join("check.sh"), "echo \"$PWD/calc.py:2: ZeroDivisionError\"; echo \"rootdir: $PWD\"; exit 1\n").unwrap();
+
+        // The absolute path is gone from the report, and the line it pointed at is still found.
+        let report = preflight(&mut s, "`sh check.sh` fails.", &cancel).await.expect("the task names a test command");
+        let wanted = format!("watch tests: FAIL (expected exit 0, got exit 1)\ncalc.py:2: ZeroDivisionError\nrootdir: .\n--- where (current file content; anchors work in edit) ---\ncalc.py\n  {}|a = 1\n> {}|b = a / 0", anchor(1, "a = 1"), anchor(2, "b = a / 0"));
+        assert_eq!(report.detail, wanted);
+
+        // On disk the output is as the command printed it; reopened, it reads as it was shown.
+        let kept = std::fs::read_to_string(s.spill_path("out:1").unwrap()).unwrap();
+        assert_eq!(kept, format!("{root}/calc.py:2: ZeroDivisionError\nrootdir: {root}\n"));
+        let reopened = crate::tools::read::run(&mut s, &serde_json::json!({"path": "out:1"}));
+        assert_eq!(reopened.observation, "out:1 · lines 1-2 of 2\n1|calc.py:2: ZeroDivisionError\n2|rootdir: .");
+
+        let mut s = test_session("watch-long-paths", Features::presage().without("short_paths").unwrap());
+        let root = s.ws.root.display().to_string();
+        std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
+        add(&mut s, "t", "echo \"$PWD/calc.py:2: ZeroDivisionError\"; exit 1");
+        let (_, text) = run_stale(&mut s, &cancel).await;
+        assert!(text.contains(&format!("\n{root}/calc.py:2: ZeroDivisionError\n--- where")) && text.ends_with("|b = a / 0"), "{text}");
+    }
+
+    #[tokio::test]
     async fn without_auto_watch_only_requested_watches_adopt_a_run() {
         let mut s = test_session("watch-manual", Features::presage().without("auto-watch").unwrap());
         let run = finished(&s, 1, "FAILED");

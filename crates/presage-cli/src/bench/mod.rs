@@ -895,6 +895,50 @@ mod tests {
         assert_eq!(h.with_data_dir(dir.join("home")).list().len(), 12);
     }
 
+    /// The workspace of a fresh run of `task` and the first message a model receives in it.
+    async fn opening(h: &Harness, task: &Task, without: &[&str]) -> (String, String) {
+        let ws = std::env::temp_dir().join(format!("presage-bench-opening-{}", rand_hex(4)));
+        materialize(&ws, task.files).unwrap();
+        let received = Arc::new(Mutex::new(String::new()));
+        let keep = received.clone();
+        let turn: presage_core::provider::mock::TurnFn = Box::new(move |messages| {
+            *keep.lock().unwrap() = messages[1].content.clone();
+            MockTurn::say("Looking into it.")
+        });
+        let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: task.prompt.to_string(), without: without.iter().map(|w| w.to_string()).collect(), ..Default::default() };
+        let meta = h.start_scripted(req, MockProvider::new(vec![turn])).unwrap();
+        wait_for_end(h, &meta.id).await.unwrap();
+        let root = std::fs::canonicalize(&ws).unwrap().to_string_lossy().into_owned();
+        let _ = std::fs::remove_dir_all(&ws);
+        let first = received.lock().unwrap().clone();
+        (root, first)
+    }
+
+    #[tokio::test]
+    async fn a_run_opens_with_the_file_the_task_names_and_its_failing_tests() {
+        if !on_path("python3") {
+            eprintln!("skipped: python3 is not installed");
+            return;
+        }
+        let h = harness("opening");
+        let task = TASKS.iter().find(|t| t.id == "pager").unwrap();
+
+        let (root, first) = opening(&h, task, &[]).await;
+        assert!(first.contains("\n</env>\n\n<files>\npager.py · 12 lines\n") && first.contains("\n</files>\nThis is `read` output for the file the task names."), "{first}");
+        assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\n") && first.ends_with(&format!("\n\n<task>\n{}\n</task>", task.prompt)), "{first}");
+        // The traceback names its file the way a tool call would, and still brings the lines along.
+        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && first.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{first}");
+        assert_eq!(first.matches(&root).count(), 1, "only the `cwd:` line names the workspace: {first}");
+        assert_eq!(first.matches("|def total_pages(count, per_page):").count(), 1, "{first}");
+
+        // Each of the two mechanisms can be taken out on its own.
+        let (_, plain) = opening(&h, task, &["attach"]).await;
+        assert!(!plain.contains("<files>") && !plain.contains("|def total_pages") && plain.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n"), "{plain}");
+        let (root, long) = opening(&h, task, &["short-paths"]).await;
+        assert!(long.contains("\n<files>\npager.py · 12 lines\n") && long.contains(&format!("\n  File \"{root}/test_pager.py\", line 12, in test_first_page\n")), "{long}");
+        assert!(long.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{long}");
+    }
+
     #[tokio::test]
     async fn a_wrong_solution_is_not_counted_however_it_was_declared() {
         if !on_path("python3") {
@@ -920,6 +964,10 @@ mod tests {
         assert_eq!((opt.repeats, opt.jobs, opt.max_cost, opt.keep, opt.tasks.len()), (5, 2, Some(1.5), true, TASKS.len()));
         assert_eq!(opt.variants[1], Variant { name: "no-receipts".into(), classic: false, without: vec!["receipts".into()] });
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
+        // Every mechanism has its variant, however its name is spelled.
+        let Ok(Command::Run(opt)) = parse(&args("--variants presage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };
+        assert_eq!((opt.variants[1].without.as_slice(), opt.variants[2].without.as_slice(), opt.variants[3].without.as_slice()), (&["attach".to_string()][..], &["short_paths".to_string()][..], &["short_paths".to_string()][..]));
+        assert!(!opt.variants[1].features().attach && opt.variants[1].features().short_paths && !opt.variants[2].features().short_paths && opt.variants[2].features().attach);
 
         assert!(matches!(parse(&args("--list")), Ok(Command::List)));
         assert!(matches!(parse(&args("--check --tasks roman")), Ok(Command::Check(t)) if t.len() == 1));

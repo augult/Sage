@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod anchors;
+pub mod attach;
 pub mod bootstrap;
 pub mod config;
 pub mod context;

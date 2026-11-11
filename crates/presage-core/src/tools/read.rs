@@ -116,7 +116,8 @@ fn read_spill(sess: &Session, handle: &str, lines_arg: Option<&str>) -> StepOutp
     if md.len() > 4 * MAX_FILE_BYTES {
         return StepOutput::error(format!("{handle} is {}; filter it with shell tools instead: {}", fmt_bytes(md.len()), path.display()));
     }
-    let text = clean(&std::fs::read(&path).unwrap_or_default());
+    // The file keeps what the command printed; the model is shown it as it was shown the excerpt.
+    let text = sess.shown(clean(&std::fs::read(&path).unwrap_or_default()));
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
         return StepOutput::ok(format!("{handle} · empty"));
@@ -285,7 +286,9 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
 
     if sess.features.dedup {
         if let SeenCheck::AlreadyShown { step } = sess.seen.observe(&abs, hash, from, to, sess.step) {
-            let msg = format!("[unchanged] {shown} lines {from}-{to} are already in your context (shown at step {step}) and the file has not changed since. Ask again if you need them re-printed.");
+            // Step 0 is before the first reply: what the harness put in the first message.
+            let when = if step == 0 { "in the first message".to_string() } else { format!("at step {step}") };
+            let msg = format!("[unchanged] {shown} lines {from}-{to} are already in your context (shown {when}) and the file has not changed since. Ask again if you need them re-printed.");
             return StepOutput { stub: msg.clone(), observation: msg, ..Default::default() };
         }
     }

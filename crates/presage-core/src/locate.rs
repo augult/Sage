@@ -155,6 +155,24 @@ mod tests {
     }
 
     #[test]
+    fn locations_are_found_in_shortened_output_as_in_the_original() {
+        let mut ws = ws_with(&[("src/calc.py", &numbered(60)), ("pkg/mod.py", &numbered(20)), ("top.py", &numbered(9))]);
+        let root = ws.root.display().to_string();
+        let out = format!("Traceback (most recent call last):\n  File \"{root}/src/calc.py\", line 41, in divide\n  File \"{root}/top.py\", line 3, in <module>\n{root}/pkg/mod.py:7: error\n");
+        let short = ws.shorten(&out);
+        assert_eq!(short, "Traceback (most recent call last):\n  File \"src/calc.py\", line 41, in divide\n  File \"top.py\", line 3, in <module>\npkg/mod.py:7: error\n");
+        let found = find_locations(&out, &ws);
+        assert_eq!(found.iter().map(|l| (ws.display(&l.path), l.line)).collect::<Vec<_>>(), vec![("src/calc.py".to_string(), 41), ("top.py".to_string(), 3), ("pkg/mod.py".to_string(), 7)]);
+        assert_eq!(find_locations(&short, &ws), found);
+
+        // After a `cd`, relative means relative to the new directory, for the output and the lookup alike.
+        ws.cwd = ws.root.join("pkg");
+        let short = ws.shorten(&out);
+        assert_eq!(short, format!("Traceback (most recent call last):\n  File \"{root}/src/calc.py\", line 41, in divide\n  File \"{root}/top.py\", line 3, in <module>\nmod.py:7: error\n"));
+        assert_eq!(find_locations(&short, &ws), found);
+    }
+
+    #[test]
     fn expand_marks_target_merges_neighbours_and_skips_what_was_shown() {
         let ws = ws_with(&[("src/calc.py", &numbered(60))]);
         let mut seen = Seen::default();

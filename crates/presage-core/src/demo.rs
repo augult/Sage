@@ -11,7 +11,9 @@ use crate::provider::mock::{MockProvider, MockTurn, TurnFn};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-pub const TASK: &str = "check.sh fails: the report total is wrong. Fix report.sh so that check.sh passes.";
+/// Worded to name neither a file nor a test command. The walkthrough opens with the stand-in reading
+/// and reproducing, so nothing may be attached or run for it before the first turn.
+pub const TASK: &str = "The check fails: the report total is wrong. Fix the report script so that the check passes.";
 
 pub fn create_workspace(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
@@ -118,6 +120,12 @@ mod tests {
                 expect("finish", StepStatus::Ok),
             ]
         );
+        // The task is the whole first message but for the environment: the stand-in's first reply
+        // reads the script and gets it, not a note that it was shown already.
+        assert!(crate::attach::named_files(TASK, &agent.sess.ws).is_empty() && crate::watches::named_in(TASK).is_none());
+        assert!(!events.iter().any(|e| matches!(e, EventKind::Note { kind, .. } if kind == "attach")));
+        let read = events.iter().find_map(|e| if let EventKind::StepEnd { observation, .. } = e { Some(observation.clone()) } else { None }).unwrap();
+        assert!(read.starts_with("report.sh · 3 lines\n"), "{read}");
         // The surprise carries the failing output and the line it points at, ready to edit.
         let surprise = events.iter().find_map(|e| if let EventKind::StepEnd { status: StepStatus::Surprise, observation, .. } = e { Some(observation.clone()) } else { None }).unwrap();
         assert!(surprise.contains("FAIL: expected 60, got 29"), "{surprise}");
