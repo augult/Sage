@@ -6,7 +6,6 @@ import { h, icon } from './dom.js';
 import { startGlass } from './glass.js';
 import { applyHooks } from './hooks.js';
 import * as store from './store.js';
-import { renderLegend } from './views/inspector.js';
 import { mountNewSession } from './views/new-session.js';
 import { mountSession } from './views/session.js';
 import { mountSettings } from './views/settings.js';
@@ -45,14 +44,11 @@ const app = {
     const meta = view.name === 'session' && app.sessions.find((session) => session.id === view.id);
     if (meta) {
       mounted = mountSession(main, side, app, meta);
+    } else if (view.name === 'session') {
+      main.append(h('div.view-message', h('p', `There is no session ${view.id}.`)));
+      mounted = null;
     } else {
-      renderLegend(side);
-      if (view.name === 'session') {
-        main.append(h('div.view-message', h('p', `There is no session ${view.id}.`)));
-        mounted = null;
-      } else {
-        mounted = view.name === 'settings' ? mountSettings(main, app) : mountNewSession(main, app);
-      }
+      mounted = view.name === 'settings' ? mountSettings(main, app) : mountNewSession(main, app);
     }
     markCurrent(newLink, view.name === 'new');
     markCurrent(settingsLink, view.name === 'settings');

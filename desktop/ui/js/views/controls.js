@@ -1,4 +1,4 @@
-// Form controls shared by the New session and Settings views.
+// Form controls shared by the New session, Session and Settings views.
 
 import { h, icon } from '../dom.js';
 
@@ -25,44 +25,49 @@ export function radioChips({ name, label, options, value, onChange, segmented = 
 
 /**
  * A button that shows the current choice and opens a menu of the others.
- * `groups` is `[{ label, note, options: [{ value, label, hint, disabled }] }]`; a group's label and
- * note are optional. `prefix` names the setting in front of the value, `empty` stands in when
- * nothing is chosen. `onChange(value)` runs on selection.
+ * `groups` is `[{ label, options: [{ value, label, title, disabled }] }]`; a group's label is
+ * optional. `prefix` names the setting in front of the value, `empty` stands in when nothing is
+ * chosen. `onChange(value)` runs on selection.
+ *
+ * With `multiple`, `value` is an array, an option toggles and the menu stays open. `locked` values
+ * are on and cannot be switched off; `onChange` gets the others that are on.
  */
-export function picker({ id, name, prefix, groups, value, empty = 'None', onChange }) {
-  let current = value;
+export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, multiple = false, locked = [], disabled = false, align }) {
   const options = groups.flatMap((group) => group.options);
-  const labelOf = (wanted) => options.find((option) => option.value === wanted)?.label ?? empty;
+  const chosen = new Set(multiple ? value : value == null ? [] : [value]);
+  const isOn = (wanted) => chosen.has(wanted) || locked.includes(wanted);
 
   const shown = h('span.pick-value');
   const button = h(
     'button.pick',
-    { id, type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)) },
+    { id, type: 'button', disabled, 'aria-haspopup': 'listbox', 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)) },
     prefix && h('span.pick-key', prefix),
     shown,
     icon('caret', 12),
   );
-  const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, hidden: true, onkeydown: onKey });
+  const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, 'aria-multiselectable': multiple && 'true', hidden: true, onkeydown: onKey });
   for (const group of groups) {
-    if (group.label) menu.append(h('div.menu-group', group.label, group.note && h('span.menu-note', group.note)));
+    if (group.label) menu.append(h('div.menu-group', group.label));
     for (const option of group.options) {
       menu.append(
         h(
           'button.menu-item',
-          { type: 'button', role: 'option', disabled: option.disabled, dataset: { value: option.value }, onclick: () => choose(option.value) },
+          { type: 'button', role: 'option', title: option.title || null, disabled: option.disabled || locked.includes(option.value), dataset: { value: option.value }, onclick: () => choose(option.value) },
           icon('check', 12),
-          h('span.menu-text', h('span', option.label), option.hint && h('span.menu-hint', option.hint)),
+          h('span', option.label),
         ),
       );
     }
   }
-  const wrap = h('div.pick-wrap', button, menu);
+  const wrap = h(`div.pick-wrap${align === 'end' ? '.align-end' : ''}`, button, menu);
   const enabled = () => [...menu.querySelectorAll('.menu-item:not(:disabled)')];
 
   function paint() {
-    shown.textContent = labelOf(current);
-    button.title = `${name}: ${labelOf(current)}`;
-    for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(item.dataset.value === current));
+    const on = options.filter((option) => isOn(option.value));
+    shown.textContent = on.length ? on[0].label + (on.length > 1 ? ` +${on.length - 1}` : '') : empty;
+    shown.classList.toggle('is-empty', !on.length);
+    button.title = `${name}: ${on.length ? on.map((option) => option.label).join(', ') : empty}`;
+    for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(isOn(item.dataset.value)));
   }
 
   const outside = (event) => {
@@ -87,10 +92,15 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   }
 
   function choose(next) {
-    current = next;
+    if (!multiple) {
+      chosen.clear();
+      chosen.add(next);
+      close(true);
+    } else if (!chosen.delete(next)) {
+      chosen.add(next);
+    }
     paint();
-    close(true);
-    onChange(next);
+    onChange(multiple ? options.map((option) => option.value).filter((option) => chosen.has(option)) : next);
   }
 
   function onKey(event) {
@@ -112,9 +122,18 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   return wrap;
 }
 
-/** A form row: label on the left, the control and an optional hint on the right. */
-export function field(label, control, hint) {
-  return h('div.field', h('div.field-label', label), h('div.field-body', control, hint));
+/**
+ * The Skills button. `skills` is the engine's list, `value` the names switched on here, `locked`
+ * the names the session already has.
+ */
+export function skillsPicker({ skills, value, locked = [], disabled = false, align, onChange }) {
+  const options = skills.map((skill) => ({ value: skill.name, label: skill.title, title: skill.description }));
+  return picker({ id: 'pick-skills', name: 'Skills', groups: [{ options }], value, locked, empty: 'Skills', multiple: true, disabled, align, onChange });
+}
+
+/** A form row: label on the left, the control and an optional status line on the right. */
+export function field(label, control, status) {
+  return h('div.field', h('div.field-label', label), h('div.field-body', control, status));
 }
 
 export const hint = (...content) => h('div.field-hint', ...content);
@@ -126,15 +145,18 @@ export function providerOptions(providers) {
     label: provider.name,
     tag: provider.has_key ? null : 'needs key',
     disabled: !provider.has_key,
-    title: provider.has_key ? provider.base_url : `Add a key for ${provider.name} in Settings, or set ${provider.key_env}`,
+    title: provider.base_url,
   }));
 }
+
+/** How an effort policy is named: the engine's `ratchet` adjusts itself. */
+export const effortLabel = (value) => String(value).replace(/^ratchet/, 'auto');
 
 /** Efforts on offer, plus the configured default when it is a variant not in the list. */
 export function effortOptions(current) {
   const values = ['ratchet', 'low', 'high', 'max'];
   if (current && !values.includes(current)) values.push(current);
-  return values.map((value) => ({ value, label: value }));
+  return values.map((value) => ({ value, label: effortLabel(value) }));
 }
 
 /** A provider's models, plus the saved default when it is one the list does not carry. */

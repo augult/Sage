@@ -18,12 +18,26 @@ export const api = {
   startDemo: () => invoke('start_demo'),
   /** Test hook: the session `PRESAGE_UI_SCRIPTED` describes. */
   startScripted: () => invoke('start_scripted'),
-  sendMessage: (id, text) => invoke('send_message', { id, text }),
+  /** `skills` are switched on with this message; the ones the session already has are ignored. */
+  sendMessage: (id, text, skills = []) => invoke('send_message', { id, text, skills }),
   stopSession: (id) => invoke('stop_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
   sessionEvents: (id) => invoke('session_events', { id }),
   readOutput: (id, handle) => invoke('read_output', { id, handle }),
   listDir: (path) => invoke('list_dir', { path }),
+  /** Built-in and user skills, plus the project's own when `cwd` is given. */
+  skills: (cwd) => invoke('list_skills', { cwd }),
+  /** A skill's whole file, front matter included: what `saveSkill` takes. */
+  skillFile: (name, cwd) => invoke('skill_file', { name, cwd }),
+  saveSkill: (name, content) => invoke('save_skill', { name, content }),
+  /** Deletes a user skill; one that replaced a built-in gives the built-in back. */
+  deleteSkill: (name) => invoke('delete_skill', { name }),
+  /** `{ system, system_default, system_custom, global }`. */
+  instructions: () => invoke('instructions'),
+  /** Null or empty goes back to the built-in template. */
+  setSystemPrompt: (template) => invoke('set_system_prompt', { template }),
+  /** Empty deletes the file. */
+  setGlobalInstructions: (text) => invoke('set_global_instructions', { text }),
 
   /** Resolves with the stored events; `onEvent` receives everything emitted after them. */
   subscribe(id, onEvent) {
