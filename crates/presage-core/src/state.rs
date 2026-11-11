@@ -7,7 +7,6 @@ use crate::review::Baseline;
 use crate::tools::jobs::Jobs;
 use crate::watches::Watches;
 use crate::workspace::{Seen, Workspace, fingerprint};
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,7 +14,7 @@ use std::time::Duration;
 
 /// Switches for each mechanism, so that any of them can be ablated and measured. `classic()` is a
 /// conventional tool loop used as the baseline in A/B runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Features {
     /// Calls in one reply run as a script that halts at the first surprise.
     pub scripts: bool,
@@ -90,7 +89,7 @@ impl Features {
 }
 
 /// Output budgets. Sized so a failure is fully legible and a success is never more than a screenful.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub ok_head: usize,
     pub ok_tail: usize,

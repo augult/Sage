@@ -13,7 +13,6 @@ use crate::state::Session;
 use crate::tools::{self, StepOutput, StepStatus, Tool, bool_arg, str_arg};
 use crate::util::{fnv64, one_line};
 use crate::watches::{self, WatchChange, WatchReport, WatchState};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -22,8 +21,7 @@ use std::time::Instant;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Autonomy {
     /// Run everything; only catastrophic commands need a human.
     Auto,

@@ -5,18 +5,16 @@
 //! script and is reported in detail. See `script.rs` for how verdicts drive execution.
 
 use regex::RegexBuilder;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitExpect {
     Code(i32),
     Nonzero,
     Any,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Expect {
     /// `None` means the default: exit code 0, or any exit code when only output text is predicted.
     pub exit: Option<ExitExpect>,
@@ -24,7 +22,7 @@ pub struct Expect {
     pub lacks: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Verdict {
     /// False when the model made no prediction and only the implicit "exit 0" applied.
     pub explicit: bool,
