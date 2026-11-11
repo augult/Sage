@@ -285,7 +285,7 @@ impl Agent {
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
 
-        let (mut turns_used, mut empties, mut nudges_left, mut loop_retries) = (0u32, 0u32, 1u32, 1u32);
+        let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
         let outcome = loop {
             if cancel.is_cancelled() {
                 break Outcome { status: FinishStatus::Stopped, summary: "Stopped by the user.".into(), verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
@@ -324,6 +324,24 @@ impl Agent {
                     loop_retries -= 1;
                     let msg = "Your last reply got stuck repeating itself and was cut off. Do not think it through again: send the next tool call now.";
                     self.note("loop", msg);
+                    self.ctx.push(Message::user(format!("[harness] {msg}")));
+                    continue;
+                }
+                Err(ProviderError::Overthinking(chars)) if overthinking_left > 0 => {
+                    overthinking_left -= 1;
+                    // The stream was cut before the provider reported usage: count what was seen.
+                    let tokens = chars as u64 / 4;
+                    self.stats.output_tokens += tokens;
+                    self.stats.reasoning_tokens += tokens;
+                    if let Some(p) = self.sess.prices {
+                        self.stats.cost += p.cost(&crate::provider::Usage { output: tokens, reasoning: tokens, ..Default::default() });
+                    }
+                    let msg = format!("Your last reply was cut off after about {tokens} tokens of thinking with no tool call. Do not work the whole task out in your head: send the first tool calls now and think between steps, with their results in front of you.");
+                    self.note("overthinking", &msg);
+                    if let Some(lower) = self.effort.lower() {
+                        self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
+                        self.effort = lower;
+                    }
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
@@ -388,14 +406,21 @@ impl Agent {
             });
 
             if calls.is_empty() {
-                if resp.content.trim().is_empty() {
+                // A reply the output limit cut off is not an answer, whatever text it got to.
+                let cut_off = resp.finish == "length";
+                if resp.content.trim().is_empty() || cut_off {
                     empties += 1;
                     if empties > 2 {
                         let message = "the model returned neither a tool call nor an answer three times in a row".to_string();
                         self.sink.emit(EventKind::Error { message: message.clone() });
                         break Outcome { status: FinishStatus::Error, summary: message, verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
                     }
-                    let msg = if resp.finish == "length" {
+                    let msg = if cut_off {
+                        // Thinking that fills the whole reply will do so again unless it is given less room.
+                        if let Some(lower) = self.effort.lower().filter(|_| resp.usage.reasoning * 10 >= resp.usage.output * 9) {
+                            self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
+                            self.effort = lower;
+                        }
                         "Your reply hit the output limit before any tool call or answer. Keep the reasoning short and send the tool calls."
                     } else {
                         "Your reply contained no tool call and no answer. Continue the task: call a tool, or call finish."
@@ -404,10 +429,14 @@ impl Agent {
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
-                // Prose only. With nobody watching, unchecked changes get one reminder of the gate.
-                if features.gate && !self.cfg.interactive && !self.sess.evidence.fresh() && nudges_left > 0 {
+                // Prose only. With nobody watching, there is one reminder: of the gate where changes
+                // are unchecked, and otherwise that a plan announced to nobody is not the work.
+                if features.gate && !self.cfg.interactive && nudges_left > 0 {
                     nudges_left -= 1;
-                    let msg = format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change);
+                    let msg = match self.sess.evidence.fresh() {
+                        false => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
+                        true => "You replied without a tool call, and nobody is here to read it or to answer. If the task is not done, carry on with tool calls. If that was your answer, call finish with it as the summary.".to_string(),
+                    };
                     self.note("gate", &msg);
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
@@ -632,6 +661,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unattended_a_plan_in_prose_or_a_reply_cut_off_is_not_taken_for_the_answer() {
+        let plan = MockTurn::say("I'll start by reading the file.");
+        let cut = MockTurn { finish: Some("length".into()), ..MockTurn::say("First I will") };
+        let finish = MockTurn::calls("", vec![("finish", json!({"summary": "three lines"}))]);
+        let mut r = rig("agent-plan", AgentConfig::new("mock"), vec![fixed(plan), fixed(cut), fixed(finish)]);
+        let out = r.agent.run("How many lines has n.txt?".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.summary.as_str(), r.agent.stats.turns), (FinishStatus::Done, "three lines", 3));
+        let said: Vec<&str> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::User).map(|m| m.content.as_str()).collect();
+        assert!(said[1].starts_with("[harness] You replied without a tool call, and nobody is here") && said[2].starts_with("[harness] Your reply hit the output limit"), "{said:?}");
+    }
+
+    #[tokio::test]
     async fn a_call_cut_off_by_the_output_limit_is_never_executed() {
         let mut cut = MockTurn::calls("", vec![("shell", json!({"cmd": "echo first"})), ("write", json!({"path": "big.txt", "content": "half a fi"}))]);
         cut.finish = Some("length".into());
@@ -681,7 +722,7 @@ mod tests {
         let turns = vec![
             fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "sleep 30", "background": true}))])),
             fixed(MockTurn::calls("", vec![("job", json!({"id": "bg:1", "kill": true}))])),
-            fixed(MockTurn::say("Started it and stopped it again.")),
+            fixed(MockTurn::calls("", vec![("finish", json!({"summary": "Started it and stopped it again."}))])),
         ];
         let mut r = rig("agent-jobs", AgentConfig::new("mock"), turns);
         r.agent.run("start the server, then stop it".into(), &CancellationToken::new()).await;

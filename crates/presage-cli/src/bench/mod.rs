@@ -382,6 +382,24 @@ fn write_file(root: &Path, rel: &str, content: &str) -> std::io::Result<()> {
     std::fs::write(path, content)
 }
 
+/// Makes the workspace a git repository holding the task as shipped, as a project would be: `git
+/// diff` then shows an agent its own changes, and git commands cannot reach a repository further
+/// up. Without git the run goes ahead in a plain folder.
+fn baseline_commit(ws: &Path) {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(["-c", "user.name=bench", "-c", "user.email=bench@localhost", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(ws)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let _ = git(&["init", "-q"]) && git(&["add", "-A"]) && git(&["commit", "-q", "-m", "task as shipped"]);
+}
+
 fn materialize(root: &Path, files: &[(&str, &str)]) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     files.iter().try_for_each(|(path, content)| write_file(root, path, content))
@@ -532,6 +550,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         run.error = Some(format!("could not create the workspace: {e}"));
         return run;
     }
+    baseline_commit(&ws);
     if let (Some(name), Some((dir, proxy))) = (&job.variant.external, &shared.external) {
         let script = external::script(dir, name);
         let home = shared.dir.join("external").join(&label);

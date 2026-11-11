@@ -296,6 +296,9 @@ pub(crate) struct Accum {
 }
 
 const LOOP_CHECK_EVERY: usize = 600;
+/// Reasoning allowed in one reply before anything else has come (about 14,000 tokens). Past it the
+/// reply would rather hit the output limit than act, having cost minutes.
+const REASONING_CAP: usize = 56_000;
 
 impl Accum {
     /// Feeds one line of the response body. Returns true once the stream signalled completion.
@@ -357,6 +360,9 @@ impl Accum {
             self.unchecked = 0;
             if is_looping(&self.reasoning) || is_looping(&self.content) {
                 return Err(ProviderError::Degenerate);
+            }
+            if self.reasoning.len() > REASONING_CAP && self.content.is_empty() && self.calls.is_empty() {
+                return Err(ProviderError::Overthinking(self.reasoning.len()));
             }
         }
 
@@ -502,6 +508,13 @@ mod tests {
         let chunk = format!(r#"data: {{"choices":[{{"delta":{{"reasoning":"{}"}}}}]}}"#, "I should re-check the file. ".repeat(30));
         let lines: Vec<&str> = vec![chunk.as_str(); 4];
         assert!(matches!(feed(&lines).unwrap_err(), ProviderError::Degenerate));
+
+        // Thinking without end is cut too, unless an answer or a call has begun.
+        let thought: String = (0..700).map(|i| format!("Step {i}: consider case {i}. ")).collect();
+        let chunk = format!(r#"data: {{"choices":[{{"delta":{{"reasoning":"{thought}"}}}}]}}"#);
+        assert!(matches!(feed(&[chunk.as_str(); 4]).unwrap_err(), ProviderError::Overthinking(n) if n > REASONING_CAP));
+        let answer = r#"data: {"choices":[{"delta":{"content":"Here is the answer."}}]}"#;
+        assert!(feed(&[answer, chunk.as_str(), chunk.as_str(), chunk.as_str(), chunk.as_str(), "data: [DONE]"]).is_ok());
     }
 
     #[test]

@@ -92,6 +92,15 @@ impl Effort {
         }
     }
 
+    pub fn lower(self) -> Option<Effort> {
+        match self {
+            Effort::Max => Some(Effort::High),
+            Effort::High => Some(Effort::Low),
+            Effort::Low => Some(Effort::Off),
+            Effort::Off => None,
+        }
+    }
+
     pub fn next(self) -> Option<Effort> {
         match self {
             Effort::Off => Some(Effort::Low),
@@ -157,6 +166,8 @@ pub enum ProviderError {
     Http { status: u16, message: String, retry_after_secs: Option<u64> },
     Network(String),
     Protocol(String),
+    /// The model thought this many characters without an answer or a tool call; the stream was cut.
+    Overthinking(usize),
     /// The model got stuck repeating itself; the stream was cut to stop paying for it.
     Degenerate,
 }
@@ -166,7 +177,7 @@ impl ProviderError {
         match self {
             ProviderError::Http { status, .. } => matches!(status, 408 | 409 | 425 | 429 | 500..=599),
             ProviderError::Network(_) | ProviderError::Protocol(_) => true,
-            ProviderError::Cancelled | ProviderError::Degenerate => false,
+            ProviderError::Cancelled | ProviderError::Degenerate | ProviderError::Overthinking(_) => false,
         }
     }
 }
@@ -179,6 +190,7 @@ impl fmt::Display for ProviderError {
             ProviderError::Network(m) => write!(f, "network error: {m}"),
             ProviderError::Protocol(m) => write!(f, "unexpected provider response: {m}"),
             ProviderError::Degenerate => write!(f, "model output degenerated into repetition"),
+            ProviderError::Overthinking(chars) => write!(f, "the model reasoned for {chars} characters without acting"),
         }
     }
 }
