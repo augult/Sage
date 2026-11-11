@@ -53,6 +53,9 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
         None => StepOutput::ok(format!("[ok] {verb} {shown} ({lines} lines, {})", fmt_bytes(content.len() as u64))),
     };
     out.changed_files = true;
+    let old_lines: Option<Vec<String>> = before.as_deref().map(|text| text.lines().map(String::from).collect());
+    let new_lines: Vec<String> = content.lines().map(String::from).collect();
+    out.change = Some(crate::diff::change(&shown, old_lines.as_deref(), &new_lines));
     out
 }
 
@@ -68,6 +71,7 @@ mod tests {
         let out = run(&mut s, &json!({"path": "pkg/sub/notes.md", "content": "# Notes\n\nhello\n"})).await;
         assert_eq!(out.observation, "[ok] wrote pkg/sub/notes.md (3 lines, 15 B)");
         assert!(out.changed_files);
+        assert_eq!(out.change.as_ref().map(|c| (c.path.as_str(), c.created, c.added, c.removed)), Some(("pkg/sub/notes.md", true, 3, 0)));
 
         let clobber = run(&mut s, &json!({"path": "pkg/sub/notes.md", "content": "gone"})).await;
         assert_eq!(clobber.status, StepStatus::Error);
