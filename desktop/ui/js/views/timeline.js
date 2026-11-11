@@ -1,47 +1,37 @@
-// The session timeline. One element per timeline item, rebuilt only when that item changed;
-// streamed text is patched in place. Disclosure state lives in `ctx.expanded`, so a rebuilt
-// item comes back the way the user left it.
+// The session timeline, as a conversation: what was asked, what the agent answered, and for each
+// turn one quiet line that says what it did. That line unfolds into the tree of the turn's tool
+// calls, and each call unfolds into what it predicted and what came back. Nothing is unfolded until
+// the user asks, and nothing is tinted: state is said in words.
+//
+// One element per timeline item, rebuilt only when that item changed; streamed text is patched in
+// place. Disclosure state lives in `ctx.expanded`, so a rebuilt item comes back the way the user
+// left it.
 //
 // ctx: { expanded: Map, canAnswer(): boolean, answer(approvalId, allow): Promise, openOutput(handle) }
 
+import { activity, stepVerb } from '../activity.js';
 import { h, icon, spinner } from '../dom.js';
 import { bytes, duration, firstLine, k, pct, plural } from '../format.js';
-import { known, outcomeLook, tag } from './common.js';
+import { known, outcomeLook } from './common.js';
 
-const STEP_LOOKS = {
-  ok: { icon: 'check', tone: 'teal', label: 'ok' },
-  surprise: { icon: 'bang', tone: 'amber', label: 'surprise' },
-  error: { icon: 'cross', tone: 'red', label: 'error' },
-  skipped: { icon: 'dash', tone: 'plain', label: 'skipped' },
-  running: { icon: 'clock', tone: 'azure', label: 'in background' },
-  denied: { icon: 'denied', tone: 'red', label: 'denied' },
-  unfinished: { icon: 'dash', tone: 'plain', label: 'did not finish' },
-};
+// How a step ended, when it was not simply fine.
+const STATE_WORDS = { surprise: 'surprise', error: 'failed', skipped: 'skipped', running: 'in background', denied: 'denied', unfinished: 'did not finish' };
 
-// Steps whose observation is worth reading without being asked.
-const OPEN_BY_DEFAULT = new Set(['surprise', 'error', 'denied', 'running']);
-
-const CACHE_LOOKS = {
-  first: ['first request', 'plain'],
-  hit: ['cache hit', 'teal'],
-  partial: ['partial cache', 'amber'],
-  miss: ['cache miss', 'amber'],
-  bust: ['cache bust', 'amber'],
-  unknown: ['no usage', 'plain'],
-};
+const CACHE_WORDS = { first: 'first request', hit: 'cache hit', partial: 'partial cache', miss: 'cache miss', bust: 'cache bust', unknown: 'no usage' };
 
 const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', error: 'Failed' };
 
-// Characters of chip text that still read as one slim line.
-const LONG_CHIP = 140;
+// Characters of a note that still read as one slim line.
+const LONG_NOTE = 140;
 
 export function createTimeline(container, ctx) {
   const rendered = [];
+  const asides = new Map();
 
   function build(item) {
     let view;
     try {
-      view = item.kind === 'turn' ? turnCard(item, ctx) : { el: (ITEMS[item.kind] ?? chipRow)(item, ctx) };
+      view = item.kind === 'turn' ? turnView(item, ctx) : { el: (ITEMS[item.kind] ?? noteRow)(item, ctx) };
     } catch (problem) {
       view = { el: undrawable(item, problem, ctx) };
     }
@@ -49,7 +39,8 @@ export function createTimeline(container, ctx) {
   }
 
   return {
-    update(items) {
+    update(all) {
+      const items = gather(all, asides);
       items.forEach((item, i) => {
         const have = rendered[i];
         if (have?.item.key !== item.key) {
@@ -71,38 +62,69 @@ export function createTimeline(container, ctx) {
   };
 }
 
+/**
+ * What arrives outside any turn (the environment snapshot, a note, a lesson) is folded into one
+ * line per stretch of it, as a turn's tool calls are. `made` keeps each line's item from one update
+ * to the next, so that an unchanged one is not drawn again.
+ */
+function gather(items, made) {
+  const out = [];
+  for (const item of items) {
+    if (item.kind !== 'env' && item.kind !== 'chip') out.push(item);
+    else if (out.at(-1)?.kind === 'aside') out.at(-1).rows.push(item);
+    else out.push({ kind: 'aside', key: `${item.key}-aside`, rev: 0, rows: [item] });
+  }
+  const keys = new Set();
+  const kept = out.map((item) => {
+    if (item.kind !== 'aside') return item;
+    keys.add(item.key);
+    const before = made.get(item.key);
+    if (before?.rows.length === item.rows.length && before.rows.every((row, i) => row === item.rows[i])) return before;
+    made.set(item.key, item);
+    return item;
+  });
+  for (const key of made.keys()) if (!keys.has(key)) made.delete(key);
+  return kept;
+}
+
 /** Stands in for an item or row that could not be drawn, so that one bad entry costs only itself. */
 function undrawable(item, problem, ctx) {
-  return chipRow({ key: `${item.key}-undrawable`, tone: 'red', label: 'cannot display', text: `${item.kind}: ${problem}` }, ctx);
+  return noteRow({ key: `${item.key}-undrawable`, label: 'cannot display', text: `${item.kind}: ${problem}` }, ctx);
 }
 
-/** A button that opens and closes, shows `body` (if any) while open, and remembers the choice under `key`. */
-function disclosure(ctx, key, openByDefault, className, body, ...content) {
+/** The mark of everything that unfolds. It turns as its toggle opens (styles/session.css). */
+function chevron() {
+  const mark = icon('chevron', 14);
+  mark.classList.add('chev');
+  return mark;
+}
+
+/**
+ * Makes `toggle` open and close `body` and returns the wrapper to put in the page. The body slides
+ * rather than appears, so it stays in the page while shut: inert, so that nothing in it takes
+ * focus. Everything starts shut; the user's choice is remembered under `key`.
+ */
+function fold(ctx, key, toggle, body) {
+  const wrap = h('div.fold', h('div.fold-inner', body));
   const show = (open) => {
     toggle.setAttribute('aria-expanded', String(open));
-    if (body) body.hidden = !open;
+    wrap.classList.toggle('is-open', open);
+    wrap.inert = !open;
   };
-  const toggle = h(
-    `button.${className}`,
-    {
-      type: 'button',
-      onclick: () => {
-        const open = toggle.getAttribute('aria-expanded') !== 'true';
-        ctx.expanded.set(key, open);
-        show(open);
-      },
-    },
-    ...content,
-  );
-  show(ctx.expanded.get(key) ?? openByDefault);
-  return toggle;
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    ctx.expanded.set(key, open);
+    show(open);
+  });
+  show(ctx.expanded.get(key) === true);
+  return wrap;
 }
 
-/** Engine text, verbatim. `out:N` handles open the full output; a leading [STATUS] is tinted. */
-function verbatim(text, ctx, tone) {
+/** Engine text, verbatim. `out:N` handles open the full output; a leading [STATUS] is set in bold. */
+function verbatim(text, ctx) {
   const pre = h('pre.block');
   const status = /^\[[A-Za-z]+\]/.exec(text)?.[0] ?? '';
-  if (status) pre.append(h(`span.obs-tag.tone-${tone}`, status));
+  if (status) pre.append(h('span.obs-tag', status));
   let from = status.length;
   for (const match of text.matchAll(/\bout:\d+\b/g)) {
     if (match.index < from) continue;
@@ -115,163 +137,166 @@ function verbatim(text, ctx, tone) {
 
 const ITEMS = {
   user(item) {
-    return h('section.user', h('div.label', item.followUp ? 'Follow-up' : 'Task'), h('div.user-text', item.text));
+    return h('section.user', { 'aria-label': item.followUp ? 'Follow-up' : 'Task' }, item.text);
   },
 
-  env(item, ctx) {
-    const body = h('pre.block', item.text);
-    const lines = item.text.split('\n').length;
-    const toggle = disclosure(ctx, item.key, false, 'fold-toggle', body, icon('chevron', 12), 'Environment snapshot', h('span.muted', `· ${plural(lines, 'line')}`));
-    return h('section.env', toggle, body);
+  /** What came in beside the turns. The snapshot needs no row of its own to open: it is the block. */
+  aside(item, ctx) {
+    const snapshots = item.rows.filter((row) => row.kind === 'env').length;
+    const notes = item.rows.length - snapshots;
+    const label = [snapshots > 0 && 'Environment snapshot', notes > 0 && plural(notes, 'note')].filter(Boolean).join(', ');
+    const toggle = h('button.activity-toggle', { type: 'button' }, h('span.activity-label', label), chevron());
+    const tree = h('div.tree', item.rows.map((row) => (row.kind === 'env' ? h('div.tree-block', verbatim(row.text, ctx)) : noteRow(row, ctx))));
+    return h('section.aside', toggle, fold(ctx, item.key, toggle, tree));
   },
 
+  /** How the run ended: its summary as the answer it is, and one line for the outcome. */
   result(item) {
     const look = outcomeLook(item.status, item.verified);
-    // "Verified" vouches for a finished task. Unchecked changes are worth flagging however the run ended.
-    const badge = !item.verified
-      ? tag('unverified', 'amber')
-      : item.status === 'done' && tag('verified', 'teal');
+    const summary = item.summary.trim();
+    // The evidence says in its own words whether the result was checked; without it, one word does.
+    const checked = item.evidence || (!item.verified ? 'unverified' : item.status === 'done' ? 'verified' : '');
     return h(
-      `section.result.tone-${look.tone}`,
-      h('div.result-head', h('span.glyph', icon(look.icon)), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), badge, h('span.result-evidence', item.evidence)),
-      item.summary.trim() && !item.repeatsReply && h('div.result-summary', item.summary.trim()),
+      'section.result',
+      summary && !item.repeatsReply && h('div.reply', summary),
+      h('div.result-line', icon(look.icon, 14), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), checked && h('span', `· ${checked}`)),
     );
   },
 
   approval: approvalRow,
-  chip: chipRow,
 };
 
-function turnCard(turn, ctx) {
-  const stream = h('div.turn-stream', streamBlocks(turn, ctx));
-  const rows = turn.rows.map((row) => {
-    try {
-      return row.kind === 'step' ? stepRow(row, ctx, turn) : (ITEMS[row.kind] ?? chipRow)(row, ctx);
-    } catch (problem) {
-      return undrawable(row, problem, ctx);
-    }
-  });
-  const queued = turn.live && turn.reply ? turn.reply.calls - turn.steps.size : 0;
-  if (queued > 0) rows.push(h('div.queued', `${plural(queued, 'more step')} queued`));
-  const el = h(`section.turn${turn.live ? '.is-live' : ''}`, { dataset: { turn: turn.turn } }, turnHead(turn), stream, h('div.script', rows));
-  return { el, patch: () => stream.replaceChildren(...streamBlocks(turn, ctx)) };
+function turnView(turn, ctx) {
+  const el = h(`section.turn${turn.live ? '.is-live' : ''}`, { dataset: { turn: turn.turn } }, turnParts(turn, ctx));
+  return { el, patch: () => el.replaceChildren(...turnParts(turn, ctx)) };
 }
 
-function turnHead(turn) {
-  const facts = h('div.turn-facts');
+/**
+ * A turn on the page: what the model said, the line for what it did with the tree folded under it,
+ * and any approval request that is waiting, which cannot wait inside a fold.
+ */
+function turnParts(turn, ctx) {
+  const streaming = turn.live && !turn.reply;
+  const content = turn.content.trim();
+  const reply = content && h('div.reply', content, streaming && h('span.caret'));
+
+  const rows = [];
+  const cards = [];
+  const reasoning = turn.reasoning.trim();
+  if (reasoning) {
+    const body = h('div.thought', reasoning, streaming && !content && h('span.caret'));
+    rows.push(treeRow(ctx, `${turn.key}-reasoning`, [h('span.tree-verb', streaming ? 'Thinking' : 'Thought'), h('span.tree-preview', firstLine(reasoning))], body));
+  }
+  for (const row of turn.rows) {
+    try {
+      if (row.kind === 'approval' && awaitsAnswer(row, ctx)) cards.push(approvalRow(row, ctx));
+      else rows.push(row.kind === 'step' ? stepRow(row, ctx, turn) : (ITEMS[row.kind] ?? noteRow)(row, ctx));
+    } catch (problem) {
+      rows.push(undrawable(row, problem, ctx));
+    }
+  }
+
+  let line = null;
+  const said = activity(turn);
+  if (said) {
+    const queued = turn.live && turn.reply ? turn.reply.calls - turn.steps.size : 0;
+    const toggle = h(
+      'button.activity-toggle',
+      { type: 'button' },
+      said.busy && spinner(),
+      h('span.activity-label', said.parts.map((part) => (typeof part === 'string' ? part : h('b', part.name)))),
+      said.notes.length > 0 && h('span.activity-notes', `· ${said.notes.join(', ')}`),
+      said.since != null && h('span.activity-timer', { dataset: { since: said.since } }),
+      chevron(),
+    );
+    const tree = h('div.tree', rows, queued > 0 && h('div.tree-facts', `${plural(queued, 'more step')} queued`), turnFacts(turn));
+    line = h('div.activity', toggle, fold(ctx, turn.key, toggle, tree));
+  }
+  // Words before tool calls introduce them; with no calls, the thinking came before the words.
+  const acted = turn.steps.size > 0;
+  return [acted && reply, line, !acted && reply, cards].flat().filter(Boolean);
+}
+
+/** The numbers of a turn, at the foot of its tree. */
+function turnFacts(turn) {
+  const facts = [`Turn ${turn.turn}`];
   const reply = turn.reply;
   if (reply) {
     const { usage } = reply;
-    facts.append(
-      h('span', h('b', duration(reply.ms))),
-      h('span', 'in ', h('b', k(usage.prompt)), ` · ${pct(usage.cached, usage.prompt)} cached`),
-      h('span', 'out ', h('b', k(usage.output)), ` · ${k(usage.reasoning)} thinking`),
-    );
-    if (reply.repairs > 0) facts.append(tag(`${reply.repairs} repaired`, 'amber'));
-    if (reply.finish === 'length') facts.append(tag('output limit', 'amber'));
-  } else if (turn.live) {
-    facts.append(h('span.thinking', spinner(), 'thinking', h('span', { dataset: { since: turn.startedAt } })));
-  } else {
-    facts.append(h('span', 'no reply'));
+    facts.push(duration(reply.ms), `in ${k(usage.prompt)}, ${pct(usage.cached, usage.prompt)} cached`, `out ${k(usage.output)}, ${k(usage.reasoning)} thinking`);
+    if (reply.repairs > 0) facts.push(`${reply.repairs} repaired`);
+    if (reply.finish === 'length') facts.push('output limit');
+  } else if (!turn.live) {
+    facts.push('no reply');
   }
   if (turn.cache) {
     const { verdict, cached, expected } = turn.cache;
-    const [label, tone] = known(CACHE_LOOKS, verdict) ?? [`cache ${verdict}`, 'plain'];
-    facts.append(tag(label, tone, expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null));
+    facts.push(h('span', { title: expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null }, known(CACHE_WORDS, verdict) ?? `cache ${verdict}`));
   }
-  return h('header.turn-head', h('span.turn-no', `Turn ${turn.turn}`), tag(`effort ${turn.effort}`), facts);
+  if (turn.effort) facts.push(`effort ${turn.effort}`);
+  return h('div.tree-facts', facts.flatMap((fact, i) => (i ? [' · ', fact] : [fact])));
 }
 
-/** Reasoning (open while the turn is live, folded to a one-line preview afterwards) and the reply text. */
-function streamBlocks(turn, ctx) {
-  const streaming = turn.live && !turn.reply;
-  const caret = () => streaming && h('span.caret');
-  const blocks = [];
-  const reasoning = turn.reasoning.trim();
-  if (reasoning) {
-    const body = h('div.reasoning-body', reasoning, !turn.content && caret());
-    const preview = h('span.fold-preview', firstLine(reasoning));
-    const toggle = disclosure(ctx, `${turn.key}-reasoning`, turn.live, 'fold-toggle', body, icon('chevron', 12), h('span.label', 'Reasoning'), preview);
-    // The preview stands in for the body, so it shows only while the body is hidden.
-    const sync = () => (preview.hidden = !body.hidden);
-    toggle.addEventListener('click', sync);
-    sync();
-    blocks.push(h('div.reasoning', toggle, body));
-  }
-  if (turn.content.trim()) blocks.push(h('div.reply', turn.content.trim(), caret()));
-  return blocks;
+/** One row of a tree. With `detail` it is a toggle that unfolds it; without, a plain line. */
+function treeRow(ctx, key, line, detail, options = {}) {
+  const { state, ...attributes } = options;
+  const spec = `div.tree-row${state ? `.is-${state.replace(/[^a-z0-9-]/gi, '')}` : ''}`;
+  if (!detail) return h(spec, attributes, h('div.tree-line', h('span.chev-slot'), line));
+  const toggle = h('button.tree-line', { type: 'button' }, chevron(), line);
+  return h(spec, attributes, toggle, fold(ctx, key, toggle, detail));
 }
 
 function stepRow(step, ctx, turn) {
   // A step with no end in a turn that is over was cut short (stop, or the app closing).
   const status = step.status === 'active' && !turn.live ? 'unfinished' : step.status;
   const active = status === 'active';
-  const look = active ? { tone: 'azure', label: 'running' } : known(STEP_LOOKS, status) ?? { icon: 'dot', tone: 'plain', label: status };
+  const state = active || status === 'ok' ? null : known(STATE_WORDS, status) ?? status;
   const line = [
-    h('span.step-no', String(step.idx + 1)),
-    h('span.step-tool', step.tool),
-    h('span.step-main', h('span.step-summary', step.summary), status === 'skipped' && tag('skipped'), status === 'unfinished' && tag('did not finish'), expectChip(step, status)),
-    active ? h('span.step-took', { dataset: { since: step.startedAt } }) : step.ms >= 100 && h('span.step-took', duration(step.ms)),
+    h('span.tree-verb', stepVerb(step.tool, active)),
+    h('span.tree-what', step.summary),
+    state && h('span.tree-state', state),
+    active ? h('span.tree-took', spinner(), h('span', { dataset: { since: step.startedAt } })) : step.ms >= 100 && h('span.tree-took', duration(step.ms)),
   ];
-  const row = h(
-    `div.row.step.is-${status.replace(/[^a-z0-9-]/gi, '')}`,
-    { dataset: { step: `${turn.turn}.${step.idx + 1}` } },
-    h(`span.step-glyph.tone-${look.tone}`, { title: look.label, role: 'img', 'aria-label': look.label }, active ? spinner() : icon(look.icon, 12)),
-  );
-  if (status === 'skipped') {
-    row.append(h('div.step-line', line), h('div.step-note', step.observation.replace(/^\[skipped\]\s*/, '')));
-  } else if (!step.observation) {
-    row.append(h('div.step-line', line));
-  } else {
-    // Violations the observation's first line does not already state.
-    const unstated = step.violations.filter((violation) => !firstLine(step.observation).includes(violation));
-    const detail = h(
-      'div.step-detail',
-      unstated.map((violation) => h('div.step-violation', violation)),
-      verbatim(step.observation, ctx, look.tone),
-      step.hidden > 0 && h('div.step-foot', `${bytes(step.hidden)} kept out of context`),
-    );
-    row.append(disclosure(ctx, step.key, OPEN_BY_DEFAULT.has(status), 'step-line', detail, line), detail);
-  }
-  return row;
+  return treeRow(ctx, step.key, line, stepDetail(step, status, ctx), { state: status, dataset: { step: `${turn.turn}.${step.idx + 1}` } });
 }
 
-/** The prediction for a step. It turns teal when it held and amber when reality contradicted it. */
-function expectChip(step, status) {
-  if (step.expect == null) {
-    return status === 'surprise' ? h('span.expect.is-violated', h('span.expect-text', 'surprise')) : null;
-  }
-  const verdict = status === 'ok' && step.explicit ? 'held' : status === 'surprise' ? 'violated' : null;
+/** What unfolds under a step: its prediction and whether it held, then what came back. */
+function stepDetail(step, status, ctx) {
+  const skipped = status === 'skipped';
+  const observation = skipped ? step.observation.replace(/^\[skipped\]\s*/, '') : step.observation;
+  if (!observation && step.expect == null) return null;
+  const verdict = status === 'ok' && step.explicit ? 'held' : status === 'surprise' ? 'did not hold' : null;
+  // Violations the observation's first line does not already state.
+  const unstated = step.violations.filter((violation) => !firstLine(step.observation).includes(violation));
   return h(
-    `span.expect${verdict ? `.is-${verdict}` : ''}`,
-    h('span.expect-text', `expect ${step.expect}`),
-    verdict && h('span.expect-verdict', icon(verdict === 'held' ? 'check' : 'bang', 12), verdict),
+    'div.tree-detail',
+    step.expect != null && h('div.detail-line', h('span.detail-key', 'Expected'), h('span.detail-mono', step.expect), verdict && h('span.detail-verdict', verdict)),
+    unstated.map((violation) => h('div.detail-line', violation)),
+    observation && (skipped ? h('div.detail-line', observation) : verbatim(observation, ctx)),
+    step.hidden > 0 && h('div.detail-foot', `${bytes(step.hidden)} kept out of context`),
   );
 }
 
-/** A slim note. One that is long or runs over several lines is cut to a line and unfolds on demand. */
-function chipRow(chip, ctx) {
-  const [head, ...rest] = chip.text.split('\n');
-  const content = [h('span.chip-label', chip.label), chip.badge && h('span.chip-badge', chip.badge), h('span.chip-text', head)];
-  const row = h(`div.row.chip.tone-${chip.tone}`, h('span.chip-dot'));
-  if (rest.length || head.length > LONG_CHIP) {
-    const body = rest.length ? verbatim(rest.join('\n'), ctx, chip.tone) : null;
-    const more = icon('chevron', 12);
-    more.classList.add('chip-more');
-    row.append(disclosure(ctx, chip.key, false, 'chip-line', body, content, more));
-    if (body) row.append(body);
-  } else {
-    row.append(h('div.chip-line', content));
-  }
-  return row;
+/**
+ * A quiet line for what happened beside the steps: a watch change, a note, a lesson, a retry.
+ * One that is long or runs over several lines shows its first line and unfolds the rest.
+ */
+function noteRow(note, ctx) {
+  const head = firstLine(note.text);
+  const label = note.label.charAt(0).toUpperCase() + note.label.slice(1);
+  const line = [h('span.tree-verb', label), note.badge && h('span.tree-state', note.badge), h('span.tree-preview', head)];
+  const long = head.length < note.text.length || head.length > LONG_NOTE;
+  return treeRow(ctx, note.key, line, long ? h('div.tree-detail', verbatim(note.text, ctx)) : null, { state: 'note' });
 }
 
-/** A prominent card while the request waits; a chip once it is answered or can no longer be. */
+const awaitsAnswer = (row, ctx) => row.state === 'pending' && ctx.canAnswer();
+
+/** A card while the request waits; a quiet line once it is answered or can no longer be. */
 function approvalRow(row, ctx) {
-  if (row.state !== 'pending' || !ctx.canAnswer()) {
-    const [tone, verdict] = known({ allowed: ['teal', 'allowed'], denied: ['red', 'denied'] }, row.state) ?? ['plain', 'never answered'];
-    // The row sits under the step it was about, so the reason is all it needs to say.
-    return chipRow({ key: row.key, tone, label: 'approval', badge: verdict, text: row.reason || `${row.tool} ${row.summary}` }, ctx);
+  if (!awaitsAnswer(row, ctx)) {
+    const verdict = known({ allowed: 'allowed', denied: 'denied' }, row.state) ?? 'never answered';
+    // The line sits under the step it was about, so the reason is all it needs to say.
+    return noteRow({ key: row.key, label: 'approval', badge: verdict, text: row.reason || `${row.tool} ${row.summary}` }, ctx);
   }
   const error = h('div.form-error', { role: 'alert', hidden: true });
   const answer = async (allow) => {
@@ -289,14 +314,11 @@ function approvalRow(row, ctx) {
     h('button.btn.primary.approval-allow', { type: 'button', onclick: () => answer(true) }, 'Allow'),
   ];
   return h(
-    'div.row.approval',
+    'div.approval',
     { dataset: { approval: row.id } },
-    h(
-      'div.approval-card',
-      h('div.approval-title', icon('bang'), 'Approval needed'),
-      h('div.approval-what', h('b', row.tool), row.summary),
-      h('div.approval-why', row.reason),
-      h('div.approval-actions', error, buttons),
-    ),
+    h('div.approval-title', icon('bang'), 'Approval needed'),
+    h('div.approval-what', h('b', row.tool), row.summary),
+    h('div.approval-why', row.reason),
+    h('div.approval-actions', error, buttons),
   );
 }

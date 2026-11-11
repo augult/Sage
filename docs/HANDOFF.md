@@ -78,6 +78,14 @@ again. Found while taking them and fixed: after a follow-up whose run ended betw
 Send stayed disabled until the session was opened again (3 of 8 scripted runs before, 0 of 8
 after). Still nobody has driven the app by hand.
 
+**Desktop, the conversation:** the timeline shows only what was said (the task, reply text, the
+closing summary and one line for the outcome). Each turn has one line for what it did ("Read 2
+files, ran a command · 1 surprise") that unfolds into the tree of its tool calls, and each call
+into its prediction and observation; nothing is open by default, and the main pane of a session is
+no longer tinted. `docs/DESKTOP_UI_BRIEF.md` has the rules; `desktop/ui/js/activity.js` writes the
+lines. Checked under xvfb only (screenshots of the folded, unfolded, running and
+waiting-for-approval states, and a recording of the folds sliding).
+
 **To measure first** with a fresh quota, before anything else is touched: `-n 3` on
 `--tasks skill,hard --variants presage,no-review,classic,ext:mini`, both models. Three things to
 look for: runs that end at the turn limit now end `done` with a summary of their own; turns per

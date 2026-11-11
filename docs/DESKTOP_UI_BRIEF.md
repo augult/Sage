@@ -78,14 +78,17 @@ Neutral dark glass: dense, quiet, and the same grey whatever is behind it.
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
 - **Shape.** 8px grid. Radius grows with the thing: 5 tags, 7 controls and rows, 10 cards,
   14 composers and dialogs. Nothing is a pill.
-- **Colour is kept for meaning; the chrome has none.** Azure `#6ea8ff` is the model's side (a
-  prediction, a run in progress), teal `#2dd4bf` held or ok, **amber `#f5a524` surprise**, red
-  `#ef4b55` error. Every state also has a word or a glyph. The primary button is light on dark
-  with no hue, one per view. No gradients, glows or accent borders.
-- **Boxes are rare.** Turns are separated by a rule. Only the task, an approval request and the
-  result are boxed, so the result is what the eye lands on.
-- **Motion.** A view or dialog arriving fades in over 140 ms; a disclosure chevron turns. Nothing
-  else moves, and `prefers-reduced-motion` removes those too.
+- **Colour is kept for meaning; the chrome has none, and neither has the conversation.** In the
+  sidebar, the inspector and Settings: azure `#6ea8ff` is the model's side (a run in progress),
+  teal `#2dd4bf` held or ok, **amber `#f5a524` surprise**, red `#ef4b55` error, and every state
+  also has a word or a glyph. In the session's main pane (header, timeline, composer) nothing is
+  tinted: a state is a word ("surprise", "failed", "skipped", "held"). The primary button is light
+  on dark with no hue, one per view. No gradients, glows or accent borders.
+- **Boxes are rare.** In the conversation only the user's message, an approval request and
+  verbatim output are boxed; the answer is plain text.
+- **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
+  240 ms while its chevron (round-ended) turns a quarter. Nothing else moves, and
+  `prefers-reduced-motion` removes those too.
 - **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Unsaved") or an
   error is shown; a sentence that explains how the product works is not, in a note, a caption, a
   placeholder or a tooltip. Placeholders are a word or two ("Folder", "Task"), empty states two or
@@ -130,18 +133,35 @@ Change a tint, the brightness band in `glass.js` or an ink colour, and these hav
      new session starts with no skills, whatever the last one had; Classic takes none, so the
      button is disabled there. With no key configured, the view leads with "Play the walkthrough"
      (`start_demo`) and "Add an API key", and Start is not the primary button.
-   - *Session*: header (title, cwd, model, active skills, effort, mode, SIMULATED badge, Stop). Timeline: the task,
-     the environment snapshot (collapsed), then a section per turn: number, effort, duration, tokens with
-     cached share, cache verdict; reasoning (streams live, collapses after the turn); the script as
-     step rows on a rail, each with status glyph, tool, summary, an "expect …" chip that turns held or
-     violated, duration, and the observation (expanded for surprise, error, denied, running). Skipped
-     steps are dimmed with the reason. Watch changes, harness notes, lessons, effort changes, trims
-     and retries appear as slim inline chips. Approval requests are a prominent card with Allow /
-     Deny. A result card closes the run: status, verified badge, evidence, summary. Idle sessions get
+   - *Session*: header (title, status, Stop; under it one line: cwd, model, effort, mode, active
+     skills, "asks first", "simulated"). The timeline is a conversation, and by default it shows
+     only what was said: the user's message (a block on the right), each turn's reply text, and
+     the summary the run ended on with one line for the outcome ("Done · verified by watch
+     tests"). Everything else is folded (`ui/js/views/timeline.js`):
+     - **A line per turn** says what the turn did, from its steps (`ui/js/activity.js`): "Read 2
+       files, ran a command", "Edited report.sh". A lone file is named; a `finish` that went
+       through is not counted, since it is the answer. What did not go to plan is appended,
+       because the tree starts folded: "· 1 surprise, 1 skipped". While the turn runs the line
+       has a spinner and says what is happening now ("Thinking 2.1s", "Running sh check.sh
+       0.4s"). A turn with nothing to unfold has no line.
+     - **The line opens the tree**: the reasoning ("Thought", with its first line), a row per
+       step (verb, summary, the state when it was not simply fine, duration), the notes that
+       arrived between them (watch changes, harness notes, lessons, effort changes, trims,
+       retries, answered approvals), and at the foot the turn's numbers (turn, duration, tokens
+       with cached share, cache verdict, effort).
+     - **A row opens its detail**: the prediction and whether it held, then the observation
+       verbatim. `out:N` in it opens the full output via `read_output`.
+     - What arrives outside a turn (the environment snapshot, attach notes, recalled lessons) is
+       gathered into one such line too: "Environment snapshot, 1 note".
+     - An approval request that is waiting is a card with Allow / Deny under the turn's line,
+       never inside a fold.
+
+     Nothing is open until the user opens it, and what they opened stays open across redraws and
+     on coming back to the session. Idle sessions get
      a follow-up box with the same Skills button: the session's skills are checked and locked, and
      any others picked are switched on with the next message (`send_message` with `skills`). Closed
      sessions are read-only replays from `session_events`, marked "read-only" in the header, with
-     no follow-up box. `out:N` in an observation opens the full output via `read_output`.
+     no follow-up box.
    - *Settings*: per provider a password field with Save / Remove (`set_key`), the equivalent
      environment variable, and defaults (`set_defaults`). Never show stored keys. Then three
      sections that edit text files, each a monospace text area with Save (enabled, beside the word
@@ -172,7 +192,9 @@ timeout 60 xvfb-run -a -s "-screen 0 1320x860x24" bash -c \
   'target/desktop/debug/presage-desktop & APP=$!; sleep 12; import -window root /tmp/shot.png; kill $APP; wait $APP 2>/dev/null; true'
 ```
 
-Look at every screenshot. The demo session must show the surprise and the skipped `finish` clearly.
+Look at every screenshot. The demo session must show only the task, three lines and the answer;
+the second line must say "1 surprise, 1 skipped", and its tree, opened, must show the surprise with
+its prediction and the skipped `finish`.
 The walkthrough: reply 1 reads and runs the check (it becomes watch `tests`), reply 2 edits and
 predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (verified by watch
 `tests`).
@@ -186,6 +208,7 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
 | `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
+| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:[data-turn="2"] .activity-toggle;;click:[data-step="2.2"] .tree-line;;click:[data-turn="2"] .tree-row:first-child .tree-line'` |
 | `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]` and two turns, then a follow-up sent with a third skill (`click:#pick-skills`, `click:#pick-skills-menu [data-value="ui"]`, `type:#followup=>…`, `click:#send-followup`) |
 | `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
 | `settings-skills.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
