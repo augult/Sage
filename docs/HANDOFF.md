@@ -59,8 +59,12 @@ He is terse and watches usage. Work in few turns, report numbers whichever way t
    `presage bench --check --tasks hard`, then calibrate both sets.
 3. **External harnesses**: adapters exist; the smoke test was still running when the session
    ended. Not verified by the parent. No head-to-head numbers.
-4. **Memory**: undecided. `scripts/memory-experiment/` holds an unfinished warm-against-cold
-   experiment for `lessons.rs`; no results. Research (`docs/RESEARCH.md`) expects little from it.
+4. **Memory**: undecided, leaning towards removal. No live run was made. A replay of command
+   sequences through the real `LessonBook` (`scripts/memory-experiment/`,
+   `docs/results/memory/lessons-replay.txt`) shows that it learns only the simplest case (a failed
+   command, then a related one that works), learns nothing when the workaround is followed by a
+   code fix, and can mislead: a fix made with `sed -i` produced a wrong lesson. The live
+   warm-against-cold driver (`run.py`) is not written.
 5. **Desktop UI**: untouched. No skills button, no settings for skills or the system prompt, and
    the explanatory text is still there (`grep -n "hint\|'note'" desktop/ui/js/views/*.js`). The
    engine API for all of it is in place.
