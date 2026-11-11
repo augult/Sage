@@ -136,8 +136,8 @@ pub struct Evidence {
     pub last_change: String,
     /// Workspace fingerprint as of the last time it was computed.
     fingerprint: Option<u64>,
-    /// The model has already been told once that it lacks evidence.
-    pub warned: bool,
+    /// How often `finish` has been refused for lack of a check since the last change.
+    pub refusals: u8,
     /// The review of the task has been asked for since the last user message.
     pub reviewed: bool,
     /// The epoch when the last user message arrived: only changes since then are reviewed.
@@ -154,6 +154,7 @@ impl Evidence {
     /// A tool changed files itself.
     pub fn changed(&mut self, what: impl Into<String>) {
         self.epoch += 1;
+        self.refusals = 0;
         self.last_change = what.into();
         self.fingerprint = None;
     }
@@ -172,6 +173,7 @@ impl Evidence {
         self.fingerprint = Some(now);
         if changed {
             self.epoch += 1;
+            self.refusals = 0;
             self.last_change = format!("`{}`", crate::util::one_line(cmd, 80));
         }
         changed
