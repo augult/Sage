@@ -1,6 +1,6 @@
-// What a row of work unfolds into, by the tool that ran: a command with what it printed, a file as
-// it was read, an edit as a before and after, a web search as its sources. All of it is the
-// engine's own text and numbers, set so that it can be read.
+// What a row of work unfolds into, the same for every tool: the input the call was made with, then
+// its output. The output is the engine's own text, or where it has a shape, that shape: an edit as
+// a before and after, a web search as its sources.
 //
 // ctx: { expanded: Map, openOutput(handle) }
 
@@ -8,7 +8,6 @@ import { toolKind } from '../activity.js';
 import { copyButton, h, icon } from '../dom.js';
 import { bytes, firstLine, plural } from '../format.js';
 import * as prefs from '../prefs.js';
-import { prose } from './prose.js';
 
 const ICONS = { shell: 'terminal', read: 'file', search: 'search', edit: 'pencil', write: 'filePlus', watch: 'eye', job: 'clock', finish: 'flag', web_search: 'globe', web_fetch: 'globe' };
 
@@ -251,47 +250,48 @@ function prediction(step, status) {
   return h('div.predict', h('span.predict-key', 'Predicted'), h('span.predict-what', step.expect), verdict && h('span.predict-verdict', verdict));
 }
 
+/** The arguments a step was called with, when the reply that made the call is known. */
+const hasInput = (step) => Boolean(step.args) && Object.keys(step.args).length > 0;
+
 /** A step has something to unfold. */
 export function hasDetail(step) {
-  return Boolean(step.observation || step.expect != null || step.change || toolKind(step.tool) === 'shell');
+  return Boolean(step.observation || step.expect != null || step.change || hasInput(step));
 }
 
-/** What unfolds under a step: what it was asked, what it predicted, and what came back. */
+/** A part of a detail under its name. `action` sits at the end of the name's line. */
+const part = (name, body, action) => h('div.part', h('div.part-head', h('span.part-name', name), action), body);
+
+/**
+ * What unfolds under a step, the same for every tool: the input it was called with, as the model
+ * wrote it, then the output. Where the output has a shape (an edit is a before and after, a search
+ * is its sources) it is set that way, with the engine's own text folded under it.
+ */
 export function stepDetail(step, status, ctx) {
   const kind = toolKind(step.tool);
-  const args = step.args ?? {};
-  const said = (name) => (typeof args[name] === 'string' ? args[name] : '');
   const skipped = status === 'skipped';
   const observation = skipped ? step.observation.replace(/^\[skipped\]\s*/, '') : step.observation;
   // Violations the observation's first line does not already state.
   const unstated = step.violations.filter((violation) => !firstLine(step.observation).includes(violation));
   const change = kind === 'edit' || kind === 'write' ? step.change ?? changeFromCall(step) : null;
+  const found = kind === 'web_search' && !skipped ? sources(step) : [];
 
   const parts = [];
-  if (kind === 'shell') {
-    const command = said('cmd') || step.summary;
-    parts.push(h('div.term-cmd', h('span.term-prompt', { 'aria-hidden': 'true' }, '$'), h('span.term-text', command), copyButton(() => command, 'Copy command')));
-  } else if (kind === 'web_search' || kind === 'web_fetch') {
-    const asked = said('query') || said('q') || said('url') || step.summary;
-    parts.push(h('div.web-query', icon(kind === 'web_search' ? 'search' : 'globe', 14), h('span', asked)));
-  } else if (kind === 'finish' && said('summary').trim() && said('summary').trim() !== step.summary) {
-    parts.push(prose(said('summary')));
+  if (hasInput(step)) {
+    const input = JSON.stringify(step.args, null, 2);
+    parts.push(part('Input', h('pre.block.is-input', input), copyButton(() => input, 'Copy input')));
   }
   if (step.expect != null) parts.push(prediction(step, status));
   parts.push(...unstated.map((violation) => h('div.detail-line', violation)));
 
-  const found = kind === 'web_search' && !skipped ? sources(step) : [];
-  if (change) {
-    parts.push(diffView(change));
-    // The edit as the model was told of it: the changed lines with their fresh anchors.
+  const shaped = change ? diffView(change) : found.length ? sourceList(found) : null;
+  if (shaped) {
+    parts.push(part('Output', shaped));
     if (observation) {
-      const toggle = h('button.sub-toggle', { type: 'button' }, chevron(), 'Observation');
+      const toggle = h('button.sub-toggle', { type: 'button' }, chevron(), 'Raw output');
       parts.push(h('div.sub', toggle, fold(ctx, `${step.key}-observation`, toggle, () => verbatim(observation, ctx))));
     }
-  } else if (found.length) {
-    parts.push(sourceList(found));
   } else if (observation) {
-    parts.push(skipped ? h('div.detail-line', observation) : verbatim(observation, ctx));
+    parts.push(part('Output', skipped ? h('div.detail-line', observation) : verbatim(observation, ctx)));
   }
   if (step.hidden > 0) parts.push(h('div.detail-foot', `${bytes(step.hidden)} kept out of context`));
   return h('div.row-detail', parts);

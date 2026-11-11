@@ -16,12 +16,13 @@ made by scripts in `desktop/art` (Ember, Orchid, Tide, Graphite; or None for fla
 into a light or a dark band behind translucent panes, with an ordered dither drifting over them
 (`backdrop.js`, `dither.js`, `themes.js`). Appearance (System, Light, Dark), background and motion
 are in Settings; the background can also be changed from the New session view. The interface
-itself has no hue, and corners are 2 to 4px.
+itself has no hue, and corners are 2 to 4px. The one colour besides a failure's is an edit's: green
+for lines added, red for lines removed.
 
 **Conversation:** one grey bar per stretch of work is the master toggle of every tool call under
-it. A row opens into a view made for its tool: a command and its output, a file with its anchors,
-an edit as a unified or split before and after, a web search as its sources. Replies are set as
-markdown. A card under the result lists the files the run edited. Stop is in the follow-up box.
+it. A row is one line about what the tool did and opens the same way for every tool: the input
+of the call as JSON, then its output, verbatim or, where it has a shape, as that shape (an edit as
+a unified or split before and after, a web search as its sources). Replies are set as markdown. A card under the result lists the files the run edited. Stop is in the follow-up box.
 
 **Engine:** `step_end` carries a `change` (path, lines added and removed, hunks) for `edit` and
 `write`, made by the new `presage-core/src/diff.rs`.
@@ -29,6 +30,9 @@ markdown. A card under the result lists the files the run edited. Stop is in the
 **Push:** a session whose folder is a git repository has a Push button ("Push to GitHub" on a
 github.com remote). `git_state` and `git_push` (`desktop/src-tauri/src/git.rs`) run the user's
 own git: commit what is uncommitted, push the branch.
+
+**Vercel:** a Vercel project is connected to the repository and failed on every commit, there
+being nothing in it to deploy; `vercel.json` now tells it not to.
 
 **Checked:** `cargo test --workspace` (213); every view under xvfb, in all four paintings and both
 appearances (`docs/screenshots/`, hooks in `docs/DESKTOP_UI_BRIEF.md`); a push from the dialog to

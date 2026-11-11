@@ -15,7 +15,7 @@ const TOOLS = {
   job: { did: 'Job', doing: 'Job', one: 'checked a background job', many: (n) => `checked background jobs ${n} times` },
   finish: { did: 'Finish', doing: 'Finishing' },
   // Not tools of this engine yet: how a web search and a page fetch read once one has them.
-  web_search: { did: 'Searched the web', doing: 'Searching the web', one: 'searched the web', many: (n) => `searched the web ${n} times` },
+  web_search: { did: 'Searched the web for', doing: 'Searching the web for', one: 'searched the web', many: (n) => `searched the web ${n} times` },
   web_fetch: { did: 'Fetched', doing: 'Fetching', one: 'fetched a page', many: (n) => `fetched ${n} pages` },
 };
 
@@ -61,8 +61,9 @@ const TROUBLE = [
 /**
  * The line for a sequence of steps, `[{ tool, summary, status }]` in the order they ran:
  * `{ parts, notes }`. `parts` are strings and `{ name }`s (a file, which the view sets apart) and
- * are empty when no step counts; `notes` say what went otherwise than planned, since the rows that
- * show it start folded away. A status of `active` is a step still running: it is not trouble.
+ * are empty when no step counts; `notes` (`{ status, text }`) say what went otherwise than planned,
+ * since the rows that show it start folded away. A status of `active` is a step still running: it
+ * is not trouble.
  */
 export function summarize(steps) {
   const groups = new Map();
@@ -86,6 +87,6 @@ export function summarize(steps) {
 
   const count = new Map();
   for (const step of steps) count.set(step.status, (count.get(step.status) ?? 0) + 1);
-  const notes = TROUBLE.filter(([status]) => count.has(status)).map(([status, say]) => say(count.get(status)));
+  const notes = TROUBLE.filter(([status]) => count.has(status)).map(([status, say]) => ({ status, text: say(count.get(status)) }));
   return { parts, notes };
 }

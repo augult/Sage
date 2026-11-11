@@ -243,7 +243,8 @@ function workView(block, ctx) {
     busy.hidden = !line.busy;
     el.classList.toggle('is-live', line.busy);
     label.replaceChildren(...line.parts.map((part) => (typeof part === 'string' ? part : h('b', part.name))));
-    notes.textContent = line.notes.join(', ');
+    // Failures in red, here too: the rows that show them start shut.
+    notes.replaceChildren(...line.notes.flatMap((note, i) => [i ? ', ' : null, h(`span${note.status === 'error' ? '.is-failed' : ''}`, note.text)].filter(Boolean)));
     notes.hidden = !line.notes.length;
     meta.replaceChildren(line.since != null ? h('span', { dataset: { since: line.since } }) : line.meta);
     meta.hidden = line.since == null && !line.meta;

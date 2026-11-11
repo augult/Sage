@@ -1,6 +1,7 @@
-/* What a row of work unfolds into (js/views/tools.js): a command and what it printed, a file as it
-   was read, a prediction, an edit as a before and after, a search as its sources, and the card of
-   everything a run edited. All of it grey: an added line is shaded, a removed one is hatched. */
+/* What a row of work unfolds into (js/views/tools.js), the same for every tool: the input it was
+   called with, then its output. The output is the engine's text, or where it has a shape, that
+   shape: a prediction, an edit as a before and after, a search as its sources. Then the card of
+   everything a run edited. All of it grey but an edit: green for added lines, red for removed. */
 
 /* Under its row, in line with the row's words. */
 .row-detail {
@@ -37,6 +38,10 @@ pre.block {
   font-weight: 600;
 }
 
+.row.is-error .obs-tag {
+  color: var(--danger);
+}
+
 /* A file line's anchor: number and hash, stepped back from the text and left out of a selection. */
 .gut {
   color: var(--faint);
@@ -67,53 +72,32 @@ pre.block {
   text-decoration: underline;
 }
 
-/* The command a shell step ran. */
-.term-cmd {
+/* A part of a detail under its name: the input a step was called with, then its output. */
+.part {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 3px 3px 3px 10px;
-  border-radius: var(--r-2);
-  background: var(--fill-2);
-  font: var(--text-sm)/24px var(--mono);
-  letter-spacing: 0;
-}
-
-.term-prompt {
-  flex: none;
-  color: var(--faint);
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.term-text {
-  flex: 1;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
-/* What was searched for or fetched, as the field it was typed into. */
-.web-query {
+.part-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-2);
-  background: var(--well);
-  color: var(--muted);
+  justify-content: space-between;
+  min-height: 24px;
+  padding-left: 2px;
 }
 
-.web-query span {
-  min-width: 0;
-  overflow: hidden;
+.part-name {
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+/* The arguments as the model wrote them. */
+pre.block.is-input {
+  max-height: 220px;
   color: var(--ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* What the step said would happen, and whether it did. */
@@ -174,11 +158,11 @@ pre.block {
 }
 
 .stat-add {
-  color: var(--ink);
+  color: var(--add);
 }
 
 .stat-del {
-  color: var(--faint);
+  color: var(--del);
 }
 
 /* An edit, before and after. */
@@ -278,18 +262,22 @@ pre.block {
 
 .diff-row.is-add,
 .diff-text.is-add {
-  background: var(--fill-3);
+  background: var(--add-soft);
   color: var(--ink);
 }
 
 .diff-row.is-add .diff-sign {
-  color: var(--ink);
+  color: var(--add);
 }
 
 .diff-row.is-del,
 .diff-text.is-del {
-  background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--fill-2) 4px 5px);
-  color: var(--muted);
+  background: var(--del-soft);
+  color: var(--ink);
+}
+
+.diff-row.is-del .diff-sign {
+  color: var(--del);
 }
 
 /* Between two places in the file. */

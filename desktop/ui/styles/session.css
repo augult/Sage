@@ -366,6 +366,10 @@
   font-weight: 500;
 }
 
+.work-notes .is-failed {
+  color: var(--danger);
+}
+
 .work-meta {
   flex: none;
   margin-left: auto;
@@ -509,7 +513,8 @@ button.row-line:focus-visible {
   white-space: nowrap;
 }
 
-.row.is-error :is(.row-icon, .row-state),
+/* A tool that failed says so in red, along its whole line. */
+.row.is-error > .row-line :is(.row-icon, .row-verb, .row-what, .row-state),
 .row.tone-danger :is(.row-icon, .row-preview) {
   color: var(--danger);
 }

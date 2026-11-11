@@ -83,11 +83,13 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   cards, menus, dialogs and the sheet. Nothing is a pill.
 - **The interface has no colour.** Ink, paper and the greys between, in a light and a dark
   appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system). Colour
-  belongs to the painting behind the glass and to one thing that must not be missed, a failure
-  (`--danger`). A state is a word or a glyph ("surprise", "failed", "skipped", "held"); a tone
-  (`.tone-*` in `base.css`) only decides how much ink it gets. Tools are grey: the bar, the
-  rows, and a diff, where an added line is shaded and a removed one hatched. The primary button
-  is ink on paper, one per view. No gradients, glows or accent borders.
+  belongs to the painting behind the glass and to two things: a failure, which must not be
+  missed (`--danger`: a tool that failed has its whole line in red), and an edit, green for what
+  it added and red for what it removed
+  (`--add`, `--del`: the `+5 −1` counts, and behind the lines of a diff). A state is a word or
+  a glyph ("surprise", "failed", "skipped", "held"); a tone (`.tone-*` in `base.css`) only
+  decides how much ink it gets. Tools are otherwise grey: the bar and the rows. The primary
+  button is ink on paper, one per view. No gradients, glows or accent borders.
 - **Boxes are rare.** In the conversation only the user's message, the bar of a stretch of work,
   an approval request, verbatim output and diffs are boxed; the answer is plain text.
 - **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
@@ -132,7 +134,7 @@ with its grain and under a dither dot, the lowest ratios are:
 | Dark, sheet | 15.5 | 11.1 | 7.4 | 4.5 |
 
 So `--ink`, `--soft` and `--muted` keep 4.5:1 everywhere; `--faint` is for marks, placeholders
-and key hints. `--danger` keeps 6.2:1 on the sheet. Change a band in `backdrop.js`, a pane's
+and key hints. On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1. Change a band in `backdrop.js`, a pane's
 fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
@@ -174,13 +176,16 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        removed, duration), and the notes that arrived between them (the environment snapshot,
        watch changes, harness notes, lessons, effort changes, trims, retries, answered
        approvals). The button at the end of the bar opens every row at once, or shuts them all.
-     - **A row opens its detail, by tool** (`ui/js/views/tools.js`): a command as a prompt line
-       with a copy button, the prediction and whether it held, and the observation verbatim
-       (`out:N` in it opens the full output via `read_output`); a file as it was read, with its
-       anchors in a gutter; an edit or a write as a before and after, Unified or Split (the
-       choice is kept), from the `change` the engine sends with `step_end`
-       (`presage-core/src/diff.rs`), with the observation folded under it; a web search as its
-       query and the sources it found (title, site, snippet, copy link).
+     - **A row is one line about what the tool did** ("Ran sh check.sh", "Edited report.sh",
+       "Searched the web for awk printf") **and opens the same way for every tool**
+       (`ui/js/views/tools.js`): **Input**, the arguments of the call as the model wrote them,
+       as JSON, with a copy button; the prediction and whether it held; then **Output**, the
+       observation verbatim (`out:N` in it opens the full output via `read_output`; a file's
+       anchors step back into a gutter). Where the output has a shape it is set that way, with
+       the verbatim text folded under it as "Raw output": an edit or a write as a before and
+       after, Unified or Split (the choice is kept), green for added lines and red for removed,
+       from the `change` the engine sends with `step_end` (`presage-core/src/diff.rs`); a web
+       search as the sources it found (title, site, snippet, copy link).
      - **Edited files**: under the result, a card with a row per file the run edited (lines added
        and removed), each opening into its edits.
      - An approval request that is waiting is a card with Allow / Deny, never inside a fold.
@@ -245,7 +250,7 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
 | `new-session-backgrounds.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-theme'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
-| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:.work-all;;wait:600;;scroll:[data-step="2.1"]'` |
+| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:.work-all;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
 | `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
 | `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
 | `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="ui"]` |
