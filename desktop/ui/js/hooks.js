@@ -9,6 +9,9 @@
 //       scroll:<selector>         wait:<milliseconds>
 //     An action waits for its element to exist, so scripts need no timing of their own.
 //   PRESAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)
+//   PRESAGE_UI_WALLPAPER=<file>             the picture behind the glass, instead of the desktop's
+//                                           (read by the shell; a path that does not exist gives
+//                                           the generated field)
 
 import { api } from './api.js';
 

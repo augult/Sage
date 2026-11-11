@@ -214,7 +214,7 @@ const HANDLERS = {
     s.notes.push({ label: kind || 'note', text: str(ev.text) });
     s.sideRev++;
     // `harness` is the general kind; any other names the mechanism that spoke (attach, gate, …).
-    place(s, ev, chip(s, 'violet', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
+    place(s, ev, chip(s, 'azure', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
   },
 
   lesson(s, ev) {
@@ -237,7 +237,7 @@ const HANDLERS = {
   },
 
   effort(s, ev) {
-    place(s, ev, chip(s, 'violet', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'azure', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
   },
 
   decay(s, ev) {

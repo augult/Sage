@@ -15,7 +15,7 @@ const unfolded = new Map();
 
 export function mountSession(main, side, app, meta) {
   const entry = store.open(meta);
-  const head = h('header.session-head');
+  const head = h('header.session-head', { 'data-tauri-drag-region': 'deep' });
   const notice = h('div.view-message', { hidden: true });
   const timelineEl = h('div.timeline');
   const scroller = h('div.timeline-scroll', notice, timelineEl);
@@ -80,7 +80,7 @@ export function mountSession(main, side, app, meta) {
           // The engine also reports ablations here, as "presage without <mechanism>".
           mode === 'classic'
             ? tag('Classic', 'plain', 'Conventional tool loop: no scripts, predictions, watches or finish gate')
-            : tag(mode === 'presage' ? 'Presage' : mode, 'violet', 'Scripts, predictions, watches and the evidence gate'),
+            : tag(mode === 'presage' ? 'Presage' : mode, 'azure', 'Scripts, predictions, watches and the evidence gate'),
           autonomy === 'ask' && tag('asks first', 'amber', 'Every step that changes something waits for your approval'),
           simulated && h('span.badge', { title: 'A scripted stand-in is playing the model: token counts and cost are fabricated.' }, 'SIMULATED'),
         ),
@@ -206,7 +206,7 @@ export function mountSession(main, side, app, meta) {
 
 function statusPill(state, model) {
   if (state.approvals > 0) return h('span.status-pill.tone-amber', icon('bang'), 'Waiting for your approval');
-  if (state.phase === 'running') return h('span.status-pill.tone-violet', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
+  if (state.phase === 'running') return h('span.status-pill.tone-azure', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
   const look = outcomeLook(state.outcome, state.verified);
   const label = state.outcome ? look.label : state.phase === 'closed' ? 'Ended without a result' : 'Idle';
   return h(`span.status-pill.tone-${look.tone}`, icon(look.icon), label, state.phase === 'closed' && tag('read-only', 'plain', 'From an earlier launch of the app'));

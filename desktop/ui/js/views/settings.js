@@ -13,7 +13,7 @@ const REMOVED = 'Stored key removed.';
 
 export function mountSettings(main, app) {
   const body = h('div.view-column');
-  main.append(h('header.view-head', h('h1', 'Settings')), h('div.view-body', body));
+  main.append(h('header.view-head', { 'data-tauri-drag-region': 'deep' }, h('h1', 'Settings')), h('div.view-body', body));
 
   /** Reloads the engine state and redraws, since a key changes what every section offers. */
   async function refresh() {
@@ -26,8 +26,8 @@ export function mountSettings(main, app) {
     body.replaceChildren(
       h(
         'section.panel',
-        h('div.label', 'API keys'),
-        h('p.field-hint.panel-title', 'Stored keys are never shown again. A key set in the environment takes precedence over a stored one.'),
+        h('h2.section-title', 'API keys'),
+        h('p.section-note', 'Stored keys are never shown again. A key set in the environment takes precedence over a stored one.'),
         state.providers.map((provider) => providerCard(provider, refresh)),
       ),
       defaults(state, refresh),
@@ -102,8 +102,8 @@ function defaults(state, refresh) {
   notices.delete('defaults');
 
   return h(
-    'section.panel.form',
-    h('div.label', 'Defaults for new sessions'),
+    'section.panel',
+    h('h2.section-title', 'Defaults for new sessions'),
     field(
       'Provider',
       radioChips({

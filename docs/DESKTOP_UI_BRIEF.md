@@ -21,7 +21,9 @@ brief remains the specification. Everything the UI needs is on `presage_core::ha
 ## Shell (`desktop/src-tauri`)
 
 Scaffold exists (Tauri 2.12, `withGlobalTauri: true`, `frontendDist: ../ui`, CSP, capability, icons).
-Dependencies are limited to what `Cargo.toml` lists.
+Dependencies are limited to what `Cargo.toml` lists. The window is undecorated (`decorations: false`,
+`shadow: false`, so Windows 10 draws no white frame line): the UI draws the title bar, and the
+capability lets the window drag, minimise, maximise and close itself.
 
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
@@ -31,6 +33,10 @@ and `subscribe(id, on_event: tauri::ipc::Channel<Event>) -> Vec<Event>`, which r
 and forwards live events until the channel or broadcast closes (keep going on `Lagged`). The UI
 should ignore events whose `seq` it has already applied.
 
+For the glass: `window_place` (where the window's content sits on its monitor, in physical pixels;
+later changes arrive as `window-place` events) and `wallpaper` (the bytes of the desktop wallpaper,
+empty when there is none to read: Windows keeps it at `%APPDATA%\Microsoft\Windows\Themes`).
+
 GUI apps start with a minimal `PATH`. On unix, first thing in `main`, resolve the login shell's
 `PATH` (`$SHELL -ilc 'printf %s "$PATH"'`, 3 s timeout) and adopt it.
 
@@ -38,29 +44,65 @@ Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the
 `PRESAGE_UI_VIEW=settings|new|session`, `PRESAGE_UI_OPEN=<session id>`. Added while building it:
 `PRESAGE_UI_SIZE=<width>x<height>`, `PRESAGE_UI_SCRIPTED=<file>` (start a session played by a
 scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
-grammar in `desktop/ui/js/hooks.js`).
+grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_WALLPAPER=<file>` (the picture behind the glass).
+Pickers answer to scripts as `#pick-model`, `#pick-effort`, `#pick-mode`, `#pick-autonomy`, and
+their options as `#pick-mode-menu [data-value="classic"]`.
 
 ## Front end (`desktop/ui`)
 
 Static files, no bundler, no framework, no external resources. `window.__TAURI__.core.invoke` and
 `new window.__TAURI__.core.Channel()`. Never put event, model or tool text through `innerHTML`.
 
-Look: a calm, dense developer tool. Dark by default, system UI font, monospace for observations,
-8px grid, thin borders. Palette: background `#0f1218`, text `#e6e8ee`, muted `#8b93a7`, prediction
-violet `#7c5cff`, held/ok teal `#2dd4bf`, **surprise amber `#f5a524`**, error red `#f31260`. The icon
-is two overlapping circles, prediction and reality.
+### Look
 
-Three columns:
+Neutral dark glass: dense, quiet, and the same grey whatever is behind it.
 
-1. **Sidebar**: app name, New session, session list (title, model, status glyph, relative time),
-   Settings.
+- **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
+  weights (400, 500, 600). The system monospace for paths, commands and observations only.
+- **Shape.** 8px grid. Radius grows with the thing: 5 tags, 7 controls and rows, 10 cards,
+  14 composers and dialogs. Nothing is a pill.
+- **Colour is kept for meaning; the chrome has none.** Azure `#6ea8ff` is the model's side (a
+  prediction, a run in progress), teal `#2dd4bf` held or ok, **amber `#f5a524` surprise**, red
+  `#ef4b55` error. Every state also has a word or a glyph. The primary button is light on dark
+  with no hue, one per view. No gradients, glows or accent borders.
+- **Boxes are rare.** Turns are separated by a rule. Only the task, an approval request and the
+  result are boxed, so the result is what the eye lands on.
+- **Motion.** A view or dialog arriving fades in over 140 ms; a disclosure chevron turns. Nothing
+  else moves, and `prefers-reduced-motion` removes those too.
+- **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
+  caption buttons where Windows puts them.
+
+### Glass (`ui/js/glass.js`, `ui/styles/glass.css`)
+
+No `backdrop-filter` and no system acrylic: both blur again on every frame, which is what makes
+acrylic windows lag on Windows 10. The app makes the material once, at start-up. It takes the
+desktop wallpaper (or paints a neutral field when there is none to read), blurs it at 128px,
+presses its brightness into a dark band, and draws the result to one canvas behind the panes. The
+canvas is laid out over the monitor and shifted by the window's position, so it holds still on the
+screen while the window moves over it; only its transform ever changes. The panes are translucent
+fills (sidebar thinnest, main thickest) with a grain tile. It shows the wallpaper, not other
+windows. `prefers-reduced-transparency` swaps in solid panes.
+
+Contrast is part of the material. `--text`, `--soft` and `--muted` keep 4.5:1 on every pane for any
+wallpaper (computed over a 5,832-colour grid; the lowest is 4.8:1, muted on the bare sidebar).
+`--faint` holds it only on the main pane and in wells, so it is used for placeholders and key hints
+there and for marks elsewhere. On a hovered or selected row, secondary text steps up to `--soft`.
+Change a tint, the brightness band in `glass.js` or an ink colour, and these have to be recomputed.
+
+### Panes
+
+1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
+   heading per day (title, model, status glyph, relative time), Settings and the version.
 2. **Main**:
-   - *New session*: workspace field with an in-app folder picker on `list_dir`; provider and model
-     from `app_state` (providers without a key are shown as "needs key"); effort (ratchet, low, high,
-     max); mode Presage / Classic; autonomy Auto / Ask; task textarea; Start (Ctrl/Cmd+Enter). With no
-     key configured, lead with "Play the walkthrough" (`start_demo`) and "Add an API key".
+   - *New session*: one composer. Along its top the workspace field and Browse (an in-app folder
+     picker on `list_dir`); then the task; then pickers for model, effort (ratchet, low, high, max),
+     mode (Presage / Classic) and autonomy (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu
+     lists models under their provider from `app_state`; a provider without a key is shown as
+     "needs key" with its models disabled. Each menu explains its options. With no key configured,
+     the view leads with "Play the walkthrough" (`start_demo`) and "Add an API key", and Start is
+     not the primary button.
    - *Session*: header (title, cwd, model, effort, mode, SIMULATED badge, Stop). Timeline: the task,
-     the environment snapshot (collapsed), then a card per turn: number, effort, duration, tokens with
+     the environment snapshot (collapsed), then a section per turn: number, effort, duration, tokens with
      cached share, cache verdict; reasoning (streams live, collapses after the turn); the script as
      step rows on a rail, each with status glyph, tool, summary, an "expect …" chip that turns held or
      violated, duration, and the observation (expanded for surprise, error, denied, running). Skipped
@@ -71,7 +113,7 @@ Three columns:
      observation opens the full output via `read_output`.
    - *Settings*: per provider a password field with Save / Remove (`set_key`), the equivalent
      environment variable, and defaults (`set_defaults`). Never show stored keys.
-3. **Inspector**: Economy from `stats` events (turns, steps, surprises, predictions held of made,
+3. **Inspector**: the caption buttons, then Economy from `stats` events (turns, steps, surprises, predictions held of made,
    prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
    when simulated, context size, model versus tool time, output kept out of context, repairs,
    retries, cache misses); Watches with current state; Notes and lessons.

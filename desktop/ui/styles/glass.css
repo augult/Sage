@@ -1,0 +1,65 @@
+/* The glass material. Nothing here blurs or filters while the app runs: js/glass.js draws one
+   blurred, darkened backdrop at start-up, and the panes are plain translucent fills over it with a
+   grain tile on top. Moving the window, resizing it and scrolling repaint none of it, which is the
+   point: the system acrylic on Windows 10 re-blurs the desktop on every frame. */
+
+:root {
+  /* How much of the backdrop each pane lets through: the sidebar most, the reading surface least. */
+  --glass-thin: rgba(21, 23, 28, 0.52);
+  --glass-mid: rgba(19, 21, 26, 0.64);
+  --glass-thick: rgba(16, 18, 22, 0.82);
+}
+
+/* What shows until the backdrop is drawn, and for good if it cannot be. */
+body {
+  background: #131518;
+}
+
+/* js/glass.js sizes this to the monitor and shifts it by the window's position, so it holds still
+   on the screen while the window moves over it. Only its transform ever changes. */
+#backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#backdrop.is-ready {
+  opacity: 1;
+  transition: opacity 200ms ease-out;
+}
+
+.glass {
+  background-color: var(--tint);
+  /* Set by js/glass.js: a small tile of faint light and dark specks. */
+  background-image: var(--grain, none);
+}
+
+#sidebar {
+  --tint: var(--glass-thin);
+}
+
+#main {
+  --tint: var(--glass-thick);
+}
+
+#inspector {
+  --tint: var(--glass-mid);
+}
+
+/* For people who have asked the system for less transparency: the same layout on solid panes. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-thin: #191b20;
+    --glass-mid: #17191d;
+    --glass-thick: #131518;
+  }
+
+  #backdrop {
+    display: none;
+  }
+}

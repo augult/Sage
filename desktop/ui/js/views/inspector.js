@@ -17,7 +17,7 @@ export function renderLegend(el) {
       null,
       h(
         'div.legend',
-        entry(tag('expect exit 0', 'violet'), 'Prediction', 'What the model says a step will do, before it runs.'),
+        entry(tag('expect exit 0', 'azure'), 'Prediction', 'What the model says a step will do, before it runs.'),
         entry(tag('held', 'teal'), 'Held', 'Reality matched. The model gets a one-line receipt instead of the output.'),
         entry(tag('surprise', 'amber'), 'Surprise', 'Reality differed. The script halts there and the model sees the evidence.'),
         entry(tag('skipped'), 'Skipped', 'The rest of a halted script, finish included. Nothing after a surprise runs.'),
@@ -62,11 +62,11 @@ function economy(model) {
     stat('Prompt tokens', k(s.prompt_tokens), s.prompt_tokens > 0 && `${pct(s.cached_tokens, s.prompt_tokens)} cached`),
     bar(s.cached_tokens, s.prompt_tokens, 'teal'),
     stat('Output tokens', k(s.output_tokens), s.output_tokens > 0 && `${pct(s.reasoning_tokens, s.output_tokens)} thinking`),
-    bar(s.reasoning_tokens, s.output_tokens, 'violet'),
+    bar(s.reasoning_tokens, s.output_tokens, 'azure'),
     cost,
     stat('Context', `${k(s.context_tokens)} tokens`),
     stat('Time', duration(s.elapsed_ms), `model ${duration(s.model_ms)} · tools ${duration(s.tool_ms)}`),
-    bar(s.model_ms, s.model_ms + s.tool_ms, 'violet', 'teal'),
+    bar(s.model_ms, s.model_ms + s.tool_ms, 'azure', 'teal'),
     stat('Kept out of context', bytes(s.hidden_bytes)),
     stat('Repairs', s.repairs),
     stat('Retries', s.retries),
@@ -98,7 +98,7 @@ function watches(model) {
 }
 
 function notes(model) {
-  const entries = [...model.lessons.map((lesson) => ({ ...lesson, tone: 'teal' })), ...model.notes.map((note) => ({ ...note, tone: 'violet' }))];
+  const entries = [...model.lessons.map((lesson) => ({ ...lesson, tone: 'teal' })), ...model.notes.map((note) => ({ ...note, tone: 'azure' }))];
   if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'Nothing yet. What the harness tells the model, and the error → fix pairs it learns, collect here.'));
   return section(
     'Notes and lessons',

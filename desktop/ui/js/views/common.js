@@ -11,7 +11,7 @@ export function outcomeLook(status, verified) {
     case 'done':
       return verified ? { icon: 'check', tone: 'teal', label: 'Done' } : { icon: 'check', tone: 'amber', label: 'Done, unverified' };
     case 'yielded':
-      return { icon: 'reply', tone: 'violet', label: 'Handed back' };
+      return { icon: 'reply', tone: 'azure', label: 'Handed back' };
     case 'stopped':
       return { icon: 'stop', tone: 'plain', label: 'Stopped' };
     case 'budget':
@@ -34,7 +34,7 @@ export function sessionState(meta, entry) {
 /** The status glyph for a session, with its meaning as a tooltip and accessible name. */
 export function stateGlyph(state) {
   if (state.approvals > 0) return glyph(icon('bang'), 'amber', 'Waiting for your approval');
-  if (state.phase === 'running') return glyph(spinner(), 'violet', 'Running');
+  if (state.phase === 'running') return glyph(spinner(), 'azure', 'Running');
   const look = outcomeLook(state.outcome, state.verified);
   return glyph(icon(look.icon), look.tone, look.label);
 }
