@@ -1,0 +1,10 @@
+[package]
+name = "lessons-replay"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+presage-core = { path = "../../../crates/presage-core" }
+
+[workspace]
