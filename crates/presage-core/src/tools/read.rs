@@ -68,7 +68,9 @@ fn not_found(sess: &Session, abs: &Path, shown: &str) -> StepOutput {
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| {
             let l = n.to_ascii_lowercase();
-            l == lower || (stem.len() >= 3 && (l.starts_with(&stem) || l.contains(&stem))) || lower.contains(l.split('.').next().unwrap_or(""))
+            // A dotfile has no stem to compare by: it would be "contained" in every name.
+            let theirs = l.split('.').next().unwrap_or("");
+            l == lower || (stem.len() >= 3 && (l.starts_with(&stem) || l.contains(&stem))) || (theirs.len() >= 3 && lower.contains(theirs))
         })
         .take(5)
         .collect();

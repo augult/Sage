@@ -596,6 +596,24 @@ mod tests {
         assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 3));
     }
 
+    #[tokio::test]
+    async fn in_a_repository_the_review_comes_with_the_diff_of_the_session() {
+        let turns = vec![
+            fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("write", json!({"path": "scratch.txt", "content": "tmp\n"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
+            fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "rm scratch.txt && grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
+        ];
+        let mut r = rig("agent-review-git", AgentConfig::new("mock"), turns);
+        let git = |script: &str| assert!(std::process::Command::new("bash").arg("-c").arg(script).current_dir(&r.agent.sess.ws.root).output().unwrap().status.success(), "{script}");
+        git("printf 'mine\\n' > wip.txt && git init -q && git add n.txt && git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base");
+
+        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2));
+        let review = requests(&r)[1].last().unwrap().content.clone();
+        // Its own two files and the diff of the tracked one; not the file that lay there before.
+        assert!(review.contains("<changes>\nPaths (`git status --short`):\n M n.txt\n?? scratch.txt\nDiff of the tracked files (`git diff HEAD`):\n"), "{review}");
+        assert!(review.contains("\n-beta\n+BETA\n") && !review.contains("wip.txt"), "{review}");
+    }
+
     fn events(r: &Rig) -> Vec<EventKind> {
         r.sink.events.lock().unwrap().clone()
     }

@@ -42,7 +42,7 @@ OPTIONS
                            +effort:<level> or +no-<mechanism>, e.g. presage+skill+effort:max
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
-      --tasks <list>       task ids (default: all)
+      --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
   -n, --repeats <n>        runs per task and variant (default 3)
   -e, --effort <level>     as for `presage run`
       --max-turns <n>      per run (default 30)

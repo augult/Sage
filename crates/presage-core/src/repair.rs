@@ -283,6 +283,22 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             _ => {}
         }
     }
+    if tool == Tool::Edit {
+        // `range: 12` or `range: [12, 14]`: line numbers where an anchor string was meant.
+        let number = |v: &Value| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().to_string()));
+        let range = match map.get("range") {
+            Some(Value::Number(n)) => Some(n.to_string()),
+            Some(Value::Array(ends)) => match ends.iter().map(number).collect::<Option<Vec<_>>>().as_deref() {
+                Some([from, to]) => Some(format!("{from}-{to}")),
+                Some([only]) => Some(only.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(range) = range {
+            map.insert("range".into(), json!(range));
+        }
+    }
     if tool == Tool::Shell {
         if let Some(ms) = num(&map, "timeout_ms") {
             map.entry("timeout").or_insert(json!(ms.div_ceil(1000)));
@@ -350,6 +366,20 @@ pub fn parse_calls(raw: &[ToolCall]) -> (Vec<Call>, u32) {
             if repaired {
                 repairs += 1;
             }
+            // Other harnesses give one editor tool several jobs: its `view` is a read here and its
+            // `create` a write. A tool named for killing a job means just that.
+            let foreign = rc.name.to_ascii_lowercase();
+            let (tool, mut args) = match (tool, args.get("command").and_then(Value::as_str)) {
+                (Tool::Edit, Some("view")) => (Tool::Read, args),
+                (Tool::Edit, Some("create")) => (Tool::Write, args),
+                _ => (tool, args),
+            };
+            if let (Tool::Job, true, Some(map)) = (tool, foreign.contains("kill"), args.as_object_mut()) {
+                map.entry("kill").or_insert(json!(true));
+            }
+            if tool == Tool::Edit && foreign.contains("patch") && args.get("path").is_none() && args.get("file_path").is_none() {
+                return Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: Some(tool), args: Value::Null, error: Some(format!("`{}` takes no patch here. Use edit with `path`, `new` and one of `range`, `old` or `after`: one call for each change.", rc.name)) };
+            }
             let before = args.clone();
             match normalize_args(tool, args) {
                 Ok(args) => {
@@ -408,6 +438,27 @@ mod tests {
         assert_eq!(lines(json!({"path": "a.py", "view_range": [400, 402]})), Some(json!("400-402")));
         assert_eq!(lines(json!({"path": "a.py", "lines": ["7"]})), Some(json!("7+")));
         assert_eq!(lines(json!({"path": "a.py", "lines": []})), None);
+        let range = |args: Value| normalize_args(Tool::Edit, args).unwrap().get("range").cloned();
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": 2})), Some(json!("2")));
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": [2, "4kq"]})), Some(json!("2-4kq")));
+        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": "2ab-4kq"})), Some(json!("2ab-4kq")));
+    }
+
+    #[test]
+    fn another_harnesss_tools_are_taken_for_what_they_mean() {
+        let call = |name: &str, args: Value| parse_calls(&[ToolCall { id: "c".into(), name: name.into(), arguments: args.to_string() }]).0.remove(0);
+        // One editor tool with a `command`: viewing is reading, creating is writing.
+        let view = call("str_replace_editor", json!({"command": "view", "path": "a.py", "view_range": [3, 9]}));
+        assert_eq!((view.tool, view.args["lines"].as_str()), (Some(Tool::Read), Some("3-9")));
+        let create = call("str_replace_based_edit_tool", json!({"command": "create", "path": "a.py", "file_text": "x = 1\n"}));
+        assert_eq!((create.tool, create.args["content"].as_str()), (Some(Tool::Write), Some("x = 1\n")));
+        let replace = call("str_replace_editor", json!({"command": "str_replace", "path": "a.py", "old_str": "1", "new_str": "2"}));
+        assert_eq!((replace.tool, replace.args["old"].as_str(), replace.args["new"].as_str()), (Some(Tool::Edit), Some("1"), Some("2")));
+        // A tool for killing a job kills it; a patch is answered with how to edit here.
+        let kill = call("KillShell", json!({"shell_id": "bg:1"}));
+        assert_eq!((kill.tool, kill.args["id"].as_str(), kill.args["kill"].as_bool()), (Some(Tool::Job), Some("bg:1"), Some(true)));
+        let patch = call("apply_patch", json!({"input": "*** Begin Patch\n*** End Patch"}));
+        assert!(patch.error.as_deref().is_some_and(|e| e.contains("takes no patch here") && e.contains("`range`, `old` or `after`")), "{:?}", patch.error);
     }
 
     #[test]
