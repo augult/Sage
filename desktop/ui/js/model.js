@@ -80,6 +80,16 @@ export function pendingApprovals(s) {
 const str = (value) => (value == null ? '' : String(value));
 const num = (value) => (Number.isFinite(value) ? value : 0);
 
+/** A tool call's arguments, which arrive as JSON text. Anything but an object is no arguments. */
+function parseArguments(text) {
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 // Every field the inspector reads, so a `stats` event that lacks one still renders.
 const NO_STATS = {
   turns: 0,
@@ -150,7 +160,7 @@ const HANDLERS = {
       turn.content = '';
       turn.streamRev++;
     }
-    place(s, ev, chip(s, 'amber', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`));
+    place(s, ev, chip(s, 'alert', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`));
   },
 
   model(s, ev) {
@@ -159,12 +169,15 @@ const HANDLERS = {
     turn.reasoning = str(ev.reasoning);
     turn.content = str(ev.content);
     const usage = ev.usage && typeof ev.usage === 'object' ? ev.usage : {};
+    const calls = Array.isArray(ev.calls) ? ev.calls : [];
+    // What each call was asked to do, for the rows that show it: a whole command, an edit's text.
+    turn.calls = new Map(calls.map((call) => [str(call?.id), parseArguments(call?.arguments)]));
     turn.reply = {
       ms: num(ev.ms),
       usage: { prompt: num(usage.prompt), cached: num(usage.cached), output: num(usage.output), reasoning: num(usage.reasoning) },
       finish: str(ev.finish),
       repairs: num(ev.repairs),
-      calls: Array.isArray(ev.calls) ? ev.calls.length : 0,
+      calls: calls.length,
     };
     turn.rev++;
   },
@@ -192,6 +205,8 @@ const HANDLERS = {
     step.hidden = num(ev.hidden_bytes);
     step.violations = Array.isArray(ev.violations) ? ev.violations.map(str) : [];
     step.explicit = ev.explicit === true;
+    step.change = ev.change && typeof ev.change === 'object' && Array.isArray(ev.change.hunks) ? ev.change : null;
+    step.results = Array.isArray(ev.results) ? ev.results : null;
     // No event announces a watch being switched off; its own step is the only trace.
     if (step.tool === 'watch' && step.status === 'ok' && step.summary.endsWith(' off')) {
       s.watches.delete(step.summary.slice(0, -' off'.length));
@@ -206,7 +221,7 @@ const HANDLERS = {
     s.watches.set(name, { name, cmd: str(ev.cmd), state: str(ev.state), detail: firstLine(detail) });
     s.sideRev++;
     // An empty detail is the engine's "nothing changed, still passing".
-    const tone = !detail || ev.change === 'same' ? 'plain' : ev.state === 'pass' ? 'teal' : ev.state === 'fail' ? 'amber' : 'plain';
+    const tone = !detail || ev.change === 'same' ? 'plain' : ev.state === 'pass' ? 'good' : ev.state === 'fail' ? 'alert' : 'plain';
     const text = detail ? detail.replace(/^watch /, '') : `${name}: still passing`;
     place(s, ev, chip(s, tone, 'watch', text, ev.change === 'new' ? 'new' : null));
   },
@@ -216,14 +231,14 @@ const HANDLERS = {
     s.notes.push({ label: kind || 'note', text: str(ev.text) });
     s.sideRev++;
     // `harness` is the general kind; any other names the mechanism that spoke (attach, gate, …).
-    place(s, ev, chip(s, 'azure', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
+    place(s, ev, chip(s, 'quiet', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
   },
 
   lesson(s, ev) {
     const label = ev.learned ? 'learned' : 'recalled';
     s.lessons.push({ label, text: str(ev.text) });
     s.sideRev++;
-    place(s, ev, chip(s, 'teal', label, str(ev.text)));
+    place(s, ev, chip(s, 'good', label, str(ev.text)));
   },
 
   approval(s, ev) {
@@ -239,11 +254,11 @@ const HANDLERS = {
   },
 
   effort(s, ev) {
-    place(s, ev, chip(s, 'azure', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'quiet', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
   },
 
   decay(s, ev) {
-    place(s, ev, chip(s, 'amber', 'trim', `${num(ev.messages)} old observations left the context (~${k(num(ev.dropped_tokens))} tokens): ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'alert', 'trim', `${num(ev.messages)} old observations left the context (~${k(num(ev.dropped_tokens))} tokens): ${str(ev.reason)}`));
   },
 
   stats(s, ev) {
@@ -264,7 +279,7 @@ const HANDLERS = {
   },
 
   error(s, ev) {
-    place(s, ev, chip(s, 'red', 'error', str(ev.message)));
+    place(s, ev, chip(s, 'danger', 'error', str(ev.message)));
   },
 };
 
@@ -322,6 +337,8 @@ function openTurn(s, ev) {
     content: '',
     /** Set by the `model` event: `{ ms, usage, finish, repairs, calls }`. */
     reply: null,
+    /** Arguments of the reply's tool calls, by call id. */
+    calls: new Map(),
     cache: null,
     rows: [],
     steps: new Map(),
@@ -347,6 +364,8 @@ function startStep(turn, ev) {
     idx: num(ev.idx),
     tool: str(ev.tool),
     summary: str(ev.summary),
+    /** What the call was asked to do, as the model wrote it; null when the reply is not at hand. */
+    args: turn.calls.get(str(ev.call_id)) ?? null,
     expect: ev.expect == null ? null : str(ev.expect),
     /** `active` until `step_end` supplies the engine's status. */
     status: 'active',
@@ -356,6 +375,10 @@ function startStep(turn, ev) {
     hidden: 0,
     violations: [],
     explicit: false,
+    /** What an edit or a write did to its file: `{ path, created, added, removed, hunks, truncated }`. */
+    change: null,
+    /** What a web search found, when the engine lists it: `[{ title, url, snippet }]`. */
+    results: null,
   };
   turn.steps.set(ev.idx, step);
   turn.rows.push(step);

@@ -1,10 +1,13 @@
 // The New session view: one composer. The workspace sits above the task; the model, skills, effort,
-// mode and autonomy are pickers in the bar below it, next to Start.
-// With no key configured the view opens with the walkthrough and the way to add a key.
+// mode and autonomy are pickers in the bar below it, next to Start. Above the composer the chosen
+// background hangs uncovered, with its dither moving over it and the picker that changes it.
+// With no key configured the view leads with the walkthrough and the way to add a key.
 
 import { api } from '../api.js';
+import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
+import * as themes from '../themes.js';
 import { MOD_KEY } from './common.js';
 import { effortOptions, modelOptions, picker, skillsPicker } from './controls.js';
 import { pickFolder } from './folder-picker.js';
@@ -21,6 +24,9 @@ const AUTONOMIES = [
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
 const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [] };
+
+// The dots over the painting as it is, unpressed: stronger than behind the panes, on any picture.
+const HERO_INKS = { light: [255, 255, 255, 0.36], dark: [0, 0, 0, 0.26] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
@@ -221,29 +227,44 @@ export function mountNewSession(main, app) {
     error,
   );
 
-  const hero =
-    keyed.length === 0 &&
-    h(
-      'div.lead-actions',
-      h('button.btn.primary', { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
-      h('button.btn.quiet', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key'),
-    );
+  // The walkthrough leads while there is no key, and steps back once there is one.
+  const lead = h(
+    'div.lead-actions',
+    h(`button.btn${keyed.length ? '' : '.primary'}`, { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
+    keyed.length === 0 && h('button.btn', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key'),
+  );
+
+  // The background, uncovered, and the picker that changes it.
+  const canvas = h('canvas.hero-dither', { 'aria-hidden': 'true' });
+  const dither = createDither(canvas, themes.ditherLook(themes.current(), 3, HERO_INKS));
+  const restyle = (now) => {
+    dither.restyle(themes.ditherLook(now, 3, HERO_INKS));
+    dither.run(now.motion);
+  };
+  const forget = themes.onChange(restyle);
+  const backgrounds = picker({
+    id: 'pick-theme',
+    name: 'Background',
+    groups: [{ options: themes.BACKGROUNDS.map((background) => ({ value: background.id, label: background.name })) }],
+    value: themes.chosen().background,
+    align: 'end',
+    onChange: (background) => themes.choose({ background }),
+  });
+  const hero = h('div.hero', h('div.hero-art', canvas), h('div.hero-pick', backgrounds));
 
   main.append(
-    h(
-      'header.view-head',
-      { 'data-tauri-drag-region': 'deep' },
-      h('h1', 'New session'),
-      keyed.length > 0 && h('button.btn.quiet', { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
-    ),
-    h('div.view-body', h('div.view-column', hero, form)),
+    h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
+    h('div.view-body', h('div.view-column', h('div.view-lead', h('h1.view-title', 'New session'), lead), hero, form)),
   );
+  restyle(themes.current());
   // Start where the first thing is still missing.
   (keyed.length === 0 ? main.querySelector('#play-demo') : draft.cwd ? task : workspace).focus();
   return {
     unmount() {
       clearTimeout(skillsTimer);
       skillsAsked++;
+      forget();
+      dither.stop();
     },
   };
 }

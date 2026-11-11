@@ -1,63 +1,119 @@
-/* The glass material. Nothing here blurs or filters while the app runs: js/glass.js draws one
-   blurred, darkened backdrop at start-up, and the panes are plain translucent fills over it.
-   Moving the window, resizing it and scrolling repaint none of it, which is the point: the system
-   acrylic on Windows 10 re-blurs the desktop on every frame. */
+/* The glass. Behind the panes hangs a painting the app brings itself (js/backdrop.js draws it once,
+   softened and pressed into a band of brightness for the appearance), and over it drifts a dither
+   on a canvas a few hundred cells wide. The panes are plain translucent fills over the two.
+   Nothing here blurs or filters while the app runs, and nothing shows what is behind the window. */
 
-:root {
-  /* How much of the backdrop each pane lets through: the sidebar most, the reading surface least. */
-  --glass-thin: rgba(21, 23, 28, 0.52);
-  --glass-mid: rgba(19, 21, 26, 0.64);
-  --glass-thick: rgba(16, 18, 22, 0.82);
+:root[data-scheme="light"] {
+  /* The material everything but the sheet sits on, and the sheet: the reading surface. */
+  --veil: rgba(255, 255, 255, 0.26);
+  --sheet: rgba(255, 255, 255, 0.87);
+  --sheet-edge: rgba(17, 18, 20, 0.12);
+  --sheet-lift: 0 1px 2px rgba(17, 18, 20, 0.05), 0 6px 24px rgba(17, 18, 20, 0.07);
+  /* The same two without a painting behind them. */
+  --flat-veil: #ececea;
+  --flat-sheet: #fdfdfc;
 }
 
-/* What shows until the backdrop is drawn, and for good if it cannot be. */
+:root[data-scheme="dark"] {
+  --veil: rgba(8, 9, 10, 0.3);
+  --sheet: rgba(16, 17, 19, 0.86);
+  --sheet-edge: rgba(255, 255, 255, 0.1);
+  --sheet-lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.3);
+  --flat-veil: #1a1b1e;
+  --flat-sheet: #111214;
+}
+
+/* What shows until the backdrop is drawn, and for good with no background chosen. */
 body {
-  background: #131518;
+  background: var(--flat-veil);
 }
 
-/* js/glass.js sizes this to the monitor and shifts it by the window's position, so it holds still
-   on the screen while the window moves over it. Only its transform ever changes. */
 #backdrop {
   position: fixed;
-  top: 0;
-  left: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
+  inset: 0;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
 }
 
 #backdrop.is-ready {
   opacity: 1;
-  transition: opacity 200ms ease-out;
+  transition: opacity 260ms ease-out;
 }
 
-.glass {
-  background-color: var(--tint);
+#backdrop canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-#sidebar {
-  --tint: var(--glass-thin);
+/* The painting keeps its shape and fills the window, cropped at the edges. */
+#backdrop-art {
+  object-fit: cover;
+}
+
+/* Whole cells, stretched without smoothing: the dots stay square. */
+#backdrop-dither,
+.hero-dither {
+  image-rendering: pixelated;
+}
+
+#app {
+  background: var(--veil);
 }
 
 #main {
-  --tint: var(--glass-thick);
+  border: 1px solid var(--sheet-edge);
+  border-radius: var(--r-3);
+  background: var(--sheet);
+  box-shadow: var(--sheet-lift);
 }
 
-#inspector {
-  --tint: var(--glass-mid);
+/* On the bare glass the secondary inks step up, so they hold their contrast over any picture. */
+:root[data-scheme="light"] :is(#sidebar, #inspector) {
+  --soft: #2a2c30;
+  --muted: #43464b;
+  --faint: #5f6368;
+  --line: rgba(17, 18, 20, 0.12);
 }
 
-/* For people who have asked the system for less transparency: the same layout on solid panes. */
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --glass-thin: #191b20;
-    --glass-mid: #17191d;
-    --glass-thick: #131518;
-  }
+:root[data-scheme="dark"] :is(#sidebar, #inspector) {
+  --soft: #dcdde0;
+  --muted: #bbbdc2;
+  --faint: #9a9da2;
+  --line: rgba(255, 255, 255, 0.11);
+}
 
-  #backdrop {
-    display: none;
-  }
+/* No background (chosen, or for people who have asked the system for less transparency, which
+   js/themes.js reads as the same): the same layout on solid panes. */
+:root[data-theme="none"] #backdrop {
+  display: none;
+}
+
+:root[data-theme="none"] #app {
+  background: var(--flat-veil);
+}
+
+:root[data-theme="none"] #main {
+  background: var(--flat-sheet);
+}
+
+/* The paintings, by background. Each is made by its script in desktop/art. */
+:root[data-theme="ember"] {
+  --art: url("../themes/ember/art.webp");
+}
+
+:root[data-theme="orchid"] {
+  --art: url("../themes/orchid/art.webp");
+}
+
+:root[data-theme="tide"] {
+  --art: url("../themes/tide/art.webp");
+}
+
+:root[data-theme="graphite"] {
+  --art: url("../themes/graphite/art.webp");
 }

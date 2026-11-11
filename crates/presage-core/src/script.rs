@@ -248,6 +248,7 @@ impl Runner<'_> {
                 hidden_bytes: out.hidden_bytes,
                 violations: out.violations.clone(),
                 explicit: out.explicit,
+                change: out.change.clone(),
             });
             res.observations.push((call.id.clone(), out.observation, out.stub));
         }
