@@ -8,7 +8,10 @@ brief remains the specification. Everything the UI needs is on `presage_core::ha
 - `crates/presage-core/src/harness.rs`: `Harness::new()`, `state()`, `set_key`, `set_defaults`,
   `start(StartRequest)`, `demo()`, `send`, `stop`, `approve`, `subscribe(id)` (backlog plus a
   `broadcast::Receiver<Event>`), `events(id)`, `meta(id)`, `list()`, `read_output(id, handle)`,
-  `list_dir(path)`; types `SessionMeta`, `SessionStatus`, `StartRequest`, `AppState`, `DirListing`.
+  `list_dir(path)`; for skills and instructions `skills(cwd)`, `skill_file`, `save_skill`,
+  `delete_skill`, `send_with_skills`, `instructions()`, `set_system_prompt`,
+  `set_global_instructions`; types `SessionMeta`, `SessionStatus`, `StartRequest`, `AppState`,
+  `DirListing`, `Instructions`, and `skills::SkillInfo`.
 - `crates/presage-core/src/events.rs`: `Event { seq, ts, type, …fields }` (flattened; `type` is
   snake_case), `Stats`, `FinishStatus`, `CacheVerdict`. `delta` events are transient streaming text;
   a `retry` event voids what was streamed for that turn.
@@ -27,11 +30,20 @@ capability lets the window drag, minimise, maximise and close itself.
 
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
-`interactive = true`), `start_demo`, `send_message(id, text)`, `stop_session(id)`,
+`interactive = true`; `req.skills` names the skills to start with), `start_demo`,
+`send_message(id, text, skills?)` (`send_with_skills`: the skills named are switched on with the
+message), `stop_session(id)`,
 `approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`, `list_dir(path?)`,
 and `subscribe(id, on_event: tauri::ipc::Channel<Event>) -> Vec<Event>`, which returns the backlog
 and forwards live events until the channel or broadcast closes (keep going on `Lagged`). The UI
 should ignore events whose `seq` it has already applied.
+
+Skills and instructions: `list_skills(cwd?)` (built-in and user skills, plus the project's own when
+a folder is given), `skill_file(name, cwd?)` (the whole file, front matter included),
+`save_skill(name, content)`, `delete_skill(name)` (a user skill; one that replaced a built-in gives
+the built-in back), `instructions()` (`{ system, system_default, system_custom, global }`),
+`set_system_prompt(template?)` (nothing resets to the built-in) and `set_global_instructions(text)`
+(empty deletes the file).
 
 For the glass: `window_place` (where the window's content sits on its monitor, in physical pixels;
 later changes arrive as `window-place` events) and `wallpaper` (the bytes of the desktop wallpaper,
@@ -45,8 +57,13 @@ Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the
 `PRESAGE_UI_SIZE=<width>x<height>`, `PRESAGE_UI_SCRIPTED=<file>` (start a session played by a
 scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
 grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_WALLPAPER=<file>` (the picture behind the glass).
-Pickers answer to scripts as `#pick-model`, `#pick-effort`, `#pick-mode`, `#pick-autonomy`, and
-their options as `#pick-mode-menu [data-value="classic"]`.
+A scripted session's file may name `skills` to start with.
+Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
+`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`. The Skills button
+is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. In Settings:
+`#settings-skills`, `#settings-system`, `#settings-instructions`, a skill's row as
+`[data-skill="debug"]`, `#new-skill`, the text areas `#skill-file`, `#system-prompt`,
+`#global-instructions`, and each section's `.editor-save`.
 
 ## Front end (`desktop/ui`)
 
@@ -69,6 +86,12 @@ Neutral dark glass: dense, quiet, and the same grey whatever is behind it.
   result are boxed, so the result is what the eye lands on.
 - **Motion.** A view or dialog arriving fades in over 140 ms; a disclosure chevron turns. Nothing
   else moves, and `prefers-reduced-motion` removes those too.
+- **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Unsaved") or an
+  error is shown; a sentence that explains how the product works is not, in a note, a caption, a
+  placeholder or a tooltip. Placeholders are a word or two ("Folder", "Task"), empty states two or
+  three. Where a control is unclear without a sentence, the control is changed. What the engine
+  itself reports about a provider (a gateway that logs prompts) is data: it is the `title` of the
+  provider's name in Settings, not a line of its own.
 - **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
   caption buttons where Windows puts them.
 
@@ -95,13 +118,19 @@ Change a tint, the brightness band in `glass.js` or an ink colour, and these hav
    heading per day (title, model, status glyph, relative time), Settings and the version.
 2. **Main**:
    - *New session*: one composer. Along its top the workspace field and Browse (an in-app folder
-     picker on `list_dir`); then the task; then pickers for model, effort (ratchet, low, high, max),
-     mode (Presage / Classic) and autonomy (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu
-     lists models under their provider from `app_state`; a provider without a key is shown as
-     "needs key" with its models disabled. Each menu explains its options. With no key configured,
-     the view leads with "Play the walkthrough" (`start_demo`) and "Add an API key", and Start is
-     not the primary button.
-   - *Session*: header (title, cwd, model, effort, mode, SIMULATED badge, Stop). Timeline: the task,
+     picker on `list_dir`); then the task; then pickers for model, skills, effort (ratchet, low,
+     high, max), mode (Presage / Classic) and autonomy (Auto / Ask), and Start (Ctrl/Cmd+Enter). The
+     model menu lists models under their provider from `app_state`; a provider without a key is
+     shown as "needs key" with its models disabled. The Skills button sits next to the model and
+     uses the same menu: it lists the skills of the chosen folder (`list_skills`) by title, each
+     with its description as the `title` attribute and a check mark when on; several can be on,
+     the menu stays open while toggling, and arrows, Home/End, Enter/Space and Escape work as in
+     the other menus. The button reads "Skills" with nothing on, then "Skills" and the number on
+     (the titles are its `title` attribute), so the bar keeps to one row. A
+     new session starts with no skills, whatever the last one had; Classic takes none, so the
+     button is disabled there. With no key configured, the view leads with "Play the walkthrough"
+     (`start_demo`) and "Add an API key", and Start is not the primary button.
+   - *Session*: header (title, cwd, model, active skills, effort, mode, SIMULATED badge, Stop). Timeline: the task,
      the environment snapshot (collapsed), then a section per turn: number, effort, duration, tokens with
      cached share, cache verdict; reasoning (streams live, collapses after the turn); the script as
      step rows on a rail, each with status glyph, tool, summary, an "expect …" chip that turns held or
@@ -109,11 +138,24 @@ Change a tint, the brightness band in `glass.js` or an ink colour, and these hav
      steps are dimmed with the reason. Watch changes, harness notes, lessons, effort changes, trims
      and retries appear as slim inline chips. Approval requests are a prominent card with Allow /
      Deny. A result card closes the run: status, verified badge, evidence, summary. Idle sessions get
-     a follow-up box; closed ones are read-only replays from `session_events`. `out:N` in an
-     observation opens the full output via `read_output`.
+     a follow-up box with the same Skills button: the session's skills are checked and locked, and
+     any others picked are switched on with the next message (`send_message` with `skills`). Closed
+     sessions are read-only replays from `session_events`, marked "read-only" in the header, with
+     no follow-up box. `out:N` in an observation opens the full output via `read_output`.
    - *Settings*: per provider a password field with Save / Remove (`set_key`), the equivalent
-     environment variable, and defaults (`set_defaults`). Never show stored keys.
-3. **Inspector**: the caption buttons, then Economy from `stats` events (turns, steps, surprises, predictions held of made,
+     environment variable, and defaults (`set_defaults`). Never show stored keys. Then three
+     sections that edit text files, each a monospace text area with Save (enabled, beside the word
+     "Unsaved", only while the text differs from what is stored; a draft survives leaving the view)
+     and engine errors shown under the text:
+     - **Skills**: a row per skill (title, and Built-in, Edited or Custom). A row opens the skill's
+       file under it. Saving a built-in stores the user's version of it (Edited); Reset on an
+       edited one brings the built-in back, Delete removes a custom one. "New skill" opens a file
+       with the front matter (`name`, `title`, `description`) to fill in.
+     - **System prompt**: the template in effect, with Reset while it is the user's own.
+     - **Instructions**: the user's `AGENTS.md` for every project.
+
+     Reset and Delete take a second click ("Confirm"). The data folder is the last line.
+3. **Inspector** (empty unless a session is open): the caption buttons, then Economy from `stats` events (turns, steps, surprises, predictions held of made,
    prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
    when simulated, context size, model versus tool time, output kept out of context, repairs,
    retries, cache misses); Watches with current state; Notes and lessons.
@@ -134,3 +176,21 @@ Look at every screenshot. The demo session must show the surprise and the skippe
 The walkthrough: reply 1 reads and runs the check (it becomes watch `tests`), reply 2 edits and
 predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (verified by watch
 `tests`).
+
+`docs/screenshots/` holds the views as that command shows them, with these in place of
+`PRESAGE_UI_AUTODEMO=1` (a keyed view also takes `LOGFARE_API_KEY=x`; no session is started with it):
+
+| File | Hooks |
+| --- | --- |
+| `new-session.jpg` | `PRESAGE_UI_VIEW=new`, no key |
+| `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
+| `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
+| `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
+| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]` and two turns, then a follow-up sent with a third skill (`click:#pick-skills`, `click:#pick-skills-menu [data-value="ui"]`, `type:#followup=>…`, `click:#send-followup`) |
+| `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
+| `settings-skills.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
+| `settings-system-prompt.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
+| `settings-instructions.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;scroll:#settings-instructions'` |
+
+The settings shots ran against a `PRESAGE_HOME` holding a user `skills/tests.md` (Edited), a custom
+skill with a long title, and an `AGENTS.md`.
