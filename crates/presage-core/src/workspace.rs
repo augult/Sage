@@ -42,7 +42,7 @@ fn real_path(p: &Path) -> PathBuf {
     let mut existing = p.to_path_buf();
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
     loop {
-        if let Ok(canon) = std::fs::canonicalize(&existing) {
+        if let Ok(canon) = crate::util::canonical(&existing) {
             let mut out = canon;
             for part in rest.iter().rev() {
                 out.push(part);
@@ -62,14 +62,14 @@ fn real_path(p: &Path) -> PathBuf {
 /// The directory the user's shell believes it is in, which keeps the symlinks they came through.
 fn logical_cwd() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let same = |p: &PathBuf| p.is_absolute() && std::fs::canonicalize(p).ok() == std::fs::canonicalize(&cwd).ok();
+    let same = |p: &PathBuf| p.is_absolute() && crate::util::canonical(p).ok() == crate::util::canonical(&cwd).ok();
     Some(std::env::var_os("PWD").map(PathBuf::from).filter(same).unwrap_or(cwd))
 }
 
 /// `given` as an absolute path with its symlinks left in, if that spells `canonical` differently.
 fn as_given(given: &Path, canonical: &Path) -> Option<PathBuf> {
     let spelled = if given.is_absolute() { normalize(given) } else { normalize(&logical_cwd()?.join(given)) };
-    (spelled != canonical && std::fs::canonicalize(&spelled).is_ok_and(|real| real == canonical)).then_some(spelled)
+    (spelled != canonical && crate::util::canonical(&spelled).is_ok_and(|real| real == canonical)).then_some(spelled)
 }
 
 /// What can sit inside a file name: next to one of these, a path goes on.
@@ -118,7 +118,7 @@ fn cut_dir(text: &str, dir: &str) -> Option<String> {
 impl Workspace {
     pub fn new(root: &Path) -> std::io::Result<Self> {
         let given = root;
-        let root = std::fs::canonicalize(given)?;
+        let root = crate::util::canonical(given)?;
         if !root.is_dir() {
             return Err(std::io::Error::new(std::io::ErrorKind::NotADirectory, "workspace root is not a directory"));
         }
@@ -180,7 +180,7 @@ impl Workspace {
             return Ok(());
         }
         let real = real_path(abs);
-        let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+        let tmp = crate::util::canonical(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
         if real.starts_with(&self.root) || real.starts_with(&tmp) {
             Ok(())
         } else {

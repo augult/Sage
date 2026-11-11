@@ -1,4 +1,4 @@
-/* New session, the pickers and their menus, Settings, the folder picker and the Push dialog. */
+/* New session, the pickers and their menus, Settings, the reminder of unsaved text and the Push dialog. */
 
 /* New session: the chosen background hangs uncovered above one composer, which holds the
    workspace, the task and the run's settings. */
@@ -214,6 +214,25 @@
   opacity: 0.5;
 }
 
+/* In a form the picker is a field: a select. */
+.pick.boxed {
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--well);
+}
+
+.pick.boxed:hover:not(:disabled),
+.pick.boxed[aria-expanded="true"] {
+  border-color: var(--faint);
+  background: var(--well);
+}
+
+/* In a form row the picker is as wide as its words, not as the row. */
+.field-body > .pick-wrap {
+  align-self: flex-start;
+}
+
 /* Holds a picker that is redrawn when what it offers changes. */
 .pick-slot {
   display: inline-flex;
@@ -246,7 +265,8 @@
   display: flex;
   flex-direction: column;
   width: max-content;
-  min-width: 216px;
+  /* As wide as its words, and never narrower than its button. */
+  min-width: max(100%, 128px);
   max-width: min(340px, 80vw);
   max-height: 336px;
   padding: 4px;
@@ -281,12 +301,11 @@
 }
 
 .menu-item {
+  position: relative;
   display: flex;
   flex: none;
-  align-items: flex-start;
-  gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px 30px 5px 10px;
   border: 0;
   border-radius: var(--r-2);
   background: transparent;
@@ -306,14 +325,16 @@
   color: var(--faint);
 }
 
-/* The check of what is chosen; the others keep its place. */
+/* The check of what is chosen, at the end of its line. */
 .menu-item > .icon {
-  margin-top: 3px;
-  visibility: hidden;
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: none;
 }
 
 .menu-item[aria-selected="true"] > .icon {
-  visibility: visible;
+  display: block;
 }
 
 .menu-text {
@@ -354,16 +375,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
-}
-
-.field-row {
-  display: flex;
-  gap: 8px;
-}
-
-.field-row .input {
-  flex: 1;
-  min-width: 0;
 }
 
 /* A radio group drawn as chips; `.segmented` joins them into one control. */
@@ -519,8 +530,8 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
-  /* With no painting: the two flat panes, side by side. */
-  background: linear-gradient(105deg, var(--flat-veil) 38%, var(--flat-sheet) 38%);
+  /* With no painting: the flat sheet. */
+  background: var(--flat-sheet);
 }
 
 .theme-thumb img {
@@ -636,111 +647,93 @@ textarea.editor {
   gap: 8px;
 }
 
-.editor-state {
-  color: var(--muted);
-  font-size: var(--text-sm);
+.editor-actions:not(:has(> :not([hidden]))) {
+  display: none;
 }
 
+/* A provider on one line: whether it has a key, its name, where it is, the key, and its removal.
+   One without a key is greyed. */
 .provider {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 132px) minmax(0, 1fr) minmax(0, 208px) 72px;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 0;
   border-top: 1px solid var(--line);
 }
 
-.provider-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+.provider-mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.provider.is-unset .provider-mark::before {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  content: "";
 }
 
 .provider-name {
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .provider-url {
-  min-width: 0;
-  color: var(--muted);
-  font: var(--text-sm) var(--mono);
-  letter-spacing: 0;
-  overflow-wrap: anywhere;
-}
-
-.provider-head .tag {
-  margin-left: auto;
-}
-
-/* Folder picker */
-
-.picker {
-  width: min(560px, calc(100vw - 48px));
-  height: min(560px, calc(100vh - 48px));
-}
-
-.picker-path {
-  display: flex;
-  flex: none;
-  gap: 8px;
-  padding: 12px 16px 8px;
-}
-
-.picker-path .input {
-  flex: 1;
-  min-width: 0;
-}
-
-.picker > .form-error,
-.push > .form-error {
-  flex: none;
-  margin: 0 16px 12px;
-}
-
-.folder-list {
-  flex: 1;
-  min-height: 0;
-  padding: 2px 8px 8px;
-  overflow-y: auto;
-}
-
-.folder {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: var(--r-2);
-  background: transparent;
-  text-align: left;
-}
-
-.folder:hover {
-  background: var(--fill-2);
-}
-
-.folder .icon {
-  color: var(--muted);
-}
-
-.folder span {
-  min-width: 0;
   overflow: hidden;
-  font: var(--text-sm) var(--mono);
+  color: var(--muted);
+  font: var(--text-xs) var(--mono);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.folder-empty {
-  padding: 8px;
-  font-size: var(--text-sm);
+.provider.is-unset .provider-name {
+  color: var(--muted);
+  font-weight: 500;
 }
 
-.picker .dialog-foot > :first-child {
+.provider.is-unset .provider-url {
+  color: var(--faint);
+}
+
+.provider > :is(.field-hint, .form-error) {
+  grid-column: 2 / -1;
+}
+
+.push > .form-error {
+  flex: none;
+  margin: 0 16px 12px;
+}
+
+/* The reminder: what was typed and not saved, before it is left behind. */
+
+.unsaved {
+  width: min(400px, calc(100vw - 48px));
+}
+
+.unsaved-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.unsaved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 18px;
+  color: var(--soft);
+}
+
+.unsaved .dialog-foot > .danger {
   margin-right: auto;
-  font-size: var(--text-sm);
 }
 
 /* Push: where it goes, what would go, and the one button that sends it. */

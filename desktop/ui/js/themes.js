@@ -1,6 +1,6 @@
-// Appearance, background and motion: what the user chose, and what that comes to right now. The
-// outcome goes on <html> as data-scheme (light or dark) and data-theme (the background's id), which
-// is all the stylesheets read; js/backdrop.js paints the background itself.
+// Appearance, background, dither and motion: what the user chose, and what that comes to right now.
+// The outcome goes on <html> as data-scheme (light or dark), data-theme (the background's id) and
+// data-dither (on or off), which is all the stylesheets read; js/backdrop.js paints the background.
 //
 // A background is a painting made by a script in desktop/art (themes/<id>/art.webp, with a small
 // thumb.webp beside it), and the way its dither drifts: three waves as [x, y, speed] in cycles per
@@ -20,8 +20,8 @@ export const BACKGROUNDS = [
 ];
 export const APPEARANCES = ['system', 'light', 'dark'];
 
-const DEFAULTS = { appearance: 'system', background: 'ember', motion: 'on' };
-const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), motion: ['on', 'off'] };
+const DEFAULTS = { appearance: 'system', background: 'ember', dither: 'on', motion: 'on' };
+const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), dither: ['on', 'off'], motion: ['on', 'off'] };
 const QUIET_DITHER = { waves: [[0.008, 0.004, 0.03], [-0.005, 0.009, 0.022], [0.003, -0.006, 0.017]], warp: 10, reach: [0.2, 0.8], fill: 0.4 };
 // The dots over the pressed backdrop: faint, and of both kinds, so they show on any picture.
 const INKS = {
@@ -36,7 +36,7 @@ const listeners = new Set();
 // Set by the test hooks, for this launch only.
 const forced = {};
 
-/** The three settings as chosen: `{ appearance, background, motion }`. */
+/** The settings as chosen: `{ appearance, background, dither, motion }`. */
 export function chosen() {
   const pick = {};
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
@@ -46,12 +46,14 @@ export function chosen() {
   return pick;
 }
 
-/** What the choices come to now: `{ scheme, background, motion }`, the system's own settings applied. */
+/** What the choices come to now: `{ scheme, background, dither, motion }`, the system's own settings applied. */
 export function current() {
   const pick = chosen();
   return {
     scheme: pick.appearance === 'system' ? (prefersDark.matches ? 'dark' : 'light') : pick.appearance,
     background: BACKGROUNDS.find((background) => background.id === (lessGlass.matches ? 'none' : pick.background)),
+    // Without it the painting is all there is behind the panes.
+    dither: pick.dither === 'on',
     motion: pick.motion === 'on' && !lessMotion.matches,
   };
 }
@@ -65,10 +67,11 @@ function apply() {
   const now = current();
   document.documentElement.dataset.scheme = now.scheme;
   document.documentElement.dataset.theme = now.background.id;
+  document.documentElement.dataset.dither = now.dither ? 'on' : 'off';
   for (const listener of listeners) listener(now);
 }
 
-/** Keeps a choice: `{ appearance }`, `{ background }` or `{ motion }`. */
+/** Keeps a choice: `{ appearance }`, `{ background }`, `{ dither }` or `{ motion }`. */
 export function choose(change) {
   for (const [key, value] of Object.entries(change)) {
     if (ALLOWED[key]?.includes(value)) prefs.set(key, value);

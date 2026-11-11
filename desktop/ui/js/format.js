@@ -31,10 +31,26 @@ export function ago(ts, now = Date.now()) {
 }
 
 /** Shortens a path under the home directory to `~/…`. */
+/** A Windows path without the verbatim prefix its system gives it: `\\?\C:\work` as `C:\work`. */
+export function plainPath(path) {
+  const text = String(path ?? '');
+  if (text.startsWith('\\\\?\\UNC\\')) return `\\\\${text.slice(8)}`;
+  return /^\\\\\?\\[A-Za-z]:/.test(text) ? text.slice(4) : text;
+}
+
 export function tilde(path, home) {
-  if (!home || !path) return path ?? '';
-  if (path === home) return '~';
-  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+  const [plain, base] = [plainPath(path), plainPath(home)];
+  if (!base || !plain) return plain;
+  if (plain === base) return '~';
+  return plain.startsWith(base) && /[\\/]/.test(plain[base.length]) ? `~${plain.slice(base.length)}` : plain;
+}
+
+/** An effort as the interface names it. The engine's `ratchet` starts high and steps up when predictions fail: Auto. */
+export function effortLabel(effort) {
+  const text = String(effort ?? '');
+  const start = /^ratchet(?:[-:](.+))?$/.exec(text);
+  if (!start) return text;
+  return !start[1] || start[1] === 'high' ? 'auto' : `auto from ${start[1]}`;
 }
 
 export const firstLine = (text) => String(text ?? '').split('\n', 1)[0];

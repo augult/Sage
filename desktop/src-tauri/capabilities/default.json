@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call the app's own commands and listen to its events. It draws its own title bar, so it may also drag, minimise, maximise and close itself.",
+  "description": "The main window may call the app's own commands and listen to its events. It draws its own title bar, so it may also drag, minimise, maximise and close itself (closing asks the page first, which then destroys the window).",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-minimize", "core:window:allow-toggle-maximize", "core:window:allow-close"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-minimize", "core:window:allow-toggle-maximize", "core:window:allow-close", "core:window:allow-destroy"]
 }

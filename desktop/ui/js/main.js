@@ -6,6 +6,7 @@ import { mountWindowControls } from './chrome.js';
 import { h, icon } from './dom.js';
 import { applyHooks } from './hooks.js';
 import * as store from './store.js';
+import { settleUnsaved } from './unsaved.js';
 import { mountNewSession } from './views/new-session.js';
 import { mountSession } from './views/session.js';
 import { mountSettings } from './views/settings.js';
@@ -72,18 +73,22 @@ const app = {
   },
 };
 
+/** Goes where the user asked to, once what they typed in Settings is saved or let go. */
+async function go(view) {
+  if (await settleUnsaved()) app.show(view);
+}
+
 function drawSessionList() {
   const currentId = app.view.name === 'session' ? app.view.id : null;
   const signature = listSignature(app.sessions, currentId);
   if (signature === listShown) return;
   listShown = signature;
-  renderSessionList(list, app.sessions, currentId, (id) => app.show({ name: 'session', id }));
+  renderSessionList(list, app.sessions, currentId, (id) => go({ name: 'session', id }));
 }
 
 [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
-document.getElementById('app-version').textContent = `v${app.state.version}`;
-newLink.addEventListener('click', () => app.show({ name: 'new' }));
-settingsLink.addEventListener('click', () => app.show({ name: 'settings' }));
+newLink.addEventListener('click', () => go({ name: 'new' }));
+settingsLink.addEventListener('click', () => go({ name: 'settings' }));
 // A session changing state changes its glyph; the timer keeps the relative times moving.
 let listFrame = 0;
 store.onChange(() => (listFrame ||= requestAnimationFrame(() => ((listFrame = 0), drawSessionList()))));

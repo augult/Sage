@@ -141,7 +141,7 @@ function load(src) {
 async function paint(now) {
   const { background, scheme } = now;
   dither.restyle(themes.ditherLook(now));
-  dither.run(now.motion && Boolean(background.art));
+  dither.run(now.motion && now.dither && Boolean(background.art));
   const wanted = `${background.id}:${scheme}`;
   if (wanted === shown) return;
   shown = wanted;

@@ -379,26 +379,6 @@
   white-space: nowrap;
 }
 
-/* Beside the bar: every row open, or every row shut. */
-.work-all {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-right: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-2);
-  background: transparent;
-  color: var(--muted);
-}
-
-.work-all:hover {
-  background: var(--fill-3);
-  color: var(--ink);
-}
-
 /* The rows hang from the bar's chevron on a hairline. */
 .work-rows {
   display: flex;
@@ -573,6 +553,38 @@ button.row-line:focus-visible {
   color: var(--danger);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+/* What the provider answered instead of a reply: never inside a fold either. */
+.notice {
+  padding: 10px 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-3);
+  background: var(--danger-soft);
+}
+
+.notice-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.notice-state {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice-text {
+  margin-top: 4px;
+  color: var(--ink);
+  font: var(--text-sm)/1.5 var(--mono);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* A request that waits for its answer: never inside a fold. */

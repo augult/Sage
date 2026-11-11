@@ -50,8 +50,9 @@ State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. 
   14.3 turns and 128 s, classic 15/17 in 20.8 turns and 139 s, mini-swe-agent 16/17 in 13.9 turns
   and 165 s. GLM-5.3 was measured on six tasks only. See `docs/BENCHMARKS.md` for what limits these
   numbers.
-- **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. The native
-  DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are untested.
+- **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. Every
+  other preset (OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek, Groq, Together,
+  Fireworks, OpenRouter, Z.ai) follows its vendor's documented contract and is untested.
 - **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
   and the front end has the session list, the new-session form with a skills picker, the live
   timeline with inspector, and settings for keys, defaults, skills, the system prompt and
@@ -109,8 +110,12 @@ presage bench --check --tasks all   # the tasks fail as shipped and pass with th
 presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
 ```
 
-Providers built in: `logfare`, `deepseek`, `zai`, `zai-coding`, `openrouter`, plus a custom
-OpenAI-compatible endpoint in `~/.presage/config.json`. Only Logfare has been exercised live.
+Providers built in: `openai`, `anthropic`, `google`, `xai`, `mistral`, `deepseek`, `groq`,
+`together`, `fireworks`, `openrouter`, `logfare`, `zai`, `zai-coding`, plus a custom
+OpenAI-compatible endpoint in `~/.presage/config.json`. All of them are called through their
+OpenAI-compatible chat-completions endpoints. Only Logfare has been exercised live: the others
+are written from the vendors' documentation (`provider/openai.rs` has what each one takes), and
+their model lists are what each vendor documented on 11 November 2026.
 
 Desktop app:
 

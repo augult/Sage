@@ -2,12 +2,15 @@
 //!
 //! The wire shapes handled here were verified against live responses from DeepSeek V4.1 Flash and
 //! GLM-5.3 (via an OpenRouter-style gateway); the native DeepSeek and Z.ai dialects follow their
-//! published API contracts.
+//! published API contracts. So do the dialects of OpenAI, Anthropic, Gemini, xAI, Mistral, Groq,
+//! Together and Fireworks, read from their documentation on 11 November 2026: none has been called.
 
 use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, Role, ToolCall, Usage, is_looping};
 use crate::text::est_tokens;
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -24,8 +27,28 @@ pub enum Dialect {
     /// logfare.ai: shaped like OpenRouter, but GLM there follows only a top-level `reasoning_effort`
     /// of `low`, `high` or `max` and thinks at `max` for anything else (measured 11 November 2026).
     Logfare,
-    /// Plain OpenAI-style `reasoning_effort`.
+    /// Plain OpenAI-style `reasoning_effort` and `max_tokens`: what self-hosted servers take.
     OpenAi,
+    /// api.openai.com itself: `max_completion_tokens` (its reasoning models refuse `max_tokens`),
+    /// and no reasoning text in either direction.
+    OpenAiPlatform,
+    /// Anthropic's OpenAI-compatible endpoint: it ignores `reasoning_effort`, returns no thinking
+    /// and does not cache prompts.
+    Anthropic,
+    /// Gemini's OpenAI-compatible endpoint: efforts up to `high`, thinking that cannot be switched
+    /// off, and on every tool call a thought signature that has to come back with it.
+    Gemini,
+    /// api.x.ai: `reasoning_effort` up to `xhigh`.
+    Xai,
+    /// api.mistral.ai: no `stream_options`, efforts from `none` to `xhigh`, and thinking streamed
+    /// as chunks of `content`.
+    Mistral,
+    /// api.groq.com: `max_completion_tokens`, an effort on some models only, reasoning as `reasoning`.
+    Groq,
+    /// api.together.ai: an effort on the gpt-oss models only.
+    Together,
+    /// api.fireworks.ai: efforts up to `high`, reasoning as `reasoning_content`.
+    Fireworks,
 }
 
 impl Dialect {
@@ -36,16 +59,58 @@ impl Dialect {
             "deepseek" => Some(Dialect::DeepSeek),
             "zai" | "z.ai" | "glm" => Some(Dialect::Zai),
             "openai" => Some(Dialect::OpenAi),
+            "openai-platform" => Some(Dialect::OpenAiPlatform),
+            "anthropic" => Some(Dialect::Anthropic),
+            "gemini" | "google" => Some(Dialect::Gemini),
+            "xai" | "grok" => Some(Dialect::Xai),
+            "mistral" => Some(Dialect::Mistral),
+            "groq" => Some(Dialect::Groq),
+            "together" => Some(Dialect::Together),
+            "fireworks" => Some(Dialect::Fireworks),
             _ => None,
         }
     }
 
-    fn reasoning_key(&self) -> &'static str {
+    /// The field of an assistant message that earlier reasoning goes back in, where the vendor
+    /// takes it back at all.
+    fn reasoning_key(&self) -> Option<&'static str> {
         match self {
-            Dialect::OpenRouter | Dialect::Logfare => "reasoning",
-            _ => "reasoning_content",
+            Dialect::OpenRouter | Dialect::Logfare | Dialect::Groq | Dialect::Together => Some("reasoning"),
+            Dialect::DeepSeek | Dialect::Zai | Dialect::OpenAi | Dialect::Xai | Dialect::Fireworks => Some("reasoning_content"),
+            Dialect::OpenAiPlatform | Dialect::Anthropic | Dialect::Gemini | Dialect::Mistral => None,
         }
     }
+}
+
+/// `reasoning_effort` in a vendor's words: `off` is what switches thinking off there (nothing where
+/// it cannot be), `max` the most it takes.
+fn effort_word(effort: Effort, off: Option<&'static str>, max: &'static str) -> Option<&'static str> {
+    match effort {
+        Effort::Off => off,
+        Effort::Low => Some("low"),
+        Effort::High => Some("high"),
+        Effort::Max => Some(max),
+    }
+}
+
+/// What tells one tool call from another when its vendor's extras are looked up again.
+fn extra_key(call: &ToolCall) -> String {
+    format!("{}\u{0}{}\u{0}{}", call.id, call.name, call.arguments)
+}
+
+/// The text and the thinking of a `content` that came as chunks rather than as a string:
+/// `[{type: "thinking", thinking: [{type: "text", text}]}, {type: "text", text}]`.
+fn content_chunks(content: Option<&Value>) -> (Option<String>, Option<String>) {
+    let Some(chunks) = content.and_then(Value::as_array) else { return (None, None) };
+    let text_of = |chunk: &Value| chunk.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+    let (mut text, mut thought) = (String::new(), String::new());
+    for chunk in chunks {
+        match chunk.get("type").and_then(Value::as_str) {
+            Some("thinking") => thought.extend(chunk.get("thinking").and_then(Value::as_array).into_iter().flatten().map(text_of)),
+            _ => text.push_str(&text_of(chunk)),
+        }
+    }
+    (Some(text), Some(thought))
 }
 
 pub struct OpenAiProvider {
@@ -56,6 +121,8 @@ pub struct OpenAiProvider {
     pub idle_timeout: Duration,
     api_key: String,
     client: reqwest::Client,
+    /// What a vendor attached to a tool call beyond the standard fields, to send back with it.
+    extras: Mutex<HashMap<String, Value>>,
 }
 
 const MAX_BACKOFF_SECS: u64 = 60;
@@ -76,7 +143,28 @@ impl OpenAiProvider {
             idle_timeout: Duration::from_secs(300),
             api_key: api_key.to_string(),
             client,
+            extras: Mutex::default(),
         })
+    }
+
+    /// Tool calls in wire form with Gemini's thought signatures put back. A reply none of whose
+    /// calls has a known one gets, on its first call, the marker Gemini documents for skipping the
+    /// check: without either it answers 400. Of parallel calls only the first carries a signature.
+    fn signed(&self, calls: &[ToolCall], mut wire: Vec<Value>) -> Vec<Value> {
+        if self.dialect != Dialect::Gemini {
+            return wire;
+        }
+        let extras = self.extras.lock().unwrap();
+        let known: Vec<Option<&Value>> = calls.iter().map(|call| extras.get(&extra_key(call))).collect();
+        let none_known = known.iter().all(Option::is_none);
+        for (i, (call, extra)) in wire.iter_mut().zip(known).enumerate() {
+            match extra {
+                Some(extra) => call["extra_content"] = extra.clone(),
+                None if none_known && i == 0 => call["extra_content"] = json!({"google": {"thought_signature": "skip_thought_signature_validator"}}),
+                None => {}
+            }
+        }
+        wire
     }
 
     /// Messages in wire form. Construction is deterministic so that an append-only history always
@@ -91,8 +179,8 @@ impl OpenAiProvider {
                     match m.role {
                         Role::Assistant => {
                             o.insert("content".into(), json!(m.content));
-                            if let Some(r) = m.reasoning.as_deref().filter(|r| !r.is_empty()) {
-                                o.insert(self.dialect.reasoning_key().into(), json!(r));
+                            if let (Some(key), Some(r)) = (self.dialect.reasoning_key(), m.reasoning.as_deref().filter(|r| !r.is_empty())) {
+                                o.insert(key.into(), json!(r));
                             }
                             if !m.tool_calls.is_empty() {
                                 let calls: Vec<Value> = m
@@ -100,7 +188,7 @@ impl OpenAiProvider {
                                     .iter()
                                     .map(|c| json!({"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}))
                                     .collect();
-                                o.insert("tool_calls".into(), Value::Array(calls));
+                                o.insert("tool_calls".into(), Value::Array(self.signed(&m.tool_calls, calls)));
                             }
                         }
                         Role::Tool => {
@@ -125,8 +213,11 @@ impl OpenAiProvider {
             b.insert("tools".into(), req.tools.clone());
         }
         b.insert("stream".into(), json!(true));
-        b.insert("stream_options".into(), json!({"include_usage": true}));
-        b.insert("max_tokens".into(), json!(req.max_tokens));
+        if self.dialect != Dialect::Mistral {
+            b.insert("stream_options".into(), json!({"include_usage": true}));
+        }
+        let limit = if matches!(self.dialect, Dialect::OpenAiPlatform | Dialect::Groq) { "max_completion_tokens" } else { "max_tokens" };
+        b.insert(limit.into(), json!(req.max_tokens));
         let effort = req.effort;
         match self.dialect {
             Dialect::OpenRouter => {
@@ -165,9 +256,24 @@ impl OpenAiProvider {
                     b.insert("reasoning_effort".into(), json!(effort.as_str()));
                 }
             }
-            Dialect::OpenAi => {
+            Dialect::OpenAi | Dialect::OpenAiPlatform => {
                 if effort != Effort::Off {
                     b.insert("reasoning_effort".into(), json!(effort.as_str()));
+                }
+            }
+            Dialect::Anthropic | Dialect::Gemini | Dialect::Xai | Dialect::Mistral | Dialect::Groq | Dialect::Together | Dialect::Fireworks => {
+                let model = self.model.as_str();
+                let word = match self.dialect {
+                    Dialect::Gemini | Dialect::Fireworks => effort_word(effort, None, "high"),
+                    Dialect::Xai => effort_word(effort, None, "xhigh"),
+                    Dialect::Mistral => effort_word(effort, Some("none"), "xhigh"),
+                    // Efforts are per model there: gpt-oss always thinks, Qwen can stop, Llama takes none.
+                    Dialect::Groq if model.starts_with("qwen/") => effort_word(effort, Some("none"), "high"),
+                    Dialect::Groq | Dialect::Together if model.contains("gpt-oss") => effort_word(effort, Some("low"), "high"),
+                    _ => None,
+                };
+                if let Some(word) = word {
+                    b.insert("reasoning_effort".into(), json!(word));
                 }
             }
         }
@@ -256,7 +362,11 @@ impl OpenAiProvider {
         if !buf.is_empty() {
             acc.feed_line(&buf, on_delta)?;
         }
-        acc.finish()
+        let (response, extras) = acc.finish_with_extras()?;
+        if !extras.is_empty() {
+            self.extras.lock().unwrap().extend(extras);
+        }
+        Ok(response)
     }
 }
 
@@ -294,6 +404,8 @@ struct PartialCall {
     id: String,
     name: String,
     arguments: String,
+    /// `extra_content`: where Gemini puts a call's thought signature.
+    extra: Option<Value>,
 }
 
 /// Accumulates one streamed response.
@@ -359,13 +471,14 @@ impl Accum {
         }
         let Some(delta) = choice.get("delta").or_else(|| choice.get("message")) else { return Ok(()) };
 
-        let reasoning = delta.get("reasoning_content").and_then(Value::as_str).or_else(|| delta.get("reasoning").and_then(Value::as_str));
+        let (chunk_text, chunk_thought) = content_chunks(delta.get("content"));
+        let reasoning = delta.get("reasoning_content").and_then(Value::as_str).or_else(|| delta.get("reasoning").and_then(Value::as_str)).or(chunk_thought.as_deref());
         if let Some(r) = reasoning.filter(|r| !r.is_empty()) {
             self.reasoning.push_str(r);
             self.unchecked += r.len();
             on_delta(Delta::Reasoning(r.to_string()));
         }
-        if let Some(c) = delta.get("content").and_then(Value::as_str).filter(|c| !c.is_empty()) {
+        if let Some(c) = delta.get("content").and_then(Value::as_str).or(chunk_text.as_deref()).filter(|c| !c.is_empty()) {
             self.content.push_str(c);
             self.unchecked += c.len();
             on_delta(Delta::Content(c.to_string()));
@@ -409,23 +522,39 @@ impl Accum {
                     call.name.push_str(name);
                 }
                 call.arguments.push_str(&args);
+                if let Some(extra) = tc.get("extra_content").filter(|extra| !extra.is_null()) {
+                    call.extra = Some(extra.clone());
+                }
             }
         }
         Ok(())
     }
 
-    pub(crate) fn finish(mut self) -> Result<ChatResponse, ProviderError> {
+    #[cfg(test)]
+    pub(crate) fn finish(self) -> Result<ChatResponse, ProviderError> {
+        self.finish_with_extras().map(|(response, _)| response)
+    }
+
+    /// The response, and with it what the vendor attached to its tool calls, by `extra_key`.
+    fn finish_with_extras(mut self) -> Result<(ChatResponse, Vec<(String, Value)>), ProviderError> {
         if !self.saw_event && !self.raw.trim().is_empty() {
             let v: Value = serde_json::from_str(self.raw.trim()).map_err(|_| ProviderError::Protocol(crate::util::truncate_chars(self.raw.trim(), 200)))?;
             let mut sink = |_d: Delta| {};
             self.apply_chunk(&v, &mut sink)?;
         }
+        let mut extras = Vec::new();
         let calls: Vec<ToolCall> = self
             .calls
             .into_iter()
             .filter(|c| !c.name.is_empty() || !c.arguments.trim().is_empty())
             .enumerate()
-            .map(|(i, c)| ToolCall { id: if c.id.is_empty() { format!("call_{i}") } else { c.id }, name: c.name, arguments: c.arguments })
+            .map(|(i, c)| {
+                let call = ToolCall { id: if c.id.is_empty() { format!("call_{i}") } else { c.id }, name: c.name, arguments: c.arguments };
+                if let Some(extra) = c.extra {
+                    extras.push((extra_key(&call), extra));
+                }
+                call
+            })
             .collect();
         if self.content.is_empty() && self.reasoning.is_empty() && calls.is_empty() {
             return Err(ProviderError::Protocol("empty response".into()));
@@ -436,7 +565,7 @@ impl Accum {
             let args: u64 = calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum();
             Usage { prompt: 0, cached: 0, output: reasoning + est_tokens(&self.content) + args, reasoning }
         });
-        Ok(ChatResponse { content: self.content, reasoning: self.reasoning, calls, usage, usage_reported, finish: self.finish, retries: 0 })
+        Ok((ChatResponse { content: self.content, reasoning: self.reasoning, calls, usage, usage_reported, finish: self.finish, retries: 0 }, extras))
     }
 }
 
@@ -552,6 +681,39 @@ mod tests {
     }
 
     #[test]
+    fn gemini_signatures_go_back_with_their_calls_and_chunked_content_is_read() {
+        let mut acc = Accum::default();
+        let mut sink = |_d: Delta| {};
+        let lines = [
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"g1","function":{"name":"read","arguments":"{\"path\":\"a\"}"},"extra_content":{"google":{"thought_signature":"SIG"}}},{"index":1,"id":"g2","function":{"name":"read","arguments":"{\"path\":\"b\"}"}}]}}]}"#,
+            "data: [DONE]",
+        ];
+        for line in lines {
+            acc.feed_line(line.as_bytes(), &mut sink).unwrap();
+        }
+        let (response, extras) = acc.finish_with_extras().unwrap();
+        assert_eq!(extras.len(), 1, "of parallel calls only the first carries a signature");
+
+        let p = provider(Dialect::Gemini);
+        p.extras.lock().unwrap().extend(extras);
+        let unknown = ToolCall { id: "x".into(), name: "shell".into(), arguments: "{}".into() };
+        let reply = |calls: Vec<ToolCall>| Message { role: Role::Assistant, content: "".into(), reasoning: None, tool_calls: calls, tool_call_id: None };
+        let wire = p.wire_messages(&[reply(response.calls.clone()), reply(vec![unknown.clone()])]);
+        assert_eq!(wire[0]["tool_calls"][0]["extra_content"], json!({"google": {"thought_signature": "SIG"}}));
+        assert!(wire[0]["tool_calls"][1].get("extra_content").is_none());
+        assert_eq!(wire[1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], json!("skip_thought_signature_validator"));
+        assert!(provider(Dialect::OpenAi).wire_messages(&[reply(vec![unknown])])[0]["tool_calls"][0].get("extra_content").is_none());
+
+        // Mistral: thinking and text as chunks of `content`.
+        let (r, _) = feed(&[
+            r#"data: {"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"hm"}]},{"type":"text","text":"done"}]},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ])
+        .unwrap();
+        assert_eq!((r.reasoning.as_str(), r.content.as_str()), ("hm", "done"));
+    }
+
+    #[test]
     fn dialects_spell_reasoning_their_own_way() {
         let tools = json!([]);
         let msgs = [Message::user("x")];
@@ -573,6 +735,28 @@ mod tests {
 
         let b = provider(Dialect::Zai).body(&req(Effort::Low));
         assert_eq!(b["thinking"], json!({"type": "enabled", "clear_thinking": false}));
+
+        // The vendors nobody here has called: what their documentation says they take.
+        let b = provider(Dialect::OpenAiPlatform).body(&req(Effort::Max));
+        assert_eq!((&b["max_completion_tokens"], &b["reasoning_effort"], b.get("max_tokens")), (&json!(100), &json!("max"), None));
+        let b = provider(Dialect::Anthropic).body(&req(Effort::High));
+        assert_eq!((b.get("reasoning_effort"), &b["max_tokens"]), (None, &json!(100)));
+        let b = provider(Dialect::Gemini).body(&req(Effort::Max));
+        assert_eq!(b["reasoning_effort"], json!("high"));
+        assert!(provider(Dialect::Gemini).body(&req(Effort::Off)).get("reasoning_effort").is_none(), "Gemini cannot stop thinking");
+        assert_eq!(provider(Dialect::Xai).body(&req(Effort::Max))["reasoning_effort"], json!("xhigh"));
+        let b = provider(Dialect::Mistral).body(&req(Effort::Off));
+        assert_eq!((&b["reasoning_effort"], b.get("stream_options")), (&json!("none"), None));
+        let groq = |model: &str, effort| OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Groq).unwrap().body(&req(effort));
+        assert_eq!((&groq("openai/gpt-oss-120b", Effort::Max)["reasoning_effort"], &groq("openai/gpt-oss-120b", Effort::Off)["reasoning_effort"]), (&json!("high"), &json!("low")));
+        assert!(groq("llama-3.3-70b-versatile", Effort::High).get("reasoning_effort").is_none());
+        assert_eq!(groq("llama-3.3-70b-versatile", Effort::High)["max_completion_tokens"], json!(100));
+        assert!(provider(Dialect::Together).body(&req(Effort::High)).get("reasoning_effort").is_none());
+        assert_eq!(provider(Dialect::Fireworks).body(&req(Effort::Max))["reasoning_effort"], json!("high"));
+
+        let said = [Message { role: Role::Assistant, content: "".into(), reasoning: Some("r".into()), tool_calls: vec![], tool_call_id: None }];
+        assert!(provider(Dialect::OpenAiPlatform).wire_messages(&said)[0].get("reasoning_content").is_none(), "OpenAI refuses fields it does not know");
+        assert_eq!(provider(Dialect::Groq).wire_messages(&said)[0]["reasoning"], json!("r"));
 
         let p = provider(Dialect::OpenRouter);
         assert_eq!(p.base_url, "https://example.invalid/v1");

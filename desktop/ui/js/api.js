@@ -20,7 +20,8 @@ export const api = {
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
   sessionEvents: (id) => invoke('session_events', { id }),
   readOutput: (id, handle) => invoke('read_output', { id, handle }),
-  listDir: (path) => invoke('list_dir', { path }),
+  /** The folder chosen in the system's dialog, opened at `start`; null when it was dismissed. */
+  pickFolder: (start) => invoke('pick_folder', { start }),
   /** Built-in and user skills, plus the project's own when `cwd` is given. */
   skills: (cwd) => invoke('list_skills', { cwd }),
   /** A skill's whole file, front matter included: what `saveSkill` takes. */

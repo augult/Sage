@@ -1,5 +1,5 @@
 // The session timeline, as a conversation: what was asked, what the agent said, and between the
-// two one grey bar for everything it did. The bar is the master toggle of a stretch of work: every
+// two one grey bar for everything it did. The bar is the one toggle of a stretch of work: every
 // tool call the agent ran, with its thinking and the harness's notes between them, across as many
 // turns as went by without words. It unfolds into a row per call, and each row into what the call
 // was: the command and what it printed, the file as it was read, the edit as a before and after.
@@ -102,6 +102,10 @@ function gather(items, ctx) {
       put([]);
     }
     if (item.live && work) work.live = item;
+    // An error the provider answered with, while nothing has come of the turn: said in the open,
+    // since a bar that reads "Retrying" can go on reading so for minutes.
+    const failed = item.rows.findLast((row) => row.retry);
+    if (failed && !item.reply) blocks.push({ kind: 'retry', key: `${item.key}-retry`, sig: `${failed.retry.attempt}:${item.live}`, retry: failed.retry, live: item.live });
     for (const row of waiting) blocks.push({ kind: 'approval', key: row.key, sig: row.state, item: row });
   }
 
@@ -163,6 +167,16 @@ const PLAIN = {
 
   approval: ({ item }, ctx) => approvalCard(item, ctx),
 
+  /** What the provider answered instead of a reply, and that the request is being made again. */
+  retry({ retry, live }) {
+    return h(
+      'section.notice',
+      { role: 'alert' },
+      h('div.notice-title', icon('bang', 14), 'Provider error', h('span.notice-state', live ? `retrying · attempt ${retry.attempt}` : plural(retry.attempt, 'attempt'))),
+      h('div.notice-text', retry.reason),
+    );
+  },
+
   /** How the run ended: its summary as the answer it is, a line for the outcome, and what it edited. */
   result({ item, edits }, ctx) {
     const look = outcomeLook(item.status, item.verified);
@@ -172,7 +186,8 @@ const PLAIN = {
     return h(
       'section.result',
       summary && !item.repeatsReply && h('div.msg.agent', prose(summary), h('div.msg-actions', copyButton(() => summary))),
-      h('div.result-line', icon(look.icon, 14), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), checked && h('span', `· ${checked}`)),
+      // A stop is the user's own doing: the header says it, and that is enough.
+      item.status !== 'stopped' && h('div.result-line', icon(look.icon, 14), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), checked && h('span', `· ${checked}`)),
       edits.length > 0 && changesCard(edits, ctx, `${item.key}-edits`),
     );
   },
@@ -184,7 +199,7 @@ function headline(block) {
   if (turn) {
     const running = [...turn.steps.values()].findLast((step) => step.status === 'active');
     if (running) return { busy: true, since: running.startedAt, parts: [`${stepVerb(running.tool, true)} `, { name: running.summary }], notes: [], meta: '' };
-    if (!turn.reply) return { busy: true, since: turn.startedAt, parts: ['Thinking'], notes: [], meta: '' };
+    if (!turn.reply) return { busy: true, since: turn.startedAt, parts: [turn.rows.some((row) => row.retry) ? 'Retrying' : 'Thinking'], notes: [], meta: '' };
   }
   const count = (kind) => block.rows.filter((row) => row.kind === kind).length;
   const steps = block.rows.filter((row) => row.kind === 'step').map((row) => ({ tool: row.step.tool, summary: row.step.summary, status: statusOf(row.step, row.turn), ms: row.step.ms }));
@@ -210,30 +225,11 @@ function workView(block, ctx) {
   const notes = h('span.work-notes');
   const meta = h('span.work-meta');
   const toggle = h('button.work-toggle', { type: 'button' }, chevron(), busy, label, notes, meta);
-  const all = h('button.work-all', { type: 'button', onclick: toggleAll });
-  const list = h('div.work-rows', { onclick: () => paintAll() });
-  const el = h('section.work', h('div.work-bar', toggle, all));
+  const list = h('div.work-rows');
+  const el = h('section.work', h('div.work-bar', toggle));
   let rows = [];
   let said = '';
   let open = false;
-
-  const toggles = () => [...list.querySelectorAll(':scope > .row > button.row-line')];
-  const allOpen = () => toggles().length > 0 && toggles().every((button) => button.getAttribute('aria-expanded') === 'true');
-
-  /** The button beside the bar opens every row at once, or shuts them all when all are open. */
-  function paintAll() {
-    const name = allOpen() ? 'Collapse all' : 'Expand all';
-    all.title = name;
-    all.setAttribute('aria-label', name);
-    all.replaceChildren(icon(allOpen() ? 'refold' : 'unfold', 14));
-    all.hidden = !open || !toggles().length;
-  }
-
-  function toggleAll() {
-    const want = !allOpen();
-    for (const button of toggles()) if ((button.getAttribute('aria-expanded') === 'true') !== want) button.click();
-    paintAll();
-  }
 
   function head() {
     const line = headline(block);
@@ -274,7 +270,6 @@ function workView(block, ctx) {
       rows[i] = fresh;
     });
     for (const stale of rows.splice(block.rows.length)) stale.el.remove();
-    paintAll();
   }
 
   const body = fold(
@@ -286,7 +281,6 @@ function workView(block, ctx) {
       open = now;
       el.classList.toggle('is-open', now);
       syncRows();
-      paintAll();
     },
   );
   el.append(body);

@@ -13,4 +13,5 @@
   const dark = appearance === 'dark' || (appearance !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
   root.dataset.scheme = dark ? 'dark' : 'light';
   root.dataset.theme = matchMedia('(prefers-reduced-transparency: reduce)').matches ? 'none' : read('background') || 'ember';
+  root.dataset.dither = read('dither') === 'off' ? 'off' : 'on';
 })();

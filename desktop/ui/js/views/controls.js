@@ -1,6 +1,7 @@
 // Form controls shared by the New session, Session and Settings views.
 
 import { h, icon } from '../dom.js';
+import { effortLabel } from '../format.js';
 
 /**
  * A radio group drawn as chips. `options` is `[{ value, label, tag, disabled, title }]`;
@@ -27,19 +28,19 @@ export function radioChips({ name, label, options, value, onChange, segmented = 
  * A button that shows the current choice and opens a menu of the others.
  * `groups` is `[{ label, options: [{ value, label, title, disabled }] }]`; a group's label is
  * optional. `prefix` names the setting in front of the value, `empty` stands in when nothing is
- * chosen. `onChange(value)` runs on selection.
+ * chosen. `boxed` draws the button as a field, for a form. `onChange(value)` runs on selection.
  *
  * With `multiple`, `value` is an array, an option toggles and the menu stays open. `locked` values
  * are on and cannot be switched off; `onChange` gets the others that are on.
  */
-export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, multiple = false, locked = [], disabled = false, align }) {
+export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, multiple = false, locked = [], disabled = false, align, boxed = false }) {
   const options = groups.flatMap((group) => group.options);
   const chosen = new Set(multiple ? value : value == null ? [] : [value]);
   const isOn = (wanted) => chosen.has(wanted) || locked.includes(wanted);
 
   const shown = h('span.pick-value');
   const button = h(
-    'button.pick',
+    `button.pick${boxed ? '.boxed' : ''}`,
     { id, type: 'button', disabled: disabled || !options.length, 'aria-haspopup': 'listbox', 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)) },
     prefix && h('span.pick-key', prefix),
     shown,
@@ -53,8 +54,8 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
         h(
           'button.menu-item',
           { type: 'button', role: 'option', title: option.title || null, disabled: option.disabled || locked.includes(option.value), dataset: { value: option.value }, onclick: () => choose(option.value) },
-          icon('check', 12),
           h('span.menu-text', option.label),
+          icon('check', 12),
         ),
       );
     }
@@ -141,22 +142,22 @@ export function field(label, control, status) {
 
 export const hint = (...content) => h('div.field-hint', ...content);
 
-/** Provider choices; a provider without a key is listed but cannot be picked. */
+/** Providers with those that have a key ahead of those that have none, each group in its own order. */
+export const keyedFirst = (providers) => [...providers].sort((a, b) => Number(b.has_key) - Number(a.has_key));
+
+/** Provider choices; one without a key is listed greyed and cannot be picked. */
 export function providerOptions(providers) {
-  return providers.map((provider) => ({
-    value: provider.id,
-    label: provider.name,
-    tag: provider.has_key ? null : 'needs key',
-    disabled: !provider.has_key,
-    title: provider.base_url,
-  }));
+  return keyedFirst(providers).map((provider) => ({ value: provider.id, label: provider.name, disabled: !provider.has_key, title: provider.has_key ? provider.base_url : 'No API key' }));
 }
 
 /** Efforts on offer, plus the configured default when it is a variant not in the list. */
 export function effortOptions(current) {
   const values = ['ratchet', 'low', 'high', 'max'];
   if (current && !values.includes(current)) values.push(current);
-  return values.map((value) => ({ value, label: value }));
+  return values.map((value) => {
+    const label = effortLabel(value);
+    return { value, label: label.charAt(0).toUpperCase() + label.slice(1) };
+  });
 }
 
 /** A provider's models, plus the saved default when it is one the list does not carry. */

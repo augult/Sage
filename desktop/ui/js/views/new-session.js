@@ -6,11 +6,10 @@
 import { api } from '../api.js';
 import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
-import { tilde } from '../format.js';
+import { plainPath, tilde } from '../format.js';
 import * as themes from '../themes.js';
 import { MOD_KEY } from './common.js';
-import { effortOptions, modelOptions, picker, skillsPicker } from './controls.js';
-import { pickFolder } from './folder-picker.js';
+import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
 
 const MODES = [
   { value: 'presage', label: 'Presage' },
@@ -30,7 +29,7 @@ const HERO_INKS = { light: [255, 255, 255, 0.36], dark: [0, 0, 0, 0.26] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
-  return [...new Set(sessions.filter((meta) => !meta.simulated).map((meta) => meta.cwd))].slice(0, 4);
+  return [...new Set(sessions.filter((meta) => !meta.simulated).map((meta) => plainPath(meta.cwd)))].slice(0, 4);
 }
 
 export function mountNewSession(main, app) {
@@ -97,10 +96,12 @@ export function mountNewSession(main, app) {
     {
       id: 'browse-workspace',
       type: 'button',
-      onclick: async () => {
-        const picked = await pickFolder(draft.cwd.trim());
-        if (picked) setWorkspace(picked);
-      },
+      // The system's own dialog: Explorer, Finder, the desktop's file chooser.
+      onclick: (event) =>
+        guarded(event.currentTarget, async () => {
+          const picked = await api.pickFolder(workspacePath() || null);
+          if (picked) setWorkspace(picked);
+        }),
     },
     'Browse…',
   );
@@ -114,7 +115,7 @@ export function mountNewSession(main, app) {
 
   // Provider and model are one choice: a model, listed under the provider that serves it.
   const served = new Map();
-  const modelGroups = state.providers.map((provider) => {
+  const modelGroups = keyedFirst(state.providers).map((provider) => {
     const models = modelOptions(provider, state);
     // A provider that lists no models still has its own default.
     const options = (models.length ? models : [{ value: null, label: 'Provider default' }]).map((option) => {
@@ -122,7 +123,8 @@ export function mountNewSession(main, app) {
       served.set(value, { provider: provider.id, model: option.value });
       return { value, label: option.label, disabled: !provider.has_key };
     });
-    return { label: provider.has_key ? provider.name : `${provider.name} · needs key`, options };
+    // Without a key its models are listed greyed.
+    return { label: provider.name, options };
   });
   const modelPicker = picker({
     id: 'pick-model',
@@ -239,7 +241,7 @@ export function mountNewSession(main, app) {
   const dither = createDither(canvas, themes.ditherLook(themes.current(), 3, HERO_INKS));
   const restyle = (now) => {
     dither.restyle(themes.ditherLook(now, 3, HERO_INKS));
-    dither.run(now.motion);
+    dither.run(now.motion && now.dither);
   };
   const forget = themes.onChange(restyle);
   const backgrounds = picker({

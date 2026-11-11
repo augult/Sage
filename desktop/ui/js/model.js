@@ -160,7 +160,9 @@ const HANDLERS = {
       turn.content = '';
       turn.streamRev++;
     }
-    place(s, ev, chip(s, 'alert', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`));
+    const row = chip(s, 'alert', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`);
+    row.retry = { attempt: num(ev.attempt), reason: str(ev.reason) };
+    place(s, ev, row);
   },
 
   model(s, ev) {

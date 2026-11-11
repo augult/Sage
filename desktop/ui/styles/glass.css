@@ -61,6 +61,11 @@ body {
   image-rendering: pixelated;
 }
 
+/* Dither off: the painting alone, here and in the New session view. */
+:root[data-dither="off"] :is(#backdrop-dither, .hero-dither) {
+  display: none;
+}
+
 #app {
   background: var(--veil);
 }

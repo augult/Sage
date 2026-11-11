@@ -1,24 +1,57 @@
 // Settings: how the window looks, an API key per provider, the defaults for new sessions, and the
 // text the model is given: skills, the system prompt and the user's instructions.
 // Keys only ever travel towards the engine; a stored key is never read back or shown.
+//
+// Nothing here has a Save button. A choice is kept the moment it is made, and a key when its field
+// is left. Text that was typed into a file is kept as a draft: leaving Settings or closing the
+// window asks whether to save it (js/unsaved.js), and Ctrl/Cmd+S in the text saves it where it is.
 
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
 import * as themes from '../themes.js';
-import { tag } from './common.js';
-import { effortOptions, field, hint, modelOptions, providerOptions, radioChips } from './controls.js';
+import { track, watchUnsaved } from '../unsaved.js';
+import { effortOptions, field, hint, modelOptions, picker, providerOptions, radioChips } from './controls.js';
 
-// What the last save or removal did, per provider, to show once the view is redrawn.
+// What removing a key or a failed save has to say, per provider, once the view is redrawn.
 const notices = new Map();
-const REMOVED = 'Removed';
 
-// Text typed into an editor and not saved yet, by what it edits. It survives leaving the view.
+// Text typed into an editor and not saved yet, by what it edits.
 const drafts = new Map();
+// Keys typed and not handed to the engine yet, by provider: `{ name, value }`.
+const typedKeys = new Map();
 // The skill whose file is open: its name, NEW, or null.
 let openSkill = null;
 const NEW = '+new';
 const NEW_SKILL = '---\nname: \ntitle: \ndescription: \n---\n\n';
+
+/** The `name` a skill file's front matter gives, or nothing. */
+function frontName(text) {
+  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+  return /^name:[ \t]*(.*?)[ \t]*$/m.exec(front)?.[1] ?? '';
+}
+
+/** A draft as the reminder lists it, and how it is saved, by its key. */
+function draftFile(key) {
+  if (key === 'system') return { label: 'System prompt', save: (text) => api.setSystemPrompt(text) };
+  if (key === 'global') return { label: 'Instructions', save: (text) => api.setGlobalInstructions(text) };
+  const name = key.slice('skill:'.length);
+  if (name === NEW) return { label: 'New skill', save: (text) => api.saveSkill(frontName(text), text) };
+  return { label: `Skill ${name}`, save: (text) => api.saveSkill(name, text) };
+}
+
+watchUnsaved(() => [
+  ...[...typedKeys].map(([provider, typed]) => ({
+    label: `API key for ${typed.name}`,
+    save: () => api.setKey(provider, typed.value).then(() => typedKeys.delete(provider)),
+    discard: () => typedKeys.delete(provider),
+  })),
+  ...[...drafts].map(([key, text]) => ({
+    label: draftFile(key).label,
+    save: () => draftFile(key).save(text).then(() => drafts.delete(key)),
+    discard: () => drafts.delete(key),
+  })),
+]);
 
 export function mountSettings(main, app) {
   const live = h('div.contents');
@@ -40,8 +73,9 @@ export function mountSettings(main, app) {
     live.replaceChildren(
       h(
         'section.panel',
+        { id: 'settings-keys' },
         h('h2.section-title', 'API keys'),
-        state.providers.map((provider) => providerCard(provider, refresh)),
+        state.providers.map((provider) => providerRow(provider, refresh)),
       ),
       defaults(state, refresh),
     );
@@ -51,7 +85,7 @@ export function mountSettings(main, app) {
   return {};
 }
 
-/** Light or dark, the painting behind the panes, and whether its dither moves. Kept by the window, not the engine. */
+/** Light or dark, the painting behind the panes, and its dither: there or not, moving or still. Kept by the window, not the engine. */
 function appearanceSection() {
   const pick = themes.chosen();
   const choice = (name, label, values, value) =>
@@ -75,101 +109,130 @@ function appearanceSection() {
     h('h2.section-title', 'Appearance'),
     field('Mode', choice('appearance', 'Appearance', themes.APPEARANCES, pick.appearance)),
     field('Background', backgrounds),
+    field('Dither', choice('dither', 'Dither', ['on', 'off'], pick.dither)),
     field('Motion', choice('motion', 'Motion', ['on', 'off'], pick.motion)),
   );
 }
 
-function providerCard(provider, refresh) {
+/**
+ * A provider and its key, on one line. One that has a key is marked and in full ink; one that has
+ * none is greyed. The key is kept when its field is left or Enter is pressed.
+ */
+function providerRow(provider, refresh) {
   const custom = provider.id === 'custom';
-  const input = h('input.input', {
-    type: 'password',
-    autocomplete: 'off',
-    spellcheck: 'false',
-    placeholder: provider.has_key && !custom ? 'New key' : 'API key',
-    'aria-label': `API key for ${provider.name}`,
-    oninput: () => (save.disabled = !input.value.trim()),
-    onkeydown: (event) => {
-      if (event.key === 'Enter' && !save.disabled) store(input.value);
-    },
-  });
-  const save = h('button.btn.save-key', { type: 'button', disabled: true, onclick: () => store(input.value) }, 'Save');
-  const remove = h('button.btn.danger.remove-key', { type: 'button', disabled: !provider.has_key, onclick: () => store('') }, 'Remove');
-  const status = hint();
-  status.setAttribute('role', 'status');
-  status.textContent = notices.get(provider.id) ?? '';
-  // Still keyed after a removal: the environment variable is supplying one.
-  if (status.textContent === REMOVED && provider.has_key && !custom) status.textContent += ` · ${provider.key_env} still set`;
-  status.hidden = !status.textContent;
-  notices.delete(provider.id);
+  const keyed = provider.has_key;
+  let storing = false;
 
-  async function store(key) {
-    save.disabled = remove.disabled = true;
+  const store = (key) => track(keep(key));
+  async function keep(key) {
+    if (storing) return;
+    storing = true;
+    typedKeys.delete(provider.id);
+    notices.delete(provider.id);
     try {
       await api.setKey(provider.id, key);
-      notices.set(provider.id, key.trim() ? 'Saved' : REMOVED);
+      if (!key.trim()) notices.set(provider.id, { removed: true });
     } catch (problem) {
-      notices.set(provider.id, String(problem));
+      notices.set(provider.id, { error: String(problem) });
     }
     await refresh();
   }
 
-  const state = custom ? tag('custom endpoint') : provider.has_key ? tag('key configured', 'good') : tag('no key');
+  const input = h('input.input', {
+    type: 'password',
+    autocomplete: 'off',
+    spellcheck: 'false',
+    value: typedKeys.get(provider.id)?.value ?? '',
+    placeholder: keyed && !custom ? 'Replace key' : 'API key',
+    'aria-label': `API key for ${provider.name}`,
+    oninput: () => (input.value.trim() ? typedKeys.set(provider.id, { name: provider.name, value: input.value }) : typedKeys.delete(provider.id)),
+    onblur: () => input.value.trim() && store(input.value),
+    onkeydown: (event) => {
+      if (event.key === 'Enter' && input.value.trim()) store(input.value);
+    },
+  });
+  const remove = h('button.btn.danger.remove-key', { type: 'button', hidden: !keyed, onclick: () => store('') }, 'Remove');
+
+  const notice = notices.get(provider.id);
+  notices.delete(provider.id);
+  // Still keyed after a removal: the system's environment is supplying one.
+  const said = notice?.error
+    ? h('div.form-error', { role: 'alert' }, notice.error)
+    : notice?.removed && keyed && !custom && hint({ role: 'status' }, 'Removed from Presage. A key from your system environment is still in use.');
+
+  const mark = keyed ? 'Key set' : 'No key';
   return h(
-    'div.provider',
+    `div.provider${keyed ? '' : '.is-unset'}`,
     { dataset: { provider: provider.id } },
-    h('div.provider-head', h('span.provider-name', { title: provider.note || null }, provider.name), h('span.provider-url', provider.base_url), h('span.provider-url', provider.key_env), state),
-    h('div.field-row', input, save, remove),
-    status,
+    h('span.provider-mark', { title: mark, role: 'img', 'aria-label': mark }, keyed && icon('check', 14)),
+    h('span.provider-name', { title: provider.note || null }, provider.name),
+    h('span.provider-url', { title: provider.base_url }, provider.base_url),
+    input,
+    remove,
+    said,
   );
 }
 
 function defaults(state, refresh) {
   const provider = state.providers.find((candidate) => candidate.id === state.provider && candidate.has_key);
-  const saved = hint();
-  saved.setAttribute('role', 'status');
+  const error = h('div.form-error', { role: 'alert', hidden: !notices.has('defaults') }, notices.get('defaults')?.error ?? null);
+  notices.delete('defaults');
+  // Kept the moment it is chosen.
   const apply = async (change) => {
     try {
       await api.setDefaults(change);
-      notices.set('defaults', 'Saved');
     } catch (problem) {
-      notices.set('defaults', String(problem));
+      notices.set('defaults', { error: String(problem) });
     }
     await refresh();
   };
-  saved.textContent = notices.get('defaults') ?? '';
-  notices.delete('defaults');
 
   return h(
     'section.panel',
+    { id: 'settings-defaults' },
     h('h2.section-title', 'Defaults'),
     field(
       'Provider',
-      radioChips({
-        name: 'default-provider',
-        label: 'Default provider',
-        options: providerOptions(state.providers),
-        value: provider?.id,
+      picker({
+        id: 'default-provider',
+        name: 'Default provider',
+        boxed: true,
+        groups: [{ options: providerOptions(state.providers) }],
+        value: provider?.id ?? null,
         // A saved model belongs to its provider, so the two are always saved together.
         onChange: (id) => apply({ provider: id, model: state.providers.find((candidate) => candidate.id === id).models[0] }),
       }),
     ),
     provider &&
-      field('Model', radioChips({ name: 'default-model', label: 'Default model', options: modelOptions(provider, state), value: state.model, onChange: (model) => apply({ provider: provider.id, model }) })),
-    field('Effort', radioChips({ name: 'default-effort', label: 'Default effort', options: effortOptions(state.effort), value: state.effort, segmented: true, onChange: (effort) => apply({ effort }) }), saved),
+      field(
+        'Model',
+        picker({ id: 'default-model', name: 'Default model', boxed: true, groups: [{ options: modelOptions(provider, state) }], value: state.model, onChange: (model) => apply({ provider: provider.id, model }) }),
+      ),
+    field('Effort', radioChips({ name: 'default-effort', label: 'Default effort', options: effortOptions(state.effort), value: state.effort, segmented: true, onChange: (effort) => apply({ effort }) }), error),
   );
 }
 
 /**
- * A text file being edited: the text area, Save (lit only while the text differs from what is
- * stored) and at most one other action. `set` hands it a file and what the buttons do with it.
+ * A text file being edited: the text area and at most one action beside saving. What is typed is
+ * a draft until it is saved, with Ctrl/Cmd+S here or from the reminder on the way out.
+ * `set` hands it a file and what its actions do.
  */
 function fileEditor(label) {
   let key = '';
   let stored = '';
   let actions = {};
-  const area = h('textarea.input.editor', { 'aria-label': label, spellcheck: 'false', autocomplete: 'off', oninput: sync });
+  const area = h('textarea.input.editor', {
+    'aria-label': label,
+    spellcheck: 'false',
+    autocomplete: 'off',
+    oninput: sync,
+    onkeydown: (event) => {
+      if (event.key.toLowerCase() !== 's' || !(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      if (area.value !== stored) run(() => actions.save(area.value));
+    },
+  });
   const error = h('div.form-error', { role: 'alert', hidden: true });
-  const unsaved = h('span.editor-state', { role: 'status', hidden: true }, 'Unsaved');
   // An action that throws text away takes a second click.
   let armed = false;
   const disarm = () => {
@@ -193,21 +256,17 @@ function fileEditor(label) {
       }
     },
   });
-  const save = h('button.btn.editor-save', { type: 'button', disabled: true, onclick: () => run(() => actions.save(area.value)) }, 'Save');
 
   function sync() {
     if (!key) return;
-    const dirty = area.value !== stored;
-    if (dirty) drafts.set(key, area.value);
+    if (area.value !== stored) drafts.set(key, area.value);
     else drafts.delete(key);
-    unsaved.hidden = !dirty;
-    save.disabled = !dirty;
     other.disabled = !actions.other?.enabled;
   }
 
-  /** Runs a button's action. On success the action hands the editor its file again. */
+  /** Runs an action. On success the action hands the editor its file again. */
   async function run(action) {
-    save.disabled = other.disabled = true;
+    other.disabled = true;
     error.hidden = true;
     try {
       await action();
@@ -219,7 +278,7 @@ function fileEditor(label) {
   }
 
   return {
-    el: h('div.editor-box', area, error, h('div.editor-actions', unsaved, other, save)),
+    el: h('div.editor-box', area, error, h('div.editor-actions', other)),
     area,
     /** `other` is `{ label, danger, confirm, enabled, run }` or null. An unsaved draft of the file comes back. */
     set(file) {
@@ -234,12 +293,6 @@ function fileEditor(label) {
       sync();
     },
   };
-}
-
-/** The `name` a skill file's front matter gives, or nothing. */
-function frontName(text) {
-  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
-  return /^name:[ \t]*(.*?)[ \t]*$/m.exec(front)?.[1] ?? '';
 }
 
 const skillState = (skill) => (skill.source === 'builtin' ? 'Built-in' : skill.overrides_builtin ? 'Edited' : 'Custom');
@@ -262,7 +315,7 @@ function skillsSection() {
     skills = await api.skills(null);
     const skill = skills.find((candidate) => candidate.name === openSkill);
     if (openSkill === NEW) {
-      const key = 'skill:+new';
+      const key = `skill:${NEW}`;
       editor.set({
         key,
         text: NEW_SKILL,
