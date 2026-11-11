@@ -8,9 +8,10 @@
 use crate::events::{EventKind, Sink, Stats};
 use crate::guard::Expect;
 use crate::repair::Call;
+use crate::review;
 use crate::state::Session;
 use crate::tools::{self, StepOutput, StepStatus, Tool, bool_arg, str_arg};
-use crate::util::{fnv64, one_line, truncate_chars};
+use crate::util::{fnv64, one_line};
 use crate::watches::{self, WatchChange, WatchReport, WatchState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -83,6 +84,8 @@ pub struct Runner<'a> {
     pub autonomy: Autonomy,
     /// Someone is present to answer approval requests.
     pub interactive: bool,
+    /// The budget ends with this reply: `finish` is taken as it stands, since nothing can follow it.
+    pub landing: bool,
 }
 
 fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
@@ -175,6 +178,7 @@ fn summarize(call: &Call) -> String {
 impl Runner<'_> {
     pub async fn run(&mut self, calls: &[Call]) -> ScriptResult {
         let scripts = self.sess.features.scripts;
+        self.sess.reply += 1;
         let mut res = ScriptResult::default();
         let mut halted: Option<String> = None;
         let mut acted = false;
@@ -190,13 +194,18 @@ impl Runner<'_> {
             self.sink.emit(EventKind::StepStart { turn: self.turn, idx: idx as u32, call_id: call.id.clone(), tool: tool_name.clone(), summary: summarize(call), expect });
 
             let started = Instant::now();
-            let out = if let Some(why) = &halted {
-                let text = format!("[skipped] not run, because {why}.");
-                StepOutput { status: StepStatus::Skipped, stub: text.clone(), observation: text, ..Default::default() }
-            } else if let Some(err) = &call.error {
-                StepOutput::error(err)
-            } else {
-                self.execute(call, &mut res, &mut acted).await
+            // The closing report of a session that is out of budget is heard even behind a failed
+            // step: skipping it would leave no report at all.
+            let closing = self.landing && call.tool == Some(Tool::Finish) && call.error.is_none();
+            let out = match &halted {
+                Some(why) if !closing => {
+                    let text = format!("[skipped] not run, because {why}.");
+                    StepOutput { status: StepStatus::Skipped, stub: text.clone(), observation: text, ..Default::default() }
+                }
+                _ => match &call.error {
+                    Some(err) => StepOutput::error(err),
+                    None => self.execute(call, &mut res, &mut acted).await,
+                },
             };
             let ms = started.elapsed().as_millis() as u64;
 
@@ -317,6 +326,9 @@ impl Runner<'_> {
             let path = str_arg(args, "path").unwrap_or("?").trim().to_string();
             self.sess.evidence.changed(format!("the {} of {path}", tool.name()));
             self.sess.lessons.on_edit();
+            if !self.sess.touched.contains(&path) {
+                self.sess.touched.push(path.clone());
+            }
             res.edited.push(path);
         }
         if let Some(meta) = &out.shell {
@@ -383,41 +395,55 @@ impl Runner<'_> {
             return StepOutput::ok("[done]");
         }
         // The gate judges the workspace as it is now, so bring the watches up to date first.
+        let unverified = str_arg(args, "unverified").map(str::trim).filter(|r| !r.is_empty());
+        let mut failing: Option<(String, bool, String)> = None;
         if self.sess.features.watches && !self.sess.watches.items.is_empty() {
             let (reports, text) = watches::run_stale(self.sess, self.cancel).await;
             self.emit_watches(&reports);
             if !self.sess.watches.all_pass() {
-                let failing: Vec<&watches::Watch> = self.sess.watches.items.iter().filter(|w| w.state != WatchState::Pass).collect();
-                let names = failing.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ");
+                let not_passing: Vec<&watches::Watch> = self.sess.watches.items.iter().filter(|w| w.state != WatchState::Pass).collect();
+                let names = not_passing.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ");
                 // A check the model never asked for must not be able to trap it.
-                let waivable = failing.iter().all(|w| w.auto);
-                if let (true, Some(reason)) = (waivable, str_arg(args, "unverified").map(str::trim).filter(|r| !r.is_empty())) {
-                    res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: {reason} (watch {names} is failing)") });
-                    return StepOutput::ok("[done] accepted without verification");
-                }
-                let head = format!("[SURPRISE] finish refused: watch {names} is not passing.");
-                let mut detail = if text.is_empty() { "Its output has not changed since it was last shown.".to_string() } else { text };
-                if waivable {
-                    detail.push_str("\nFix it. If it cannot pass for a reason outside this task, call finish with `unverified` set to that reason.");
-                }
-                return StepOutput { status: StepStatus::Surprise, violations: vec![format!("watch {names} is failing")], stub: head.clone(), observation: format!("{head}\n{detail}"), ..Default::default() };
+                failing = Some((names, not_passing.iter().all(|w| w.auto), text));
             }
         }
-        let unverified = str_arg(args, "unverified").map(str::trim).filter(|r| !r.is_empty());
-        let ev = &mut self.sess.evidence;
+        if self.landing {
+            // Nothing can follow this reply, so a refusal or a review would only cost the report.
+            // It is accepted, with what is actually known about the work.
+            let ev = &self.sess.evidence;
+            let (verified, evidence) = match (&failing, unverified) {
+                (Some((names, _, _)), _) => (false, format!("unverified: watch {names} was failing when the budget ran out")),
+                (None, _) if ev.fresh() => (true, ev.verified_by()),
+                (None, Some(reason)) => (false, format!("unverified: {reason}")),
+                (None, None) => (false, format!("unverified: nothing was checked after {} before the budget ran out", ev.last_change)),
+            };
+            res.finished = Some(Finished { summary, verified, evidence });
+            return StepOutput::ok(if verified { "[done] accepted" } else { "[done] accepted without verification" });
+        }
+        if let Some((names, waivable, text)) = failing {
+            if let (true, Some(reason)) = (waivable, unverified) {
+                res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: {reason} (watch {names} is failing)") });
+                return StepOutput::ok("[done] accepted without verification");
+            }
+            let head = format!("[SURPRISE] finish refused: watch {names} is not passing.");
+            let mut detail = if text.is_empty() { "Its output has not changed since it was last shown.".to_string() } else { text };
+            if waivable {
+                detail.push_str("\nFix it. If it cannot pass for a reason outside this task, call finish with `unverified` set to that reason.");
+            }
+            return StepOutput { status: StepStatus::Surprise, violations: vec![format!("watch {names} is failing")], stub: head.clone(), observation: format!("{head}\n{detail}"), ..Default::default() };
+        }
         // Passing checks say the visible tests hold, not that the task is done: ask once for a
         // review against the task before accepting work that changed something.
+        let ev = &mut self.sess.evidence;
         if self.sess.features.review && !ev.reviewed && ev.epoch > ev.message_epoch && (ev.fresh() || unverified.is_some()) {
             ev.reviewed = true;
-            let text = review_text(&self.sess.task);
+            let changes = review::changes(self.sess).await;
+            let text = review::text(&self.sess.task, changes.as_deref());
             return StepOutput { stub: "[review] one review pass before finish is accepted".into(), observation: text, ..StepOutput::ok("") };
         }
+        let ev = &mut self.sess.evidence;
         if ev.fresh() {
-            let evidence = match &ev.verified {
-                Some((_, by)) if ev.epoch > 0 => format!("verified by {by}"),
-                _ => "no changes were made".to_string(),
-            };
-            res.finished = Some(Finished { summary, verified: true, evidence });
+            res.finished = Some(Finished { summary, verified: true, evidence: ev.verified_by() });
             return StepOutput::ok("[done] accepted");
         }
         if let Some(reason) = unverified {
@@ -438,14 +464,6 @@ impl Runner<'_> {
     }
 }
 
-/// What the first `finish` after a change is answered with.
-fn review_text(task: &str) -> String {
-    format!(
-        "[review] Not accepted yet: one review pass first. Passing checks show that the tests you can see hold, not that the task is done.\n<task>\n{}\n</task>\nBefore calling `finish` again:\n1. Go through the task above sentence by sentence. Is every separate request done, and every stated constraint respected (names, formats, files to leave alone)?\n2. Go through the README, docstrings or spec of the code you touched. Every rule and edge case the visible tests do not cover (empty input, zero, boundaries, duplicates, invalid input, ordering): run it now unless you already have.\n3. Re-read what you changed: a call site or second entry point you missed, leftover debugging or scratch files, anything changed that the task did not ask for.\nFix whatever you find, then call `finish` again. It is reviewed only once.",
-        truncate_chars(task, 6000)
-    )
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -461,13 +479,45 @@ mod tests {
     }
 
     async fn run(sess: &mut Session, list: &[(&str, Value)]) -> (ScriptResult, Stats, Vec<EventKind>) {
+        run_as(sess, list, false).await
+    }
+
+    /// `landing`: the script is the last reply the budget allows.
+    async fn run_as(sess: &mut Session, list: &[(&str, Value)], landing: bool) -> (ScriptResult, Stats, Vec<EventKind>) {
         let sink = MemorySink::default();
         let mut stats = Stats::default();
         let cancel = CancellationToken::new();
         let approvals = Approvals::default();
-        let res = Runner { sess, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Auto, interactive: false }.run(&calls(list)).await;
+        let res = Runner { sess, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Auto, interactive: false, landing }.run(&calls(list)).await;
         let events = sink.events.lock().unwrap().clone();
         (res, stats, events)
+    }
+
+    #[tokio::test]
+    async fn on_the_last_reply_finish_is_taken_as_it_stands_and_says_what_is_known() {
+        let finish = ("finish", json!({"summary": "half done"}));
+        // Unchecked, with the review still due and behind a failed step: accepted all the same.
+        let mut s = test_session("script-landing", Features::presage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        let (res, _, events) = run_as(&mut s, &[("edit", json!({"path": "n.txt", "old": "1", "new": "3"})), ("shell", json!({"cmd": "grep -qx 2 n.txt"})), finish.clone()], true).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Surprise, StepStatus::Ok]);
+        let done = res.finished.expect("nothing can follow the last reply");
+        assert_eq!((done.verified, done.evidence.as_str(), done.summary.as_str()), (false, "unverified: nothing was checked after the edit of n.txt before the budget ran out", "half done"));
+
+        // Any other step behind a failed one is skipped as always.
+        let (res, _, events) = run_as(&mut s, &[("shell", json!({"cmd": "grep -qx 2 n.txt"})), ("write", json!({"path": "b.txt", "content": "x"})), finish.clone()], true).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Surprise, StepStatus::Skipped, StepStatus::Ok]);
+        assert!(res.finished.is_some() && !s.ws.root.join("b.txt").exists());
+
+        // A failing watch is named; a passing one verifies, with no review in between.
+        let mut s = test_session("script-landing-watch", Features::presage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        run(&mut s, &[("watch", json!({"name": "is-two", "cmd": "grep -qx 2 n.txt"}))]).await;
+        let (res, _, _) = run_as(&mut s, &[("edit", json!({"path": "n.txt", "old": "1", "new": "3"})), finish.clone()], true).await;
+        assert_eq!(res.finished.unwrap().evidence, "unverified: watch is-two was failing when the budget ran out");
+        let (res, _, _) = run_as(&mut s, &[("edit", json!({"path": "n.txt", "old": "3", "new": "2"})), finish], true).await;
+        let done = res.finished.unwrap();
+        assert_eq!((done.verified, done.evidence.as_str()), (true, "verified by watch is-two"));
     }
 
     fn statuses(events: &[EventKind]) -> Vec<StepStatus> {
@@ -639,7 +689,7 @@ mod tests {
                 }
             }
         };
-        let mut runner = Runner { sess: &mut s, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Ask, interactive: true };
+        let mut runner = Runner { sess: &mut s, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Ask, interactive: true, landing: false };
         let (res, _) = tokio::join!(runner.run(&list), answer);
         assert!(s.ws.root.join("a.txt").exists() && !s.ws.root.join("b.txt").exists());
         assert!(res.observations[1].1.starts_with("[denied] the user declined"));

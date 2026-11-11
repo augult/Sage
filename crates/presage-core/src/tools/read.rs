@@ -291,6 +291,9 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
             let msg = format!("[unchanged] {shown} lines {from}-{to} are already in your context (shown {when}) and the file has not changed since. Ask again if you need them re-printed.");
             return StepOutput { stub: msg.clone(), observation: msg, ..Default::default() };
         }
+    } else {
+        // Still on record: `edit` reads an anchor by what the model has been shown.
+        sess.seen.mark(&abs, hash, from, to, sess.step);
     }
 
     let mut out = if from == 1 && to == total { format!("{shown} · {total} lines\n") } else { format!("{shown} · lines {from}-{to} of {total}\n") };

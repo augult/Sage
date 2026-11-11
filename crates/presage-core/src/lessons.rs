@@ -226,14 +226,16 @@ impl LessonBook {
         Some(lesson)
     }
 
-    /// If this failure has been seen and resolved before, say how.
+    /// If this failure has been seen and resolved before, say how. Not where the failing command is
+    /// the resolution itself: it is failing for some other reason, and the lesson would only send
+    /// the model back to what it has just run.
     pub fn hint(&self, cmd: &str, output: &str) -> Option<String> {
         let sig = signature(output);
         let cmd = cmd.trim();
         let l = self
             .lessons
             .iter()
-            .filter(|l| l.failed == cmd || (l.sig == sig && related(&l.failed, cmd)))
+            .filter(|l| l.fix != cmd && (l.failed == cmd || (l.sig == sig && related(&l.failed, cmd))))
             .max_by_key(|l| (l.hits, l.last_seen))?;
         Some(match l.kind {
             LessonKind::Instead => format!("lesson from this project ({}×): `{}` worked where `{}` failed like this", l.hits, l.fix, l.failed),

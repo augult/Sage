@@ -3,7 +3,7 @@
 use super::{StepOutput, str_arg, u64_arg};
 use crate::anchors::push_anchored;
 use crate::state::Session;
-use grep_regex::RegexMatcherBuilder;
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::WalkBuilder;
@@ -18,12 +18,30 @@ const MAX_LISTED_FILES: usize = 200;
 const TIME_BUDGET: Duration = Duration::from_secs(8);
 const MAX_COLS: usize = 240;
 
+/// The parts of a comma-separated glob list. A comma inside braces belongs to its glob: `*.{rs,toml}`.
+fn glob_parts(list: &str) -> Vec<&str> {
+    let (mut parts, mut depth, mut start) = (Vec::new(), 0usize, 0usize);
+    for (i, c) in list.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&list[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&list[start..]);
+    parts.into_iter().map(str::trim).filter(|p| !p.is_empty()).collect()
+}
+
 fn walker(root: &Path, glob: Option<&str>) -> Result<ignore::Walk, String> {
     let mut b = WalkBuilder::new(root);
     b.hidden(false).follow_links(false).sort_by_file_name(|a, b| a.cmp(b)).filter_entry(|e| e.file_name() != ".git");
     if let Some(g) = glob {
         let mut ov = OverrideBuilder::new(root);
-        for part in g.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        for part in glob_parts(g) {
             ov.add(part).map_err(|e| format!("bad glob {part:?}: {e}"))?;
         }
         b.overrides(ov.build().map_err(|e| format!("bad glob {g:?}: {e}"))?);
@@ -35,6 +53,59 @@ struct FileHits {
     path: PathBuf,
     lines: Vec<(usize, String)>,
     more: usize,
+}
+
+#[derive(Default)]
+struct Scan {
+    hits: Vec<FileHits>,
+    shown: usize,
+    total: usize,
+    files_with_hits: usize,
+    timed_out: bool,
+}
+
+/// Searches every file of `walk`, keeping at most `cap` matching lines.
+fn scan(walk: ignore::Walk, matcher: &RegexMatcher, cap: usize, started: Instant) -> Scan {
+    let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(b'\x00')).line_number(true).build();
+    let mut s = Scan::default();
+    for entry in walk.flatten() {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        if started.elapsed() > TIME_BUDGET {
+            s.timed_out = true;
+            break;
+        }
+        if s.total >= MAX_COUNTED {
+            break;
+        }
+        let mut found: Vec<(usize, String)> = Vec::new();
+        let mut count = 0usize;
+        let _ = searcher.search_path(
+            matcher,
+            entry.path(),
+            UTF8(|lnum, line| {
+                count += 1;
+                if found.len() < MAX_PER_FILE {
+                    found.push((lnum as usize, line.trim_end_matches(['\n', '\r']).to_string()));
+                }
+                Ok(count < 2_000)
+            }),
+        );
+        if count == 0 {
+            continue;
+        }
+        s.files_with_hits += 1;
+        s.total += count;
+        let room = cap.saturating_sub(s.shown);
+        if room > 0 {
+            found.truncate(room);
+            s.shown += found.len();
+            let more = count - found.len();
+            s.hits.push(FileHits { path: entry.path().to_path_buf(), lines: found, more });
+        }
+    }
+    s
 }
 
 pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
@@ -77,57 +148,29 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
 
     // Smart case, as in ripgrep. A pattern that is not a valid regex is searched for literally.
     let build = |literal: bool| RegexMatcherBuilder::new().case_smart(true).fixed_strings(literal).line_terminator(Some(b'\n')).build(pattern);
-    let (matcher, literal) = match build(false) {
+    let (matcher, mut literal) = match build(false) {
         Ok(m) => (m, false),
         Err(_) => match build(true) {
             Ok(m) => (m, true),
             Err(e) => return StepOutput::error(format!("cannot search for {pattern:?}: {e}")),
         },
     };
-    let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(b'\x00')).line_number(true).build();
     let cap = sess.limits.search_matches;
-    let mut hits: Vec<FileHits> = Vec::new();
-    let (mut shown, mut total, mut files_with_hits, mut timed_out) = (0usize, 0usize, 0usize, false);
-
-    for entry in walk.flatten() {
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        if started.elapsed() > TIME_BUDGET {
-            timed_out = true;
-            break;
-        }
-        if total >= MAX_COUNTED {
-            break;
-        }
-        let mut found: Vec<(usize, String)> = Vec::new();
-        let mut count = 0usize;
-        let _ = searcher.search_path(
-            &matcher,
-            entry.path(),
-            UTF8(|lnum, line| {
-                count += 1;
-                if found.len() < MAX_PER_FILE {
-                    found.push((lnum as usize, line.trim_end_matches(['\n', '\r']).to_string()));
-                }
-                Ok(count < 2_000)
-            }),
-        );
-        if count == 0 {
-            continue;
-        }
-        files_with_hits += 1;
-        total += count;
-        let room = cap.saturating_sub(shown);
-        if room > 0 {
-            found.truncate(room);
-            shown += found.len();
-            let more = count - found.len();
-            hits.push(FileHits { path: entry.path().to_path_buf(), lines: found, more });
+    let mut found = scan(walk, &matcher, cap, started);
+    // Code pasted as a pattern is a valid regex that means something else: `divide(a, b)` is a
+    // group, and matches no parenthesis. Before reporting that there is nothing, look for the text.
+    let mut why_literal = "not a valid regex";
+    if found.hits.is_empty() && !literal && !found.timed_out && regex::escape(pattern) != pattern {
+        if let (Ok(m), Ok(walk)) = (build(true), walker(&root, glob)) {
+            let retry = scan(walk, &m, cap, started);
+            if !retry.hits.is_empty() {
+                (found, literal, why_literal) = (retry, true, "as a regex it matches nothing");
+            }
         }
     }
+    let Scan { hits, shown, total, files_with_hits, timed_out } = found;
 
-    let label = if literal { format!("{pattern:?} (searched literally: not a valid regex)") } else { format!("/{pattern}/") };
+    let label = if literal { format!("{pattern:?} (searched literally: {why_literal})") } else { format!("/{pattern}/") };
     if hits.is_empty() {
         let scope = glob.map(|g| format!(" matching {g}")).unwrap_or_default();
         return StepOutput::ok(format!("[no matches for {label} in {}{scope}]", sess.ws.display(&root)));
@@ -139,15 +182,9 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
     for file in &hits {
         out.push_str(&sess.ws.display(&file.path));
         out.push('\n');
-        if context == 0 {
-            for (ln, text) in &file.lines {
-                if anchors {
-                    push_anchored(&mut out, "  ", *ln, text, MAX_COLS);
-                } else {
-                    out.push_str(&format!("  {ln}: {}\n", crate::util::truncate_chars(text, MAX_COLS)));
-                }
-            }
-        } else if let Ok(content) = std::fs::read_to_string(&file.path) {
+        // A file that is not UTF-8 throughout has no lines to count context in: its matches alone.
+        let content = if context == 0 { None } else { std::fs::read_to_string(&file.path).ok() };
+        if let Some(content) = content {
             let all: Vec<&str> = content.lines().collect();
             let mut last_printed = 0usize;
             for (ln, _) in &file.lines {
@@ -166,13 +203,21 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
                 }
                 last_printed = last_printed.max(to);
             }
+        } else {
+            for (ln, text) in &file.lines {
+                if anchors {
+                    push_anchored(&mut out, "  ", *ln, text, MAX_COLS);
+                } else {
+                    out.push_str(&format!("  {ln}: {}\n", crate::util::truncate_chars(text, MAX_COLS)));
+                }
+            }
         }
         if file.more > 0 {
             out.push_str(&format!("  … {} more matches in this file\n", file.more));
         }
     }
     let plural = |n: usize, word: &str| if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") };
-    let note = if literal { " · searched literally: not a valid regex" } else { "" };
+    let note = if literal { format!(" · searched literally: {why_literal}") } else { String::new() };
     out.push_str(&if shown < total || timed_out {
         format!(
             "[{shown} of {}{} matches shown, in {} — narrow with path, glob or a tighter pattern]",
@@ -224,6 +269,23 @@ mod tests {
         // Smart case: a lowercase pattern also finds `Divide_all`.
         assert!(o.contains("Divide_all"));
         assert!(o.ends_with("[7 matches in 3 files]"), "{o}");
+    }
+
+    #[test]
+    fn code_pasted_as_a_pattern_is_found_and_brace_globs_work() {
+        let mut s = fixture(Features::presage());
+        // As a regex this is a group that matches `dividea, b`: nothing. The text is there.
+        let out = run(&mut s, &json!({"pattern": "divide(a, b)"}));
+        assert!(out.observation.contains("|def divide(a, b):") && out.observation.ends_with("[1 match in 1 file · searched literally: as a regex it matches nothing]"), "{}", out.observation);
+        // A regex that matches is left a regex, and one that finds nothing either way says so plainly.
+        assert!(run(&mut s, &json!({"pattern": "divide\\(a, \\w\\)"})).observation.ends_with("[1 match in 1 file]"));
+        assert_eq!(run(&mut s, &json!({"pattern": "multiply(a, b)"})).observation, "[no matches for /multiply(a, b)/ in .]");
+
+        let out = run(&mut s, &json!({"glob": "**/*.{py,yml}"}));
+        assert!(out.observation.ends_with("[3 files]") && out.observation.contains("ci.yml"), "{}", out.observation);
+        let out = run(&mut s, &json!({"glob": "*.{py,yml}, *.bin"}));
+        assert!(out.observation.ends_with("[4 files]"), "{}", out.observation);
+        assert_eq!(glob_parts("a.{x,y}, b ,,c"), ["a.{x,y}", "b", "c"]);
     }
 
     #[test]

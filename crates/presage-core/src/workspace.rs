@@ -254,6 +254,11 @@ impl Seen {
         self.files.get(path).is_some_and(|f| f.hash == hash && f.windows.iter().any(|w| w.from <= from && w.to >= to))
     }
 
+    /// The line windows shown of a file while its content had this hash.
+    pub fn windows(&self, path: &Path, hash: u64) -> Vec<(usize, usize)> {
+        self.files.get(path).filter(|f| f.hash == hash).map(|f| f.windows.iter().map(|w| (w.from, w.to)).collect()).unwrap_or_default()
+    }
+
     /// Forget everything: called when old observations are dropped from the context.
     pub fn clear(&mut self) {
         self.files.clear();
@@ -265,6 +270,11 @@ const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox",
     ".next", ".cache", ".gradle", ".idea", ".ruff_cache",
 ];
+
+/// True for a path inside one of the directories that hold derived files (caches, dependencies).
+pub(crate) fn derived(path: &str) -> bool {
+    path.split('/').any(|part| SKIP_DIRS.contains(&part))
+}
 
 const FINGERPRINT_MAX_FILES: u32 = 20_000;
 

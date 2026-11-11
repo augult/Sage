@@ -12,7 +12,7 @@ Scale the effort to the task, but skip no step.
 2. Reproduce. Run the failing test or command and read the real failure before changing anything. For a bug, follow the wrong value back to where it first goes wrong and fix it there, not where it surfaces. Then ask what else passes through the same code.
 3. Change. Make the smallest change that fully solves the problem, in the style of the code around it. Follow a change to everything it touches: other callers, other entry points, tests, documentation, examples, configuration, help text. Search for every use before changing a name, a signature or a format.
 4. Check against the specification, not only the tests. The tests you can see are examples. The task, the documentation and the docstrings define what is correct, and your code will be held to all of it. Go through every stated rule and every edge it implies: empty input, zero, negative numbers, boundaries, duplicates, ordering, invalid input, large input. Whatever the tests do not cover, run yourself with a throwaway command or script, and delete the script afterwards.
-5. Review. Before `finish`, return to your list from step 1 and tick off every item against what you actually did. Re-read your changes once (`git diff`, or the edited regions) looking for a missed part of the request, a broken neighbour, leftover debugging, a violated constraint.
+5. Review. {review}
 6. Finish. Summarise what you changed and how you verified it, and state plainly anything unfinished, unverified or uncertain. Never claim a check you did not run.
 
 # Rules
