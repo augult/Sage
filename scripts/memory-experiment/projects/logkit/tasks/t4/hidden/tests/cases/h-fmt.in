@@ -1,0 +1,3 @@
+2024-06-03T09:00:00Z ERROR db: connect: refused: retry in 5s
+2024-06-03T09:00:01Z INFO api: route: GET /health
+2024-06-03T09:00:02Z WARN auth: token expires soon

@@ -1,0 +1,33 @@
+{
+  "name": "logkit",
+  "friction": "bin/logkit loads build/logkit.sh, which `make gen` generates from lib/ and data/; without it (or with a stale one) the tests fail",
+  "plain": "sh tests/run.sh",
+  "visible": "make gen >/dev/null && sh tests/run.sh",
+  "check": "rm -rf build && make gen >/dev/null && sh tests/run.sh",
+  "pristine": ["tests"],
+  "friction_markers": ["build/logkit.sh: No such file"],
+  "relevant_lesson": "make gen",
+  "note": "Project notes:\n- bin/logkit loads build/logkit.sh, which is generated: run `make gen` before `sh tests/run.sh`, and again after every change under lib/ or data/.\n- Never edit build/logkit.sh by hand; edit lib/*.sh.",
+  "tasks": [
+    {
+      "id": "t1",
+      "kind": "feature",
+      "prompt": "Add a `--component NAME` option to `logkit filter`: only the lines logged by exactly that component are printed. It combines with `--min`. The existing tests must keep passing; do not edit them."
+    },
+    {
+      "id": "t2",
+      "kind": "bugfix-failing-test",
+      "prompt": "One of the logkit test cases is failing: `logkit stats` should list the levels most severe first, but it lists them alphabetically. Fix it. Do not edit the tests."
+    },
+    {
+      "id": "t3",
+      "kind": "feature",
+      "prompt": "Add a `since` command to logkit: `logkit since TIMESTAMP` reads a log on stdin and prints the lines stamped at or after TIMESTAMP (timestamps are ISO 8601 UTC, like `2024-05-01T12:00:03Z`). The existing tests must keep passing; do not edit them."
+    },
+    {
+      "id": "t4",
+      "kind": "bugfix-report",
+      "prompt": "`logkit fmt` cuts a message short when the message itself contains a colon followed by a space: `db: connect: refused` comes out as `db: connect`. Fix it so that the whole message is kept. The existing tests must keep passing; do not edit them."
+    }
+  ]
+}
