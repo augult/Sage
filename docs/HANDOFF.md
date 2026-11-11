@@ -93,7 +93,8 @@ them off and `presage bench --variants no-<mechanism>` turns one off.
    if the watches pass; saying "you can finish now" in the receipt of a passing check.
 4. **Desktop UI, what nobody has seen:** a session against a real provider started from the app,
    closing the window while a step runs, macOS and Windows, a release build, clippy. One deviation
-   from the brief: login-shell PATH adoption is skipped when a standard stream is a terminal.
+   from the brief: login-shell PATH adoption is skipped when a standard stream is a terminal; and
+   the children of a login shell that hangs outlive its 3 s timeout.
    Engine wishes from that work, none implemented: `Harness::events` drops lines it cannot type
    (the shell reads the log raw instead); no orderly shutdown (a command that ignores SIGTERM
    survives the app); `ProviderInfo` cannot say whether a key is stored or from the environment;
