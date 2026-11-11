@@ -4,7 +4,7 @@
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, DirListing, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
+use presage_core::harness::{AppState, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
 use presage_core::provider::mock::{MockProvider, MockTurn};
 use presage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
@@ -217,9 +217,24 @@ async fn read_output(harness: State<'_, Harness>, id: String, handle: String) ->
     harness.read_output(&id, &handle)
 }
 
+/// Asks for a folder with the system's own dialog (Explorer, Finder, the desktop's file chooser),
+/// opened at `start` when that is a folder. Nothing comes back when the dialog is dismissed.
 #[tauri::command]
-async fn list_dir(harness: State<'_, Harness>, path: Option<String>) -> Reply<DirListing> {
-    harness.list_dir(path.as_deref())
+async fn pick_folder(app: tauri::AppHandle, start: Option<String>) -> Reply<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_title("Choose a folder");
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    if let Some(dir) = start.map(PathBuf::from).filter(|dir| dir.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    dialog.pick_folder(move |folder| {
+        let _ = chosen.send(folder);
+    });
+    let folder = answer.await.map_err(|_| "the folder dialog closed without an answer".to_string())?;
+    Ok(folder.and_then(|folder| folder.into_path().ok()).map(|path| presage_core::util::plain_path(&path.to_string_lossy())))
 }
 
 /// Built-in and user skills, plus the project's own when `cwd` is given.
@@ -319,6 +334,7 @@ fn main() {
     let hooks = Hooks::from_env();
     let size = hooks.size;
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Harness::new())
         .manage(hooks)
         .setup(move |app| {
@@ -355,7 +371,7 @@ fn main() {
             approve,
             session_events,
             read_output,
-            list_dir,
+            pick_folder,
             list_skills,
             skill_file,
             save_skill,

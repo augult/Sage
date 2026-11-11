@@ -95,7 +95,7 @@ pub struct Named {
 /// path, a symlink) names nothing.
 fn inside(ws: &Workspace, word: &str) -> Option<Named> {
     let path = ws.resolve(word);
-    let real = std::fs::canonicalize(&path).ok()?;
+    let real = crate::util::canonical(&path).ok()?;
     (real.starts_with(&ws.root) && real.is_file()).then_some(Named { path, real })
 }
 

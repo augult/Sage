@@ -24,16 +24,20 @@ brief remains the specification. Everything the UI needs is on `presage_core::ha
 ## Shell (`desktop/src-tauri`)
 
 Scaffold exists (Tauri 2.12, `withGlobalTauri: true`, `frontendDist: ../ui`, CSP, capability, icons).
-Dependencies are limited to what `Cargo.toml` lists. The window is undecorated (`decorations: false`,
-`shadow: false`, so Windows 10 draws no white frame line): the UI draws the title bar, and the
-capability lets the window drag, minimise, maximise and close itself.
+Dependencies are limited to what `Cargo.toml` lists (`tauri-plugin-dialog` is there for the
+system's folder dialog). The window is undecorated (`decorations: false`, `shadow: false`, so
+Windows 10 draws no white frame line): the UI draws the title bar, and the capability lets the
+window drag, minimise, maximise and close itself. A request to close the window, from its own
+button or from the system, goes to the page first (`onCloseRequested` in `ui/js/chrome.js`), which
+asks about unsaved text and then destroys the window.
 
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
 `interactive = true`; `req.skills` names the skills to start with), `start_demo`,
 `send_message(id, text, skills?)` (`send_with_skills`: the skills named are switched on with the
 message), `stop_session(id)`,
-`approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`, `list_dir(path?)`,
+`approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`,
+`pick_folder(start?)` (the system's folder dialog, opened at `start`; the chosen path, or nothing),
 and `subscribe(id, on_event: tauri::ipc::Channel<Event>) -> Vec<Event>`, which returns the backlog
 and forwards live events until the channel or broadcast closes (keep going on `Lagged`). The UI
 should ignore events whose `seq` it has already applied.
@@ -66,7 +70,9 @@ Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pi
 is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. In Settings:
 `#settings-skills`, `#settings-system`, `#settings-instructions`, a skill's row as
 `[data-skill="debug"]`, `#new-skill`, the text areas `#skill-file`, `#system-prompt`,
-`#global-instructions`, and each section's `.editor-save`.
+`#global-instructions`, `#settings-keys` with a provider's row as `[data-provider="openai"]`,
+`#settings-defaults` with `#default-provider` and `#default-model`, and in the reminder of unsaved
+text `#unsaved-save` and `#unsaved-discard`.
 
 ## Front end (`desktop/ui`)
 
@@ -97,8 +103,9 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   an approval request, verbatim output and diffs are boxed; the answer is plain text.
 - **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
   180 ms while its chevron turns a quarter. The dither drifts at 20 frames a second. Motion off
-  (Settings, or `prefers-reduced-motion`) holds the dither still and removes the rest.
-- **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Unsaved") or an
+  (Settings, or `prefers-reduced-motion`) holds the dither still and removes the rest; Dither
+  off takes the dots away altogether and leaves the painting.
+- **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Built-in") or an
   error is shown; a sentence that explains how the product works is not, in a note, a caption, a
   placeholder or a tooltip. Placeholders are a word or two ("Folder", "Task"), empty states two or
   three. Where a control is unclear without a sentence, the control is changed. What the engine
@@ -143,14 +150,17 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 ### Panes
 
 1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
-   heading per day (title, model, status glyph, relative time), Settings and the version.
+   heading per day (title, model, status glyph, relative time), and Settings.
 2. **Main**:
    - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
-     it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the workspace field and Browse (an in-app folder
-     picker on `list_dir`); then the task; then pickers for model, skills, effort (ratchet, low,
-     high, max), mode (Presage / Classic) and autonomy (Auto / Ask), and Start (Ctrl/Cmd+Enter). The
-     model menu lists models under their provider from `app_state`; a provider without a key is
-     shown as "needs key" with its models disabled. The Skills button sits next to the model and
+     it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
+     workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
+     then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
+     which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
+     (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu lists models under their provider
+     from `app_state`, the providers that have a key first; one without a key has its models
+     greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
+     the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
      uses the same menu: it lists the skills of the chosen folder (`list_skills`) by title, each
      with its description as the `title` attribute and a check mark when on; several can be on,
      the menu stays open while toggling, and arrows, Home/End, Enter/Space and Escape work as in
@@ -178,7 +188,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
        watch changes, harness notes, lessons, effort changes, trims, retries, answered
-       approvals). The button at the end of the bar opens every row at once, or shuts them all.
+       approvals).
      - **A row is one line about what the tool did** ("Ran sh check.sh", "Edited report.sh",
        "Searched the web for awk printf") **and opens the same way for every tool**
        (`ui/js/views/tools.js`): **Input**, the arguments of the call as the model wrote them,
@@ -192,6 +202,12 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **Edited files**: under the result, a card with a row per file the run edited (lines added
        and removed), each opening into its edits.
      - An approval request that is waiting is a card with Allow / Deny, never inside a fold.
+     - **A provider error is said in the open.** While a turn has no reply and the provider has
+       answered with an error, a red block under the bar gives the error and the attempt
+       ("Provider error · retrying · attempt 2"), and the bar reads "Retrying", not "Thinking":
+       the engine tries up to eight times, and a bar alone can say so for minutes.
+     - A run the user stopped ends on its summary alone ("Stopped by the user."): the header
+       already says Stopped.
      - **Push** (`ui/js/views/push.js`): the button reads "Push to GitHub" when the remote is on
        github.com, and counts what is waiting (changed files plus commits ahead). Its dialog
        shows the repository, branch and remote, every file a commit would take and a commit
@@ -205,12 +221,19 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      sessions are read-only replays from `session_events`, marked "read-only" in the header, with
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
-     and None, each as a small picture of itself; Motion: On or Off; each applies at once). Then
-     per provider a password field with Save / Remove (`set_key`), the equivalent
-     environment variable, and defaults (`set_defaults`). Never show stored keys. Then three
-     sections that edit text files, each a monospace text area with Save (enabled, beside the word
-     "Unsaved", only while the text differs from what is stored; a draft survives leaving the view)
-     and engine errors shown under the text:
+     and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
+     applies at once). Then **API keys**, a line per provider: a check and the name in full ink
+     when it has a key, a ring and grey when it has none; its address; a password field; and
+     Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
+     Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider
+     and the model as dropdowns (a provider without a key is greyed and cannot be chosen) and the
+     effort; each is kept the moment it is chosen. Then three sections that edit text files, each
+     a monospace text area with engine errors shown under it.
+
+     **Nothing in Settings has a Save button, and nothing says "Saved".** Text typed into a file
+     is a draft. Leaving Settings or closing the window with drafts opens a reminder
+     (`ui/js/unsaved.js`) that lists them, with Save, Discard and Cancel; Ctrl/Cmd+S in a text
+     area saves that file where it is.
      - **Skills**: a row per skill (title, and Built-in, Edited or Custom). A row opens the skill's
        file under it. Saving a built-in stores the user's version of it (Edited); Reset on an
        edited one brings the built-in back, Delete removes a custom one. "New skill" opens a file
@@ -253,12 +276,16 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
 | `new-session-backgrounds.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-theme'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
-| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:.work-all;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
+| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
 | `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
 | `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
 | `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="ui"]` |
 | `session-push.jpg` | `PRESAGE_UI_SCRIPTED=<file>` whose `cwd` is a git repository with a github.com remote and whose turns edit files, then `wait:7500;;click:#push` |
+| `session-error.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
 | `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
+| `settings-keys.jpg` | `PRESAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x PRESAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |
+| `settings-defaults.jpg` | the same with `ANTHROPIC_API_KEY=x` and `scroll:#settings-defaults;;click:#default-provider` |
+| `settings-unsaved.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;type:#system-prompt=>…;;click:#new-session'` |
 | `settings-skills.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
 | `settings-system-prompt.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
 | `settings-instructions.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |

@@ -412,7 +412,7 @@ impl Harness {
     pub fn demo(&self) -> Result<SessionMeta, String> {
         let root = self.inner.data_dir.join("demo").join(session_id());
         demo::create_workspace(&root).map_err(|e| format!("could not create the demo workspace: {e}"))?;
-        let real = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+        let real = crate::util::canonical(&root).map_err(|e| e.to_string())?;
         let provider = Provider::Mock(demo::provider(real, 22));
         // The walkthrough is three replies; the review pass would add a fourth that shows nothing new.
         let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into(), "survey".into()], ..Default::default() };
@@ -632,7 +632,7 @@ impl Harness {
             Some(p) => p.strip_prefix("~/").map(|rest| home_dir().join(rest)).unwrap_or_else(|| PathBuf::from(p)),
             None => home_dir(),
         };
-        let dir = std::fs::canonicalize(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let dir = crate::util::canonical(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         if !dir.is_dir() {
             return Err(format!("{} is not a directory", dir.display()));
         }

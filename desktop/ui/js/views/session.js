@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
-import { duration, tilde } from '../format.js';
+import { duration, effortLabel, tilde } from '../format.js';
 import * as store from '../store.js';
 import { MOD_KEY, outcomeLook, sessionState } from './common.js';
 import { skillsPicker } from './controls.js';
@@ -100,7 +100,7 @@ export function mountSession(main, side, app, meta) {
     // With what the session runs, as plain words after the folder.
     const facts = [
       modelName,
-      `effort ${effort}`,
+      `effort ${effortLabel(effort)}`,
       // The engine also reports ablations here, as "presage without <mechanism>".
       mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode,
       skills.length > 0 && `${skills.length > 1 ? 'skills' : 'skill'} ${skills.join(', ')}`,
@@ -213,7 +213,7 @@ export function mountSession(main, side, app, meta) {
     stopButton.disabled = stopping;
     if (stopShown !== String(stopping)) {
       stopShown = String(stopping);
-      stopButton.replaceChildren(icon('stop', 12), stopping ? 'Stopping…' : 'Stop');
+      stopButton.replaceChildren(icon('stop', 16), stopping ? 'Stopping…' : 'Stop');
     }
     // Not while its menu may be open: a redraw would close it.
     if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);

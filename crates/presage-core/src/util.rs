@@ -1,6 +1,6 @@
 //! Small shared helpers. No domain logic lives here.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> u64 {
@@ -58,6 +58,27 @@ pub fn home_dir() -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// `std::fs::canonicalize` without the verbatim prefix Windows answers with: `\\?\C:\work` comes
+/// back as `C:\work`. `cmd.exe` cannot start in the verbatim form, and nobody writes it.
+pub fn canonical(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    let real = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    let real = real.to_str().map(|text| PathBuf::from(plain_path(text))).unwrap_or(real);
+    Ok(real)
+}
+
+/// A Windows path without its verbatim prefix: `\\?\C:\work` as `C:\work`, `\\?\UNC\host\share`
+/// as `\\host\share`. Anything else comes back as it is.
+pub fn plain_path(path: &str) -> String {
+    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\").filter(|rest| rest.as_bytes().get(1) == Some(&b':')) {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
 }
 
 /// Cut `s` to at most `max` chars, marking how much was dropped.
@@ -122,5 +143,15 @@ mod tests {
         assert_eq!(truncate_chars("héllo", 10), "héllo");
         assert_eq!(truncate_chars("héllo wörld", 5), "héllo…[+6 chars]");
         assert_eq!(one_line("\n  first line  \nsecond", 5), "first…");
+    }
+
+    #[test]
+    fn verbatim_windows_paths_are_written_plainly() {
+        assert_eq!(plain_path(r"\\?\C:\Users\me\Desktop\Novel"), r"C:\Users\me\Desktop\Novel");
+        assert_eq!(plain_path(r"\\?\UNC\host\share\dir"), r"\\host\share\dir");
+        assert_eq!(plain_path(r"C:\work"), r"C:\work");
+        assert_eq!(plain_path("/home/me/work"), "/home/me/work");
+        // A device path is not a drive path: it stays as it is.
+        assert_eq!(plain_path(r"\\?\Volume{1}\x"), r"\\?\Volume{1}\x");
     }
 }

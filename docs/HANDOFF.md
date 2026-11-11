@@ -40,6 +40,29 @@ a bare repository on the same machine, which received the commit. **Not checked:
 github.com itself; the sources view against a real search (the engine has no web search tool, so
 its screenshot is of a step added to a log by hand); the app driven by hand, on Windows or macOS.
 
+**After the owner ran it on Windows** (same day, PR after #8):
+
+- *Providers.* Ten more built in, each through its OpenAI-compatible endpoint: OpenAI, Anthropic,
+  Google Gemini, xAI, Mistral, Groq, Together, Fireworks, and longer model lists for OpenRouter.
+  `provider/openai.rs` has a dialect for each, written from the vendor's documentation and
+  covered by tests of the request it builds: which token limit it takes, how it spells an
+  effort, whether reasoning goes back, Gemini's thought signatures on tool calls, Mistral's
+  chunked `content`. **None of them has been called.** The first live run with each is the test.
+  Anthropic's compatible endpoint returns no thinking and does not cache prompts, which costs
+  this harness its economy there: a native client would be the real fix.
+- *Windows paths.* `std::fs::canonicalize` answers `\\?\C:\…` there. The engine now strips the
+  prefix (`util::canonical`): it showed in the header, and `cmd.exe` cannot start in such a folder.
+- *Settings.* No Save buttons and no "Saved": choices and keys are kept at once, text files are
+  drafts that a reminder asks about on leaving Settings or closing the window. A provider with a
+  key is marked, one without is greyed; provider and model defaults are dropdowns. The effort
+  `ratchet` is shown as Auto. Dither can be switched off.
+- *Session.* A provider error is shown in the open while the engine retries (it retried a 429
+  silently, behind a bar that read "Thinking"). No result line after a stop, no expand-all button.
+- *Browse* opens the system's folder dialog (`tauri-plugin-dialog`); the in-app picker is gone.
+
+Not checked: any of this on Windows or macOS; the folder dialog beyond seeing GTK's open under
+xvfb; the reminder against a real window manager's close button (the app's own button was used).
+
 ## Seventh session: changes made without a benchmark (11 November 2026)
 
 The Logfare key was at its limit, so nothing below is measured. Each change rests on the recorded

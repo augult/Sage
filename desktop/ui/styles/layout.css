@@ -44,14 +44,6 @@
   font-weight: 600;
 }
 
-.brand-version {
-  flex: none;
-  padding-right: 8px;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-
 .nav-item {
   display: flex;
   flex: none;

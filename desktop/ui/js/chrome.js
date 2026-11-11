@@ -1,6 +1,8 @@
 // The window's caption buttons. The app draws its own title bar (the top strip of each pane,
 // marked `data-tauri-drag-region`), so minimise, maximise and close are ordinary buttons here.
 
+import { settleUnsaved } from './unsaved.js';
+
 export function mountWindowControls() {
   const current = window.__TAURI__.window.getCurrentWindow();
   const maximize = document.getElementById('win-max');
@@ -8,6 +10,11 @@ export function mountWindowControls() {
   document.getElementById('win-min').addEventListener('click', () => current.minimize());
   maximize.addEventListener('click', () => current.toggleMaximize());
   document.getElementById('win-close').addEventListener('click', () => current.close());
+  // However the window is asked to close (this button, the taskbar, a shortcut), what was typed and
+  // not saved is asked about first. The window goes once the handler returns without objecting.
+  current.onCloseRequested(async (event) => {
+    if (!(await settleUnsaved())) event.preventDefault();
+  });
 
   // The middle button shows what it will do: maximise, or restore once the window is maximised.
   async function sync() {
