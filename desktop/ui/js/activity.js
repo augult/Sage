@@ -1,10 +1,10 @@
-// What a turn did, as the one line the timeline shows for it: "Read 2 files, ran a command".
+// What a stretch of work did, as the one line its bar shows: "Read 2 files, ran a command".
 // Pure text (no DOM), so it can be checked without a window.
 
-import { duration, plural } from './format.js';
+import { plural } from './format.js';
 
-// Per tool: the word that leads its row in the tree, the same while it runs, and how one call and
-// several calls read in a turn's line. `file` marks the tools whose summary starts with a path.
+// Per tool: the word that leads its row, the same while it runs, and how one call and several
+// calls read in the line. `file` marks the tools whose summary starts with a path.
 const TOOLS = {
   shell: { did: 'Ran', doing: 'Running', one: 'ran a command', many: (n) => `ran ${n} commands` },
   read: { did: 'Read', doing: 'Reading', one: 'read a file', many: (n) => `read ${n} files`, file: 'read' },
@@ -14,15 +14,37 @@ const TOOLS = {
   watch: { did: 'Watch', doing: 'Watch', one: 'set a watch', many: (n) => `set ${n} watches` },
   job: { did: 'Job', doing: 'Job', one: 'checked a background job', many: (n) => `checked background jobs ${n} times` },
   finish: { did: 'Finish', doing: 'Finishing' },
+  // Not tools of this engine yet: how a web search and a page fetch read once one has them.
+  web_search: { did: 'Searched the web for', doing: 'Searching the web for', one: 'searched the web', many: (n) => `searched the web ${n} times` },
+  web_fetch: { did: 'Fetched', doing: 'Fetching', one: 'fetched a page', many: (n) => `fetched ${n} pages` },
 };
 
-const words = (tool) => (Object.hasOwn(TOOLS, tool) ? TOOLS[tool] : { did: tool || 'Step', doing: tool || 'Step', one: `used ${tool}`, many: (n) => `used ${tool} ${n} times` });
+const WEB = {
+  web: 'web_search',
+  websearch: 'web_search',
+  search_web: 'web_search',
+  fetch: 'web_fetch',
+  webfetch: 'web_fetch',
+  fetch_url: 'web_fetch',
+  open_url: 'web_fetch',
+};
+
+/** The kind of tool a step ran, with the names a web search or a page fetch may go by folded into one. */
+export function toolKind(tool) {
+  const name = String(tool ?? '').toLowerCase().replace(/-/g, '_');
+  return Object.hasOwn(WEB, name) ? WEB[name] : name;
+}
+
+function words(tool) {
+  const kind = toolKind(tool);
+  return Object.hasOwn(TOOLS, kind) ? TOOLS[kind] : { did: tool || 'Step', doing: tool || 'Step', one: `used ${tool}`, many: (n) => `used ${tool} ${n} times` };
+}
 
 /** The word that leads a step's row: "Ran", or "Running" while it runs. */
 export const stepVerb = (tool, active) => words(tool)[active ? 'doing' : 'did'];
 
 /** The file a read, edit or write names, without its folder, line range, symbol or anchor. */
-function fileName(summary) {
+export function fileName(summary) {
   const path = summary.split(/\s/, 1)[0].replace(/:[\d,-]+$/, '').replace(/\/+$/, '');
   return path.slice(path.lastIndexOf('/') + 1);
 }
@@ -37,50 +59,34 @@ const TROUBLE = [
 ];
 
 /**
- * The line for a turn: `{ busy, since, parts, notes }`, or null for a turn with nothing to unfold.
- * `parts` are strings and `{ name }`s (a file or a command, which the view sets apart); `notes`
- * say what went otherwise than planned, since the tree that shows it starts folded. While the turn
- * runs the line says what is happening now, and `since` is when that began.
+ * The line for a sequence of steps, `[{ tool, summary, status }]` in the order they ran:
+ * `{ parts, notes }`. `parts` are strings and `{ name }`s (a file, which the view sets apart) and
+ * are empty when no step counts; `notes` (`{ status, text }`) say what went otherwise than planned,
+ * since the rows that show it start folded away. A status of `active` is a step still running: it
+ * is not trouble.
  */
-export function activity(turn) {
-  const steps = turn.rows.filter((row) => row.kind === 'step');
-  if (turn.live) {
-    const running = steps.findLast((step) => step.status === 'active');
-    if (running) return { busy: true, since: running.startedAt, parts: [`${stepVerb(running.tool, true)} `, { name: running.summary }], notes: [] };
-    if (!turn.reply) return { busy: true, since: turn.startedAt, parts: ['Thinking'], notes: [] };
-  }
-
+export function summarize(steps) {
   const groups = new Map();
   for (const step of steps) {
-    // A finish that went through is the answer below, not something the turn did on the way.
+    // A finish that went through is the answer below, not something done on the way.
     if (step.tool === 'finish') continue;
-    if (!groups.has(step.tool)) groups.set(step.tool, []);
-    groups.get(step.tool).push(step);
+    const kind = toolKind(step.tool);
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind).push(step);
   }
   const parts = [];
-  for (const [tool, calls] of groups) {
-    const word = words(tool);
+  for (const calls of groups.values()) {
+    const word = words(calls[0].tool);
     const names = word.file ? [...new Set(calls.map((step) => fileName(step.summary)))] : [];
     if (parts.length) parts.push(', ');
     if (names.length === 1 && names[0]) parts.push(`${word.file} `, { name: names[0] });
     else if (word.file) parts.push(names.length > 1 ? word.many(names.length) : word.one);
     else parts.push(calls.length > 1 ? word.many(calls.length) : word.one);
   }
-  if (!parts.length) {
-    if (turn.reasoning.trim()) parts.push(turn.reply ? `thought for ${duration(turn.reply.ms)}` : 'thought');
-    else if (steps.length) parts.push('finished');
-    else if (turn.rows.length) parts.push(turn.reply ? `replied in ${duration(turn.reply.ms)}` : 'no reply');
-    else if (turn.live) parts.push('working');
-    else return null;
-  }
-  parts[0] = parts[0][0].toUpperCase() + parts[0].slice(1);
+  if (parts.length) parts[0] = parts[0][0].toUpperCase() + parts[0].slice(1);
 
   const count = new Map();
-  for (const step of steps) {
-    // A step with no end in a turn that is over was cut short (stop, or the app closing).
-    const status = step.status === 'active' ? 'unfinished' : step.status;
-    count.set(status, (count.get(status) ?? 0) + 1);
-  }
-  const notes = TROUBLE.filter(([status]) => count.has(status)).map(([status, say]) => say(count.get(status)));
-  return { busy: turn.live, since: null, parts, notes };
+  for (const step of steps) count.set(step.status, (count.get(step.status) ?? 0) + 1);
+  const notes = TROUBLE.filter(([status]) => count.has(status)).map(([status, say]) => ({ status, text: say(count.get(status)) }));
+  return { parts, notes };
 }

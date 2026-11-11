@@ -50,7 +50,7 @@ export function pickFolder(start) {
       path.value = listing.path;
       up.disabled = !listing.parent;
       use.disabled = false;
-      kind.replaceChildren(listing.is_git ? tag('git repository', 'teal') : h('span.muted', 'Not a git repository'));
+      kind.replaceChildren(listing.is_git ? tag('git repository', 'good') : h('span.muted', 'Not a git repository'));
       list.replaceChildren(
         ...(listing.dirs.length
           ? listing.dirs.map((dir) => h('button.folder', { type: 'button', title: dir.path, onclick: () => go(dir.path) }, icon('folder'), h('span', dir.name)))

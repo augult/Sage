@@ -1,6 +1,47 @@
-/* New session, Settings and the folder picker. */
+/* New session, the pickers and their menus, Settings, the folder picker and the Push dialog. */
 
-/* New session: one composer holds the workspace, the task and the run's settings. */
+/* New session: the chosen background hangs uncovered above one composer, which holds the
+   workspace, the task and the run's settings. */
+
+.hero {
+  position: relative;
+}
+
+/* A wide crop of the painting as it is, with the dither moving over it. */
+.hero-art {
+  position: relative;
+  aspect-ratio: 3 / 1;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background-color: var(--fill-2);
+  background-image: var(--art, none);
+  background-position: center;
+  background-size: cover;
+}
+
+.hero-dither {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The picker that changes it, opaque in its corner so it reads on any picture. */
+.hero-pick {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+
+.hero-pick .pick,
+.hero-pick .pick:hover:not(:disabled),
+.hero-pick .pick[aria-expanded="true"] {
+  background: var(--solid);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
 
 .new-session {
   display: flex;
@@ -10,13 +51,13 @@
 
 .composer-card {
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-3);
   background: var(--well);
+  transition: border-color 120ms ease;
 }
 
-.composer-card:has(textarea:focus-visible),
-.composer:has(textarea:focus-visible) {
-  border-color: var(--azure-ink);
+.composer-card:has(textarea:focus-visible) {
+  border-color: var(--ink);
 }
 
 .composer-card textarea {
@@ -81,7 +122,7 @@
   min-width: 0;
   height: 28px;
   padding: 0 8px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-2);
   color: var(--muted);
   cursor: text;
 }
@@ -92,7 +133,7 @@
 
 .workspace-pick:focus-within {
   background: var(--fill-1);
-  box-shadow: inset 0 0 0 1px var(--azure-ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
 }
 
 .workspace-pick input {
@@ -102,9 +143,44 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   font: var(--text-sm) var(--mono);
   letter-spacing: 0;
+}
+
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.recent button {
+  max-width: 100%;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--soft);
+  font: var(--text-sm)/22px var(--mono);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent button:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+/* The walkthrough and the way to a key, offered while no provider has one. */
+.lead-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 /* A picker: the current choice as a quiet button, the others in a menu under it. */
@@ -123,10 +199,10 @@
   height: 28px;
   padding: 0 6px 0 8px;
   border: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--r-2);
   background: transparent;
   white-space: nowrap;
-  cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .pick:hover:not(:disabled),
@@ -136,7 +212,6 @@
 
 .pick:disabled {
   opacity: 0.5;
-  cursor: default;
 }
 
 /* Holds a picker that is redrawn when what it offers changes. */
@@ -165,27 +240,27 @@
 
 .menu {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 4px);
   left: 0;
   z-index: 20;
   display: flex;
   flex-direction: column;
   width: max-content;
-  min-width: 232px;
+  min-width: 216px;
   max-width: min(340px, 80vw);
   max-height: 336px;
   padding: 4px;
   overflow-y: auto;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-3);
   background: var(--solid);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--lift);
   animation: enter 120ms ease-out;
 }
 
 .opens-up > .menu {
   top: auto;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 4px);
 }
 
 .align-end > .menu {
@@ -195,8 +270,8 @@
 
 .menu-group {
   padding: 8px 8px 4px;
-  color: var(--soft);
-  font-size: var(--text-sm);
+  color: var(--muted);
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -211,12 +286,11 @@
   align-items: flex-start;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-2);
   background: transparent;
   text-align: left;
-  cursor: pointer;
 }
 
 .menu-item:hover:not(:disabled),
@@ -230,11 +304,11 @@
 
 .menu-item:disabled {
   color: var(--faint);
-  cursor: default;
 }
 
+/* The check of what is chosen; the others keep its place. */
 .menu-item > .icon {
-  margin-top: 4px;
+  margin-top: 3px;
   visibility: hidden;
 }
 
@@ -247,41 +321,7 @@
   overflow-wrap: anywhere;
 }
 
-.recent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-.recent button {
-  max-width: 100%;
-  padding: 0 7px;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--soft);
-  font: var(--text-sm)/18px var(--mono);
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.recent button:hover {
-  background: var(--fill-2);
-  color: var(--text);
-}
-
-/* The walkthrough and the way to a key, offered while no provider has one. */
-.lead-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+/* A setting: its name, and beside it the control with whatever it has to say. */
 
 .panel > .section-title,
 .panel > .section-head {
@@ -326,12 +366,6 @@
   min-width: 0;
 }
 
-/* Buttons beside an input take its height. */
-.field-row .btn,
-.picker-path .btn {
-  height: auto;
-}
-
 /* A radio group drawn as chips; `.segmented` joins them into one control. */
 
 .chips {
@@ -366,7 +400,7 @@
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
+  border-radius: var(--r-2);
   color: var(--soft);
   font-size: var(--text-md);
   white-space: nowrap;
@@ -374,17 +408,17 @@
 
 .chip-option:hover input:not(:disabled) + .chip-face {
   background: var(--fill-2);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .chip-option input:checked + .chip-face {
-  border-color: rgba(255, 255, 255, 0.4);
-  background: var(--fill-3);
-  color: var(--text);
+  border-color: var(--ink);
+  background: var(--fill-2);
+  color: var(--ink);
 }
 
 .chip-option input:focus-visible + .chip-face {
-  outline: 2px solid var(--azure-ink);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -403,16 +437,15 @@
   align-self: flex-start;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--well);
+  border-radius: var(--r-3);
+  background: var(--fill-2);
 }
 
 .chips.segmented .chip-face {
   height: 24px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   color: var(--muted);
 }
 
@@ -421,9 +454,9 @@
 }
 
 .chips.segmented input:checked + .chip-face {
-  background: rgba(255, 255, 255, 0.14);
-  color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  background: var(--solid);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-strong);
 }
 
 /* Settings */
@@ -457,6 +490,70 @@
   overflow-wrap: anywhere;
 }
 
+/* The backgrounds: each as a small picture of itself, the chosen one framed in ink. */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.theme-card input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.theme-thumb {
+  display: block;
+  aspect-ratio: 8 / 5;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  /* With no painting: the two flat panes, side by side. */
+  background: linear-gradient(105deg, var(--flat-veil) 38%, var(--flat-sheet) 38%);
+}
+
+.theme-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.theme-card:hover .theme-thumb {
+  border-color: var(--faint);
+}
+
+.theme-card input:checked + .theme-thumb {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.theme-card input:focus-visible + .theme-thumb {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.theme-name {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.theme-card input:checked ~ .theme-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
 /* Skills: a row each; the open one has its file under it. */
 .skill-list {
   display: flex;
@@ -476,7 +573,6 @@
   border-bottom: 1px solid var(--line);
   background: transparent;
   text-align: left;
-  cursor: pointer;
 }
 
 .skill-row:hover,
@@ -491,7 +587,7 @@
 .skill-row > .icon {
   flex: none;
   color: var(--muted);
-  transition: transform 120ms ease-out;
+  transition: transform 140ms var(--ease);
 }
 
 .skill-row[aria-expanded="true"] > .icon {
@@ -595,9 +691,10 @@ textarea.editor {
   min-width: 0;
 }
 
-.picker > .form-error {
+.picker > .form-error,
+.push > .form-error {
   flex: none;
-  margin: 0 16px 8px;
+  margin: 0 16px 12px;
 }
 
 .folder-list {
@@ -614,11 +711,9 @@ textarea.editor {
   width: 100%;
   padding: 5px 8px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-2);
   background: transparent;
-  color: var(--text);
   text-align: left;
-  cursor: pointer;
 }
 
 .folder:hover {
@@ -646,4 +741,103 @@ textarea.editor {
 .picker .dialog-foot > :first-child {
   margin-right: auto;
   font-size: var(--text-sm);
+}
+
+/* Push: where it goes, what would go, and the one button that sends it. */
+
+.push {
+  width: min(520px, calc(100vw - 48px));
+}
+
+.push-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+
+.push-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.push-repo {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.push-branch {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  color: var(--soft);
+  font: var(--text-xs)/16px var(--mono);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.push-target .muted {
+  flex: none;
+  font-size: var(--text-sm);
+}
+
+.push-standing {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* Every file the commit would take. */
+.push-files {
+  flex: none;
+  max-height: 216px;
+  padding: 4px 0;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--fill-1);
+}
+
+.push-file {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 10px;
+  font: var(--text-sm)/20px var(--mono);
+  letter-spacing: 0;
+}
+
+.push-kind {
+  flex: none;
+  width: 9ch;
+  color: var(--muted);
+}
+
+.push-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.push-note {
+  min-width: 0;
+  margin-right: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.push .dialog-foot {
+  justify-content: flex-end;
 }

@@ -1,4 +1,5 @@
-/* The three panes: sidebar, main view, inspector. The top strip of each is the window's title bar. */
+/* The window: glass with a sidebar on its left and the inspector on its right, and between them the
+   sheet, the one opaque surface, where reading happens. The top strip of each is the title bar. */
 
 #app {
   position: relative;
@@ -20,7 +21,6 @@
   flex-direction: column;
   min-height: 0;
   padding: 0 8px 8px;
-  border-right: 1px solid var(--line);
 }
 
 .brand {
@@ -28,10 +28,11 @@
   flex: none;
   align-items: center;
   gap: 8px;
-  height: var(--strip);
+  /* As tall as the sheet's own strip with the gap above it, so the two lines of the title bar meet. */
+  height: calc(var(--strip) + var(--gap));
   /* Out to the pane's edges, so the whole strip drags the window. */
   margin: 0 -8px;
-  padding: 0 16px;
+  padding: var(--gap) 16px 0;
 }
 
 .brand-mark {
@@ -60,11 +61,12 @@
   height: 30px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--r-2);
   background: transparent;
   color: var(--soft);
+  font-weight: 500;
   text-align: left;
-  cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .nav-item .icon {
@@ -73,17 +75,17 @@
 
 .nav-item:hover {
   background: var(--fill-2);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .nav-item[aria-current="page"] {
   background: var(--fill-3);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .nav-item:hover .icon,
 .nav-item[aria-current="page"] .icon {
-  color: var(--text);
+  color: var(--ink);
 }
 
 #session-list {
@@ -101,14 +103,14 @@
 /* A day's sessions: Today, Yesterday, … */
 .side-group {
   flex: none;
-  padding: 14px 8px 4px;
+  padding: 16px 8px 4px;
   color: var(--muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
 .side-empty {
-  padding: 14px 8px 4px;
+  padding: 16px 8px 4px;
   color: var(--muted);
   font-size: var(--text-sm);
 }
@@ -121,10 +123,10 @@
   width: 100%;
   padding: 6px 8px;
   border: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--r-2);
   background: transparent;
   text-align: left;
-  cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .session-item:hover {
@@ -155,7 +157,7 @@
 
 .session-item:hover .session-title,
 .session-item[aria-current="page"] .session-title {
-  color: var(--text);
+  color: var(--ink);
 }
 
 .session-item:hover .session-sub,
@@ -187,11 +189,10 @@
 
 .sim {
   flex: none;
-  padding: 0 4px;
-  border: 1px solid var(--amber-line);
-  border-radius: 3px;
-  color: var(--amber);
-  font-size: var(--text-xs);
+  padding: 0 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 13px;
@@ -213,48 +214,61 @@
   min-width: 0;
 }
 
-/* Main view */
+/* The sheet */
 
 #main {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  margin: var(--gap) 0;
+  overflow: hidden;
 }
 
 #main > * {
   animation: enter 140ms ease-out backwards;
 }
 
+/* The sheet's share of the title bar. A view that is not a session leaves it empty, to drag by. */
 .view-head {
   display: flex;
   flex: none;
   align-items: center;
   gap: 12px;
   height: var(--strip);
-  padding: 0 12px 0 20px;
-  border-bottom: 1px solid var(--line);
-}
-
-.view-head h1 {
-  margin-right: auto;
-  font-size: var(--text-md);
-  font-weight: 600;
+  padding: 0 12px 0 24px;
 }
 
 .view-body {
   flex: 1;
   min-height: 0;
-  padding: 32px 24px 48px;
+  padding: 4px 24px 48px;
   overflow-y: auto;
 }
 
 .view-column {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 28px;
   max-width: 736px;
   margin: 0 auto;
+}
+
+/* The line a view opens with, and what it leads to on its right. */
+.view-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: -8px;
+}
+
+.view-title {
+  font-size: var(--text-display);
+  font-weight: 400;
+  letter-spacing: -0.024em;
+  line-height: 1.15;
 }
 
 .view-message {
@@ -275,13 +289,12 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--line);
 }
 
 /* The inspector's share of the title bar: empty, so it drags, with the caption buttons at its end. */
 .pane-strip {
   flex: none;
-  height: var(--strip);
+  height: calc(var(--strip) + var(--gap));
 }
 
 /* Where Windows puts them and the size it makes them, so the corner still closes the window. */
@@ -309,9 +322,10 @@
 
 .window-controls button:hover {
   background: var(--fill-3);
-  color: var(--text);
+  color: var(--ink);
 }
 
+/* The one hue of the title bar, and the one Windows itself gives this button. */
 .window-controls #win-close:hover {
   background: #c42b1c;
   color: #fff;
@@ -333,7 +347,7 @@
 #inspector-body {
   flex: 1;
   min-height: 0;
-  padding: 0 16px 24px;
+  padding: 2px 16px 24px;
   overflow-y: auto;
 }
 
@@ -355,7 +369,7 @@
 }
 
 .side-title .label {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-md);
   font-weight: 600;
 }
@@ -387,11 +401,13 @@
 }
 
 .stat-value {
+  font-weight: 500;
   text-align: right;
 }
 
-.stat-value[class*="tone-"] {
-  color: var(--tone-ink);
+.stat-value.tone-plain {
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .stat-sub {
@@ -403,22 +419,25 @@
   content: "· ";
 }
 
-/* A two-part share bar under a stat. */
+/* A share, as a ruler: one tick every three pixels, in full ink for the part that counts, faint
+   for the rest, and a shade between for a part that is neither. */
 .bar {
   display: flex;
-  gap: 2px;
-  height: 3px;
-  margin: 3px 0 7px;
+  height: 7px;
+  margin: 4px 0 8px;
 }
 
 .bar span {
   height: 100%;
-  border-radius: 2px;
-  background: var(--tone);
+  background: repeating-linear-gradient(90deg, var(--tone) 0 1px, transparent 1px 3px);
 }
 
 .bar span.tone-plain {
-  background: var(--line-strong);
+  --tone: var(--line-strong);
+}
+
+.bar span.tone-alert {
+  --tone: var(--faint);
 }
 
 .watch {
@@ -460,7 +479,7 @@
 
 .note-label {
   display: block;
-  color: var(--tone-ink);
+  color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 500;
 }

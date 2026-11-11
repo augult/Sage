@@ -1,9 +1,44 @@
 # Handoff: Presage
 
-Read this first. State: 11 November 2026, after the seventh session, which ran no benchmarks: the
-Logfare key was still at the daily limit that had stopped the sixth, whose numbers these are.
+Read this first. State: 11 November 2026, after the eighth session. Neither it nor the seventh ran
+benchmarks: the Logfare key was still at the daily limit that had stopped the sixth, whose numbers
+these are.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Eighth session: the desktop redesign (11 November 2026)
+
+No benchmark was run and nothing in the agent loop changed. Branch `hoplite/massalia-4feee274`.
+
+**Look:** the app no longer reads the desktop wallpaper or the window's place (`glass.js` and the
+`wallpaper` and `window_place` commands are gone). It brings its own background: four paintings
+made by scripts in `desktop/art` (Ember, Orchid, Tide, Graphite; or None for flat panes), pressed
+into a light or a dark band behind translucent panes, with an ordered dither drifting over them
+(`backdrop.js`, `dither.js`, `themes.js`). Appearance (System, Light, Dark), background and motion
+are in Settings; the background can also be changed from the New session view. The interface
+itself has no hue, and corners are 2 to 4px. The one colour besides a failure's is an edit's: green
+for lines added, red for lines removed.
+
+**Conversation:** one grey bar per stretch of work is the master toggle of every tool call under
+it. A row is one line about what the tool did and opens the same way for every tool: the input
+of the call as JSON, then its output, verbatim or, where it has a shape, as that shape (an edit as
+a unified or split before and after, a web search as its sources). Replies are set as markdown. A card under the result lists the files the run edited. Stop is in the follow-up box.
+
+**Engine:** `step_end` carries a `change` (path, lines added and removed, hunks) for `edit` and
+`write`, made by the new `presage-core/src/diff.rs`.
+
+**Push:** a session whose folder is a git repository has a Push button ("Push to GitHub" on a
+github.com remote). `git_state` and `git_push` (`desktop/src-tauri/src/git.rs`) run the user's
+own git: commit what is uncommitted, push the branch.
+
+**Vercel:** a Vercel project is connected to the repository and failed on every commit, there
+being nothing in it to deploy; `vercel.json` now tells it not to.
+
+**Checked:** `cargo test --workspace` (213); every view under xvfb, in all four paintings and both
+appearances (`docs/screenshots/`, hooks in `docs/DESKTOP_UI_BRIEF.md`); a push from the dialog to
+a bare repository on the same machine, which received the commit. **Not checked:** a push to
+github.com itself; the sources view against a real search (the engine has no web search tool, so
+its screenshot is of a step added to a log by hand); the app driven by hand, on Windows or macOS.
 
 ## Seventh session: changes made without a benchmark (11 November 2026)
 
