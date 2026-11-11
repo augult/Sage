@@ -48,13 +48,15 @@ He is terse and watches usage. Work in few turns, report numbers whichever way t
 1. **No benchmark was run on the new prompt, the review pass or the skills.** Whether they improve
    results is unproven. `/tmp/presage-bin/v1` (old prompt) and `v2` existed for an A/B but `/tmp`
    does not survive; rebuild v1 from commit `d7e3cfc`.
-2. **Hard and skill task sets are fixtures only, not registered.** Directories under
-   `crates/presage-cli/bench/`: hard = `shipquote`, `attempts`, `connpool`, `confdialect`,
-   `rollup`, `jobqueue`, `ttlcache`; skill = `audit`, `audit-clean`, `deadcode`, `deadcode-js`,
-   `mutants`, `mutants-js`, `slowpath`. Each has `workspace/`, `hidden/`, `solution/`, but no
-   entry in `src/bench/tasks/hard.rs` or `skilled.rs` (no prompt, check or verify command yet), and
-   the last five were copied from an agent's working tree unreviewed. Next step: register them,
-   run `presage bench --check --tasks hard,skill`, then calibrate.
+2. **The skill task set is registered and unmeasured; the hard set is fixtures only.**
+   `presage bench --check --tasks skill` passes for ten tasks (`audit`, `audit-clean`, `deadcode`,
+   `deadcode-js`, `mutants`, `mutants-js`, `slowpath`, `nplusone`, `heisenbug`, `restyle`), each
+   naming its skill, but no live run has been made on them: difficulty is uncalibrated. The hard
+   fixtures (`shipquote`, `attempts`, `connpool`, `confdialect`, `rollup`, `jobqueue`, `ttlcache`
+   under `crates/presage-cli/bench/`) have `workspace/`, `hidden/`, `solution/` but no entry in
+   `src/bench/tasks/hard.rs` (no prompt, check or verify command): the agent writing them died.
+   The last two were copied from its working tree unreviewed. Next step: register them, run
+   `presage bench --check --tasks hard`, then calibrate both sets.
 3. **External harnesses**: adapters exist; the smoke test was still running when the session
    ended. Not verified by the parent. No head-to-head numbers.
 4. **Memory**: undecided. `scripts/memory-experiment/` holds an unfinished warm-against-cold
@@ -66,7 +68,7 @@ He is terse and watches usage. Work in few turns, report numbers whichever way t
 
 ## Suggested order
 
-1. Register the hard and skill tasks; `bench --check`.
+1. Register the hard tasks; `bench --check --tasks hard`.
 2. One run: `presage bench -p logfare -m deepseek-v4.1-flash-1017,glm-5.3 --tasks hard
    --variants presage,no-review,presage+sys:docs/prompts/system-v1.md,classic,ext:mini,ext:opencode -n 3`.
    Keep the review pass and prompt v2 only if they raise the solve rate.
