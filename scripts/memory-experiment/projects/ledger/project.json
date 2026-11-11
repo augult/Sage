@@ -1,0 +1,33 @@
+{
+  "name": "ledger",
+  "friction": "the package is in src/ and not installed: tests only import it with PYTHONPATH=src",
+  "plain": "python3 -m unittest",
+  "visible": "PYTHONPATH=src python3 -m unittest",
+  "check": "PYTHONPATH=src python3 -m unittest",
+  "pristine": ["tests"],
+  "friction_markers": ["No module named 'ledger'"],
+  "relevant_lesson": "PYTHONPATH=src",
+  "note": "Project notes:\n- The package is in src/ and is not installed: run the tests from the repository root as `PYTHONPATH=src python3 -m unittest`.\n- Plain `python3 -m unittest` fails with \"No module named 'ledger'\"; that is the missing PYTHONPATH, not a bug.",
+  "tasks": [
+    {
+      "id": "t1",
+      "kind": "feature",
+      "prompt": "Add a keyword option `thousands` to `format_cents` in the ledger package: `format_cents(123456789, thousands=True)` returns `'1,234,567.89'`, and the default stays ungrouped. A negative amount keeps its sign in front (`'-1,234.50'`). The existing tests must keep passing; do not edit them."
+    },
+    {
+      "id": "t2",
+      "kind": "bugfix-failing-test",
+      "prompt": "A test in the ledger project is failing: an entry description that contains a comma inside double quotes is cut short. Fix the parser so that standard CSV quoting works, including doubled quotes inside a quoted field. Do not edit the tests."
+    },
+    {
+      "id": "t3",
+      "kind": "feature",
+      "prompt": "Add `top_categories(entries, n)` to the ledger's report module. It returns a list of `(category, total_cents)` pairs for the `n` categories with the largest spending, biggest spender first. Spending means a negative total: categories whose total is zero or positive are left out. Ties are ordered by category name. The existing tests must keep passing; do not edit them."
+    },
+    {
+      "id": "t4",
+      "kind": "bugfix-report",
+      "prompt": "Users report that `month_range` in the ledger's dates module leaves out a month in some ranges, for example from October to the following February. Fix it. The existing tests must keep passing; do not edit them."
+    }
+  ]
+}
