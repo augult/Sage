@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tauri::ipc::Channel;
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 use tokio::sync::broadcast::error::RecvError;
+
+mod git;
 
 type Reply<T> = Result<T, String>;
 
@@ -30,12 +32,14 @@ struct Hooks {
     scripted: Option<String>,
     /// `PRESAGE_UI_SCRIPT`: UI actions to play once the first view is up (grammar in `ui/js/hooks.js`).
     script: Option<String>,
+    /// `PRESAGE_UI_THEME=<background>`: the painting behind the glass for this launch, by its id
+    /// (`ui/js/themes.js`), whatever the user has chosen.
+    theme: Option<String>,
+    /// `PRESAGE_UI_SCHEME=light|dark`: the appearance for this launch.
+    scheme: Option<String>,
     /// `PRESAGE_UI_SIZE=<width>x<height>`: window size in logical pixels.
     #[serde(skip)]
     size: Option<(f64, f64)>,
-    /// `PRESAGE_UI_WALLPAPER=<file>`: the picture behind the glass, instead of the desktop's.
-    #[serde(skip)]
-    wallpaper: Option<String>,
 }
 
 impl Hooks {
@@ -51,8 +55,9 @@ impl Hooks {
             open: var("PRESAGE_UI_OPEN"),
             scripted: var("PRESAGE_UI_SCRIPTED"),
             script: var("PRESAGE_UI_SCRIPT"),
+            theme: var("PRESAGE_UI_THEME"),
+            scheme: var("PRESAGE_UI_SCHEME"),
             size,
-            wallpaper: var("PRESAGE_UI_WALLPAPER"),
         }
     }
 }
@@ -123,72 +128,6 @@ fn adopt_login_shell_path() {
 #[tauri::command]
 async fn ui_hooks(hooks: State<'_, Hooks>) -> Reply<Hooks> {
     Ok(hooks.inner().clone())
-}
-
-/// Where the window's content sits on its monitor, in physical pixels. The UI lays its glass
-/// backdrop out over the monitor and shifts it by this, so the backdrop holds still on the screen
-/// while the window moves over it, as glass over the desktop would.
-#[derive(Clone, Serialize)]
-struct Place {
-    x: i32,
-    y: i32,
-    monitor_x: i32,
-    monitor_y: i32,
-    monitor_width: u32,
-    monitor_height: u32,
-    scale: f64,
-}
-
-fn place_of(window: &tauri::Window) -> Option<Place> {
-    let origin = window.inner_position().ok()?;
-    let monitor = window.current_monitor().ok()??;
-    Some(Place {
-        x: origin.x,
-        y: origin.y,
-        monitor_x: monitor.position().x,
-        monitor_y: monitor.position().y,
-        monitor_width: monitor.size().width,
-        monitor_height: monitor.size().height,
-        scale: window.scale_factor().unwrap_or(1.0),
-    })
-}
-
-/// The window's place now. Later changes arrive as `window-place` events.
-#[tauri::command]
-async fn window_place(window: tauri::Window) -> Reply<Option<Place>> {
-    Ok(place_of(&window))
-}
-
-/// Files that may hold the desktop wallpaper, likeliest first. Windows keeps the current one as a
-/// JPEG at a fixed place in the profile, and per-size copies beside it; elsewhere there is nothing
-/// to find and the UI paints a backdrop of its own. The test hook names the one file to use.
-fn wallpaper_candidates(hook: Option<&str>, appdata: Option<&Path>) -> Vec<PathBuf> {
-    if let Some(path) = hook {
-        return vec![PathBuf::from(path)];
-    }
-    let Some(appdata) = appdata else { return Vec::new() };
-    let themes = appdata.join("Microsoft").join("Windows").join("Themes");
-    let mut paths = vec![themes.join("TranscodedWallpaper")];
-    let mut cached: Vec<PathBuf> = std::fs::read_dir(themes.join("CachedFiles")).map(|dir| dir.flatten().map(|entry| entry.path()).collect()).unwrap_or_default();
-    cached.sort();
-    paths.extend(cached);
-    paths
-}
-
-/// The desktop wallpaper's bytes, for the glass backdrop; empty when there is none to be had. The
-/// file is only read here: the webview decodes it, blurs it once and keeps the result.
-#[tauri::command]
-async fn wallpaper(hooks: State<'_, Hooks>) -> Reply<tauri::ipc::Response> {
-    const LIMIT: u64 = 64 * 1024 * 1024;
-    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
-    let bytes = wallpaper_candidates(hooks.wallpaper.as_deref(), appdata.as_deref()).into_iter().find_map(|path| {
-        let meta = std::fs::metadata(&path).ok()?;
-        if !meta.is_file() || meta.len() == 0 || meta.len() > LIMIT {
-            return None;
-        }
-        std::fs::read(&path).ok()
-    });
-    Ok(tauri::ipc::Response::new(bytes.unwrap_or_default()))
 }
 
 /// Test hook: starts the session `PRESAGE_UI_SCRIPTED` describes. The path comes from the
@@ -320,6 +259,23 @@ async fn set_global_instructions(harness: State<'_, Harness>, text: String) -> R
     harness.set_global_instructions(&text)
 }
 
+/// The folder a session works in, whether it is running or from an earlier launch.
+fn session_cwd(harness: &Harness, id: &str) -> Reply<PathBuf> {
+    harness.list().into_iter().find(|meta| meta.id == id).map(|meta| PathBuf::from(meta.cwd)).ok_or_else(|| format!("no session {id}"))
+}
+
+/// Where the session's workspace stands with git: branch, remote, what is uncommitted or unpushed.
+#[tauri::command]
+async fn git_state(harness: State<'_, Harness>, id: String) -> Reply<git::GitState> {
+    Ok(git::state(&session_cwd(&harness, &id)?).await)
+}
+
+/// Commits what is uncommitted in the session's workspace under `message` and pushes its branch.
+#[tauri::command]
+async fn git_push(harness: State<'_, Harness>, id: String, message: String) -> Reply<git::Pushed> {
+    git::push(&session_cwd(&harness, &id)?, &message).await
+}
+
 /// Returns everything stored so far and forwards what follows to `on_event`, with nothing lost or
 /// repeated in between. Forwarding ends when the webview or the session goes away.
 #[tauri::command]
@@ -385,18 +341,8 @@ fn main() {
             }
             Ok(())
         })
-        // The glass backdrop is pinned to the screen, so the UI has to hear where the window went.
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {
-                if let Some(place) = place_of(window) {
-                    let _ = window.emit("window-place", place);
-                }
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             ui_hooks,
-            window_place,
-            wallpaper,
             app_state,
             set_key,
             set_defaults,
@@ -417,6 +363,8 @@ fn main() {
             instructions,
             set_system_prompt,
             set_global_instructions,
+            git_state,
+            git_push,
             subscribe
         ])
         .build(tauri::generate_context!())
@@ -426,27 +374,4 @@ fn main() {
             close_sessions(handle.state::<Harness>().inner());
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wallpaper_candidates_follow_the_hook_then_the_windows_profile() {
-        let appdata = std::env::temp_dir().join(format!("presage-wallpaper-test-{}", std::process::id()));
-        let themes = appdata.join("Microsoft").join("Windows").join("Themes");
-        let cached = themes.join("CachedFiles");
-        std::fs::create_dir_all(&cached).unwrap();
-        std::fs::write(cached.join("CachedImage_1920_1080_POS4.jpg"), b"x").unwrap();
-
-        // The hook names the one file to use, whatever the profile holds.
-        assert_eq!(wallpaper_candidates(Some("/tmp/picture.png"), Some(&appdata)), vec![PathBuf::from("/tmp/picture.png")]);
-        // No profile (anything but Windows): nothing to read.
-        assert!(wallpaper_candidates(None, None).is_empty());
-        // The current wallpaper first, then the per-size copies.
-        assert_eq!(wallpaper_candidates(None, Some(&appdata)), vec![themes.join("TranscodedWallpaper"), cached.join("CachedImage_1920_1080_POS4.jpg")]);
-
-        std::fs::remove_dir_all(&appdata).unwrap();
-    }
 }

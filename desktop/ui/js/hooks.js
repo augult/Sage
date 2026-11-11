@@ -9,11 +9,12 @@
 //       scroll:<selector>         wait:<milliseconds>
 //     An action waits for its element to exist, so scripts need no timing of their own.
 //   PRESAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)
-//   PRESAGE_UI_WALLPAPER=<file>             the picture behind the glass, instead of the desktop's
-//                                           (read by the shell; a path that does not exist gives
-//                                           the generated field)
+//   PRESAGE_UI_THEME=<background>           the painting behind the glass for this launch, by id:
+//                                           ember, orchid, tide, graphite or none
+//   PRESAGE_UI_SCHEME=light|dark            the appearance for this launch
 
 import { api } from './api.js';
+import * as themes from './themes.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -53,6 +54,7 @@ async function play(script) {
 /** Opens the first view, as the hooks ask or the New session view by default, then plays the script. */
 export async function applyHooks(app) {
   const hooks = await api.hooks();
+  themes.force({ background: hooks.theme, appearance: hooks.scheme });
   if (hooks.autodemo) await app.playDemo();
   else if (hooks.scripted) await app.opened(await api.startScripted());
   else if (hooks.open) app.show({ name: 'session', id: hooks.open });
