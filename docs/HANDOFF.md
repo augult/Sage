@@ -59,6 +59,10 @@ its screenshot is of a step added to a log by hand); the app driven by hand, on 
 - *Session.* A provider error is shown in the open while the engine retries (it retried a 429
   silently, behind a bar that read "Thinking"). No result line after a stop, no expand-all button.
 - *Browse* opens the system's folder dialog (`tauri-plugin-dialog`); the in-app picker is gone.
+- *Dither* drifts behind the sidebar and the inspector only: its canvas is cut away where the
+  sheet is, and the band in the New session view shows the painting alone.
+- *Enter sends* a task or a follow-up, and Ctrl/Cmd+Enter or Shift+Enter breaks the line;
+  Settings can turn the two round (`ui/js/keys.js`, kept in `localStorage`).
 
 Not checked: any of this on Windows or macOS; the folder dialog beyond seeing GTK's open under
 xvfb; the reminder against a real window manager's close button (the app's own button was used).

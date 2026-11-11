@@ -1,14 +1,14 @@
 // The New session view: one composer. The workspace sits above the task; the model, skills, effort,
-// mode and autonomy are pickers in the bar below it, next to Start. Above the composer the chosen
-// background hangs uncovered, with its dither moving over it and the picker that changes it.
+// mode and autonomy are pickers in the bar below it, next to Start. Enter in the task starts the
+// session, unless Settings says Ctrl/Cmd+Enter does (js/keys.js). Above the composer the chosen
+// background hangs uncovered, with the picker that changes it.
 // With no key configured the view leads with the walkthrough and the way to add a key.
 
 import { api } from '../api.js';
-import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
+import { onSendKey, sendHint } from '../keys.js';
 import { plainPath, tilde } from '../format.js';
 import * as themes from '../themes.js';
-import { MOD_KEY } from './common.js';
 import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
 
 const MODES = [
@@ -23,9 +23,6 @@ const AUTONOMIES = [
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
 const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [] };
-
-// The dots over the painting as it is, unpressed: stronger than behind the panes, on any picture.
-const HERO_INKS = { light: [255, 255, 255, 0.36], dark: [0, 0, 0, 0.26] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
@@ -206,6 +203,9 @@ export function mountNewSession(main, app) {
     'div.new-session',
     {
       onkeydown: (event) => {
+        // In the task the chosen key starts the session and the other breaks the line.
+        if (event.target === task) return void onSendKey(event, start);
+        // Anywhere else in the form Ctrl/Cmd+Enter starts it; Enter is the control's own.
         if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
         start();
@@ -225,7 +225,7 @@ export function mountNewSession(main, app) {
         startButton,
       ),
     ),
-    h('div.composer-foot', recentRow, h('span.kbd', `${MOD_KEY}+Enter`)),
+    h('div.composer-foot', recentRow, h('span.kbd', sendHint())),
     error,
   );
 
@@ -237,13 +237,6 @@ export function mountNewSession(main, app) {
   );
 
   // The background, uncovered, and the picker that changes it.
-  const canvas = h('canvas.hero-dither', { 'aria-hidden': 'true' });
-  const dither = createDither(canvas, themes.ditherLook(themes.current(), 3, HERO_INKS));
-  const restyle = (now) => {
-    dither.restyle(themes.ditherLook(now, 3, HERO_INKS));
-    dither.run(now.motion && now.dither);
-  };
-  const forget = themes.onChange(restyle);
   const backgrounds = picker({
     id: 'pick-theme',
     name: 'Background',
@@ -252,21 +245,18 @@ export function mountNewSession(main, app) {
     align: 'end',
     onChange: (background) => themes.choose({ background }),
   });
-  const hero = h('div.hero', h('div.hero-art', canvas), h('div.hero-pick', backgrounds));
+  const hero = h('div.hero', h('div.hero-art'), h('div.hero-pick', backgrounds));
 
   main.append(
     h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
     h('div.view-body', h('div.view-column', h('div.view-lead', h('h1.view-title', 'New session'), lead), hero, form)),
   );
-  restyle(themes.current());
   // Start where the first thing is still missing.
   (keyed.length === 0 ? main.querySelector('#play-demo') : draft.cwd ? task : workspace).focus();
   return {
     unmount() {
       clearTimeout(skillsTimer);
       skillsAsked++;
-      forget();
-      dither.stop();
     },
   };
 }

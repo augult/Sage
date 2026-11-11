@@ -3,8 +3,9 @@
 import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
 import { duration, effortLabel, tilde } from '../format.js';
+import { onSendKey, sendHint } from '../keys.js';
 import * as store from '../store.js';
-import { MOD_KEY, outcomeLook, sessionState } from './common.js';
+import { outcomeLook, sessionState } from './common.js';
 import { skillsPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
@@ -135,12 +136,7 @@ export function mountSession(main, side, app, meta) {
     'aria-label': 'Follow-up message',
     placeholder: 'Follow-up',
     oninput: fitBox,
-    onkeydown: (event) => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        send();
-      }
-    },
+    onkeydown: (event) => onSendKey(event, send),
   });
   const sendButton = h('button.btn.primary', { id: 'send-followup', type: 'button', onclick: send }, 'Send');
   // While a run is in progress the same place stops it.
@@ -204,7 +200,7 @@ export function mountSession(main, side, app, meta) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(h('div.composer', sendError, box, h('div.composer-row', skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), stopButton, sendButton)));
+    if (!foot.firstChild) foot.append(h('div.composer', sendError, box, h('div.composer-row', skillsSlot, h('span.kbd', sendHint()), stopButton, sendButton)));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;

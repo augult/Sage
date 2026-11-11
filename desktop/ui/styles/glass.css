@@ -1,6 +1,6 @@
 /* The glass. Behind the panes hangs a painting the app brings itself (js/backdrop.js draws it once,
-   softened and pressed into a band of brightness for the appearance), and over it drifts a dither
-   on a canvas a few hundred cells wide. The panes are plain translucent fills over the two.
+   softened and pressed into a band of brightness for the appearance), and over it, behind the two
+   side panes, drifts a dither on a canvas a few hundred cells wide. The panes are plain translucent fills over the two.
    Nothing here blurs or filters while the app runs, and nothing shows what is behind the window. */
 
 :root[data-scheme="light"] {
@@ -55,14 +55,28 @@ body {
   object-fit: cover;
 }
 
-/* Whole cells, stretched without smoothing: the dots stay square. */
-#backdrop-dither,
-.hero-dither {
+/* Whole cells, stretched without smoothing: the dots stay square. They drift behind the sidebar
+   and the inspector only: the canvas is cut away over the column between them, so that where
+   reading happens there is the painting and nothing that moves. */
+#backdrop-dither {
   image-rendering: pixelated;
+  clip-path: polygon(
+    evenodd,
+    0 0,
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 0,
+    var(--side) 0,
+    var(--side) 100%,
+    calc(100% - var(--inspect)) 100%,
+    calc(100% - var(--inspect)) 0,
+    var(--side) 0
+  );
 }
 
-/* Dither off: the painting alone, here and in the New session view. */
-:root[data-dither="off"] :is(#backdrop-dither, .hero-dither) {
+/* Dither off: the painting alone. */
+:root[data-dither="off"] #backdrop-dither {
   display: none;
 }
 
