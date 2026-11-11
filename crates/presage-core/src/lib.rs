@@ -11,6 +11,7 @@ pub mod bootstrap;
 pub mod config;
 pub mod context;
 pub mod demo;
+pub mod diff;
 pub mod economy;
 pub mod events;
 pub mod guard;
