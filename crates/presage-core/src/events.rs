@@ -176,6 +176,10 @@ pub enum EventKind {
         hidden_bytes: u64,
         violations: Vec<String>,
         explicit: bool,
+        /// What an `edit` or a `write` did to its file, for a before/after view. The model is
+        /// not shown this.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        change: Option<crate::diff::FileChange>,
     },
     Watch {
         turn: u32,
@@ -263,7 +267,7 @@ mod tests {
 
     #[test]
     fn events_serialise_flat_with_a_type_tag() {
-        let e = Event { seq: 7, ts: 1, kind: EventKind::StepEnd { turn: 2, idx: 0, call_id: "c".into(), tool: "shell".into(), status: StepStatus::Surprise, observation: "x".into(), ms: 5, hidden_bytes: 0, violations: vec![], explicit: true } };
+        let e = Event { seq: 7, ts: 1, kind: EventKind::StepEnd { turn: 2, idx: 0, call_id: "c".into(), tool: "shell".into(), status: StepStatus::Surprise, observation: "x".into(), ms: 5, hidden_bytes: 0, violations: vec![], explicit: true, change: None } };
         let v: serde_json::Value = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "step_end");
         assert_eq!(v["seq"], 7);

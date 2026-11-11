@@ -115,6 +115,8 @@ pub struct StepOutput {
     pub hidden_bytes: u64,
     /// The step itself changed files in the workspace.
     pub changed_files: bool,
+    /// What it did to the file it changed, for the UI. The model is not shown this.
+    pub change: Option<crate::diff::FileChange>,
     pub shell: Option<ShellMeta>,
 }
 
