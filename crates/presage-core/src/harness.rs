@@ -415,7 +415,7 @@ impl Harness {
         let real = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
         let provider = Provider::Mock(demo::provider(real, 22));
         // The walkthrough is three replies; the review pass would add a fourth that shows nothing new.
-        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into()], ..Default::default() };
+        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into(), "survey".into()], ..Default::default() };
         self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
     }
 

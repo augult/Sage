@@ -5,6 +5,7 @@ import { h, icon, spinner } from '../dom.js';
 import { duration, tilde } from '../format.js';
 import * as store from '../store.js';
 import { MOD_KEY, outcomeLook, sessionState, tag } from './common.js';
+import { skillsPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
 import { createTimeline } from './timeline.js';
@@ -41,7 +42,7 @@ export function mountSession(main, side, app, meta) {
     jump.hidden = pinned || atEnd();
     if (pinned) scroller.scrollTop = scroller.scrollHeight;
     const waiting = sessionState(entry.meta, entry).approvals > 0;
-    const label = waiting ? 'An approval request is waiting below' : 'Jump to the end';
+    const label = waiting ? 'Approval needed' : 'Jump to the end';
     if (jump.textContent !== label) {
       jump.className = `jump tone-${waiting ? 'amber' : 'plain'}`;
       jump.replaceChildren(icon('down', 12), label);
@@ -56,13 +57,20 @@ export function mountSession(main, side, app, meta) {
     { passive: true },
   );
 
+  // The skills on offer in this workspace, for their titles and for the follow-up box.
+  let skillList = [];
+  let picked = [];
+  const activeSkills = (model) => (Array.isArray(model.meta.skills) ? model.meta.skills : []);
+  const skillTitle = (name) => skillList.find((skill) => skill.name === name)?.title ?? name;
+
   let stopping = false;
   let headShown = '';
   function renderHead(model) {
     const state = sessionState(entry.meta, entry);
     if (state.phase !== 'running') stopping = false;
     const { title, cwd, model: modelName, provider, effort, mode, autonomy, simulated } = model.meta;
-    const shown = [state.phase, state.outcome, state.verified, state.approvals, stopping, title, cwd, modelName, provider, effort, mode, autonomy, simulated].join('|');
+    const skills = activeSkills(model).map(skillTitle);
+    const shown = [state.phase, state.outcome, state.verified, state.approvals, stopping, title, cwd, modelName, provider, effort, mode, autonomy, simulated, ...skills].join('|');
     if (shown === headShown) return;
     headShown = shown;
     const stop =
@@ -75,14 +83,13 @@ export function mountSession(main, side, app, meta) {
         h('span.session-cwd', { title: cwd }, h('bdi', tilde(cwd, app.state.home))),
         h(
           'div.session-tags',
-          tag(modelName, 'plain', `Model, through ${provider}`),
-          tag(`effort ${effort}`, 'plain', 'Reasoning effort policy'),
+          tag(modelName, 'plain', provider),
+          skills.length > 0 && h('span.tag.tone-plain.tag-skills', { title: skills.join(', ') }, `${skills.length > 1 ? 'skills' : 'skill'} ${skills.join(', ')}`),
+          tag(`effort ${effort}`),
           // The engine also reports ablations here, as "presage without <mechanism>".
-          mode === 'classic'
-            ? tag('Classic', 'plain', 'Conventional tool loop: no scripts, predictions, watches or finish gate')
-            : tag(mode === 'presage' ? 'Presage' : mode, 'azure', 'Scripts, predictions, watches and the evidence gate'),
-          autonomy === 'ask' && tag('asks first', 'amber', 'Every step that changes something waits for your approval'),
-          simulated && h('span.badge', { title: 'A scripted stand-in is playing the model: token counts and cost are fabricated.' }, 'SIMULATED'),
+          mode === 'classic' ? tag('Classic') : tag(mode === 'presage' ? 'Presage' : mode, 'azure'),
+          autonomy === 'ask' && tag('asks first', 'amber'),
+          simulated && h('span.badge', 'SIMULATED'),
         ),
       ),
     );
@@ -103,8 +110,7 @@ export function mountSession(main, side, app, meta) {
     id: 'followup',
     rows: 1,
     'aria-label': 'Follow-up message',
-    title: 'The agent still has its context from this session',
-    placeholder: 'Send a follow-up',
+    placeholder: 'Follow-up',
     oninput: fitBox,
     onkeydown: (event) => {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -131,8 +137,9 @@ export function mountSession(main, side, app, meta) {
     sendError.hidden = true;
     render();
     try {
-      await api.sendMessage(entry.id, text);
+      await api.sendMessage(entry.id, text, picked);
       box.value = '';
+      picked = [];
       fitBox();
       awaitingRun = true;
       pinned = true;
@@ -144,18 +151,34 @@ export function mountSession(main, side, app, meta) {
     render();
   }
 
+  // The Skills button of the follow-up box: what the session has is on for good, the rest can be
+  // switched on with the next message.
+  const skillsSlot = h('span.pick-slot');
+  let slotShown = null;
+  function renderSkillsSlot(model) {
+    const locked = activeSkills(model);
+    // The classic baseline takes no skills.
+    const offered = model.meta.mode === 'classic' ? [] : skillList;
+    picked = picked.filter((name) => !locked.includes(name));
+    const signature = () => [offered.length, ...locked, '|', ...picked].join(' ');
+    if (signature() === slotShown) return;
+    slotShown = signature();
+    const choose = (names) => {
+      picked = names;
+      slotShown = signature();
+    };
+    skillsSlot.replaceChildren(...(offered.length ? [skillsPicker({ skills: offered, value: picked, locked, align: 'end', onChange: choose })] : []));
+  }
+
   function renderFoot(model) {
-    if (!foot.firstChild) {
-      foot.append(
-        entry.live
-          ? h('div.composer', h('div.composer-box', sendError, box), h('span.kbd', `${MOD_KEY}+Enter`), sendButton)
-          : h('p.foot-note', 'Read-only replay. This session ran in an earlier launch of the app, so it cannot be continued.'),
-      );
-    }
+    // A session from an earlier launch cannot be continued: its header says read-only.
+    foot.hidden = !entry.live;
+    if (!entry.live) return;
+    if (!foot.firstChild) foot.append(h('div.composer', h('div.composer-box', sendError, box), skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), sendButton));
     if (model.running) awaitingRun = false;
-    const busy = model.running || sending || awaitingRun;
-    sendButton.disabled = busy;
-    sendButton.title = busy ? 'A follow-up can be sent when this run ends' : '';
+    sendButton.disabled = model.running || sending || awaitingRun;
+    // Not while its menu may be open: a redraw would close it.
+    if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);
   }
 
   const tick = () => {
@@ -170,7 +193,7 @@ export function mountSession(main, side, app, meta) {
     notice.hidden = Boolean(model);
     if (!model) {
       notice.replaceChildren(
-        ...(entry.error ? [h('p', entry.error), h('button.btn', { type: 'button', onclick: () => store.reload(entry) }, 'Try again')] : [h('p', 'Loading the session…')]),
+        ...(entry.error ? [h('p', entry.error), h('button.btn', { type: 'button', onclick: () => store.reload(entry) }, 'Try again')] : [h('p', 'Loading…')]),
       );
       return;
     }
@@ -192,10 +215,21 @@ export function mountSession(main, side, app, meta) {
     if (changed === entry) frame ||= requestAnimationFrame(() => ((frame = 0), render()));
   });
   const ticker = setInterval(tick, 200);
+  let gone = false;
   render();
+  api.skills(entry.meta.cwd).then(
+    (listed) => {
+      if (gone) return;
+      skillList = listed;
+      render();
+    },
+    // Without the list, skills go by their names.
+    () => {},
+  );
 
   return {
     unmount() {
+      gone = true;
       unlisten();
       clearInterval(ticker);
       cancelAnimationFrame(frame);
@@ -209,5 +243,5 @@ function statusPill(state, model) {
   if (state.phase === 'running') return h('span.status-pill.tone-azure', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
   const look = outcomeLook(state.outcome, state.verified);
   const label = state.outcome ? look.label : state.phase === 'closed' ? 'Ended without a result' : 'Idle';
-  return h(`span.status-pill.tone-${look.tone}`, icon(look.icon), label, state.phase === 'closed' && tag('read-only', 'plain', 'From an earlier launch of the app'));
+  return h(`span.status-pill.tone-${look.tone}`, icon(look.icon), label, state.phase === 'closed' && tag('read-only'));
 }

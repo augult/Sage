@@ -19,6 +19,133 @@ LOGFARE_API_KEY=... PRESAGE_HOME=/tmp/presage-live target/debug/presage bench -p
   --variants presage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## Skill and hard task sets, against other harnesses, 11 November 2026 (sixth session)
+
+The seven tasks above are solved by every variant, so they measure turns only. Two harder sets were
+added: `skill` (ten tasks, one per built-in skill: audits, dead-code removal, writing tests,
+performance, a heisenbug, a restyle) and `hard` (seven tasks with several files and held-out checks
+for behaviour the task specifies but the visible tests do not cover). Variants: `presage`, `classic`,
+and mini-swe-agent 2.4.6 (`ext:mini`) driven through the same gateway behind a metering proxy.
+30 replies and 15 minutes per run. Raw results, the CLI's tables, the grades and the scripts that
+produced the figures below are in `docs/results/2026-11-11-session6/`.
+
+**One run per task and variant.** The gateway key allows 12 requests at a time, 2,000 an hour and
+10,000 a day; the daily limit ended the session before the GLM-5.3 run and the ablations were
+complete. With one run per cell, a difference of one solved task is not a finding. Turns, time and
+cost are steadier, and the before/after rows compare runs made under different load.
+
+### DeepSeek V4.1 Flash: 17 tasks
+
+| Variant | Solved | Turns (mean) | Time (mean) | Cost (17 runs) | Answer grade (of 8) |
+|---|---|---:|---:|---:|---:|
+| Presage | 16/17 | 14.3 | 128 s | $0.377 | 7.53 |
+| Classic | 15/17 | 20.8 | 139 s | $0.323 | 7.06 |
+| mini-swe-agent | 16/17 | 13.9 | 165 s | $0.372 | 7.24 |
+
+- Presage against classic: 45% fewer turns (median 11 against 20), 35% less time, 13% lower cost at
+  the median. Against mini-swe-agent: about the same number of turns and the same cost, a third
+  less time.
+- By set: on the ten skill tasks mini-swe-agent is the leanest (11.2 turns, $0.015 a run; Presage
+  14.6 turns, $0.021). On the seven hard tasks Presage is (13.9 turns and 127 s; mini-swe-agent 17.7
+  turns and 243 s; classic 19.0 turns).
+- The unsolved runs: `restyle` under Presage and mini-swe-agent (both declared it done; the hidden
+  check wants a spacing and type scale that only the `ui` skill spells out), `deadcode-js` and
+  `rollup` under classic (turn limit).
+- **Five of the 17 classic runs left their workspace** (`find /`, then work on whatever copy of the
+  project they found, among them this repository's fixtures; one read a hidden verifier). No Presage
+  run did: its first message says where the workspace is. Four of the five were run again with the
+  fixtures removed from disk: all four solved (`deadcode-js` now in 12 turns), which would make
+  classic 16/17; `rollup` could not be re-run before the daily limit.
+
+### GLM-5.3: 6 of the 17 tasks
+
+`audit`, `audit-clean`, `deadcode`, `shipquote`, `attempts`, `connpool`; the run stopped at the daily
+limit.
+
+| Variant | Solved | Turns (mean) | Time (mean) | Cost (mean) | Answer grade (of 8) |
+|---|---|---:|---:|---:|---:|
+| Presage (effort `high`) | 5/6 | 21.0 | 324 s | $0.305 | 7.33 |
+| Presage, effort `max` | 6/6 | 20.5 | 448 s | $0.361 | not graded |
+| Classic | 5/6 | 25.7 | 292 s | $0.229 | 5.83 |
+| mini-swe-agent | 5/6 | 27.3 | 479 s | $0.431 | 6.17 |
+
+Six tasks and one run each separate nothing on solve rate. mini-swe-agent ran into the 30-reply
+limit on five of the six; it sends no effort setting, so GLM-5.3 thinks at its default there.
+
+### Before and after this session's changes
+
+| Model, tasks | Presage before | Presage after |
+|---|---|---|
+| DeepSeek, 10 skill tasks | 8/9 solved, 22.7 turns, 202 s, $0.034 | 9/10 solved, 14.6 turns, 129 s, $0.021 |
+| DeepSeek, 7 hard tasks | 7/7 solved, 20.1 turns, 254 s, $0.033 | 7/7 solved, 13.9 turns, 127 s, $0.024 |
+| GLM-5.3, `audit`, `audit-clean`, `deadcode` | 1/2 solved, 28.0 turns, 457 s | 3/3 solved, 18.3 turns, 240 s |
+| GLM-5.3, 10 skill tasks | 6/9 solved, 22.1 turns, 437 s | not run (daily limit) |
+
+"Before" is the engine as merged in PR #4 for the skill tasks, and with only the finish-gate fix
+for the hard tasks. The before runs shared the gateway with more parallel runs, which lengthens
+time but not turns. What changed in between, found by reading the traces of the before runs:
+
+- **Finish gate.** A check written as `cd dir && <check>` did not count, so `finish` was refused
+  until the turn limit (five refusals in one run).
+- **GLM-5.3 effort.** Logfare passes GLM-5.3 only a top-level `reasoning_effort` of `low`, `high` or
+  `max`; with `reasoning: {effort}`, which the harness sent, it thinks at `max`. Measured on one
+  prompt: about 6,000 reasoning tokens and no answer within the limit, against 90 to 960 with
+  `reasoning_effort: high`. In the before runs GLM-5.3 filled whole 32,000-token replies with
+  reasoning, three times in a row, without a tool call (about 200 s each). Both spellings are now
+  sent, and a reply that only reasons is cut at about 14,000 tokens and asked for again one level
+  lower.
+- **Survey, budget, single-call streaks.** A small workspace is listed and attached up front; the
+  budget is in the first message; a streak of single-call replies is pointed out.
+- A reply cut off by the output limit, or a plan in prose, ended an unattended run as its answer.
+
+### Ablations on DeepSeek (10 of 17 tasks each, one run; stopped by the daily limit)
+
+| Variant | Solved | Turns | against Presage on the same tasks |
+|---|---|---:|---|
+| `no-review` | 9/10 | 13.6 | 9/10, 15.5 turns |
+| `no-survey` | 9/10 | 17.6 | 9/10, 17.5 turns |
+| `presage+skill` (8 skill tasks) | 8/8 | 16.2 | 7/8, 12.1 turns |
+
+- **Review pass**: costs about two turns and changed no outcome here. Undecided; ten runs cannot
+  show a rare rescue.
+- **Survey**: no difference in turns on these ten tasks. The drop from 22 to 14 turns above is
+  therefore not shown to come from it; the ablation does not isolate the gate fix or the budget
+  line, which have no switch.
+- **Skills**: the one task Presage fails without a skill (`restyle`) is solved with `ui`. Elsewhere
+  the skill costs turns (16.2 against 12.1) and about twice the money, for no change in outcome.
+
+### Grading the answers
+
+Each DeepSeek run and the graded GLM-5.3 runs were exported as a bundle (task, hidden verification
+result, final message, diff) and scored 0 to 2 on four counts: correct, scope, honest report,
+quality (`grading-rubric.md`). Claude Haiku 5.5 graded every bundle; Claude Fable 5.2 then re-graded
+36 of the 51 DeepSeek bundles and all GLM-5.3 bundles from the bundle itself and corrected the file.
+On DeepSeek it changed 15 scores in 12 bundles, mostly `honest`, in both directions and without a
+lean towards one variant.
+
+| DeepSeek | correct | scope | honest | quality | total |
+|---|---:|---:|---:|---:|---:|
+| Presage | 1.94 | 2.00 | 1.65 | 1.94 | 7.53 |
+| mini-swe-agent | 1.94 | 2.00 | 1.65 | 1.65 | 7.24 |
+| Classic | 1.82 | 2.00 | 1.47 | 1.76 | 7.06 |
+
+Presage's lead is 5 points of 136; second against third is 3 points and could swap with a repeat.
+On the six GLM-5.3 tasks the totals are Presage 7.33, mini-swe-agent 6.17, classic 5.83, where one
+run that stops at its limit moves a mean by half a point.
+Every variant loses most on `honest`: runs that stop at the turn limit leave no final message.
+
+### What makes these numbers weaker than they look
+
+- One run per cell, and the two models ran different numbers of tasks.
+- **Runs share one machine.** They see each other's scratch files in `/tmp` and each other's
+  workspaces, and an agent's `pkill -f <word of the task>` killed mini-swe-agent and opencode
+  processes of other runs, whose command line held the task. The mini-swe-agent adapter now passes
+  the task through the environment (opencode's still takes it on the command line), the bench makes
+  each workspace its own git repository, and the fixtures were removed from disk for the later
+  runs, but there is no isolation between runs. A run
+  that leaves its workspace is found afterwards by `wander.py`, not prevented.
+- opencode was only smoke-tested (two easy tasks, both solved) and is not in the tables.
+
 ## Baseline, 10 November 2026 (engine at d739e56, before `attach` and `short_paths`)
 
 ### GLM-5.3: 140 runs, all solved, 20 minutes, $2.46

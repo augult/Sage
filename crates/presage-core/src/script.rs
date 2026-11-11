@@ -94,10 +94,24 @@ fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
     }
 }
 
-/// Commands that succeed no matter what and so prove nothing.
+/// Commands that succeed no matter what and so prove nothing. One part that can fail makes the
+/// line a check: `cd dir && pytest` is one, `cd dir; echo ok` is not.
 fn proves_nothing(cmd: &str) -> bool {
-    let first = cmd.trim_start().split(|c: char| c.is_whitespace() || c == ';').next().unwrap_or("");
-    matches!(first, "echo" | "true" | ":" | "printf" | "cd" | "pwd" | "sleep" | "export" | "exit" | "")
+    let mut parts = vec![String::new()];
+    let mut quote: Option<char> = None;
+    for c in cmd.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if matches!(c, ';' | '&' | '|' | '\n' | '(' | ')' | '{' | '}') => parts.push(String::new()),
+            None => parts.last_mut().unwrap().push(c),
+        }
+    }
+    parts.iter().all(|part| {
+        let first = part.split_whitespace().find(|w| !w.contains('=')).unwrap_or("");
+        matches!(first, "echo" | "true" | ":" | "printf" | "cd" | "pwd" | "sleep" | "export" | "exit" | "")
+    })
 }
 
 fn summarize(call: &Call) -> String {
@@ -410,7 +424,12 @@ impl Runner<'_> {
             res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: {reason}") });
             return StepOutput::ok("[done] accepted without verification");
         }
-        ev.warned = true;
+        // The gate asks for a check; it must not be able to trap a model that cannot produce one.
+        ev.refusals += 1;
+        if ev.refusals > 2 {
+            res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: no check passed after {}", ev.last_change) });
+            return StepOutput::ok("[done] accepted without verification");
+        }
         let text = format!(
             "[gate] finish refused: nothing has been checked since {}. Run a check (shell with expect_exit / expect_has) and call finish right after it in the same reply. If no check is possible, call finish again with `unverified` set to the reason.",
             ev.last_change
@@ -527,9 +546,13 @@ mod tests {
         assert!(res.finished.is_none());
 
         // Nor is a run that failed, even if what the model said it would print was printed.
-        let (res, _, events) = run(&mut s, &[("shell", json!({"cmd": "sh -c \"echo '5 passing, 1 failing'; exit 1\"", "expect_has": "passing"})), ("finish", json!({"summary": "done"}))]).await;
-        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Surprise]);
+        let (res, _, events) = run(&mut s, &[("write", json!({"path": "log.txt", "content": "x"})), ("shell", json!({"cmd": "sh -c \"echo '5 passing, 1 failing'; exit 1\"", "expect_has": "passing"})), ("finish", json!({"summary": "done"}))]).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Ok, StepStatus::Surprise]);
         assert!(res.finished.is_none());
+
+        // A check behind a `cd` is still a check; a line of commands that cannot fail is not.
+        assert!(!proves_nothing("cd sub && FOO=1 python3 -m unittest") && !proves_nothing("echo start; grep -q 2 n.txt"));
+        assert!(proves_nothing("cd sub && echo 'done; grep x'") && proves_nothing("  ") && proves_nothing("export A=1; pwd"));
 
         // A check that passed, then another change: stale again.
         run(&mut s, &[("shell", json!({"cmd": "grep -qx 2 n.txt", "expect": {"exit": "0"}}))]).await;
@@ -541,6 +564,15 @@ mod tests {
         let done = res.finished.unwrap();
         assert!(!done.verified);
         assert_eq!(done.evidence, "unverified: docs only, nothing to run");
+
+        // Refused twice for the same change, the third finish is taken as unverified.
+        let (res, _, _) = run(&mut s, &[("write", json!({"path": "third.txt", "content": "x"})), ("finish", json!({"summary": "done"}))]).await;
+        assert!(res.finished.is_none());
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done"}))]).await;
+        assert!(res.finished.is_none());
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done"}))]).await;
+        let done = res.finished.unwrap();
+        assert_eq!((done.verified, done.evidence.as_str()), (false, "unverified: no check passed after the write of third.txt"));
     }
 
     #[tokio::test]

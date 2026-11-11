@@ -116,6 +116,9 @@ pub struct Agent {
     budget_marks: u8,
     /// How many more times the model is reminded that steps can be chained.
     chain_hints: u8,
+    /// Replies in a row that carried a single call, and how often that may still be pointed out.
+    solo_streak: u32,
+    solo_hints: u8,
     /// The `job` tool was in the list sent with the previous request.
     offered_job_tool: bool,
 }
@@ -127,7 +130,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, offered_job_tool: false }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false }
     }
 
     pub fn effort(&self) -> Effort {
@@ -228,6 +231,15 @@ impl Agent {
                 }
             }
             parts.push(env);
+            // Known from the start, the budget is something to plan with; heard of at half-time, it
+            // is only a reason to hurry.
+            if features.scripts && !self.cfg.interactive {
+                let time = self.cfg.time_budget.map(|b| format!(" and {} minutes", (b.as_secs() / 60).max(1))).unwrap_or_default();
+                parts.push(format!(
+                    "Budget: {} replies{time}. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.",
+                    self.cfg.max_turns
+                ));
+            }
         }
         // Before the test command is run: the source lines its failing output points at are then on
         // record as shown wherever they are in an attached file, and are not printed a second time.
@@ -273,7 +285,7 @@ impl Agent {
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
 
-        let (mut turns_used, mut empties, mut nudges_left, mut loop_retries) = (0u32, 0u32, 1u32, 1u32);
+        let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
         let outcome = loop {
             if cancel.is_cancelled() {
                 break Outcome { status: FinishStatus::Stopped, summary: "Stopped by the user.".into(), verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
@@ -312,6 +324,24 @@ impl Agent {
                     loop_retries -= 1;
                     let msg = "Your last reply got stuck repeating itself and was cut off. Do not think it through again: send the next tool call now.";
                     self.note("loop", msg);
+                    self.ctx.push(Message::user(format!("[harness] {msg}")));
+                    continue;
+                }
+                Err(ProviderError::Overthinking(chars)) if overthinking_left > 0 => {
+                    overthinking_left -= 1;
+                    // The stream was cut before the provider reported usage: count what was seen.
+                    let tokens = chars as u64 / 4;
+                    self.stats.output_tokens += tokens;
+                    self.stats.reasoning_tokens += tokens;
+                    if let Some(p) = self.sess.prices {
+                        self.stats.cost += p.cost(&crate::provider::Usage { output: tokens, reasoning: tokens, ..Default::default() });
+                    }
+                    let msg = format!("Your last reply was cut off after about {tokens} tokens of thinking with no tool call. Do not work the whole task out in your head: send the first tool calls now and think between steps, with their results in front of you.");
+                    self.note("overthinking", &msg);
+                    if let Some(lower) = self.effort.lower() {
+                        self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
+                        self.effort = lower;
+                    }
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
@@ -376,14 +406,21 @@ impl Agent {
             });
 
             if calls.is_empty() {
-                if resp.content.trim().is_empty() {
+                // A reply the output limit cut off is not an answer, whatever text it got to.
+                let cut_off = resp.finish == "length";
+                if resp.content.trim().is_empty() || cut_off {
                     empties += 1;
                     if empties > 2 {
                         let message = "the model returned neither a tool call nor an answer three times in a row".to_string();
                         self.sink.emit(EventKind::Error { message: message.clone() });
                         break Outcome { status: FinishStatus::Error, summary: message, verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
                     }
-                    let msg = if resp.finish == "length" {
+                    let msg = if cut_off {
+                        // Thinking that fills the whole reply will do so again unless it is given less room.
+                        if let Some(lower) = self.effort.lower().filter(|_| resp.usage.reasoning * 10 >= resp.usage.output * 9) {
+                            self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
+                            self.effort = lower;
+                        }
                         "Your reply hit the output limit before any tool call or answer. Keep the reasoning short and send the tool calls."
                     } else {
                         "Your reply contained no tool call and no answer. Continue the task: call a tool, or call finish."
@@ -392,10 +429,14 @@ impl Agent {
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
-                // Prose only. With nobody watching, unchecked changes get one reminder of the gate.
-                if features.gate && !self.cfg.interactive && !self.sess.evidence.fresh() && nudges_left > 0 {
+                // Prose only. With nobody watching, there is one reminder: of the gate where changes
+                // are unchecked, and otherwise that a plan announced to nobody is not the work.
+                if features.gate && !self.cfg.interactive && nudges_left > 0 {
                     nudges_left -= 1;
-                    let msg = format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change);
+                    let msg = match self.sess.evidence.fresh() {
+                        false => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
+                        true => "You replied without a tool call, and nobody is here to read it or to answer. If the task is not done, carry on with tool calls. If that was your answer, call finish with it as the summary.".to_string(),
+                    };
                     self.note("gate", &msg);
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
@@ -429,6 +470,15 @@ impl Agent {
                     self.chain_hints -= 1;
                     notes.push(h.to_string());
                 }
+            }
+            self.solo_streak = if calls.len() == 1 && result.finished.is_none() { self.solo_streak + 1 } else { 0 };
+            if features.scripts && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised {
+                self.solo_hints -= 1;
+                self.solo_streak = 0;
+                notes.push(format!(
+                    "Your last 4 replies carried one tool call each, and every reply counts against the budget ({turns_used} of {} used). Send the calls you can already foresee together in one reply: the script stops by itself at the first surprise.",
+                    self.cfg.max_turns
+                ));
             }
             notes.extend(self.budget_notes(run_started, turns_used));
             for n in &notes {
@@ -481,6 +531,8 @@ mod tests {
         // The review pass has its own test; the others script one reply too few for it.
         let mut cfg = cfg;
         cfg.features.review = cfg.features.review && name == "agent-review";
+        // Likewise the survey: these workspaces are small, and the tests say what the first message holds.
+        cfg.features.survey = cfg.features.survey && name == "agent-survey";
         let sess = test_session(name, cfg.features);
         std::fs::write(sess.ws.root.join("n.txt"), "alpha\nbeta\ngamma\n").unwrap();
         let sink = Arc::new(MemorySink::default());
@@ -609,6 +661,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unattended_a_plan_in_prose_or_a_reply_cut_off_is_not_taken_for_the_answer() {
+        let plan = MockTurn::say("I'll start by reading the file.");
+        let cut = MockTurn { finish: Some("length".into()), ..MockTurn::say("First I will") };
+        let finish = MockTurn::calls("", vec![("finish", json!({"summary": "three lines"}))]);
+        let mut r = rig("agent-plan", AgentConfig::new("mock"), vec![fixed(plan), fixed(cut), fixed(finish)]);
+        let out = r.agent.run("How many lines has n.txt?".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.summary.as_str(), r.agent.stats.turns), (FinishStatus::Done, "three lines", 3));
+        let said: Vec<&str> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::User).map(|m| m.content.as_str()).collect();
+        assert!(said[1].starts_with("[harness] You replied without a tool call, and nobody is here") && said[2].starts_with("[harness] Your reply hit the output limit"), "{said:?}");
+    }
+
+    #[tokio::test]
     async fn a_call_cut_off_by_the_output_limit_is_never_executed() {
         let mut cut = MockTurn::calls("", vec![("shell", json!({"cmd": "echo first"})), ("write", json!({"path": "big.txt", "content": "half a fi"}))]);
         cut.finish = Some("length".into());
@@ -658,7 +722,7 @@ mod tests {
         let turns = vec![
             fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "sleep 30", "background": true}))])),
             fixed(MockTurn::calls("", vec![("job", json!({"id": "bg:1", "kill": true}))])),
-            fixed(MockTurn::say("Started it and stopped it again.")),
+            fixed(MockTurn::calls("", vec![("finish", json!({"summary": "Started it and stopped it again."}))])),
         ];
         let mut r = rig("agent-jobs", AgentConfig::new("mock"), turns);
         r.agent.run("start the server, then stop it".into(), &CancellationToken::new()).await;
@@ -713,7 +777,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBETA\ngamma\n");
         // The file is there as `read` prints it, between the environment and the task.
         let first = &requests(&r)[0][1].content;
-        let files = format!("\n</env>\n\n<files>\nn.txt · 3 lines\n{a1}|alpha\n{a2}|beta\n{a3}|gamma\n</files>\nThis is `read` output for the file the task names. It is already read and can be edited directly: do not read it first.\n\n<task>\n{task}\n</task>");
+        let files = format!("\n</env>\n\nBudget: 80 replies. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.\n\n<files>\nn.txt · 3 lines\n{a1}|alpha\n{a2}|beta\n{a3}|gamma\n</files>\nThis is `read` output for the file the task names. It is already read and can be edited directly: do not read it first.\n\n<task>\n{task}\n</task>");
         assert!(first.starts_with("<env>\ncwd: ") && first.ends_with(&files), "{first}");
         let ev = events(&r);
         assert!(ev.iter().any(|e| matches!(e, EventKind::Note { turn: 0, kind, text } if kind == "attach" && text == "attached n.txt (3 lines)")));
@@ -732,7 +796,7 @@ mod tests {
         let out = r.agent.run(task.into(), &CancellationToken::new()).await;
         assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
         let env = events(&r).iter().find_map(|e| if let EventKind::Env { text } = e { Some(text.clone()) } else { None }).unwrap();
-        assert_eq!(requests(&r)[0][1].content, format!("{env}\n\n<task>\n{task}\n</task>"));
+        assert_eq!(requests(&r)[0][1].content, format!("{env}\n\nBudget: 80 replies. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.\n\n<task>\n{task}\n</task>"));
         assert!(first_result(&r).starts_with("n.txt · 3 lines\n"), "{}", first_result(&r));
         assert!(!events(&r).iter().any(|e| matches!(e, EventKind::Note { kind, .. } if kind == "attach")));
     }

@@ -44,19 +44,21 @@ pub struct Features {
     pub short_paths: bool,
     /// The first `finish` after a change is answered once with a review of the task instead of being accepted.
     pub review: bool,
+    /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
+    pub survey: bool,
 }
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: true, survey: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, review: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, review: false, survey: false }
     }
 
     /// The mechanisms `without` can switch off.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "review"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "review", "survey"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(mut self, name: &str) -> Option<Self> {
@@ -76,6 +78,7 @@ impl Features {
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
             "review" => &mut self.review,
+            "survey" => &mut self.survey,
             _ => return None,
         };
         *slot = false;
@@ -136,8 +139,8 @@ pub struct Evidence {
     pub last_change: String,
     /// Workspace fingerprint as of the last time it was computed.
     fingerprint: Option<u64>,
-    /// The model has already been told once that it lacks evidence.
-    pub warned: bool,
+    /// How often `finish` has been refused for lack of a check since the last change.
+    pub refusals: u8,
     /// The review of the task has been asked for since the last user message.
     pub reviewed: bool,
     /// The epoch when the last user message arrived: only changes since then are reviewed.
@@ -154,6 +157,7 @@ impl Evidence {
     /// A tool changed files itself.
     pub fn changed(&mut self, what: impl Into<String>) {
         self.epoch += 1;
+        self.refusals = 0;
         self.last_change = what.into();
         self.fingerprint = None;
     }
@@ -172,6 +176,7 @@ impl Evidence {
         self.fingerprint = Some(now);
         if changed {
             self.epoch += 1;
+            self.refusals = 0;
             self.last_change = format!("`{}`", crate::util::one_line(cmd, 80));
         }
         changed

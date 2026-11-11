@@ -1,0 +1,125 @@
+[1/51] deepseek-v4.1-flash-1017 · heisenbug · ext:mini #1: solved · 7 turns · $0.0071 · 44s
+[2/51] deepseek-v4.1-flash-1017 · audit · presage #1: solved · 22 turns · $0.0263 · 2m39s
+[3/51] deepseek-v4.1-flash-1017 · restyle · presage #1: NOT solved (done) · 26 turns · $0.0351 · 3m44s
+[4/51] deepseek-v4.1-flash-1017 · audit · classic #1: solved · 29 turns · $0.0244 · 3m16s
+[5/51] deepseek-v4.1-flash-1017 · audit · ext:mini #1: solved · 18 turns · $0.0162 · 2m34s
+[6/51] deepseek-v4.1-flash-1017 · audit-clean · presage #1: solved · 10 turns · $0.0266 · 3m29s
+[7/51] deepseek-v4.1-flash-1017 · audit-clean · ext:mini #1: solved · 10 turns · $0.0155 · 2m05s
+[8/51] deepseek-v4.1-flash-1017 · deadcode · presage #1: solved · 11 turns · $0.0149 · 1m07s
+[9/51] deepseek-v4.1-flash-1017 · audit-clean · classic #1: solved · 30 turns · $0.0389 · 4m37s
+[10/51] deepseek-v4.1-flash-1017 · deadcode · ext:mini #1: solved · 13 turns · $0.0120 · 1m10s
+[11/51] deepseek-v4.1-flash-1017 · deadcode-js · presage #1: solved · 10 turns · $0.0133 · 54s
+[12/51] deepseek-v4.1-flash-1017 · deadcode · classic #1: solved · 25 turns · $0.0214 · 2m14s
+[13/51] deepseek-v4.1-flash-1017 · deadcode-js · ext:mini #1: solved · 13 turns · $0.0175 · 2m09s
+[14/51] deepseek-v4.1-flash-1017 · deadcode-js · classic #1: NOT solved (budget) · 30 turns · $0.0217 · 2m48s
+[15/51] deepseek-v4.1-flash-1017 · mutants · presage #1: solved · 30 turns · $0.0440 · 4m13s
+[16/51] deepseek-v4.1-flash-1017 · mutants · classic #1: solved · 20 turns · $0.0276 · 2m38s
+[17/51] deepseek-v4.1-flash-1017 · mutants · ext:mini #1: solved · 9 turns · $0.0191 · 2m04s
+[18/51] deepseek-v4.1-flash-1017 · mutants-js · classic #1: solved · 13 turns · $0.0149 · 2m03s
+[19/51] deepseek-v4.1-flash-1017 · mutants-js · ext:mini #1: solved · 8 turns · $0.0204 · 2m10s
+[20/51] deepseek-v4.1-flash-1017 · mutants-js · presage #1: solved · 19 turns · $0.0253 · 2m57s
+[21/51] deepseek-v4.1-flash-1017 · slowpath · presage #1: solved · 7 turns · $0.0075 · 49s
+[22/51] deepseek-v4.1-flash-1017 · nplusone · presage #1: solved · 5 turns · $0.0095 · 57s
+[23/51] deepseek-v4.1-flash-1017 · slowpath · ext:mini #1: solved · 10 turns · $0.0071 · 1m49s
+[24/51] deepseek-v4.1-flash-1017 · nplusone · classic #1: solved · 9 turns · $0.0042 · 26s
+[25/51] deepseek-v4.1-flash-1017 · slowpath · classic #1: solved · 27 turns · $0.0176 · 2m09s
+[26/51] deepseek-v4.1-flash-1017 · heisenbug · classic #1: solved · 9 turns · $0.0027 · 28s
+[27/51] deepseek-v4.1-flash-1017 · heisenbug · presage #1: solved · 6 turns · $0.0056 · 37s
+[28/51] deepseek-v4.1-flash-1017 · nplusone · ext:mini #1: solved · 9 turns · $0.0089 · 1m13s
+[29/51] deepseek-v4.1-flash-1017 · confdialect · classic #1: solved · 30 turns · $0.0393 · 4m04s
+[30/51] deepseek-v4.1-flash-1017 · confdialect · presage #1: solved · 30 turns · $0.0570 · 5m10s
+[31/51] deepseek-v4.1-flash-1017 · rollup · presage #1: solved · 20 turns · $0.0380 · 3m36s
+[32/51] deepseek-v4.1-flash-1017 · confdialect · ext:mini #1: solved · 30 turns · $0.0698 · 7m27s
+[33/51] deepseek-v4.1-flash-1017 · jobqueue · presage #1: solved · 8 turns · $0.0136 · 1m24s
+[34/51] deepseek-v4.1-flash-1017 · rollup · classic #1: NOT solved (budget) · 30 turns · $0.0196 · 5m01s
+[35/51] deepseek-v4.1-flash-1017 · jobqueue · classic #1: solved · 15 turns · $0.0144 · 1m29s
+[36/51] deepseek-v4.1-flash-1017 · ttlcache · presage #1: solved · 5 turns · $0.0128 · 57s
+[37/51] deepseek-v4.1-flash-1017 · ttlcache · classic #1: solved · 10 turns · $0.0103 · 54s
+[38/51] deepseek-v4.1-flash-1017 · jobqueue · ext:mini #1: solved · 12 turns · $0.0255 · 3m26s
+[39/51] deepseek-v4.1-flash-1017 · attempts · presage #1: solved · 15 turns · $0.0152 · 1m01s
+[40/51] deepseek-v4.1-flash-1017 · ttlcache · ext:mini #1: solved · 14 turns · $0.0191 · 2m38s
+[41/51] deepseek-v4.1-flash-1017 · rollup · ext:mini #1: solved · 30 turns · $0.0581 · 8m09s
+[42/51] deepseek-v4.1-flash-1017 · shipquote · presage #1: solved · 7 turns · $0.0092 · 44s
+[43/51] deepseek-v4.1-flash-1017 · shipquote · classic #1: solved · 11 turns · $0.0095 · 49s
+[44/51] deepseek-v4.1-flash-1017 · restyle · ext:mini #1: NOT solved (done) · 15 turns · $0.0230 · 2m22s
+[45/51] deepseek-v4.1-flash-1017 · restyle · classic #1: solved · 29 turns · $0.0330 · 3m33s
+[46/51] deepseek-v4.1-flash-1017 · shipquote · ext:mini #1: solved · 11 turns · $0.0129 · 1m23s
+[47/51] deepseek-v4.1-flash-1017 · attempts · classic #1: solved · 18 turns · $0.0116 · 1m01s
+[48/51] deepseek-v4.1-flash-1017 · connpool · presage #1: solved · 12 turns · $0.0231 · 1m56s
+[49/51] deepseek-v4.1-flash-1017 · attempts · ext:mini #1: solved · 11 turns · $0.0153 · 1m23s
+[50/51] deepseek-v4.1-flash-1017 · connpool · classic #1: solved · 19 turns · $0.0117 · 1m37s
+[51/51] deepseek-v4.1-flash-1017 · connpool · ext:mini #1: solved · 16 turns · $0.0242 · 3m55s
+presage bench 20261111-050300-c6b2 · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: presage ~1945 tokens, classic ~762 tokens
+first prompt with the task, measured: ext:mini ~1102 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+audit      presage             1/1    22    327k    77%   23.7k   $0.0263   $0.0633   2m39s
+           classic             1/1    29    270k    77%   24.2k   $0.0244   $0.0550   3m16s
+           ext:mini            1/1    18    269k    86%   16.3k   $0.0162   $0.0501   2m34s
+audit-clean presage             1/1    10    143k    76%   35.1k   $0.0266   $0.0426   3m29s
+           classic             1/1    30    452k    80%   40.3k   $0.0389   $0.0921   4m37s
+           ext:mini            1/1    10   92.4k    53%   14.6k   $0.0155   $0.0226   2m05s
+deadcode   presage             1/1    11    164k    70%   11.7k   $0.0149   $0.0317   1m07s
+           classic             1/1    25    303k    80%   19.4k   $0.0214   $0.0571   2m14s
+           ext:mini            1/1    13    166k    75%    8.9k   $0.0120   $0.0303   1m10s
+deadcode-js presage             1/1    10    121k    56%    8.5k   $0.0133   $0.0233     54s
+           classic             0/1    30    539k    86%   15.2k   $0.0217   $0.0900   2m48s
+           ext:mini            1/1    13    173k    70%   15.6k   $0.0175   $0.0353   2m09s
+mutants    presage             1/1    30    591k    84%   46.8k   $0.0440   $0.1168   4m13s
+           classic             1/1    20    313k    86%   33.5k   $0.0276   $0.0672   2m38s
+           ext:mini            1/1     9    111k    70%   23.2k   $0.0191   $0.0306   2m04s
+mutants-js presage             1/1    19    255k    92%   35.7k   $0.0253   $0.0598   2m57s
+           classic             1/1    13    118k    79%   18.1k   $0.0149   $0.0287   2m03s
+           ext:mini            1/1     8   67.2k    29%   22.0k   $0.0204   $0.0233   2m10s
+slowpath   presage             1/1     7   49.2k    68%    8.5k   $0.0075   $0.0125     49s
+           classic             1/1    27    236k    81%   17.4k   $0.0176   $0.0460   2m09s
+           ext:mini            1/1    10   45.8k    68%    8.0k   $0.0071   $0.0117   1m49s
+nplusone   presage             1/1     5   37.6k    46%   10.6k   $0.0095   $0.0120     57s
+           classic             1/1     9   44.5k    84%    5.0k   $0.0042   $0.0097     26s
+           ext:mini            1/1     9   44.9k    50%    9.1k   $0.0089   $0.0122   1m13s
+heisenbug  presage             1/1     6   47.0k    77%    6.5k   $0.0056   $0.0110     37s
+           classic             1/1     9   37.4k    75%    2.0k   $0.0027   $0.0068     28s
+           ext:mini            1/1     7   34.1k    11%    4.2k   $0.0071   $0.0077     44s
+restyle    presage             0/1    26    575k    90%   41.4k   $0.0351   $0.1112   3m44s   1 declared done, then failed verification
+           classic             1/1    29    368k    87%   41.2k   $0.0330   $0.0800   3m33s
+           ext:mini            0/1    15    180k    78%   27.6k   $0.0230   $0.0436   2m22s   1 declared done, then failed verification
+shipquote  presage             1/1     7   69.8k    71%    9.9k   $0.0092   $0.0164     44s
+           classic             1/1    11   69.6k    74%   11.1k   $0.0095   $0.0171     49s
+           ext:mini            1/1    11   86.2k    72%   15.3k   $0.0129   $0.0221   1m23s
+attempts   presage             1/1    15    341k    87%   12.5k   $0.0152   $0.0587   1m01s
+           classic             1/1    18    208k    85%   10.4k   $0.0116   $0.0375   1m01s
+           ext:mini            1/1    11    170k    75%   14.1k   $0.0153   $0.0340   1m23s
+connpool   presage             1/1    12    165k    68%   24.7k   $0.0231   $0.0396   1m56s
+           classic             1/1    19    159k    82%   11.6k   $0.0117   $0.0309   1m37s
+           ext:mini            1/1    16    186k    73%   27.0k   $0.0242   $0.0441   3m55s
+confdialect presage             1/1    30    646k    90%   75.8k   $0.0570   $0.1424   5m10s
+           classic             1/1    30    463k    86%   47.4k   $0.0393   $0.0980   4m04s
+           ext:mini            1/1    30    640k    94%    103k   $0.0698   $0.1583   7m27s
+rollup     presage             1/1    20    323k    79%   45.3k   $0.0380   $0.0757   3m36s
+           classic             0/1    30    357k    92%   24.0k   $0.0196   $0.0680   5m01s
+           ext:mini            1/1    30    547k    90%   80.8k   $0.0581   $0.1306   8m09s
+jobqueue   presage             1/1     8   74.4k    76%   18.0k   $0.0136   $0.0219   1m24s
+           classic             1/1    15    126k    68%   13.3k   $0.0144   $0.0270   1m29s
+           ext:mini            1/1    12    118k    70%   33.3k   $0.0255   $0.0378   3m26s
+ttlcache   presage             1/1     5   45.5k    63%   17.0k   $0.0128   $0.0170     57s
+           classic             1/1    10   70.7k    68%   11.4k   $0.0103   $0.0174     54s
+           ext:mini            1/1    14    147k    87%   26.5k   $0.0191   $0.0380   2m38s
+ALL        presage           16/17    11    164k    68%   18.0k   $0.0152   $0.0396   1m24s   total $0.377, $0.0236 per solved task   1 declared done, then failed verification
+           classic           15/17    20    236k    81%   17.4k   $0.0176   $0.0460   2m09s   total $0.323, $0.0215 per solved task
+           ext:mini          16/17    12    147k    82%   16.3k   $0.0175   $0.0340   2m09s   total $0.372, $0.0232 per solved task   1 declared done, then failed verification
+presage against classic: turns -45%, input tokens -31%, output tokens +3%, cost -13% (-14% with no cache), time -35%; solved 16/17 against 15/17
+  by task (17): fewer turns on 14, more on 2; cheaper on 6, dearer on 11 (with no cache: 7 and 10)
+ext:mini against presage: turns +9%, input tokens -10%, output tokens -10%, cost +15% (-14% with no cache), time +53%; solved 16/17 against 16/17
+  by task (17): fewer turns on 5, more on 10; cheaper on 8, dearer on 9 (with no cache: 9 and 8)
+
+4 runs without a solution:
+  deepseek-v4.1-flash-1017 · deadcode-js · classic #1 · session 20261111-051234-bd72 · budget; verification: score: 1/16
+  deepseek-v4.1-flash-1017 · restyle · presage #1 · session 20261111-050300-30af · done; verification: score: 8/11
+  deepseek-v4.1-flash-1017 · restyle · ext:mini #1 · session 29-restyle-ext-mini-0 · done; verification: score: 8/11
+  deepseek-v4.1-flash-1017 · rollup · classic #1 · session 20261111-052735-86e1 · budget; verification: 
+
+results: <bench-home>/bench/20261111-050300-c6b2/results.json
+replay a run: PRESAGE_HOME=<bench-home>/bench/20261111-050300-c6b2/home presage show <session>
+output of an external run: <bench-home>/bench/20261111-050300-c6b2/external/<session>/output.log

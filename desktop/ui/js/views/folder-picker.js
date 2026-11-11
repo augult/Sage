@@ -54,7 +54,7 @@ export function pickFolder(start) {
       list.replaceChildren(
         ...(listing.dirs.length
           ? listing.dirs.map((dir) => h('button.folder', { type: 'button', title: dir.path, onclick: () => go(dir.path) }, icon('folder'), h('span', dir.name)))
-          : [h('p.muted.folder-empty', 'No folders in here.')]),
+          : [h('p.muted.folder-empty', 'No folders')]),
       );
       list.scrollTop = 0;
       return true;

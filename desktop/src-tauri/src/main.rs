@@ -4,8 +4,9 @@
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, DirListing, Harness, SessionMeta, SessionStatus, StartRequest};
+use presage_core::harness::{AppState, DirListing, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
 use presage_core::provider::mock::{MockProvider, MockTurn};
+use presage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -65,6 +66,9 @@ struct Scripted {
     autonomy: Option<String>,
     #[serde(default)]
     effort: Option<String>,
+    /// Skills the session starts with, by name.
+    #[serde(default)]
+    skills: Vec<String>,
     /// Milliseconds between streamed chunks of a reply.
     #[serde(default)]
     delay_ms: u64,
@@ -197,7 +201,7 @@ async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) ->
     let turns = script.turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, finish: None }).collect();
     let mut provider = MockProvider::scripted(turns);
     provider.chunk_delay_ms = script.delay_ms;
-    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, interactive: true, ..Default::default() };
+    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, interactive: true, ..Default::default() };
     harness.start_scripted(req, provider)
 }
 
@@ -234,9 +238,10 @@ async fn start_demo(harness: State<'_, Harness>) -> Reply<SessionMeta> {
     harness.demo()
 }
 
+/// `skills` are switched on with this message.
 #[tauri::command]
-async fn send_message(harness: State<'_, Harness>, id: String, text: String) -> Reply<()> {
-    harness.send(&id, &text)
+async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>) -> Reply<()> {
+    harness.send_with_skills(&id, &text, &skills.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -276,6 +281,43 @@ async fn read_output(harness: State<'_, Harness>, id: String, handle: String) ->
 #[tauri::command]
 async fn list_dir(harness: State<'_, Harness>, path: Option<String>) -> Reply<DirListing> {
     harness.list_dir(path.as_deref())
+}
+
+/// Built-in and user skills, plus the project's own when `cwd` is given.
+#[tauri::command]
+async fn list_skills(harness: State<'_, Harness>, cwd: Option<String>) -> Reply<Vec<SkillInfo>> {
+    Ok(harness.skills(cwd.as_deref()))
+}
+
+#[tauri::command]
+async fn skill_file(harness: State<'_, Harness>, name: String, cwd: Option<String>) -> Reply<String> {
+    harness.skill_file(&name, cwd.as_deref())
+}
+
+#[tauri::command]
+async fn save_skill(harness: State<'_, Harness>, name: String, content: String) -> Reply<SkillInfo> {
+    harness.save_skill(&name, &content)
+}
+
+#[tauri::command]
+async fn delete_skill(harness: State<'_, Harness>, name: String) -> Reply<()> {
+    harness.delete_skill(&name)
+}
+
+#[tauri::command]
+async fn instructions(harness: State<'_, Harness>) -> Reply<Instructions> {
+    Ok(harness.instructions())
+}
+
+/// `None` or nothing goes back to the built-in template.
+#[tauri::command]
+async fn set_system_prompt(harness: State<'_, Harness>, template: Option<String>) -> Reply<()> {
+    harness.set_system_prompt(template.as_deref())
+}
+
+#[tauri::command]
+async fn set_global_instructions(harness: State<'_, Harness>, text: String) -> Reply<()> {
+    harness.set_global_instructions(&text)
 }
 
 /// Returns everything stored so far and forwards what follows to `on_event`, with nothing lost or
@@ -368,6 +410,13 @@ fn main() {
             session_events,
             read_output,
             list_dir,
+            list_skills,
+            skill_file,
+            save_skill,
+            delete_skill,
+            instructions,
+            set_system_prompt,
+            set_global_instructions,
             subscribe
         ])
         .build(tauri::generate_context!())

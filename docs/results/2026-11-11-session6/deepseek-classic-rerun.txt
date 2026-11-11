@@ -1,0 +1,4 @@
+[1/5] deepseek-v4.1-flash-1017 · audit-clean · classic #1: solved · 29 turns · $0.1024 · 7m44s
+[2/5] deepseek-v4.1-flash-1017 · confdialect · classic #1: solved · 30 turns · $0.0921 · 8m36s
+[3/5] deepseek-v4.1-flash-1017 · deadcode-js · classic #1: solved · 12 turns · $0.0172 · 1m43s
+[4/5] deepseek-v4.1-flash-1017 · mutants-js · classic #1: solved · 16 turns · $0.0357 · 3m26s

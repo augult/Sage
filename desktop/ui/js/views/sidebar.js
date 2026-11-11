@@ -29,7 +29,7 @@ export function listSignature(sessions, currentId) {
 export function renderSessionList(list, sessions, currentId, onOpen) {
   const focused = document.activeElement?.dataset?.session;
   if (!sessions.length) {
-    list.replaceChildren(h('p.side-empty', 'No sessions yet.'));
+    list.replaceChildren(h('p.side-empty', 'No sessions'));
     return;
   }
   const rows = [];
@@ -48,7 +48,7 @@ export function renderSessionList(list, sessions, currentId, onOpen) {
         h(
           'span.session-text',
           h('span.session-title', meta.title || 'Untitled session'),
-          h('span.session-sub', h('span.session-model', meta.model), meta.simulated && h('span.sim', { title: 'Simulated: a scripted stand-in played the model' }, 'SIM'), h('span.session-time', ago(meta.created))),
+          h('span.session-sub', h('span.session-model', meta.model), meta.simulated && h('span.sim', { title: 'Simulated' }, 'SIM'), h('span.session-time', ago(meta.created))),
         ),
       ),
     );

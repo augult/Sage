@@ -73,6 +73,16 @@
   max-width: 100%;
 }
 
+/* Any number of skills, of any length, in the room of one tag. */
+.tag-skills {
+  display: block;
+  flex: 0 1 auto;
+  max-width: 260px;
+  overflow: hidden;
+  line-height: 18px;
+  text-overflow: ellipsis;
+}
+
 /* Timeline */
 
 .timeline-scroll {
@@ -712,15 +722,14 @@ button.chip-line:hover {
   overflow-wrap: anywhere;
 }
 
-/* Footer: the follow-up composer, or the read-only note. */
+/* Footer: the follow-up composer. */
 
 .session-foot {
   flex: none;
   padding: 8px 24px 16px;
 }
 
-.composer,
-.foot-note {
+.composer {
   max-width: 772px;
   margin: 0 auto;
 }
@@ -760,9 +769,9 @@ button.chip-line:hover {
   margin: 4px 0 8px -6px;
 }
 
-.foot-note {
-  color: var(--muted);
-  font-size: var(--text-sm);
+.composer .pick-slot {
+  flex: 0 1 auto;
+  max-width: 40%;
 }
 
 /* Full output viewer */

@@ -32,6 +32,9 @@ the customer pays for delivery. All money is in integer cents, all weights in in
 
 ## The quote
 
+The shape of the result. The figures only illustrate it: they are not the quote of the order
+above.
+
 ```python
 {
     "zone": "C",

@@ -220,6 +220,10 @@ OLD = [
     r"\bretries\s*=(?!=)",
     r"[\"'`]retries[\"'`]",
     r"\.retries\b",
+]
+
+# Signatures and calls. Not looked for in the README, where "(retries ...)" can be plain prose.
+OLD_IN_CODE = [
     r"\(\s*retries\b",
     r",\s*retries\s*[,)]",
 ]
@@ -236,9 +240,10 @@ class LeftoversTest(unittest.TestCase):
 
     def test_no_old_identifier_is_left(self):
         for path in self.shipped_files():
+            patterns = OLD if path.endswith(".md") else OLD + OLD_IN_CODE
             with open(path, encoding="utf-8", errors="replace") as source:
                 for number, line in enumerate(source, 1):
-                    for pattern in OLD:
+                    for pattern in patterns:
                         self.assertFalse(re.search(pattern, line), f"{os.path.relpath(path, ROOT)}:{number}: {line.strip()}")
 
     def test_readme_documents_the_new_names(self):

@@ -268,6 +268,34 @@ const SKIP_DIRS: &[&str] = &[
 
 const FINGERPRINT_MAX_FILES: u32 = 20_000;
 
+/// Every file of a small workspace, relative to `root` and sorted. `None` when there are more than
+/// `max_files`: a larger tree is for the model to explore.
+pub fn small_tree(root: &Path, max_files: usize) -> Option<Vec<PathBuf>> {
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(false)
+        .follow_links(false)
+        .filter_entry(|e| !e.file_name().to_str().is_some_and(|n| SKIP_DIRS.contains(&n)))
+        .build();
+    let mut files = Vec::new();
+    for entry in walker.flatten() {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(root) else { continue };
+        files.push(rel.to_path_buf());
+        if files.len() > max_files {
+            return None;
+        }
+    }
+    files.sort();
+    Some(files)
+}
+
 fn mix(mut x: u64) -> u64 {
     x ^= x >> 30;
     x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);

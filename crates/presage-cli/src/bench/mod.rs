@@ -382,6 +382,24 @@ fn write_file(root: &Path, rel: &str, content: &str) -> std::io::Result<()> {
     std::fs::write(path, content)
 }
 
+/// Makes the workspace a git repository holding the task as shipped, as a project would be: `git
+/// diff` then shows an agent its own changes, and git commands cannot reach a repository further
+/// up. Without git the run goes ahead in a plain folder.
+fn baseline_commit(ws: &Path) {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(["-c", "user.name=bench", "-c", "user.email=bench@localhost", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(ws)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let _ = git(&["init", "-q"]) && git(&["add", "-A"]) && git(&["commit", "-q", "-m", "task as shipped"]);
+}
+
 fn materialize(root: &Path, files: &[(&str, &str)]) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     files.iter().try_for_each(|(path, content)| write_file(root, path, content))
@@ -532,6 +550,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         run.error = Some(format!("could not create the workspace: {e}"));
         return run;
     }
+    baseline_commit(&ws);
     if let (Some(name), Some((dir, proxy))) = (&job.variant.external, &shared.external) {
         let script = external::script(dir, name);
         let home = shared.dir.join("external").join(&label);
@@ -1075,10 +1094,14 @@ mod tests {
         let task = TASKS.iter().find(|t| t.id == "pager").unwrap();
 
         let (root, first) = opening(&h, task, &[]).await;
-        assert!(first.contains("\n</env>\n\n<files>\npager.py · 12 lines\n") && first.contains("\n</files>\nThis is `read` output for the file the task names."), "{first}");
+        assert!(first.contains("\n</env>\n\nBudget: 80 replies") && first.contains("\n\n<files>\npager.py · 12 lines\n") && first.contains("\ntest_pager.py · ") && first.contains("\n</files>\nThis is `read` output for the files of this workspace that fit here"), "{first}");
         assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\n") && first.ends_with(&format!("\n\n<task>\n{}\n</task>", task.prompt)), "{first}");
         // The traceback names its file the way a tool call would, and still brings the lines along.
-        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && first.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{first}");
+        // The traceback names its file the way a tool call would. Its lines are in the attached test file
+        // already; without the survey they come along with the traceback.
+        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && !first.contains("\n--- where "), "{first}");
+        let (_, named) = opening(&h, task, &["survey"]).await;
+        assert!(named.contains("\n</files>\nThis is `read` output for the file the task names.") && named.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{named}");
         assert_eq!(first.matches(&root).count(), 1, "only the `cwd:` line names the workspace: {first}");
         assert_eq!(first.matches("|def total_pages(count, per_page):").count(), 1, "{first}");
 
@@ -1087,7 +1110,6 @@ mod tests {
         assert!(!plain.contains("<files>") && !plain.contains("|def total_pages") && plain.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n"), "{plain}");
         let (root, long) = opening(&h, task, &["short-paths"]).await;
         assert!(long.contains("\n<files>\npager.py · 12 lines\n") && long.contains(&format!("\n  File \"{root}/test_pager.py\", line 12, in test_first_page\n")), "{long}");
-        assert!(long.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{long}");
     }
 
     #[tokio::test]

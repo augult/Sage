@@ -118,7 +118,7 @@
 .pick {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   max-width: 100%;
   height: 28px;
   padding: 0 6px 0 8px;
@@ -129,18 +129,36 @@
   cursor: pointer;
 }
 
-.pick:hover,
+.pick:hover:not(:disabled),
 .pick[aria-expanded="true"] {
   background: var(--fill-2);
 }
 
+.pick:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Holds a picker that is redrawn when what it offers changes. */
+.pick-slot {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* A skill's title is the user's to write, at any length. */
+.pick-slot .pick-value {
+  max-width: 160px;
+}
+
 .pick-key,
+.pick-value.is-empty,
 .pick .icon {
   color: var(--muted);
 }
 
 .pick-value {
   min-width: 0;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -170,9 +188,12 @@
   bottom: calc(100% + 6px);
 }
 
+.align-end > .menu {
+  right: 0;
+  left: auto;
+}
+
 .menu-group {
-  display: flex;
-  flex-direction: column;
   padding: 8px 8px 4px;
   color: var(--soft);
   font-size: var(--text-sm);
@@ -182,11 +203,6 @@
 .menu-group:not(:first-child) {
   margin-top: 4px;
   border-top: 1px solid var(--line);
-}
-
-.menu-note {
-  color: var(--muted);
-  font-weight: 400;
 }
 
 .menu-item {
@@ -227,15 +243,8 @@
 }
 
 .menu-text {
-  display: flex;
-  flex-direction: column;
   min-width: 0;
-}
-
-.menu-hint {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .recent {
@@ -267,40 +276,15 @@
   color: var(--text);
 }
 
-/* The walkthrough, offered while no provider has a key. */
-.hero {
-  display: flex;
-  gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--fill-1);
-}
-
-.hero-mark {
-  flex: none;
-  margin-top: 2px;
-}
-
-.hero h2 {
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-
-.hero p {
-  max-width: 62ch;
-  margin-top: 4px;
-  color: var(--soft);
-}
-
-.hero-actions {
+/* The walkthrough and the way to a key, offered while no provider has one. */
+.lead-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 12px;
 }
 
-.panel > .section-title:has(+ .field) {
+.panel > .section-title,
+.panel > .section-head {
   margin-bottom: 10px;
 }
 
@@ -330,12 +314,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
-}
-
-.field-hint code {
-  color: var(--soft);
-  font: var(--text-sm) var(--mono);
-  letter-spacing: 0;
 }
 
 .field-row {
@@ -453,10 +431,118 @@
 .panel {
   display: flex;
   flex-direction: column;
+  scroll-margin-top: 16px;
 }
 
-.panel > .section-note {
-  margin-bottom: 14px;
+/* Wraps the sections that are redrawn with the engine state, without a box of its own. */
+.contents {
+  display: contents;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.section-head > .btn {
+  margin-left: auto;
+}
+
+.section-file,
+.data-path {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Skills: a row each; the open one has its file under it. */
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.skill-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-row:hover,
+.skill-row[aria-expanded="true"] {
+  background: var(--fill-1);
+}
+
+.skill-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.skill-row > .icon {
+  flex: none;
+  color: var(--muted);
+  transition: transform 120ms ease-out;
+}
+
+.skill-row[aria-expanded="true"] > .icon {
+  transform: rotate(90deg);
+}
+
+.skill-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-state {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* A text file: the text, then what can be done with it. */
+.editor-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-list > .editor-box {
+  padding: 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+textarea.editor {
+  height: 264px;
+  min-height: 96px;
+  font: var(--text-sm)/1.6 var(--mono);
+  letter-spacing: 0;
+  tab-size: 2;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.editor-state {
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
 
 .provider {

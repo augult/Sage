@@ -1,5 +1,4 @@
-// The right-hand column: Economy, Watches, and Notes and lessons for the open session; a short
-// legend when no session is open.
+// The right-hand column: Economy, Watches, and Notes and lessons for the open session.
 
 import { h, icon } from '../dom.js';
 import { bytes, duration, k, pct, plural } from '../format.js';
@@ -7,25 +6,6 @@ import { known, tag } from './common.js';
 
 export function renderInspector(el, model) {
   el.replaceChildren(economy(model), watches(model), notes(model));
-}
-
-export function renderLegend(el) {
-  const entry = (mark, term, meaning) => [h('div.legend-mark', mark), h('div', h('b', term), h('span.muted', meaning))];
-  el.replaceChildren(
-    section(
-      'Reading a session',
-      null,
-      h(
-        'div.legend',
-        entry(tag('expect exit 0', 'azure'), 'Prediction', 'What the model says a step will do, before it runs.'),
-        entry(tag('held', 'teal'), 'Held', 'Reality matched. The model gets a one-line receipt instead of the output.'),
-        entry(tag('surprise', 'amber'), 'Surprise', 'Reality differed. The script halts there and the model sees the evidence.'),
-        entry(tag('skipped'), 'Skipped', 'The rest of a halted script, finish included. Nothing after a surprise runs.'),
-        entry(tag('error', 'red'), 'Error', 'A step that could not be carried out, or a run that failed.'),
-      ),
-    ),
-    section('Inspector', null, h('p.side-note', 'Economy, watches, notes and lessons appear here when a session is open.')),
-  );
 }
 
 function section(title, badge, ...content) {
@@ -47,10 +27,10 @@ function bar(part, whole, tone, restTone = 'plain') {
 function economy(model) {
   const s = model.stats;
   const simulated = model.meta.simulated === true;
-  const badge = simulated && h('span.badge', { title: 'A scripted stand-in played the model: token counts and cost are fabricated.' }, 'SIMULATED');
-  if (!s) return section('Economy', badge, h('p.side-note', model.running ? 'Numbers appear after the first turn.' : 'No numbers: this session ended before its first turn was complete.'));
+  const badge = simulated && h('span.badge', 'SIMULATED');
+  if (!s) return section('Economy', badge, h('p.side-note', 'No data'));
 
-  const cost = simulated ? stat('Cost', 'fabricated', 'simulated run', 'amber') : s.priced ? stat('Cost', `$${s.cost.toFixed(4)}`, 'at list price') : stat('Cost', 'no price table for this model', null, 'plain');
+  const cost = simulated ? stat('Cost', 'fabricated', null, 'amber') : s.priced ? stat('Cost', `$${s.cost.toFixed(4)}`, 'at list price') : stat('Cost', 'unpriced', null, 'plain');
   return section(
     'Economy',
     badge,
@@ -70,14 +50,14 @@ function economy(model) {
     stat('Kept out of context', bytes(s.hidden_bytes)),
     stat('Repairs', s.repairs),
     stat('Retries', s.retries),
-    stat('Cache misses', s.cache_misses, s.cache_busts > 0 && `${plural(s.cache_busts, 'bust')} by the harness`),
+    stat('Cache misses', s.cache_misses, s.cache_busts > 0 && plural(s.cache_busts, 'bust')),
   );
 }
 
 const WATCH_LOOKS = { pass: ['check', 'teal', 'passing'], fail: ['bang', 'amber', 'failing'] };
 
 function watches(model) {
-  if (!model.watches.size) return section('Watches', null, h('p.side-note', 'No watches. A watch is a check the harness re-runs after every change.'));
+  if (!model.watches.size) return section('Watches', null, h('p.side-note', 'No watches'));
   return section(
     'Watches',
     null,
@@ -99,7 +79,7 @@ function watches(model) {
 
 function notes(model) {
   const entries = [...model.lessons.map((lesson) => ({ ...lesson, tone: 'teal' })), ...model.notes.map((note) => ({ ...note, tone: 'azure' }))];
-  if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'Nothing yet. What the harness tells the model, and the error → fix pairs it learns, collect here.'));
+  if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'None'));
   return section(
     'Notes and lessons',
     null,

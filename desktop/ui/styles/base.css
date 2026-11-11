@@ -419,13 +419,6 @@ textarea.input {
   font-weight: 600;
 }
 
-.section-note {
-  max-width: 64ch;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: var(--text-md);
-}
-
 .kbd {
   flex: none;
   color: var(--faint);

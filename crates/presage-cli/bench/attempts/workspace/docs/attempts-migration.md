@@ -40,6 +40,6 @@ Details:
   "3 attempts" afterwards.
 - Everything that ships in this repository moves with the library: the config template, the
   scripts, the example manifest, the README. Their behaviour stays what it is today.
-- When you are done, `retries` no longer occurs as a parameter, attribute, constant, option, flag,
-  key or environment variable anywhere outside this note. Prose may of course still say that
-  something is retried.
+- When you are done, `retries` no longer occurs as a name anywhere outside this note: not as a
+  parameter, variable, attribute, constant, option, flag, key or environment variable. Prose may
+  of course still say that something is retried.
