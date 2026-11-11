@@ -34,7 +34,9 @@ USAGE
 OPTIONS
   -p, --provider <id>      provider (default: the configured one)
   -m, --model <name>       model; repeat or separate with commas to compare several
-      --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic)
+      --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic);
+                           add +skill (each task with its skill), +sys:<file> (system prompt template),
+                           +effort:<level> or +no-<mechanism>, e.g. presage+skill+effort:max
       --tasks <list>       task ids (default: all)
   -n, --repeats <n>        runs per task and variant (default 3)
   -e, --effort <level>     as for `presage run`
@@ -56,27 +58,50 @@ const VERIFY_TIMEOUT: Duration = Duration::from_secs(120);
 /// Name of the summary row that spans every task.
 pub const ALL: &str = "ALL";
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Variant {
     pub name: String,
     pub classic: bool,
     /// Mechanisms switched off, by their `Features` name.
     pub without: Vec<String>,
+    /// Run each task with the skill it names (`+skill`).
+    pub skill: bool,
+    /// A system prompt template that replaces the built-in one (`+sys:<file>`).
+    #[serde(skip)]
+    pub system: Option<String>,
+    /// Reasoning effort for this variant only (`+effort:<level>`).
+    pub effort: Option<String>,
 }
 
 impl Variant {
     pub fn parse(s: &str) -> Result<Variant, String> {
-        let name = s.trim().to_ascii_lowercase();
-        let unknown = || format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}", Features::NAMES.join(", "));
-        match name.as_str() {
-            "presage" => Ok(Variant { name, classic: false, without: vec![] }),
-            "classic" => Ok(Variant { name, classic: true, without: vec![] }),
-            _ => {
-                let mechanism = name.strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
-                Features::presage().without(&mechanism).ok_or_else(unknown)?;
-                Ok(Variant { name, classic: false, without: vec![mechanism] })
+        let name = s.trim().to_string();
+        let unknown = || format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>", Features::NAMES.join(", "));
+        let mechanism = |m: &str| -> Result<String, String> {
+            let mechanism = m.to_ascii_lowercase().strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
+            Features::presage().without(&mechanism).ok_or_else(unknown)?;
+            Ok(mechanism)
+        };
+        let mut parts = name.split('+');
+        let base = parts.next().unwrap_or_default().to_ascii_lowercase();
+        let mut v = match base.as_str() {
+            "presage" => Variant::default(),
+            "classic" => Variant { classic: true, ..Variant::default() },
+            other => Variant { without: vec![mechanism(other)?], ..Variant::default() },
+        };
+        for m in parts {
+            if m == "skill" {
+                v.skill = true;
+            } else if let Some(path) = m.strip_prefix("sys:") {
+                v.system = Some(std::fs::read_to_string(path).map_err(|e| format!("variant {s:?}: cannot read {path}: {e}"))?);
+            } else if let Some(level) = m.strip_prefix("effort:") {
+                v.effort = Some(level.to_string());
+            } else {
+                v.without.push(mechanism(m)?);
             }
         }
+        v.name = if v.system.is_some() { name } else { name.to_ascii_lowercase() };
+        Ok(v)
     }
 
     fn features(&self) -> Features {
@@ -107,7 +132,7 @@ impl Default for Options {
         Self {
             provider: None,
             models: Vec::new(),
-            variants: vec![Variant { name: "presage".into(), classic: false, without: vec![] }, Variant { name: "classic".into(), classic: true, without: vec![] }],
+            variants: vec![Variant { name: "presage".into(), ..Variant::default() }, Variant { name: "classic".into(), classic: true, ..Variant::default() }],
             tasks: TASKS.iter().collect(),
             repeats: 3,
             effort: None,
@@ -473,13 +498,16 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         task: job.task.prompt.to_string(),
         provider: shared.provider.clone(),
         model: (!shared.scripted).then(|| job.model.clone()),
-        effort: shared.effort.clone(),
+        effort: job.variant.effort.clone().or_else(|| shared.effort.clone()),
         mode: Some(if job.variant.classic { "classic" } else { "presage" }.to_string()),
         autonomy: None,
         max_turns: Some(shared.max_turns),
         time_budget_secs: Some(shared.time_budget),
         interactive: false,
         without: job.variant.without.clone(),
+        system_prompt: job.variant.system.clone(),
+        skills: if job.variant.skill && !job.task.skill.is_empty() { vec![job.task.skill.to_string()] } else { Vec::new() },
+        ..Default::default()
     };
     let started = if shared.scripted { shared.harness.start_scripted(req, stand_in(job.task)) } else { shared.harness.start(req) };
     match started {
@@ -971,7 +999,7 @@ mod tests {
         let Ok(Command::Run(opt)) = parse(&args("-p logfare -m glm-5.3,glm-5.3-flash -m other --variants classic,no-receipts -n 5 -j 2 --max-cost 1.5 --keep")) else { panic!("should parse") };
         assert_eq!(opt.models, ["glm-5.3", "glm-5.3-flash", "other"]);
         assert_eq!((opt.repeats, opt.jobs, opt.max_cost, opt.keep, opt.tasks.len()), (5, 2, Some(1.5), true, TASKS.len()));
-        assert_eq!(opt.variants[1], Variant { name: "no-receipts".into(), classic: false, without: vec!["receipts".into()] });
+        assert_eq!(opt.variants[1], Variant { name: "no-receipts".into(), without: vec!["receipts".into()], ..Variant::default() });
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
         // Every mechanism has its variant, however its name is spelled.
         let Ok(Command::Run(opt)) = parse(&args("--variants presage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };

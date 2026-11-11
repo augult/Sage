@@ -16,8 +16,6 @@ const PROBED_TOOLS: &[&str] = &[
     "clang", "make", "cmake", "docker", "git", "rg", "jq", "curl", "wget", "sqlite3", "ruby", "php", "dotnet",
 ];
 
-const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".presage.md"];
-const MAX_INSTRUCTION_CHARS: usize = 4_000;
 const MAX_TOP_LEVEL: usize = 40;
 
 async fn sh(script: &str, cwd: &Path) -> Option<String> {
@@ -76,7 +74,7 @@ fn top_level(root: &Path) -> String {
     line
 }
 
-/// Builds the `<env>` block (and any project instructions) for the first message of a session.
+/// Builds the `<env>` block for the first message of a session.
 pub async fn snapshot(sess: &Session) -> String {
     let root = &sess.ws.root;
     let probe = format!(
@@ -138,16 +136,6 @@ pub async fn snapshot(sess: &Session) -> String {
         }
     }
     out.push_str("</env>");
-
-    for name in INSTRUCTION_FILES {
-        if let Ok(text) = std::fs::read_to_string(root.join(name)) {
-            let text = text.trim();
-            if !text.is_empty() {
-                out.push_str(&format!("\n\n<project-instructions file=\"{name}\">\n{}\n</project-instructions>", crate::util::truncate_chars(text, MAX_INSTRUCTION_CHARS)));
-                break;
-            }
-        }
-    }
     out
 }
 
@@ -173,7 +161,8 @@ mod tests {
         assert!(env.contains("installed: ") && env.contains("git"), "{env}");
         assert!(env.contains("files: src/  AGENTS.md  Makefile (targets: all, build, test)  package.json (scripts: test, build)"), "{env}");
         assert!(env.contains("known here: `pytest -q` fails here (bash: pytest: command not found) → `uv run pytest -q` works"), "{env}");
-        assert!(env.contains("<project-instructions file=\"AGENTS.md\">\nAlways run `make test` before finishing.\n</project-instructions>"));
+        // Project instructions are part of the system prompt, so they are not said a second time here.
+        assert!(env.ends_with("</env>") && !env.contains("make test"), "{env}");
 
         // Where command output keeps its absolute paths, nothing is said about it.
         s.features = Features::presage().without("short_paths").unwrap();

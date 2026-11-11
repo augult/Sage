@@ -21,6 +21,7 @@ pub mod prompt;
 pub mod provider;
 pub mod repair;
 pub mod script;
+pub mod skills;
 pub mod state;
 pub mod text;
 pub mod tools;
