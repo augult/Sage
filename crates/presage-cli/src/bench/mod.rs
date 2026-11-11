@@ -1,9 +1,12 @@
 //! `presage bench`: the built-in tasks run under several harness variants, every run verified
 //! independently of what the agent claimed, summarised as medians.
 
+mod external;
+mod proxy;
 mod tasks;
 
 use crate::{k, pct};
+use presage_core::config::Config;
 use presage_core::economy::{peak_multiplier, prices_for};
 use presage_core::events::{Event, EventKind, FinishStatus, Stats};
 use presage_core::harness::{Harness, StartRequest};
@@ -34,7 +37,9 @@ USAGE
 OPTIONS
   -p, --provider <id>      provider (default: the configured one)
   -m, --model <name>       model; repeat or separate with commas to compare several
-      --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic)
+      --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic),
+                           ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
+      --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids (default: all)
   -n, --repeats <n>        runs per task and variant (default 3)
   -e, --effort <level>     as for `presage run`
@@ -50,7 +55,11 @@ OPTIONS
 
 Every run starts from a fresh copy of the task. When the agent is done, the files it was told to
 leave alone are put back, held-out checks are added and the task's verification is run. Only that
-counts as solved, whatever the agent claimed.";
+counts as solved, whatever the agent claimed.
+
+An ext:<name> run reaches the model through a local proxy that counts its requests and tokens and
+refuses requests beyond --max-turns, and is killed at --time-budget. Its cost is at Presage's
+prices. Install the harnesses with scripts/external/install.sh.";
 
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(120);
 /// Name of the summary row that spans every task.
@@ -62,19 +71,32 @@ pub struct Variant {
     pub classic: bool,
     /// Mechanisms switched off, by their `Features` name.
     pub without: Vec<String>,
+    /// Another harness, run through its adapter `<name>/run.sh`, instead of Presage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external: Option<String>,
 }
 
 impl Variant {
+    fn own(name: &str, classic: bool, without: Vec<String>) -> Variant {
+        Variant { name: name.to_string(), classic, without, external: None }
+    }
+
     pub fn parse(s: &str) -> Result<Variant, String> {
         let name = s.trim().to_ascii_lowercase();
-        let unknown = || format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}", Features::NAMES.join(", "));
+        let unknown = || format!("unknown variant {s:?}: use presage, classic, ext:<harness>, or no-<mechanism> with one of {}", Features::NAMES.join(", "));
+        if let Some(harness) = name.strip_prefix("ext:") {
+            if harness.is_empty() || !harness.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                return Err(format!("{s:?} does not name an external harness: use ext:<name>, with letters, digits, - and _"));
+            }
+            return Ok(Variant { external: Some(harness.to_string()), ..Variant::own(&name, false, vec![]) });
+        }
         match name.as_str() {
-            "presage" => Ok(Variant { name, classic: false, without: vec![] }),
-            "classic" => Ok(Variant { name, classic: true, without: vec![] }),
+            "presage" => Ok(Variant::own(&name, false, vec![])),
+            "classic" => Ok(Variant::own(&name, true, vec![])),
             _ => {
                 let mechanism = name.strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
                 Features::presage().without(&mechanism).ok_or_else(unknown)?;
-                Ok(Variant { name, classic: false, without: vec![mechanism] })
+                Ok(Variant::own(&name, false, vec![mechanism]))
             }
         }
     }
@@ -100,6 +122,8 @@ pub struct Options {
     pub out: Option<PathBuf>,
     pub keep: bool,
     pub scripted: bool,
+    /// Where the adapters of external harnesses are; `None` for the ones shipped with the source.
+    pub external_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -107,7 +131,7 @@ impl Default for Options {
         Self {
             provider: None,
             models: Vec::new(),
-            variants: vec![Variant { name: "presage".into(), classic: false, without: vec![] }, Variant { name: "classic".into(), classic: true, without: vec![] }],
+            variants: vec![Variant::own("presage", false, vec![]), Variant::own("classic", true, vec![])],
             tasks: TASKS.iter().collect(),
             repeats: 3,
             effort: None,
@@ -119,6 +143,7 @@ impl Default for Options {
             out: None,
             keep: false,
             scripted: false,
+            external_dir: None,
         }
     }
 }
@@ -175,6 +200,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "--out" => opt.out = Some(PathBuf::from(value(a)?)),
             "--keep" => opt.keep = true,
             "--scripted" => opt.scripted = true,
+            "--external-dir" => opt.external_dir = Some(PathBuf::from(value(a)?)),
             other => return Err(format!("unknown option {other}; try `presage bench --help`")),
         }
     }
@@ -198,7 +224,8 @@ pub struct Run {
     pub task: String,
     pub variant: String,
     pub repeat: u32,
-    /// Its log is `<dir>/home/sessions/<session>/events.jsonl`.
+    /// Its log is `<dir>/home/sessions/<session>/events.jsonl`; for an external harness,
+    /// `<dir>/external/<session>/output.log`.
     pub session: String,
     /// How the agent's run ended: done, yielded, stopped, budget or error.
     pub outcome: String,
@@ -215,7 +242,11 @@ pub struct Run {
     /// What the run would have cost at list price had the provider served nothing from its cache.
     /// Takes the luck of the cache out of a comparison.
     pub cost_uncached: f64,
+    /// For an external harness, turns, tokens, cost and times as its proxy measured them; the
+    /// rest is Presage's own and stays empty.
     pub stats: Stats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external: Option<external::Detail>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -269,6 +300,9 @@ pub struct Report {
     pub variants: Vec<String>,
     /// Estimated size of the system prompt plus tool schemas, per variant.
     pub prefix_tokens: Vec<Prefix>,
+    /// Median measured size of the first prompt of each external harness: its system prompt, its
+    /// tool schemas and the task.
+    pub first_prompt_tokens: Vec<Prefix>,
     pub skipped_tasks: Vec<String>,
     /// Runs never started because the cost limit was reached.
     pub not_started: usize,
@@ -300,6 +334,8 @@ struct Shared {
     slots: Semaphore,
     spent: Mutex<f64>,
     done: Mutex<usize>,
+    /// The adapters' directory and the proxy they reach the model through, when a variant needs them.
+    external: Option<(PathBuf, proxy::Proxy)>,
 }
 
 fn on_path(program: &str) -> bool {
@@ -462,11 +498,39 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         error: None,
         cost_uncached: 0.0,
         stats: Stats::default(),
+        external: None,
     };
-    let ws = shared.dir.join("work").join(format!("{}-{}-{}-{}", job.seq, job.task.id, job.variant.name, retry));
+    let label = format!("{}-{}-{}-{}", job.seq, job.task.id, job.variant.name.replace(':', "-"), retry);
+    let ws = shared.dir.join("work").join(&label);
     if let Err(e) = materialize(&ws, job.task.files) {
         run.error = Some(format!("could not create the workspace: {e}"));
         return run;
+    }
+    if let (Some(name), Some((dir, proxy))) = (&job.variant.external, &shared.external) {
+        let script = external::script(dir, name);
+        let home = shared.dir.join("external").join(&label);
+        let ext = external::Job { id: &label, script: &script, workspace: &ws, home: &home, prompt: job.task.prompt, model: &job.model, max_turns: shared.max_turns, time_budget: shared.time_budget, keep: shared.keep };
+        let ran = external::run(proxy, &ext).await;
+        let u = &ran.detail.usage;
+        run.session = label;
+        run.outcome = ran.outcome.to_string();
+        (run.failure, run.error) = (ran.failure, ran.error);
+        run.cost_uncached = u.cost_uncached;
+        run.stats = Stats {
+            turns: u.turns,
+            prompt_tokens: u.prompt_tokens,
+            cached_tokens: u.cached_tokens,
+            output_tokens: u.output_tokens,
+            reasoning_tokens: u.reasoning_tokens,
+            context_tokens: u.context_tokens,
+            cost: u.cost,
+            priced: u.priced,
+            elapsed_ms: ran.elapsed_ms,
+            model_ms: u.model_ms,
+            ..Stats::default()
+        };
+        run.external = Some(ran.detail);
+        return judged(shared, job, &ws, run).await;
     }
     let req = StartRequest {
         cwd: ws.to_string_lossy().into_owned(),
@@ -504,11 +568,16 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
             let _ = shared.harness.close(&meta.id);
         }
     }
+    judged(shared, job, &ws, run).await
+}
+
+/// The same verdict for every harness: the run's workspace is verified unless the provider failed.
+async fn judged(shared: &Shared, job: &Job, ws: &Path, mut run: Run) -> Run {
     if run.error.is_none() {
-        (run.solved, run.verify_tail) = verify(job.task, &ws).await;
+        (run.solved, run.verify_tail) = verify(job.task, ws).await;
     }
     if !shared.keep {
-        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(ws);
     }
     run
 }
@@ -619,6 +688,22 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         return Err("none of the chosen tasks can run here: a program they need is not installed".into());
     }
 
+    let external = if let Some(first) = opt.variants.iter().find(|v| v.external.is_some()) {
+        let provider = provider.as_deref().ok_or_else(|| format!("{} needs a real model: drop --scripted", first.name))?;
+        let adapters = opt.external_dir.clone().unwrap_or_else(external::default_dir);
+        let adapters = adapters.canonicalize().map_err(|e| format!("no adapters at {}: {e}", adapters.display()))?;
+        for name in opt.variants.iter().filter_map(|v| v.external.as_deref()) {
+            let script = external::script(&adapters, name);
+            if !script.is_file() {
+                return Err(format!("no adapter for ext:{name}: {} does not exist", script.display()));
+            }
+        }
+        let endpoint = Config::load(&Path::new(&state.data_dir).join("config.json")).resolve(Some(provider), None)?;
+        Some((adapters, proxy::Proxy::start(&endpoint.base_url, &endpoint.key).await?))
+    } else {
+        None
+    };
+
     let id = bench_id();
     let dir = PathBuf::from(&state.data_dir).join("bench").join(&id);
     std::fs::create_dir_all(dir.join("work")).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
@@ -638,6 +723,7 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         slots: Semaphore::new(opt.jobs),
         spent: Mutex::new(0.0),
         done: Mutex::new(0),
+        external,
     });
 
     // Variants alternate within each repeat, so that drifting provider load hits them alike.
@@ -666,6 +752,10 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
 
     let task_ids: Vec<String> = tasks.iter().map(|t| t.id.to_string()).collect();
     let variant_names: Vec<String> = opt.variants.iter().map(|v| v.name.clone()).collect();
+    let first_prompt = |variant: &Variant| {
+        let sizes = runs.iter().filter(|r| r.variant == variant.name).filter_map(|r| r.external.as_ref()).map(|d| d.usage.first_prompt_tokens as f64).filter(|n| *n > 0.0);
+        Prefix { variant: variant.name.clone(), tokens: median(sizes.collect()) as u64 }
+    };
     let report = Report {
         id,
         started_ms,
@@ -674,7 +764,8 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         repeats: opt.repeats,
         simulated: opt.scripted,
         dir: dir.to_string_lossy().into_owned(),
-        prefix_tokens: opt.variants.iter().map(|v| Prefix { variant: v.name.clone(), tokens: prefix_tokens(&v.features()) }).collect(),
+        prefix_tokens: opt.variants.iter().filter(|v| v.external.is_none()).map(|v| Prefix { variant: v.name.clone(), tokens: prefix_tokens(&v.features()) }).collect(),
+        first_prompt_tokens: opt.variants.iter().filter(|v| v.external.is_some()).map(first_prompt).collect(),
         skipped_tasks: skipped.iter().map(|t| t.id.to_string()).collect(),
         not_started,
         summary: summarise(&runs, &models, &task_ids, &variant_names),
@@ -706,7 +797,20 @@ pub fn render(r: &Report) -> String {
     if r.simulated {
         out.push("SCRIPTED STAND-IN: every run replays the reference solution. Turns, tokens and costs are fabricated; this checks the benchmark and measures nothing.".into());
     }
-    out.push(format!("fixed prompt prefix, estimated: {}", r.prefix_tokens.iter().map(|p| format!("{} ~{} tokens", p.variant, p.tokens)).collect::<Vec<_>>().join(", ")));
+    let sizes = |of: &[Prefix]| of.iter().map(|p| format!("{} ~{} tokens", p.variant, p.tokens)).collect::<Vec<_>>().join(", ");
+    if !r.prefix_tokens.is_empty() {
+        out.push(format!("fixed prompt prefix, estimated: {}", sizes(&r.prefix_tokens)));
+    }
+    if !r.first_prompt_tokens.is_empty() {
+        out.push(format!("first prompt with the task, measured: {}", sizes(&r.first_prompt_tokens)));
+    }
+    let details = || r.runs.iter().filter_map(|run| Some((run, run.external.as_ref()?)));
+    for variant in &r.variants {
+        let unmetered: u32 = details().filter(|(run, _)| &run.variant == variant).map(|(_, d)| d.usage.unmetered).sum();
+        if unmetered > 0 {
+            out.push(format!("{variant}: {} answered without a usage report; its tokens and cost are understated", plural(unmetered as usize, "request")));
+        }
+    }
     if !r.skipped_tasks.is_empty() {
         out.push(format!("skipped, a program they need is not installed: {}", r.skipped_tasks.join(", ")));
     }
@@ -748,12 +852,16 @@ pub fn render(r: &Report) -> String {
             out.push(line);
         }
 
-        let Some(base) = cells(ALL, "classic") else { continue };
-        for variant in r.variants.iter().filter(|v| v.as_str() != "classic") {
-            let Some(c) = cells(ALL, variant) else { continue };
+        for variant in &r.variants {
+            // Presage's variants are measured against classic, another harness against Presage.
+            let against = if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "presage") { "presage" } else { "classic" };
+            let (Some(c), Some(base)) = (cells(ALL, variant), cells(ALL, against)) else { continue };
+            if variant == against {
+                continue;
+            }
             let (a, b) = (&c.median, &base.median);
             out.push(format!(
-                "{variant} against classic: turns {}, input tokens {}, output tokens {}, cost {} ({} with no cache), time {}; solved {}/{} against {}/{}",
+                "{variant} against {against}: turns {}, input tokens {}, output tokens {}, cost {} ({} with no cache), time {}; solved {}/{} against {}/{}",
                 delta(a.turns, b.turns),
                 delta(a.prompt_tokens, b.prompt_tokens),
                 delta(a.output_tokens, b.output_tokens),
@@ -765,7 +873,7 @@ pub fn render(r: &Report) -> String {
                 base.solved,
                 base.runs
             ));
-            let pairs: Vec<(&Cell, &Cell)> = r.tasks.iter().filter_map(|t| Some((cells(t, variant)?, cells(t, "classic")?))).collect();
+            let pairs: Vec<(&Cell, &Cell)> = r.tasks.iter().filter_map(|t| Some((cells(t, variant)?, cells(t, against)?))).collect();
             let count = |better: fn(&Medians, &Medians) -> bool| pairs.iter().filter(|(x, y)| better(&x.median, &y.median)).count();
             out.push(format!(
                 "  by task ({}): fewer turns on {}, more on {}; cheaper on {}, dearer on {} (with no cache: {} and {})",
@@ -798,7 +906,12 @@ pub fn render(r: &Report) -> String {
     }
     out.push(String::new());
     out.push(format!("results: {}/results.json", r.dir));
-    out.push(format!("replay a run: PRESAGE_HOME={}/home presage show <session>", r.dir));
+    if !r.prefix_tokens.is_empty() {
+        out.push(format!("replay a run: PRESAGE_HOME={}/home presage show <session>", r.dir));
+    }
+    if !r.first_prompt_tokens.is_empty() {
+        out.push(format!("output of an external run: {}/external/<session>/output.log", r.dir));
+    }
     out.join("\n")
 }
 
@@ -971,7 +1084,7 @@ mod tests {
         let Ok(Command::Run(opt)) = parse(&args("-p logfare -m glm-5.3,glm-5.3-flash -m other --variants classic,no-receipts -n 5 -j 2 --max-cost 1.5 --keep")) else { panic!("should parse") };
         assert_eq!(opt.models, ["glm-5.3", "glm-5.3-flash", "other"]);
         assert_eq!((opt.repeats, opt.jobs, opt.max_cost, opt.keep, opt.tasks.len()), (5, 2, Some(1.5), true, TASKS.len()));
-        assert_eq!(opt.variants[1], Variant { name: "no-receipts".into(), classic: false, without: vec!["receipts".into()] });
+        assert_eq!(opt.variants[1], Variant::own("no-receipts", false, vec!["receipts".into()]));
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
         // Every mechanism has its variant, however its name is spelled.
         let Ok(Command::Run(opt)) = parse(&args("--variants presage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };
@@ -983,6 +1096,96 @@ mod tests {
         for bad in ["--variants turbo", "--variants no-telepathy", "--tasks nope", "-n 0", "-n many", "--frobnicate", "-m"] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn external_variants_parse() {
+        let Ok(Command::Run(opt)) = parse(&args("--variants presage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters")) else { panic!("should parse") };
+        let externals: Vec<(&str, Option<&str>)> = opt.variants.iter().map(|v| (v.name.as_str(), v.external.as_deref())).collect();
+        assert_eq!(externals, [("presage", None), ("ext:mini", Some("mini")), ("ext:open-code_2", Some("open-code_2"))]);
+        assert!(!opt.variants[1].classic && opt.variants[1].without.is_empty());
+        assert_eq!(opt.external_dir, Some(PathBuf::from("/tmp/adapters")));
+        assert_eq!(Options::default().external_dir, None);
+        for bad in ["--variants ext:", "--variants ext:../mini", "--variants ext:a/b", "--variants external:mini", "--external-dir"] {
+            assert!(parse(&args(bad)).is_err(), "{bad}");
+        }
+    }
+
+    fn adapter(dir: &Path, name: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        // `ask <json>` sends one chat completion to the endpoint the runner handed over.
+        let ask = r#"ask() { python3 -c 'import os, sys, urllib.request as u
+r = u.Request(os.environ["BENCH_BASE_URL"] + "/chat/completions", data=sys.argv[1].encode(), headers={"content-type": "application/json", "authorization": "Bearer " + os.environ["BENCH_API_KEY"]})
+u.urlopen(r).read()' "$1"; }"#;
+        let path = dir.join(name).join("run.sh");
+        write_file(dir, &format!("{name}/run.sh"), &format!("#!/bin/sh\n{ask}\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_external_harness_is_run_metered_and_verified_like_presage() {
+        if !on_path("python3") {
+            eprintln!("skipped: python3 is not installed");
+            return;
+        }
+        let (upstream, seen) = proxy::fake::provider().await;
+        let root = std::env::temp_dir().join(format!("presage-bench-external-{}", rand_hex(4)));
+        let adapters = root.join("adapters");
+        let roman = tasks::find("roman").unwrap();
+        materialize(&root.join("solution"), roman.solution).unwrap();
+        let solve = format!("cp {}/solution/roman.py . && touch \"$BENCH_SCRATCH/state\"", root.display());
+        adapter(&adapters, "solver", &format!("ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}}' && ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"stream\":true,\"messages\":[]}}'; {solve}"));
+        adapter(&adapters, "idle", "echo 'no key configured' >&2");
+        adapter(&adapters, "looper", "while ask '{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}'; do :; done 2>/dev/null; echo gave up; exit 1");
+        write_file(&root, "home/config.json", &json!({"keys": {"custom": "real-key"}, "custom": {"base_url": upstream, "models": ["deepseek-chat"]}}).to_string()).unwrap();
+        let h = Harness::at(root.join("home"));
+
+        let line = format!("-p custom -m deepseek-chat,broken --tasks roman --variants ext:solver,ext:idle,ext:looper -n 1 -j 3 --max-turns 3 --retries 0 --external-dir {}", adapters.display());
+        let Ok(Command::Run(opt)) = parse(&args(&line)) else { panic!("should parse") };
+        let report = execute(&h, &opt, false).await.unwrap();
+        let run = |model: &str, variant: &str| report.runs.iter().find(|r| r.model == model && r.variant == variant).unwrap();
+
+        // Two requests, one of them a stream that did not ask for its usage.
+        let solver = run("deepseek-chat", "ext:solver");
+        let detail = solver.external.as_ref().unwrap();
+        assert!(solver.solved && solver.error.is_none() && solver.failure.is_none(), "{solver:?}");
+        assert_eq!((solver.outcome.as_str(), detail.exit_code, detail.usage.usage_injected, detail.usage.unmetered), ("done", Some(0), 1, 0));
+        let s = &solver.stats;
+        assert_eq!((s.turns, s.prompt_tokens, s.cached_tokens, s.output_tokens, s.reasoning_tokens, s.context_tokens), (2, 2100, 1800, 80, 20, 900));
+        assert!(s.priced && s.cost > 0.0 && solver.cost_uncached > s.cost && s.elapsed_ms > 0);
+        assert!(Path::new(&detail.log).is_file() && detail.log.ends_with(&format!("external/{}/output.log", solver.session)));
+        assert!(!Path::new(&report.dir).join("external").join(&solver.session).join("scratch").exists(), "the scratch directory goes with the run");
+        assert!(std::fs::read_dir(Path::new(&report.dir).join("work")).unwrap().next().is_none(), "workspaces are removed");
+
+        let idle = run("deepseek-chat", "ext:idle");
+        assert_eq!((idle.solved, idle.outcome.as_str(), idle.failure.as_deref(), idle.stats.turns), (false, "error", Some("made no model request: no key configured"), 0));
+        assert!(idle.error.is_none() && idle.verify_tail.contains("roman"), "an adapter that does nothing is judged, and fails: {idle:?}");
+
+        let looper = run("deepseek-chat", "ext:looper");
+        assert_eq!((looper.solved, looper.outcome.as_str(), looper.failure.as_deref(), looper.stats.turns), (false, "budget", Some("stopped at the limit of 3 model requests"), 3));
+        assert!(looper.external.as_ref().unwrap().usage.refused >= 1);
+
+        // A provider that fails leaves no result, as for Presage's own runs.
+        let lost = run("broken", "ext:solver");
+        assert!(lost.error.as_deref().is_some_and(provider_failed) && !lost.solved, "{lost:?}");
+        let all = |variant: &str| report.summary.iter().find(|c| c.model == "deepseek-chat" && c.task == ALL && c.variant == variant).unwrap();
+        assert_eq!((all("ext:solver").solved, all("ext:solver").runs, all("ext:idle").solved, all("ext:idle").runs), (1, 1, 0, 1));
+        assert_eq!(report.summary.iter().find(|c| c.model == "broken" && c.task == ALL && c.variant == "ext:solver").map(|c| (c.runs, c.errors)), Some((0, 1)));
+
+        let seen = seen.lock().unwrap();
+        assert!(!seen.is_empty() && seen.iter().all(|(_, _, auth, _)| auth == "Bearer real-key"), "{seen:?}");
+        assert!(report.prefix_tokens.is_empty());
+        assert_eq!(report.first_prompt_tokens.iter().map(|p| (p.variant.as_str(), p.tokens)).collect::<Vec<_>>(), [("ext:solver", 1200), ("ext:idle", 0), ("ext:looper", 1200)]);
+        let text = render(&report);
+        for expected in ["first prompt with the task, measured: ext:solver ~1200 tokens", "ext:idle", "made no model request: no key configured", "stopped at the limit of 3 model requests", "no result: provider returned HTTP 503", "/external/<session>/output.log"] {
+            assert!(text.contains(expected), "{expected:?} missing from:\n{text}");
+        }
+
+        let Ok(Command::Run(scripted)) = parse(&args(&format!("{line} --scripted"))) else { panic!("should parse") };
+        assert!(execute(&h, &scripted, false).await.is_err_and(|e| e.contains("needs a real model")));
+        let Ok(Command::Run(unknown)) = parse(&args(&line.replace("ext:idle", "ext:nope"))) else { panic!("should parse") };
+        assert!(execute(&h, &unknown, false).await.is_err_and(|e| e.contains("no adapter for ext:nope")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1002,6 +1205,7 @@ mod tests {
             error: error.map(String::from),
             cost_uncached: cost * 2.0,
             stats: Stats { turns, cost, ..Stats::default() },
+            external: None,
         };
         let runs = [run(3, 0.01, true, None), run(5, 0.03, false, None), run(4, 0.02, true, None), run(0, 0.0, false, Some("provider returned HTTP 502: overloaded"))];
         let c = cell("m", "t", "presage", &runs.iter().collect::<Vec<_>>());
