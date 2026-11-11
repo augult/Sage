@@ -5,19 +5,22 @@ import { pendingApprovals } from '../model.js';
 
 export const MOD_KEY = navigator.platform.startsWith('Mac') ? 'Cmd' : 'Ctrl';
 
-/** How a finished run reads: glyph, colour and words. */
+// Tones carry meaning without hue (styles/base.css): `good` held or done, `alert` wants a look,
+// `quiet` is the model's side at work, `danger` failed, `plain` is none of these.
+
+/** How a finished run reads: glyph, tone and words. */
 export function outcomeLook(status, verified) {
   switch (status) {
     case 'done':
-      return verified ? { icon: 'check', tone: 'teal', label: 'Done' } : { icon: 'check', tone: 'amber', label: 'Done, unverified' };
+      return verified ? { icon: 'check', tone: 'good', label: 'Done' } : { icon: 'check', tone: 'alert', label: 'Done, unverified' };
     case 'yielded':
-      return { icon: 'reply', tone: 'azure', label: 'Handed back' };
+      return { icon: 'reply', tone: 'quiet', label: 'Handed back' };
     case 'stopped':
       return { icon: 'stop', tone: 'plain', label: 'Stopped' };
     case 'budget':
-      return { icon: 'stop', tone: 'amber', label: 'Out of budget' };
+      return { icon: 'stop', tone: 'alert', label: 'Out of budget' };
     case 'error':
-      return { icon: 'cross', tone: 'red', label: 'Failed' };
+      return { icon: 'cross', tone: 'danger', label: 'Failed' };
     default:
       return { icon: 'dash', tone: 'plain', label: status || 'No result' };
   }
@@ -33,8 +36,8 @@ export function sessionState(meta, entry) {
 
 /** The status glyph for a session, with its meaning as a tooltip and accessible name. */
 export function stateGlyph(state) {
-  if (state.approvals > 0) return glyph(icon('bang'), 'amber', 'Waiting for your approval');
-  if (state.phase === 'running') return glyph(spinner(), 'azure', 'Running');
+  if (state.approvals > 0) return glyph(icon('bang'), 'alert', 'Waiting for your approval');
+  if (state.phase === 'running') return glyph(spinner(), 'quiet', 'Running');
   const look = outcomeLook(state.outcome, state.verified);
   return glyph(icon(look.icon), look.tone, look.label);
 }
