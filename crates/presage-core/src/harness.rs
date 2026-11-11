@@ -414,7 +414,8 @@ impl Harness {
         demo::create_workspace(&root).map_err(|e| format!("could not create the demo workspace: {e}"))?;
         let real = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
         let provider = Provider::Mock(demo::provider(real, 22));
-        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, ..Default::default() };
+        // The walkthrough is three replies; the review pass would add a fourth that shows nothing new.
+        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into()], ..Default::default() };
         self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
     }
 
@@ -750,9 +751,9 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let cwd = ws.to_string_lossy().into_owned();
         let turns = vec![MockTurn::calls("", vec![("write", json!({"path": "a.txt", "content": "x"})), ("shell", json!({"cmd": "test -f a.txt", "expect_exit": "0"})), ("finish", json!({"summary": "wrote a.txt"}))])];
-        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into()], ..Default::default() };
+        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into(), "review".into()], ..Default::default() };
         let meta = h.start_scripted(req, MockProvider::scripted(turns)).unwrap();
-        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch", true));
+        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch, review", true));
         let done = until_idle(&h, &meta.id).await;
         assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
 

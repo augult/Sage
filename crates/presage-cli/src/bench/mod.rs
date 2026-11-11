@@ -416,7 +416,8 @@ fn stand_in(task: &Task) -> MockProvider {
     let mut calls: Vec<(&str, Value)> = task.solution.iter().map(|(path, content)| ("write", json!({"path": path, "content": content, "overwrite": true}))).collect();
     calls.push(("shell", json!({"cmd": task.check, "expect_exit": "0"})));
     calls.push(("finish", json!({"summary": "Applied the reference solution."})));
-    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls)])
+    // The second reply answers the review pass, where the variant has one.
+    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls), MockTurn::calls("", vec![("finish", json!({"summary": "Applied the reference solution."}))])])
 }
 
 struct End {
@@ -920,7 +921,7 @@ mod tests {
         assert_eq!(report.runs.iter().take(3).map(|r| r.variant.as_str()).collect::<Vec<_>>(), ["presage", "classic", "no-auto-watch"]);
 
         let all = report.summary.iter().find(|c| c.task == ALL && c.variant == "presage").unwrap();
-        assert_eq!((all.runs, all.solved, all.false_done, all.errors, all.median.turns), (4, 4, 0, 0, 1.0));
+        assert_eq!((all.runs, all.solved, all.false_done, all.errors, all.median.turns), (4, 4, 0, 0, 2.0));
         let text = render(&report);
         assert!(text.contains("SCRIPTED STAND-IN") && text.contains("no-auto-watch against classic"), "{text}");
 

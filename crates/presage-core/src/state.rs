@@ -42,19 +42,21 @@ pub struct Features {
     pub attach: bool,
     /// Command output is shown without the workspace's absolute path.
     pub short_paths: bool,
+    /// The first `finish` after a change is answered once with a review of the task instead of being accepted.
+    pub review: bool,
 }
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, review: false }
     }
 
     /// The mechanisms `without` can switch off.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "review"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(mut self, name: &str) -> Option<Self> {
@@ -73,6 +75,7 @@ impl Features {
             "bootstrap" => &mut self.bootstrap,
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
+            "review" => &mut self.review,
             _ => return None,
         };
         *slot = false;
@@ -135,6 +138,10 @@ pub struct Evidence {
     fingerprint: Option<u64>,
     /// The model has already been told once that it lacks evidence.
     pub warned: bool,
+    /// The review of the task has been asked for since the last user message.
+    pub reviewed: bool,
+    /// The epoch when the last user message arrived: only changes since then are reviewed.
+    pub message_epoch: u64,
 }
 
 const FINGERPRINT_BUDGET: Duration = Duration::from_millis(400);
@@ -182,6 +189,8 @@ pub struct Session {
     pub jobs: Jobs,
     pub watches: Watches,
     pub evidence: Evidence,
+    /// The user message being worked on, quoted back by the review.
+    pub task: String,
     pub lessons: LessonBook,
     pub features: Features,
     pub limits: Limits,
@@ -203,6 +212,7 @@ impl Session {
             jobs: Jobs::default(),
             watches: Watches::default(),
             evidence: Evidence::default(),
+            task: String::new(),
             lessons,
             features,
             limits: Limits::default(),
