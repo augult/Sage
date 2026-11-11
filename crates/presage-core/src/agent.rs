@@ -9,6 +9,7 @@ use crate::prompt;
 use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role};
 use crate::repair;
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
+use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
 use crate::util::now_ms;
 use crate::watches;
@@ -69,6 +70,8 @@ pub struct AgentConfig {
     pub interactive: bool,
     /// Prompt size (tokens) above which old observations are trimmed whatever the price.
     pub context_limit: u64,
+    /// The system prompt, where the session has its own; otherwise the built-in one for `features`.
+    pub system: Option<String>,
 }
 
 impl AgentConfig {
@@ -83,6 +86,7 @@ impl AgentConfig {
             autonomy: Autonomy::Auto,
             interactive: false,
             context_limit: 150_000,
+            system: None,
         }
     }
 }
@@ -121,7 +125,7 @@ const MIN_DECAY_TOKENS: u64 = 6_000;
 
 impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
-        let ctx = Context::new(prompt::system_prompt(&cfg.features));
+        let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
         Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, offered_job_tool: false }
     }
@@ -248,12 +252,24 @@ impl Agent {
     /// Handles one user message: runs model turns until the task is finished, handed back, stopped,
     /// or out of budget.
     pub async fn run(&mut self, text: String, cancel: &CancellationToken) -> Outcome {
+        self.run_with(text, &[], cancel).await
+    }
+
+    /// `run`, with skills switched on from this message onwards. The system prompt cannot change
+    /// once it has been sent, so they travel in front of the message.
+    pub async fn run_with(&mut self, text: String, skills: &[SkillInfo], cancel: &CancellationToken) -> Outcome {
         let run_started = Instant::now();
         let elapsed_before = self.stats.elapsed_ms;
         let features = self.cfg.features;
         let task = text.trim().to_string();
-        self.sink.emit(EventKind::User { text: task.clone() });
-        let composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
+        self.sink.emit(EventKind::User { text: task.clone(), skills: skills.iter().map(|s| s.name.clone()).collect() });
+        self.sess.task = task.clone();
+        self.sess.evidence.reviewed = false;
+        self.sess.evidence.message_epoch = self.sess.evidence.epoch;
+        let mut composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
+        if !skills.is_empty() {
+            composed = format!("{}\n\n{composed}", skills::blocks(skills));
+        }
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
 
@@ -462,6 +478,9 @@ mod tests {
     }
 
     fn rig(name: &str, cfg: AgentConfig, turns: Vec<TurnFn>) -> Rig {
+        // The review pass has its own test; the others script one reply too few for it.
+        let mut cfg = cfg;
+        cfg.features.review = cfg.features.review && name == "agent-review";
         let sess = test_session(name, cfg.features);
         std::fs::write(sess.ws.root.join("n.txt"), "alpha\nbeta\ngamma\n").unwrap();
         let sink = Arc::new(MemorySink::default());
@@ -471,6 +490,25 @@ mod tests {
 
     fn fixed(t: MockTurn) -> TurnFn {
         Box::new(move |_| t.clone())
+    }
+
+    #[tokio::test]
+    async fn the_first_finish_after_a_change_gets_one_review_pass() {
+        let change = |old: &str, new: &str| {
+            fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": old, "new": new})), ("shell", json!({"cmd": "grep -c A n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]))
+        };
+        let finish = || fixed(MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]));
+        let mut r = rig("agent-review", AgentConfig::new("mock"), vec![change("beta", "BETA"), change("gamma", "GAMMA"), finish()]);
+
+        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2), "the review is asked for once, even after a further change");
+        let review = requests(&r)[1].last().unwrap().content.clone();
+        assert!(review.contains("[review] Not accepted yet") && review.contains("<task>\nUpper-case the second line of n.txt.\n</task>"), "{review}");
+        assert_eq!(r.agent.stats.surprises, 0, "a review is not a surprise");
+
+        // Nothing changed in answer to the next message, so there is nothing to review.
+        let out = r.agent.run("Is it done?".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 3));
     }
 
     fn events(r: &Rig) -> Vec<EventKind> {

@@ -16,6 +16,8 @@ USAGE
   presage run [options] <task…>     work on a task in a directory, unattended
   presage demo                      play the scripted walkthrough (no key, no network)
   presage bench [options]           compare harness variants on built-in tasks (presage bench --help)
+  presage skills [show <name>]      list skills, or print one
+  presage prompt [options]          print the system prompt `run` would send with the same options
   presage sessions                  list sessions
   presage show <session-id>         replay a session's log
   presage providers                 list providers and whether a key is set
@@ -28,6 +30,10 @@ OPTIONS for run
   -e, --effort <level>     low | high | max | ratchet (default; starts high, rises on repeated surprises)
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
+      --skill <name>       switch a skill on (repeatable, or comma-separated)
+      --system-file <path> system prompt template for this run
+      --no-project-instructions
+                           leave the project's AGENTS.md out of the system prompt
       --max-turns <n>      model replies allowed (default 80)
       --time-budget <s>    seconds allowed
       --ask                ask before every step that changes something
@@ -124,9 +130,10 @@ impl Printer {
     fn print(&mut self, ev: &Event) {
         let p = &self.paint;
         match &ev.kind {
-            EventKind::SessionStart { id, cwd, provider, model, effort, mode, simulated, .. } => {
+            EventKind::SessionStart { id, cwd, provider, model, effort, mode, simulated, skills, .. } => {
                 let sim = if *simulated { p.yellow("  [simulated model]") } else { String::new() };
-                eprintln!("{} {model} via {provider} · effort {effort} · {mode}{sim}\n{}", p.bold("presage"), p.dim(&format!("{cwd} · session {id}")));
+                let skills = if skills.is_empty() { String::new() } else { format!(" · skills: {}", skills.join(", ")) };
+                eprintln!("{} {model} via {provider} · effort {effort} · {mode}{skills}{sim}\n{}", p.bold("presage"), p.dim(&format!("{cwd} · session {id}")));
             }
             EventKind::Env { text } if self.verbose => eprintln!("{}", p.dim(&indent(text, "  ", 12))),
             EventKind::Retry { attempt, wait_ms, reason, .. } => eprintln!("  {}", p.yellow(&format!("provider hiccup (attempt {attempt}): {reason} — retrying in {}", fmt_duration(*wait_ms)))),
@@ -206,7 +213,8 @@ struct RunArgs {
     events: bool,
 }
 
-fn parse_run(args: &[String]) -> Result<RunArgs, String> {
+/// Options of `run`. `prompt` takes the same ones and no task.
+fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
     let mut req = StartRequest { cwd: ".".into(), ..Default::default() };
     let (mut verbose, mut json, mut events) = (false, false, false);
     let mut task: Vec<String> = Vec::new();
@@ -220,6 +228,12 @@ fn parse_run(args: &[String]) -> Result<RunArgs, String> {
             "-e" | "--effort" => req.effort = Some(value(a)?),
             "--classic" => req.mode = Some("classic".into()),
             "--without" => req.without.push(value(a)?),
+            "--skill" => req.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
+            "--system-file" => {
+                let path = value(a)?;
+                req.system_prompt = Some(std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?);
+            }
+            "--no-project-instructions" => req.project_instructions = Some(false),
             "--ask" => {
                 req.autonomy = Some("ask".into());
                 req.interactive = false;
@@ -235,6 +249,9 @@ fn parse_run(args: &[String]) -> Result<RunArgs, String> {
         }
     }
     req.task = task.join(" ");
+    if !needs_task {
+        return Ok(RunArgs { req, verbose, json, events });
+    }
     if req.task.trim() == "-" || req.task.trim().is_empty() {
         let mut buf = String::new();
         if !std::io::stdin().is_terminal() {
@@ -355,7 +372,30 @@ async fn main() -> ExitCode {
             println!("presage {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some("run") => match parse_run(&args[1..]) {
+        Some("skills") => match (args.get(1).map(String::as_str), args.get(2)) {
+            (None, _) => {
+                for s in h.skills(Some(".")) {
+                    println!("{:<14} {:<8} {}", s.name, s.source.as_str(), s.description);
+                }
+                ExitCode::SUCCESS
+            }
+            (Some("show"), Some(name)) => match h.skill_file(name, Some(".")) {
+                Ok(text) => {
+                    println!("{}", text.trim_end());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            },
+            _ => fail("usage: presage skills [show <name>]".into()),
+        },
+        Some("prompt") => match parse_run(&args[1..], false).and_then(|run| h.system_prompt(&run.req)) {
+            Ok(text) => {
+                println!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        Some("run") => match parse_run(&args[1..], true) {
             Err(e) => fail(e),
             Ok(run) => match h.start(run.req) {
                 Err(e) => fail(e),

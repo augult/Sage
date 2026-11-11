@@ -1,0 +1,35 @@
+ledger, tests pass once the path is set
+    learned: `python3 -m unittest` fails here (FAILED (errors=#)) → `PYTHONPATH=src python3 -m unittest` works
+    later `python3 -m unittest` fails (same friction): lesson from this project (1×): `PYTHONPATH=src python3 -m unittest` worked where `python3 -m unittest` failed like this
+    later `python3 -m unittest -v` fails (same friction): lesson from this project (1×): `PYTHONPATH=src python3 -m unittest` worked where `python3 -m unittest` failed like this
+    later `python3 -m unittest tests.test_money` fails (same friction): no hint
+    later `python3 -m pytest` fails (other cause): no hint
+    later `PYTHONPATH=src python3 -m unittest` fails (a real bug that raises, run with the fix already applied): lesson from this project (1×): `PYTHONPATH=src python3 -m unittest` worked where `python3 -m unittest` failed like this
+    later `PYTHONPATH=src python3 -m unittest` fails (a real assertion failure, run with the fix already applied): no hint
+ledger, a test fails for a real bug until the code is edited
+    learned: nothing
+ledger, workaround spelled with discover
+    learned: nothing
+ledger, workaround by changing directory
+    learned: nothing
+ledger, real failure then a fix made without the edit tool
+    learned: `PYTHONPATH=src python3 -m unittest` fails here (FAILED (failures=#)) → `PYTHONPATH=src python3 -m unittest -v` works
+logkit, tests pass once generated
+    learned: `sh tests/run.sh` fails here (# passed, # failed) until you run `make gen`
+    later `sh tests/run.sh` fails (same friction): lesson from this project (1×): this failed until `make gen` was run first
+    later `sh tests/run.sh` fails (a real failing case, build present): lesson from this project (1×): this failed until `make gen` was run first
+logkit, generated and run in one command
+    learned: nothing
+logkit, a case fails for a real bug until lib/ is edited
+    learned: nothing
+logkit, edit then stale build then regenerate
+    learned: `sh tests/run.sh` fails here (# passed, # failed) until you run `make gen`
+shopcart, node --test first
+    learned: `node --test` fails here (TypeError [Error]: mock.module is not a function) → `node --experimental-test-module-mocks --test` works
+    later `node --test` fails (same friction): lesson from this project (1×): `node --experimental-test-module-mocks --test` worked where `node --test` failed like this
+    later `npm test` fails (same friction): no hint
+    later `node --test test/tax.test.mjs` fails (same friction, one file): no hint
+shopcart, npm test then the flag
+    learned: nothing
+shopcart, a test fails for a real bug until the code is edited
+    learned: nothing

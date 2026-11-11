@@ -1,0 +1,9 @@
+[project]
+name = "stockr"
+version = "0.9.0"
+description = "Stock reports for a small workshop"
+requires-python = ">=3.10"
+
+[project.scripts]
+stockr = "stockr.cli:main"
+stockr-prune = "stockr.maintenance:prune_main"

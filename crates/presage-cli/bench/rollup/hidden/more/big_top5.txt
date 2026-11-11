@@ -1,0 +1,12 @@
+requests: 861
+skipped: 16
+window: 2026-03-02T10:15:04Z .. 2026-03-02T10:58:58Z
+slowest: 9120ms GET /api/reports/3?full=1 at 2026-03-02T10:41:09Z
+
+endpoint                           count   err%    p50    p95      bytes
+GET /api/users/:id                   140    2.1     31    121     633024
+GET /api/search                      120    2.5     90    413     554246
+GET /api/orders/:id/items/:id         95    2.1     21    101     425008
+POST /api/orders                      95    4.2     64    404     420922
+GET /                                 60    0.0      4     16     271532
+(other)                              351    6.6      -      -    1671016

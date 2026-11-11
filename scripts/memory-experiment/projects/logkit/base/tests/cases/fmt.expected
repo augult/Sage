@@ -1,0 +1,8 @@
+[INFO] api: started on port 8080
+[DEBUG] db: pool size 4
+[WARN] api: slow request /orders 2.4s
+[ERROR] db: query timed out
+[INFO] auth: login ok user=ana
+[ERROR] api: upstream returned 502
+[FATAL] db: disk full
+[INFO] api: shutting down

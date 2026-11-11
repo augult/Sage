@@ -8,51 +8,89 @@
 //! misses. So the system prompt explains how turns work once, the tool descriptions say only what
 //! each tool does, and a tool is offered only where it is needed.
 
+use crate::skills::SkillInfo;
 use crate::state::Features;
 use serde_json::{Value, json};
+use std::path::Path;
 use std::sync::LazyLock;
 
-/// `{chain}`, `{watch}` and `{finish}` depend on whether test runs are watched automatically.
-const SYSTEM_PRESAGE: &str = "\
-You are Presage, a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
+/// The built-in Presage prompt, as a template. `{chain}`, `{watch}` and `{finish}` are filled in
+/// according to whether test runs are watched automatically.
+const SYSTEM_PRESAGE: &str = include_str!("../prompts/system.md");
 
-Turns here work differently from other agents:
-1. A reply is a script. All its tool calls run, in order; a shell, edit or write step that fails or contradicts your prediction skips the calls after it and comes back in detail. So one reply carries the whole next stretch of work, for example: {chain}. Never spend a reply on a single step when the following steps are already clear: a wrong assumption only stops the script.
-2. Predict. On `shell`, set `expect_exit`, `expect_has` or `expect_lacks` whenever you know the outcome. If you were right you get a short receipt instead of the output; if you were wrong, the output plus the code it points at. Give no prediction when you need to read the output itself.
-3. {watch}
-4. `finish` is accepted only if a check has passed since your last change: a shell prediction that held, or passing watches. {finish}
+/// A project's instruction file is cut to this many characters.
+pub const MAX_PROJECT_CHARS: usize = 12_000;
+/// Where a project keeps its instructions; the first of these that has any is used.
+const PROJECT_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".presage/AGENTS.md", ".presage.md"];
 
-Rules:
-- Read code before changing it. Lines in read and search output begin with an anchor such as `41kq`; give anchors to `edit` instead of retyping the old text.
-- Reproduce exactly any names, paths, commands, formats and output the task specifies.
-- Keep changes minimal. Never delete or revert work you did not create.
-- After a surprise, find the cause before retrying. Never repeat a failed step unchanged.
-- Be brief: no preamble, no recap of tool output, no explanation unless asked.";
+pub fn default_template() -> &'static str {
+    SYSTEM_PRESAGE.trim_end()
+}
 
-fn presage_prompt(auto_watch: bool, preflight: bool) -> String {
+/// A template that lacks a placeholder simply gets nothing put in for it.
+fn fill(template: &str, auto_watch: bool, preflight: bool) -> String {
     let (chain, watch, finish) = if auto_watch {
         (
-            "read + read + shell (run the tests); then edit + edit + finish",
+            "read + read + search + shell (run the tests); then edit + edit + shell (try what the tests do not cover)",
             if preflight {
                 "Tests are watched for you. The harness runs the test command the task names (or else takes the first one you run) and re-runs it by itself after every change, telling you when its result changes. Do not run it again yourself."
             } else {
                 "Tests are watched for you. Once you have run a test command, the harness re-runs it by itself after every change and tells you when its result changes, so do not run it again yourself."
             },
-            "Once the tests are watched, put `finish` in the same reply as your edits: it is refused if they fail.",
+            "The first `finish` after a change comes back once with a review to carry out; watched tests are re-run first and it is refused if they fail.",
         )
     } else {
         (
-            "read + read + read; or edit + edit + shell (run the tests) + finish",
+            "read + read + read; or edit + edit + shell (run the tests)",
             "`watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes.",
-            "Put it in the same reply, right after the check.",
+            "Put it right after a check, in the same reply. The first `finish` after a change comes back once with a review to carry out.",
         )
     };
-    SYSTEM_PRESAGE.replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", finish)
+    template.trim().replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", finish)
 }
 
-static PRESAGE_PREFLIGHT: LazyLock<String> = LazyLock::new(|| presage_prompt(true, true));
-static PRESAGE_AUTO: LazyLock<String> = LazyLock::new(|| presage_prompt(true, false));
-static PRESAGE_MANUAL: LazyLock<String> = LazyLock::new(|| presage_prompt(false, false));
+/// A Presage template with its placeholders filled in for the mechanisms that are switched on.
+pub fn render(template: &str, features: &Features) -> String {
+    let auto_watch = features.watches && features.auto_watch;
+    fill(template, auto_watch, features.preflight)
+}
+
+/// The project's instruction file, if it has one: its name and its text, cut to `MAX_PROJECT_CHARS`.
+pub fn project_instructions(root: &Path) -> Option<(&'static str, String)> {
+    PROJECT_FILES.iter().find_map(|name| {
+        let text = std::fs::read_to_string(root.join(name)).ok()?;
+        let text = text.trim();
+        let cut = match text.char_indices().nth(MAX_PROJECT_CHARS) {
+            None => text.to_string(),
+            Some((idx, _)) => format!("{}\n\n[Cut here: these are the first {MAX_PROJECT_CHARS} of {} characters. Read {name} for the rest.]", text[..idx].trim_end(), text.chars().count()),
+        };
+        (!text.is_empty()).then_some((*name, cut))
+    })
+}
+
+/// The system prompt of a session: `base`, then the user's instructions, the project's, and the
+/// active skills, each under its own heading. It is the cached prefix of every request, so it is
+/// built once, when the session starts.
+pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: &[SkillInfo]) -> String {
+    let mut out = base.trim().to_string();
+    let mut section = |heading: String, text: &str| {
+        if !text.trim().is_empty() {
+            out.push_str(&format!("\n\n# {heading}\n\n{}", text.trim()));
+        }
+    };
+    section("User instructions".into(), global);
+    if let Some((file, text)) = project {
+        section(format!("Project instructions ({file})"), text);
+    }
+    for skill in skills {
+        section(format!("Skill: {}", skill.title), &skill.body);
+    }
+    out
+}
+
+static PRESAGE_PREFLIGHT: LazyLock<String> = LazyLock::new(|| fill(default_template(), true, true));
+static PRESAGE_AUTO: LazyLock<String> = LazyLock::new(|| fill(default_template(), true, false));
+static PRESAGE_MANUAL: LazyLock<String> = LazyLock::new(|| fill(default_template(), false, false));
 
 pub const SYSTEM_CLASSIC: &str = "\
 You are a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
@@ -211,6 +249,7 @@ static TOOLS_CLASSIC: LazyLock<Value> = LazyLock::new(|| {
     ])
 });
 
+/// The built-in system prompt, with nothing of the user's or the project's in it.
 pub fn system_prompt(features: &Features) -> &'static str {
     if !features.scripts {
         SYSTEM_CLASSIC
@@ -261,7 +300,7 @@ mod tests {
         }
         // The fixed prefix is paid for on every turn of every session: keep it lean.
         let (presage, classic) = (prefix_tokens(&Features::presage()), prefix_tokens(&Features::classic()));
-        assert!(presage < 1_250, "the Presage prefix is ~{presage} tokens");
+        assert!(presage < 2_300, "the Presage prefix is ~{presage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
         assert!(!tool_schemas(&Features::classic(), false).to_string().contains("expect"));
     }
@@ -291,6 +330,52 @@ mod tests {
             assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
         }
         assert_eq!(system_prompt(&Features::presage().without("scripts").unwrap()), SYSTEM_CLASSIC);
+    }
+
+    #[test]
+    fn a_template_is_filled_in_where_it_has_placeholders() {
+        let auto = Features::presage();
+        let manual = Features::presage().without("auto_watch").unwrap();
+        for placeholder in ["{chain}", "{watch}", "{finish}"] {
+            assert!(default_template().contains(placeholder), "the built-in template lost {placeholder}");
+        }
+        for features in [auto, manual, Features::presage().without("preflight").unwrap()] {
+            assert_eq!(render(default_template(), &features), system_prompt(&features));
+        }
+        assert_eq!(render("Be terse.\n", &auto), "Be terse.");
+        assert_eq!(render("Tests: {watch} {nothing}", &manual), "Tests: `watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes. {nothing}");
+    }
+
+    #[test]
+    fn the_parts_of_a_system_prompt_come_in_a_fixed_order() {
+        let skill = |name: &str, title: &str, body: &str| SkillInfo { name: name.into(), title: title.into(), description: String::new(), source: crate::skills::SkillSource::Builtin, overrides_builtin: false, body: body.into() };
+        let skills = [skill("security", "Security audit", "Look for injection."), skill("ui", "UI work", "Check it in the app.")];
+        let full = compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills);
+        assert_eq!(full, "Base.\n\n# User instructions\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\nRun make test.\n\n# Skill: Security audit\n\nLook for injection.\n\n# Skill: UI work\n\nCheck it in the app.");
+        // The same parts give the same bytes: this is the prefix the provider caches.
+        assert_eq!(full, compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills));
+        assert_eq!(compose("Base.", " \n", None, &[]), "Base.");
+        assert_eq!(compose("Base.", "", Some(("CLAUDE.md", "Hi.")), &skills[1..]), "Base.\n\n# Project instructions (CLAUDE.md)\n\nHi.\n\n# Skill: UI work\n\nCheck it in the app.");
+    }
+
+    #[test]
+    fn project_instructions_come_from_the_first_file_that_has_any_and_are_capped() {
+        let root = std::env::temp_dir().join(format!("presage-prompt-{}", crate::util::rand_hex(4)));
+        std::fs::create_dir_all(root.join(".presage")).unwrap();
+        assert_eq!(project_instructions(&root), None);
+        std::fs::write(root.join(".presage/AGENTS.md"), "deep\n").unwrap();
+        assert_eq!(project_instructions(&root), Some((".presage/AGENTS.md", "deep".to_string())));
+        std::fs::write(root.join("CLAUDE.md"), "claude").unwrap();
+        std::fs::write(root.join("AGENTS.md"), " \n").unwrap();
+        assert_eq!(project_instructions(&root), Some(("CLAUDE.md", "claude".to_string())), "an empty file is passed over");
+
+        // The cap counts characters, not bytes.
+        std::fs::write(root.join("AGENTS.md"), "é".repeat(MAX_PROJECT_CHARS)).unwrap();
+        assert_eq!(project_instructions(&root), Some(("AGENTS.md", "é".repeat(MAX_PROJECT_CHARS))));
+        std::fs::write(root.join("AGENTS.md"), format!("{}{}", "é".repeat(MAX_PROJECT_CHARS), "x".repeat(8_000))).unwrap();
+        let (file, text) = project_instructions(&root).unwrap();
+        assert_eq!(file, "AGENTS.md");
+        assert_eq!(text, format!("{}\n\n[Cut here: these are the first 12000 of 20000 characters. Read AGENTS.md for the rest.]", "é".repeat(MAX_PROJECT_CHARS)));
     }
 
     #[test]

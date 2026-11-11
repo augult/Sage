@@ -1,0 +1,105 @@
+<html>
+<head>
+<title>Team settings</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="top">
+  <span class="logo">Harbor</span>
+  <a href="#profile" style="color:#9fb3c8;margin-left:22px">Profile</a>
+  <a href="#members-section" style="color:#9fb3c8;margin-left:13px">Members</a>
+</div>
+
+<div class="wrap">
+  <div class="title">Team settings</div>
+  <div class="hint" style="margin-bottom:17px">Changes apply to everyone in the team.</div>
+
+  <div class="box" id="profile">
+    <div class="boxtitle">Profile</div>
+    <form id="settings-form">
+      <div class="row">
+        Display name<br>
+        <input type="text" id="display-name" value="Harbor Crew" style="width:300px">
+      </div>
+      <div class="row">
+        <input type="text" id="email" placeholder="Contact email" value="crew@harbor.example" style="width:300px">
+      </div>
+      <div class="row">
+        <span class="lbl">Time zone</span>
+        <select id="timezone">
+          <option value="utc">UTC</option>
+          <option value="cet" selected>Central Europe</option>
+          <option value="est">US Eastern</option>
+          <option value="pst">US Pacific</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="checkbox" id="notify" checked> <span style="font-size:12px">Email me when a member joins</span>
+      </div>
+      <div class="row">
+        <textarea id="bio" rows="3" cols="50" placeholder="About the team"></textarea>
+        <div class="hint">Shown on the team page.</div>
+      </div>
+      <button class="btn" id="save">Save changes</button>
+      <button class="button-small" id="reset" style="margin-left:9px">Reset</button>
+      <span id="status" class="status"></span>
+    </form>
+  </div>
+
+  <div class="box" id="members-section">
+    <div class="boxtitle" style="float:left">Members</div>
+    <div class="btn2" id="invite-open" style="float:right">Invite member</div>
+    <div style="clear:both"></div>
+    <input type="text" id="member-filter" placeholder="Filter members" style="margin:7px 0 11px 0;width:220px">
+    <table class="tbl" width="100%" cellspacing="0">
+      <tr class="head">
+        <td>Name</td>
+        <td>Role</td>
+        <td>Status</td>
+        <td></td>
+      </tr>
+      <tbody id="members">
+        <tr data-member="Ines Vidal">
+          <td>Ines Vidal</td>
+          <td>Owner</td>
+          <td><span class="tag ok">Active</span></td>
+          <td><span class="lnk" data-action="remove">remove</span></td>
+        </tr>
+        <tr data-member="Tomas Reyes">
+          <td>Tomas Reyes</td>
+          <td>Admin</td>
+          <td><span class="tag ok">Active</span></td>
+          <td><span class="lnk" data-action="remove">remove</span></td>
+        </tr>
+        <tr data-member="Mira Okafor">
+          <td>Mira Okafor</td>
+          <td>Member</td>
+          <td><span class="tag wait">Invited</span></td>
+          <td><span class="lnk" data-action="remove">remove</span></td>
+        </tr>
+        <tr data-member="Jonas Lind">
+          <td>Jonas Lind</td>
+          <td>Member</td>
+          <td><span class="tag ok">Active</span></td>
+          <td><span class="lnk" data-action="remove">remove</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="hint" id="member-count" style="margin-top:5px">4 members</div>
+  </div>
+</div>
+
+<div class="modal" id="invite-dialog" hidden>
+  <div class="modalbox">
+    <div class="boxtitle" style="font-size:19px">Invite a member</div>
+    <input type="text" id="invite-email" placeholder="name@example.com" style="width:100%;margin:15px 0">
+    <div style="text-align:right">
+      <div class="cancel" id="invite-cancel">Cancel</div>
+      <button class="btn2" id="invite-send">Send invite</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -9,10 +9,12 @@ use crate::demo;
 use crate::economy::prices_for;
 use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
 use crate::lessons::LessonBook;
+use crate::prompt;
 use crate::provider::Provider;
 use crate::provider::mock::MockProvider;
 use crate::provider::openai::OpenAiProvider;
 use crate::script::{Approvals, Autonomy};
+use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
 use crate::util::{civil_date, fnv64, home_dir, now_ms, one_line, rand_hex};
 use crate::workspace::Workspace;
@@ -53,6 +55,9 @@ pub struct SessionMeta {
     pub outcome: Option<FinishStatus>,
     pub verified: Option<bool>,
     pub stats: Stats,
+    /// Names of the skills switched on, in the order they were.
+    #[serde(default)]
+    pub skills: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -82,6 +87,26 @@ pub struct StartRequest {
     /// Mechanisms to switch off, for ablation runs (see `Features::NAMES`).
     #[serde(default)]
     pub without: Vec<String>,
+    /// A system prompt template for this run alone, in place of the user's or the built-in one.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Skills to switch on, by name.
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// `false` leaves the project's instruction file (`AGENTS.md`, …) out of the system prompt.
+    #[serde(default)]
+    pub project_instructions: Option<bool>,
+}
+
+/// What the user can edit of the system prompt.
+#[derive(Clone, Debug, Serialize)]
+pub struct Instructions {
+    /// The template in effect: the user's own, or else the built-in one.
+    pub system: String,
+    pub system_default: String,
+    pub system_custom: bool,
+    /// The user's instructions for every project (`<data_dir>/AGENTS.md`).
+    pub global: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -127,7 +152,8 @@ struct Live {
     seq: AtomicU64,
     tx: broadcast::Sender<Event>,
     log: Mutex<Option<std::fs::File>>,
-    input: mpsc::UnboundedSender<String>,
+    /// A user message, and the skills to switch on with it.
+    input: mpsc::UnboundedSender<(String, Vec<SkillInfo>)>,
     cancel: Mutex<CancellationToken>,
     /// Cancelled when the session is closed for good.
     closed: CancellationToken,
@@ -194,6 +220,30 @@ fn session_id() -> String {
     let (y, m, d) = civil_date(secs);
     let t = secs % 86_400;
     format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{}", t / 3600, (t % 3600) / 60, t % 60, rand_hex(2))
+}
+
+/// The mechanisms a request switches on, and whether it asks for the classic baseline.
+fn features_of(req: &StartRequest) -> Result<(Features, bool), String> {
+    let classic = matches!(req.mode.as_deref(), Some("classic"));
+    let mut features = if classic { Features::classic() } else { Features::presage() };
+    for name in &req.without {
+        features = features.without(name).ok_or_else(|| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", ")))?;
+    }
+    Ok((features, classic))
+}
+
+fn read_text(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok().filter(|t| !t.trim().is_empty())
+}
+
+/// Writes `text` to `path`; with nothing to write, the file goes.
+fn store_text(path: &Path, text: &str) -> Result<(), String> {
+    let stored = if text.trim().is_empty() {
+        std::fs::remove_file(path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+    } else {
+        path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(path, text))
+    };
+    stored.map_err(|e| format!("could not save {}: {e}", path.display()))
 }
 
 impl Harness {
@@ -272,6 +322,77 @@ impl Harness {
         cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
     }
 
+    fn system_path(&self) -> PathBuf {
+        self.inner.data_dir.join("system.md")
+    }
+
+    fn global_path(&self) -> PathBuf {
+        self.inner.data_dir.join("AGENTS.md")
+    }
+
+    pub fn instructions(&self) -> Instructions {
+        let custom = read_text(&self.system_path());
+        let default = prompt::default_template().to_string();
+        Instructions { system_custom: custom.is_some(), system: custom.unwrap_or_else(|| default.clone()), system_default: default, global: read_text(&self.global_path()).unwrap_or_default() }
+    }
+
+    /// Stores the user's system prompt template. `None`, nothing, or the built-in text itself goes
+    /// back to the built-in one.
+    pub fn set_system_prompt(&self, template: Option<&str>) -> Result<(), String> {
+        let text = template.unwrap_or("");
+        store_text(&self.system_path(), if text.trim() == prompt::default_template() { "" } else { text })
+    }
+
+    /// Stores (or, with nothing, removes) the user's instructions for every project.
+    pub fn set_global_instructions(&self, text: &str) -> Result<(), String> {
+        store_text(&self.global_path(), text)
+    }
+
+    /// The skills on offer, with the project's own where `cwd` is given.
+    pub fn skills(&self, cwd: Option<&str>) -> Vec<SkillInfo> {
+        skills::list(&self.inner.data_dir, cwd.map(str::trim).filter(|c| !c.is_empty()).map(Path::new))
+    }
+
+    /// The whole file of a skill, front matter included: what `save_skill` takes.
+    pub fn skill_file(&self, name: &str, cwd: Option<&str>) -> Result<String, String> {
+        skills::file_text(&self.inner.data_dir, cwd.map(str::trim).filter(|c| !c.is_empty()).map(Path::new), name)
+    }
+
+    /// Stores a skill of the user's. Under the name of a built-in one, it takes that one's place.
+    pub fn save_skill(&self, name: &str, content: &str) -> Result<SkillInfo, String> {
+        skills::save_user(&self.inner.data_dir, name, content)
+    }
+
+    /// Deletes a skill of the user's. Where it stood in for a built-in one, that one is back.
+    pub fn delete_skill(&self, name: &str) -> Result<(), String> {
+        skills::delete_user(&self.inner.data_dir, name)
+    }
+
+    /// The system prompt a session started with `req` would be given.
+    pub fn system_prompt(&self, req: &StartRequest) -> Result<String, String> {
+        let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
+        let (features, classic) = features_of(req)?;
+        self.compose_prompt(req, &ws.root, &features, classic).map(|(system, _)| system)
+    }
+
+    /// The system prompt and the skills of a session. The classic baseline has only its own prompt.
+    fn compose_prompt(&self, req: &StartRequest, root: &Path, features: &Features, classic: bool) -> Result<(String, Vec<SkillInfo>), String> {
+        let picked = skills::resolve(&self.inner.data_dir, Some(root), &req.skills)?;
+        if classic {
+            return Ok((prompt::SYSTEM_CLASSIC.to_string(), Vec::new()));
+        }
+        // With scripts switched off, a template about script turns would describe the wrong loop.
+        let base = if features.scripts {
+            let template = req.system_prompt.clone().filter(|t| !t.trim().is_empty()).or_else(|| read_text(&self.system_path()));
+            prompt::render(template.as_deref().unwrap_or_else(|| prompt::default_template()), features)
+        } else {
+            prompt::SYSTEM_CLASSIC.to_string()
+        };
+        let global = read_text(&self.global_path()).unwrap_or_default();
+        let project = if req.project_instructions.unwrap_or(true) { prompt::project_instructions(root) } else { None };
+        Ok((prompt::compose(&base, &global, project.as_ref().map(|(file, text)| (*file, text.as_str())), &picked), picked))
+    }
+
     fn lessons_path(&self, root: &Path) -> PathBuf {
         self.inner.data_dir.join("projects").join(format!("{:016x}", fnv64(root.as_os_str().as_encoded_bytes()))).join("lessons.jsonl")
     }
@@ -293,7 +414,8 @@ impl Harness {
         demo::create_workspace(&root).map_err(|e| format!("could not create the demo workspace: {e}"))?;
         let real = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
         let provider = Provider::Mock(demo::provider(real, 22));
-        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, ..Default::default() };
+        // The walkthrough is three replies; the review pass would add a fourth that shows nothing new.
+        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into()], ..Default::default() };
         self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
     }
 
@@ -306,11 +428,10 @@ impl Harness {
 
     fn launch(&self, req: StartRequest, provider: Provider, provider_id: &str, model: &str, effort: Option<String>) -> Result<SessionMeta, String> {
         let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
-        let classic = matches!(req.mode.as_deref(), Some("classic"));
-        let mut features = if classic { Features::classic() } else { Features::presage() };
-        for name in &req.without {
-            features = features.without(name).ok_or_else(|| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", ")))?;
-        }
+        let (features, classic) = features_of(&req)?;
+        // Read once, here: the system prompt is the cached prefix of every request of the session.
+        let (system, picked) = self.compose_prompt(&req, &ws.root, &features, classic)?;
+        let skill_names: Vec<String> = picked.into_iter().map(|s| s.name).collect();
         let mode = match (classic, req.without.is_empty()) {
             (true, _) => "classic".to_string(),
             (false, true) => "presage".to_string(),
@@ -335,6 +456,7 @@ impl Harness {
 
         let mut cfg = AgentConfig::new(model);
         cfg.features = features;
+        cfg.system = Some(system);
         cfg.effort = effort;
         cfg.autonomy = autonomy;
         cfg.interactive = req.interactive;
@@ -359,9 +481,10 @@ impl Harness {
             outcome: None,
             verified: None,
             stats: Stats::default(),
+            skills: skill_names.clone(),
         };
         let (tx, _) = broadcast::channel(4096);
-        let (input, mut inbox) = mpsc::unbounded_channel::<String>();
+        let (input, mut inbox) = mpsc::unbounded_channel::<(String, Vec<SkillInfo>)>();
         let approvals = Arc::new(Approvals::default());
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
         let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone() });
@@ -376,6 +499,7 @@ impl Harness {
             mode: meta.mode.clone(),
             autonomy: if autonomy == Autonomy::Ask { "ask" } else { "auto" }.to_string(),
             simulated,
+            skills: skill_names,
         });
         self.inner.sessions.lock().unwrap().insert(id, live.clone());
 
@@ -384,20 +508,20 @@ impl Harness {
         let worker = live.clone();
         tokio::spawn(async move {
             loop {
-                let text = tokio::select! {
-                    text = inbox.recv() => text,
+                let message = tokio::select! {
+                    message = inbox.recv() => message,
                     _ = worker.closed.cancelled() => None,
                 };
-                let Some(text) = text else { break };
+                let Some((text, skills)) = message else { break };
                 let cancel = CancellationToken::new();
                 *worker.cancel.lock().unwrap() = cancel.clone();
                 worker.set_status(SessionStatus::Running);
-                agent.run(text, &cancel).await;
+                agent.run_with(text, &skills, &cancel).await;
                 worker.set_status(SessionStatus::Idle);
             }
             agent.sess.jobs.kill_all();
         });
-        live.input.send(req.task).map_err(|_| "the session ended before it started".to_string())?;
+        live.input.send((req.task, Vec::new())).map_err(|_| "the session ended before it started".to_string())?;
         Ok(meta)
     }
 
@@ -407,16 +531,32 @@ impl Harness {
 
     /// Sends a follow-up message to an idle session.
     pub fn send(&self, id: &str, text: &str) -> Result<(), String> {
+        self.send_with_skills(id, text, &[])
+    }
+
+    /// `send`, switching on the skills named that the session does not have yet. Its system prompt
+    /// is already sent, so they go in front of this message instead.
+    pub fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
         let live = self.live(id)?;
         if text.trim().is_empty() {
             return Err("the message is empty".into());
         }
-        if live.meta.lock().unwrap().status == SessionStatus::Running {
-            return Err("the session is still working; stop it first or wait".into());
+        let cwd = live.meta.lock().unwrap().cwd.clone();
+        let mut added = skills::resolve(&self.inner.data_dir, Some(Path::new(&cwd)), skills)?;
+        {
+            let mut meta = live.meta.lock().unwrap();
+            if meta.status == SessionStatus::Running {
+                return Err("the session is still working; stop it first or wait".into());
+            }
+            // The classic baseline has no skills.
+            added.retain(|s| meta.mode != "classic" && !meta.skills.contains(&s.name));
+            meta.skills.extend(added.iter().map(|s| s.name.clone()));
+            // Mark it running now so a second message cannot slip in before the worker picks this one up.
+            meta.status = SessionStatus::Running;
+            meta.updated = now_ms();
         }
-        // Mark it running now so a second message cannot slip in before the worker picks this one up.
-        live.set_status(SessionStatus::Running);
-        live.input.send(text.to_string()).map_err(|_| "the session has ended".to_string())
+        live.save_meta();
+        live.input.send((text.to_string(), added)).map_err(|_| "the session has ended".to_string())
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
@@ -611,9 +751,9 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let cwd = ws.to_string_lossy().into_owned();
         let turns = vec![MockTurn::calls("", vec![("write", json!({"path": "a.txt", "content": "x"})), ("shell", json!({"cmd": "test -f a.txt", "expect_exit": "0"})), ("finish", json!({"summary": "wrote a.txt"}))])];
-        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into()], ..Default::default() };
+        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into(), "review".into()], ..Default::default() };
         let meta = h.start_scripted(req, MockProvider::scripted(turns)).unwrap();
-        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch", true));
+        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch, review", true));
         let done = until_idle(&h, &meta.id).await;
         assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
 
@@ -630,6 +770,139 @@ mod tests {
         let other = h.with_data_dir(h.inner.data_dir.join("elsewhere"));
         assert!(other.state().providers.iter().any(|p| p.id == "openrouter" && p.has_key));
         assert!(other.list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_system_template_and_the_users_instructions_can_be_edited_and_reset() {
+        let h = harness("instructions");
+        let fresh = h.instructions();
+        assert!(!fresh.system_custom && fresh.system == fresh.system_default && fresh.global.is_empty());
+        assert!(fresh.system_default.starts_with("You are Presage") && fresh.system_default.contains("{watch}"));
+
+        h.set_system_prompt(Some("You are terse. {watch}")).unwrap();
+        h.set_global_instructions("Use tabs.\n").unwrap();
+        let edited = Harness::at(h.inner.data_dir.clone()).instructions();
+        assert_eq!((edited.system.as_str(), edited.system_custom, edited.global.as_str()), ("You are terse. {watch}", true, "Use tabs.\n"));
+        assert_eq!(edited.system_default, fresh.system_default);
+
+        // The built-in text, nothing and `None` all go back to the built-in template.
+        for reset in [Some(fresh.system_default.as_str()), Some(" \n"), None] {
+            h.set_system_prompt(Some("Mine.")).unwrap();
+            assert!(h.instructions().system_custom);
+            h.set_system_prompt(reset).unwrap();
+            assert!(!h.instructions().system_custom && !h.inner.data_dir.join("system.md").exists());
+        }
+        h.set_global_instructions("").unwrap();
+        assert!(h.instructions().global.is_empty() && !h.inner.data_dir.join("AGENTS.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_session_gets_its_system_prompt_once_and_later_skills_with_the_message() {
+        use crate::provider::mock::{MockTurn, TurnFn};
+        use crate::provider::{Message, Role};
+        let h = harness("skills");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(ws.join(".presage/skills")).unwrap();
+        std::fs::write(ws.join("AGENTS.md"), "Run make test.\n").unwrap();
+        std::fs::write(ws.join(".presage/skills/house.md"), "---\ntitle: House rules\n---\nNo globals.\n").unwrap();
+        h.set_global_instructions("Use tabs.").unwrap();
+        let cwd = ws.to_string_lossy().into_owned();
+        let req = || StartRequest { cwd: cwd.clone(), task: "hello".into(), interactive: true, skills: vec!["security".into(), "house".into()], ..Default::default() };
+        let skill = |name: &str| h.skills(Some(&cwd)).into_iter().find(|s| s.name == name).unwrap();
+
+        // Template, the user's instructions, the project's, then the skills in the order asked for.
+        let built_in = prompt::system_prompt(&Features::presage());
+        let expected = h.system_prompt(&req()).unwrap();
+        assert_eq!(expected, format!("{built_in}\n\n# User instructions\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\nRun make test.\n\n# Skill: {}\n\n{}\n\n# Skill: House rules\n\nNo globals.", skill("security").title, skill("security").body));
+
+        // A template for one run wins over the user's, which wins over the built-in one.
+        let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
+        h.set_system_prompt(Some("Mine. {finish}")).unwrap();
+        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. The first `finish` after a change comes back once with a review to carry out; watched tests are re-run first and it is refused if they fail.\n\n# User instructions\n\nUse tabs.");
+        assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), "Be terse.\n\n# User instructions\n\nUse tabs.");
+        h.set_system_prompt(None).unwrap();
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\nUse tabs."));
+
+        // The baseline is the classic prompt and nothing else.
+        assert_eq!(h.system_prompt(&StartRequest { mode: Some("classic".into()), system_prompt: Some("Be terse.".into()), ..req() }).unwrap(), prompt::SYSTEM_CLASSIC);
+        let no_scripts = h.system_prompt(&StartRequest { without: vec!["scripts".into()], ..bare.clone() }).unwrap();
+        assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
+
+        let unknown = StartRequest { skills: vec!["ui".into(), "telepathy".into()], ..req() };
+        assert!(h.system_prompt(&unknown).unwrap_err().contains("unknown skill \"telepathy\""));
+        assert!(h.start_scripted(unknown, MockProvider::scripted(vec![])).unwrap_err().contains("unknown skill \"telepathy\""));
+        assert!(h.list().is_empty(), "nothing was started");
+
+        let seen: Arc<Mutex<Vec<Vec<Message>>>> = Arc::default();
+        let turn = || {
+            let seen = seen.clone();
+            Box::new(move |messages: &[Message]| {
+                seen.lock().unwrap().push(messages.to_vec());
+                MockTurn::say("ok")
+            }) as TurnFn
+        };
+        let meta = h.start_scripted(req(), MockProvider::new(vec![turn(), turn(), turn()])).unwrap();
+        assert_eq!(meta.skills, ["security", "house"]);
+        until_idle(&h, &meta.id).await;
+
+        // What changes on disk after the start does not reach a session that is under way.
+        std::fs::write(ws.join("AGENTS.md"), "Changed.").unwrap();
+        h.set_global_instructions("Changed.").unwrap();
+        h.send_with_skills(&meta.id, "now the UI", &["house".into(), "ui".into()]).unwrap();
+        until_idle(&h, &meta.id).await;
+        h.send_with_skills(&meta.id, "again", &["ui".into()]).unwrap();
+        let done = until_idle(&h, &meta.id).await;
+        assert_eq!(done.skills, ["security", "house", "ui"]);
+        assert!(h.send_with_skills(&meta.id, "more", &["telepathy".into()]).unwrap_err().contains("unknown skill"));
+        assert_eq!(h.meta(&meta.id).unwrap().status, SessionStatus::Idle);
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(seen.iter().all(|messages| messages[0].content == expected), "the system prompt is the same bytes in every request");
+        let said: Vec<&str> = seen[2].iter().filter(|m| m.role == Role::User).map(|m| m.content.as_str()).collect();
+        assert!(said[0].ends_with("<task>\nhello\n</task>") && !said[0].contains("<skill") && !said[0].contains("Run make test."), "{}", said[0]);
+        // Only the skill the session did not have yet, and only once.
+        assert_eq!(said[1], format!("<skill name=\"ui\">\n{}\n</skill>\n\nnow the UI", skill("ui").body));
+        assert_eq!(said[2], "again");
+
+        let events = h.events(&meta.id).unwrap();
+        assert!(matches!(&events[0].kind, EventKind::SessionStart { skills, .. } if *skills == ["security", "house"]));
+        let with_message: Vec<(String, Vec<String>)> = events.iter().filter_map(|e| if let EventKind::User { text, skills } = &e.kind { Some((text.clone(), skills.clone())) } else { None }).collect();
+        assert_eq!(with_message, [("hello".to_string(), vec![]), ("now the UI".to_string(), vec!["ui".to_string()]), ("again".to_string(), vec![])]);
+        assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].skills, ["security", "house", "ui"]);
+    }
+
+    #[tokio::test]
+    async fn the_classic_baseline_takes_no_skills() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("classic-skills");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "hello".into(), mode: Some("classic".into()), interactive: true, skills: vec!["ui".into()], ..Default::default() };
+        let meta = h.start_scripted(req, MockProvider::scripted(vec![MockTurn::say("ok"), MockTurn::say("ok")])).unwrap();
+        assert!(meta.skills.is_empty());
+        until_idle(&h, &meta.id).await;
+        h.send_with_skills(&meta.id, "more", &["security".into()]).unwrap();
+        assert!(until_idle(&h, &meta.id).await.skills.is_empty());
+        assert!(h.events(&meta.id).unwrap().iter().all(|e| !matches!(&e.kind, EventKind::User { skills, .. } if !skills.is_empty())));
+    }
+
+    #[test]
+    fn what_was_stored_before_there_were_skills_still_loads() {
+        let meta = SessionMeta { id: "s".into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: None, verified: None, stats: Stats::default(), skills: vec!["ui".into()] };
+        let mut old = serde_json::to_value(&meta).unwrap();
+        assert_eq!(old.as_object_mut().unwrap().remove("skills"), Some(serde_json::json!(["ui"])));
+        assert!(serde_json::from_value::<SessionMeta>(old).unwrap().skills.is_empty());
+
+        let start = r#"{"seq":1,"ts":1,"type":"session_start","id":"s","title":"t","cwd":"/","provider":"p","model":"m","effort":"high","mode":"presage","autonomy":"auto","simulated":false}"#;
+        assert!(matches!(serde_json::from_str::<Event>(start).unwrap().kind, EventKind::SessionStart { skills, .. } if skills.is_empty()));
+        let user = r#"{"seq":2,"ts":1,"type":"user","text":"hi"}"#;
+        let event = serde_json::from_str::<Event>(user).unwrap();
+        assert!(matches!(&event.kind, EventKind::User { skills, .. } if skills.is_empty()));
+        assert_eq!(serde_json::to_string(&event).unwrap(), user);
+
+        let req: StartRequest = serde_json::from_str(r#"{"cwd":"/tmp","task":"x"}"#).unwrap();
+        assert!(req.skills.is_empty() && req.system_prompt.is_none() && req.project_instructions.is_none());
     }
 
     #[tokio::test]
