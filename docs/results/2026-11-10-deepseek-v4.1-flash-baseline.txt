@@ -1,0 +1,46 @@
+presage bench 20261110-233024-e21a · logfare · effort ratchet · 5 runs per task and variant
+fixed prompt prefix, estimated: presage ~1193 tokens, no-preflight ~1182 tokens, no-auto-watch ~1290 tokens, classic ~762 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      presage             5/5     3    8.5k    60%     314   $0.0005   $0.0015    2.5s
+           no-preflight        5/5     3    6.2k    71%     412   $0.0005   $0.0012    2.9s
+           no-auto-watch       5/5     4    9.3k    58%     476   $0.0010   $0.0017    6.1s
+           classic             5/5     5    9.8k    65%     692   $0.0011   $0.0018    5.6s
+inventory  presage             5/5     3    9.7k    73%     448   $0.0008   $0.0017    3.9s
+           no-preflight        5/5     4   10.4k    52%     618   $0.0009   $0.0020    3.7s
+           no-auto-watch       5/5     3    8.7k    71%     576   $0.0007   $0.0016    3.5s
+           classic             5/5     5    9.5k    62%     555   $0.0007   $0.0017    3.9s
+slug       presage             5/5     3    8.0k    69%     422   $0.0008   $0.0015    3.6s
+           no-preflight        5/5     3    6.2k    79%     484   $0.0006   $0.0012    4.0s
+           no-auto-watch       5/5     3    6.6k    79%     544   $0.0007   $0.0013    4.1s
+           classic             5/5     5    8.0k    76%     568   $0.0007   $0.0015    5.4s
+tariff     presage             5/5     3   17.0k    35%     426   $0.0014   $0.0028    3.8s
+           no-preflight        5/5     6   22.5k    57%     647   $0.0012   $0.0038    5.3s
+           no-auto-watch       5/5     4   20.7k    75%     742   $0.0018   $0.0036    4.9s
+           classic             5/5     5   11.9k    50%     562   $0.0013   $0.0021    4.8s
+textstats  presage             5/5     3    8.1k    60%     407   $0.0008   $0.0015    3.3s
+           no-preflight        5/5     4    9.8k    70%     700   $0.0008   $0.0019    4.3s
+           no-auto-watch       5/5     4   10.4k    74%     568   $0.0008   $0.0019    4.0s
+           classic             5/5     6   12.0k    78%     562   $0.0008   $0.0021    5.7s
+roman      presage             5/5     4   10.7k    71%    2.8k   $0.0022   $0.0033     13s
+           no-preflight        5/5     4    9.4k    75%    1.6k   $0.0017   $0.0024     10s
+           no-auto-watch       5/5     4    9.7k    71%    1.6k   $0.0016   $0.0024    7.8s
+           classic             5/5     6   11.7k    58%    2.1k   $0.0018   $0.0031     12s
+report     presage             5/5     4    9.0k    74%     462   $0.0006   $0.0016    4.4s
+           no-preflight        5/5     6   14.4k    71%    1.3k   $0.0014   $0.0031    7.7s
+           no-auto-watch       5/5     4    9.2k    82%     747   $0.0009   $0.0019    5.4s
+           classic             5/5     5    8.5k    62%     798   $0.0009   $0.0018    6.4s
+ALL        presage           35/35     3    9.6k    63%     442   $0.0008   $0.0017    3.8s   total $0.043, $0.0012 per solved task
+           no-preflight      35/35     4    9.7k    71%     618   $0.0009   $0.0019    4.8s   total $0.040, $0.0011 per solved task
+           no-auto-watch     35/35     4    9.5k    70%     619   $0.0010   $0.0020    4.9s   total $0.043, $0.0012 per solved task
+           classic           35/35     6   10.4k    65%     639   $0.0009   $0.0019    5.4s   total $0.037, $0.0011 per solved task
+presage against classic: turns -50%, input tokens -8%, output tokens -31%, cost -3% (-11% with no cache), time -30%; solved 35/35 against 35/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 2, dearer on 5 (with no cache: 5 and 2)
+no-preflight against classic: turns -33%, input tokens -7%, output tokens -3%, cost +8% (-2% with no cache), time -11%; solved 35/35 against 35/35
+  by task (7): fewer turns on 5, more on 2; cheaper on 4, dearer on 3 (with no cache: 4 and 3)
+no-auto-watch against classic: turns -33%, input tokens -9%, output tokens -3%, cost +14% (+1% with no cache), time -11%; solved 35/35 against 35/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 3, dearer on 4 (with no cache: 5 and 2)
+
+results: /tmp/presage-live/bench/20261110-233024-e21a/results.json
+replay a run: PRESAGE_HOME=/tmp/presage-live/bench/20261110-233024-e21a/home presage show <session>

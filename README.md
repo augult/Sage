@@ -3,9 +3,10 @@
 An expectation-driven agent harness, written in Rust: engine, CLI, and a Tauri desktop app.
 
 Presage is built for cheap models that think for a long time (DeepSeek V4.1 Flash, GLM-5.3). On
-those models a cached input token costs 1/50 of a fresh one and 1/200 of an output token, so the
-scarce resource is not context. It is deliberation: every model turn is a fresh round of paid
-thinking. And the usual failure is not lack of intelligence but an unnoticed mistake that compounds.
+DeepSeek a cached input token costs 1/50 of a fresh one and 1/200 of an output token (on GLM-5.3
+about 1/5 and 1/17), so the scarce resource is not context. It is deliberation: every model turn is
+a fresh round of paid thinking. And the usual failure is not lack of intelligence but an unnoticed
+mistake that compounds.
 
 One primitive addresses both: **the model says what it expects, the harness checks it mechanically,
 and the model's attention is spent only where reality diverged.**
@@ -16,69 +17,70 @@ and the model's attention is spent only where reality diverged.**
 |---|---|---|
 | **A reply is a script** | All tool calls in one reply run in order. The first step that fails or contradicts its prediction halts the rest (`set -e` semantics). The model can commit to "edit, check, finish" in one round of thinking, safely. | `script.rs` |
 | **Predictions and receipts** | `shell` takes a prediction (`expect_exit`, `expect_has`, `expect_lacks`). A predicted success that held is answered with a one-line receipt instead of the output; a violated one (a *surprise*) gets the output, the source lines it points at with edit anchors, and any lesson already learned about that error. Output size is proportional to surprise. | `guard.rs`, `tools/shell.rs`, `locate.rs` |
-| **Watches** | Checks registered once and re-run by the harness after every change. They report only state changes: a regression is announced the moment it is introduced. | `watches.rs` |
+| **Watches** | Checks registered once and re-run by the harness after every change. They report only state changes: a regression is announced the moment it is introduced. The first test command the model runs becomes a watch without being asked, so an edit-only reply comes back checked. | `watches.rs` |
+| **Before the first turn** | What the harness can find out without the model is in the first message: a snapshot of the environment, the files the task names (as `read` output, so the first reply can edit them), and the result of a test command the task names, which is watched from then on. | `bootstrap.rs`, `attach.rs`, `watches.rs` |
 | **Evidence gate** | `finish` is accepted only if a check has passed since the last change to the workspace (tracked with a cheap fingerprint). With fresh evidence it is accepted in the same reply as the check. | `state.rs`, `script.rs` |
 | **Anchored edits** | Lines are shown as `41kq|…` (line number + 2-letter content hash). Edits address anchors, so the model never retypes old text, and a stale or shifted anchor is detected or relocated instead of corrupting the file. | `anchors.rs`, `tools/edit.rs` |
 | **Reflex memory** | Error → fix pairs are learned mechanically per project (a command failed, a related one worked, no file was edited in between) and recalled at the next session. No model call involved. | `lessons.rs` |
-| **Price-aware policy** | The harness knows the price vector (cache hit / miss / output). History is append-only and byte-stable so the provider cache always hits; every request is audited (harness bust vs provider miss); old observations are trimmed only when the arithmetic says it pays. | `economy.rs`, `context.rs` |
+| **Price-aware policy** | The harness knows the price vector (cache hit / miss / output). History is append-only and byte-stable so that the provider's cache can hit; every request is audited (harness bust vs provider miss); old observations are trimmed only when the arithmetic says it pays. | `economy.rs`, `context.rs` |
 | **Effort ratchet** | Reasoning effort starts at `high` (below GLM-5.3's default `max`) and only rises, after repeated surprises. | `agent.rs` |
-| **Robust plumbing** | Tool-call repair (malformed JSON, foreign argument names, calls written as text), thinking-loop watchdog, retries honouring `Retry-After`, commands that outlive their timeout become background jobs instead of being killed, noise-stripped output with the raw bytes kept on disk (`out:N`). | `repair.rs`, `provider/`, `tools/jobs.rs`, `text.rs` |
+| **Robust plumbing** | Tool-call repair (malformed JSON, foreign argument names, calls written as text), thinking-loop watchdog, retries honouring `Retry-After`, commands that outlive their timeout become background jobs instead of being killed, noise-stripped output with the raw bytes kept on disk (`out:N`), command output shown with paths relative to the workspace. | `repair.rs`, `provider/`, `tools/jobs.rs`, `text.rs`, `workspace.rs` |
 
 A `--classic` mode switches all of this off and runs a conventional tool loop with the same model
-and tools, so every claim above can be measured rather than believed.
+and tools, and `presage bench` runs both, or Presage with any one mechanism switched off, over a set
+of tasks. Every claim above can be measured rather than believed.
 
 ## Status
 
-Honest state as of the last commit:
+State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
+`docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 132 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 164 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
-- **Walkthrough**: `presage demo` plays a three-turn scripted session through the real harness
-  (reproduce, a wrong fix that is caught and halts the script, the right fix accepted with evidence).
-- **Live models**: runs end to end on GLM-5.3 through Logfare (results below). DeepSeek V4.1 Flash
-  could not be tested: Logfare's route for it answered 429/502 "overloaded" for the whole session.
-  The native DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are
-  untested.
-- **Desktop app**: only the Tauri shell scaffold exists (it builds and renders a placeholder). The UI is not built yet; the spec is in `docs/DESKTOP_UI_BRIEF.md`.
+- **Benchmark**: `presage bench` runs 7 small synthetic tasks under harness variants and judges
+  every run with held-out checks, whatever the agent claimed.
+- **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. The native
+  DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are untested.
+- **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
+  and the front end has the session list, the new-session form, the live timeline with inspector,
+  and settings. It builds without warnings and has been checked with headless screenshots only:
+  nobody has driven it by hand, and no live-model session has been started from it.
+- **Walkthrough**: `presage demo` plays a three-reply scripted session through the real harness
+  (read and reproduce, a wrong fix that is caught and halts the script, the right fix accepted with
+  evidence).
 - Not implemented: resuming a session after restarting the app, Windows-specific shell handling,
   OS-level sandboxing of commands (there is a tripwire for catastrophic commands, nothing more).
 
-### Live results so far: no advantage demonstrated yet
+### What the benchmark shows
 
-One small task (fix two bugs in a two-module Python package so six unit tests pass), GLM-5.3 via
-Logfare, effort `high`. Every run produced a correct fix (checked afterwards with the pristine tests).
+Logfare, 7 tasks, 5 runs per task and variant, medians per run; "no cache" is the cost had the
+provider cached nothing. These rows are the baseline of 10 November, before `attach`.
 
-| Run | Mode | Turns | Steps | Input tok (cached) | Output tok (thinking) | List-price cost | Time |
-|---|---|---:|---:|---:|---:|---:|---:|
-| 1 | Presage (before fixes below) | 6 | 8 | 16,136 (3,392) | 831 (382) | $0.0224 | 15.6 s |
-| 2 | Presage | 6 | 11 | 17,970 (6,464) | 1,038 (655) | $0.0224 | 15.9 s |
-| 3 | Presage | 5 | 10 | 17,843 (8,704) | 758 (276) | $0.0184 | 10.7 s |
-| 4 | Classic | 7 | 11 | 13,785 (0) | 1,293 (750) | $0.0250 | 22.8 s |
-| 5 | Classic | 5 | 9 | 10,438 (4,032) | 731 (242) | $0.0132 | 58.9 s |
+| Model | Variant | Solved | Turns (mean) | Input tok | Output tok | Cost | No cache | Total spend | Time |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| GLM-5.3 | Presage | 35/35 | 3 (3.6) | 8.8k | 395 | $0.0077 | $0.0141 | $0.469 | 6.4 s |
+| GLM-5.3 | Classic | 35/35 | 6 (7.4) | 9.9k | 415 | $0.0088 | $0.0154 | $0.864 | 9.8 s |
+| DeepSeek V4.1 Flash | Presage | 35/35 | 3 (3.6) | 9.6k | 442 | $0.0008 | $0.0017 | $0.043 | 3.8 s |
+| DeepSeek V4.1 Flash | Classic | 35/35 | 6 (5.6) | 10.4k | 639 | $0.0009 | $0.0019 | $0.037 | 5.4 s |
 
-Five runs of one task are an anecdote, not a benchmark, and what they show is parity at best:
-
-- **The central bet has not paid off yet.** GLM-5.3 batches reads and makes predictions, but it did
-  not chain edit → check → finish into one reply, so turns were not saved. It works step by step as
-  it was trained to. Getting it to chain (or having the harness run the check itself after edits) is
-  the main open problem.
-- **Presage's fixed prefix is about 1,000 tokens larger** (system prompt and eight tool schemas).
-  With a working prefix cache that is nearly free; on this gateway the cache missed on most turns
-  (the harness's prefix was byte-stable; the audit classifies these as provider-side misses), so it
-  was paid for repeatedly.
-- What Presage did deliver here: completion backed by harness-checked evidence (`verified by …`),
-  where the classic loop ended on the model's say-so.
-
-The first live run also exposed four defects that no scripted test would have, all fixed since:
-GLM-5.3 mangles nested tool arguments (`"exit</arg_key><arg_value>nonzero"`), so predictions are now
-flat fields; `tests | tail` hid a failing exit code, so the harness now reads `PIPESTATUS`; the model
-called `read {"out": "1"}`; and a correctly predicted *failure* was reduced to a receipt although its
-output was exactly what the model needed.
+- **Turns halve on both models, and runs finish about a third sooner.** The saving comes from the
+  harness running the check itself (preflight and auto-watch each account for one turn), not from
+  the model's own predictions, of which it makes few once a watch exists.
+- **Cost falls less.** On GLM-5.3 a typical run is about a tenth cheaper; the 46% gap in total
+  spend is two runaway classic runs on one task. On DeepSeek there is no saving: three Presage
+  turns carry about as many input tokens as six classic ones.
+- **Reliability is not measured.** Every run of every variant was solved, so these tasks are too
+  easy to separate the variants.
+- **The model still spends a turn on `finish`.** It came in the same reply as the edits in 6 of 35
+  runs on GLM-5.3 and 1 of 35 on DeepSeek. Before `attach`, almost every run was
+  `read → edit → finish`.
+- `attach` and `short_paths` were measured afterwards: see the follow-up in `docs/BENCHMARKS.md`.
 
 ## Build and run
 
 Requires Rust 1.99.1 (pinned in `rust-toolchain.toml`). On Debian/Ubuntu, `scripts/setup-dev.sh`
-installs the toolchain and the system libraries Tauri needs.
+installs the toolchain and the system libraries Tauri needs; `.hoplite/setup.sh` does the latter
+when a Hoplite sandbox is set up.
 
 ```sh
 cargo test                      # engine + CLI tests
@@ -89,6 +91,9 @@ presage key logfare             # store an API key (read from stdin), or export 
 presage run -C path/to/project "Fix the failing tests"
 presage run --classic ...       # baseline loop, for comparison
 presage sessions | presage show <id>
+
+presage bench --check           # the tasks fail as shipped and pass with their reference solutions
+presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
 ```
 
 Providers built in: `logfare`, `deepseek`, `zai`, `zai-coding`, `openrouter`, plus a custom
@@ -105,9 +110,10 @@ cargo run -p presage-desktop --target-dir target/desktop
 
 ```
 crates/presage-core   the engine (no UI dependencies)
-crates/presage-cli    the `presage` binary
+crates/presage-cli    the `presage` binary; bench/ holds the benchmark tasks
 desktop/src-tauri     Tauri shell
 desktop/ui            static front end (no bundler)
+docs                  handoff, benchmarks with raw results, UI brief, screenshots
 ```
 
 Sessions, spilled outputs, lessons and configuration live under `~/.presage` (`PRESAGE_HOME`).
