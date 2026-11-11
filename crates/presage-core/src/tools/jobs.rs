@@ -175,6 +175,9 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<OutBuf>>) {
 pub fn spawn(cmd: &str, cwd: &Path, envs: &[(String, String)], state: StateMode<'_>, spill: &Path) -> std::io::Result<Running> {
     let mut c = shell_command(cmd, state);
     c.env("PRESAGE_PIPE", pipe_file(spill));
+    // `cd -` goes to $OLDPWD, and an inherited one is wherever Presage was launched from: a
+    // directory that has nothing to do with the session. Each command starts with it at home.
+    c.env("OLDPWD", cwd);
     c.current_dir(cwd)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .stdin(Stdio::null())
@@ -361,6 +364,21 @@ mod tests {
         assert_eq!(waited, Waited::Exited(Exit { code: Some(3), signal: None }));
         let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         assert!(text.contains("out") && text.contains("err"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cd_minus_stays_in_the_session_directory() {
+        // Without this an agent that runs `cd -` or `cd "$OLDPWD"` lands wherever Presage was started.
+        let log = spill("d.log");
+        let dir = log.parent().unwrap().to_path_buf();
+        let mut run = spawn("cd - >/dev/null && pwd && echo \"$OLDPWD\"", &dir, &[], StateMode::None, &log).unwrap();
+        let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &CancellationToken::new()).await;
+        drain(&mut run.readers).await;
+        assert_eq!(waited, Waited::Exited(Exit { code: Some(0), signal: None }));
+        let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
+        let here = dir.to_str().unwrap();
+        assert_eq!(text.lines().collect::<Vec<_>>(), [here, here], "{text}");
     }
 
     #[cfg(unix)]
