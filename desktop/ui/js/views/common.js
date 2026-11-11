@@ -51,6 +51,9 @@ export const tag = (text, tone = 'plain', title) => h(`span.tag.tone-${tone}`, {
 /** Looks up a value the engine named. Anything this build does not know comes back undefined. */
 export const known = (table, name) => (Object.hasOwn(table, name) ? table[name] : undefined);
 
+/** The cross that closes a dialog. */
+export const closeButton = (close) => h('button.close', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, icon('cross', 14));
+
 /** A modal dialog that removes itself when closed. `build(close)` returns its children. */
 export function openDialog(className, build) {
   const dialog = h(`dialog.${className}`);
@@ -58,5 +61,10 @@ export function openDialog(className, build) {
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
+  // Opening goes to the first control, which must not be the cross: the dialog takes the focus instead.
+  if (document.activeElement?.classList.contains('close')) {
+    dialog.tabIndex = -1;
+    dialog.focus();
+  }
   return dialog;
 }

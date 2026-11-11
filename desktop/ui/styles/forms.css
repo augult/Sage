@@ -162,10 +162,10 @@
   padding: 0 7px;
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
+  border-radius: var(--r-2);
   background: transparent;
   color: var(--soft);
-  font: var(--text-sm)/18px var(--mono);
+  font: var(--text-sm)/22px var(--mono);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -364,12 +364,6 @@
 .field-row .input {
   flex: 1;
   min-width: 0;
-}
-
-/* Buttons beside an input take its height. */
-.field-row .btn,
-.picker-path .btn {
-  height: auto;
 }
 
 /* A radio group drawn as chips; `.segmented` joins them into one control. */

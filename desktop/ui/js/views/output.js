@@ -3,13 +3,13 @@
 import { api } from '../api.js';
 import { h } from '../dom.js';
 import { bytes, plural } from '../format.js';
-import { openDialog } from './common.js';
+import { closeButton, openDialog } from './common.js';
 
 export function openOutput(sessionId, handle) {
   const size = h('span.muted');
   const body = h('pre.output-body', 'Loading…');
   openDialog('output', (close) => [
-    h('div.dialog-head', h('h2', h('span.mono', handle), ' · full output'), size, h('button.btn', { type: 'button', onclick: close }, 'Close')),
+    h('div.dialog-head', h('h2', h('span.mono', handle), ' · full output'), size, closeButton(close)),
     body,
   ]);
   api.readOutput(sessionId, handle).then(

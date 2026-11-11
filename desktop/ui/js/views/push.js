@@ -5,7 +5,7 @@
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { firstLine, plural } from '../format.js';
-import { openDialog } from './common.js';
+import { closeButton, openDialog } from './common.js';
 
 // Longer than this and a commit's first line is cut off in most places it is shown.
 const SUBJECT = 72;
@@ -23,7 +23,7 @@ export function openPush(session, onChange) {
   let busy = false;
 
   const dialog = openDialog('push', (close) => [
-    h('div.dialog-head', title, h('button.btn.quiet', { type: 'button', onclick: close }, 'Close')),
+    h('div.dialog-head', title, closeButton(close)),
     body,
     error,
     h('div.dialog-foot', note, go),

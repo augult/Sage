@@ -80,7 +80,10 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
 - **Shape.** 8px grid. Corners are barely turned: 2px tags and marks, 3px controls and rows, 4px
-  cards, menus, dialogs and the sheet. Nothing is a pill.
+  cards, menus, dialogs and the sheet. Nothing is a pill. Every button is 28px tall, and a
+  one-line field beside one is as tall; the small buttons inside a line or a header (copy, a
+  diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
+  darkens when pointed at.
 - **The interface has no colour.** Ink, paper and the greys between, in a light and a dark
   appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system). Colour
   belongs to the painting behind the glass and to two things: a failure, which must not be
