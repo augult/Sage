@@ -2614,7 +2614,9 @@ name = "presage-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "presage-core",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
