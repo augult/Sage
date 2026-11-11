@@ -8,7 +8,7 @@ import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
 import { plainPath, tilde } from '../format.js';
 import * as themes from '../themes.js';
-import { MOD_KEY } from './common.js';
+import { onSendKey, sendKeyLabel } from './common.js';
 import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
 
 const MODES = [
@@ -183,6 +183,7 @@ export function mountNewSession(main, app) {
     placeholder: 'Task',
     'aria-label': 'Task',
     oninput: () => (draft.task = task.value),
+    onkeydown: (event) => onSendKey(event, start),
   });
 
   // With no key there is nothing to start: the walkthrough is the view's one primary action.
@@ -205,8 +206,9 @@ export function mountNewSession(main, app) {
   const form = h(
     'div.new-session',
     {
+      // From any other control of the form. In the task box the key is the user's choice.
       onkeydown: (event) => {
-        if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+        if (event.target === task || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
         start();
       },
@@ -225,7 +227,7 @@ export function mountNewSession(main, app) {
         startButton,
       ),
     ),
-    h('div.composer-foot', recentRow, h('span.kbd', `${MOD_KEY}+Enter`)),
+    h('div.composer-foot', recentRow, h('span.kbd', sendKeyLabel())),
     error,
   );
 

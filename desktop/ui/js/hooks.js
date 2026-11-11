@@ -5,7 +5,7 @@
 //   PRESAGE_UI_OPEN=<session id>            open that session
 //   PRESAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
 //   PRESAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
-//       click:<selector>          type:<selector>=><text>     key:<selector>=>ctrl+Enter
+//       click:<selector>          type:<selector>=><text>     key:<selector>=>Enter (or ctrl+Enter)
 //       scroll:<selector>         wait:<milliseconds>
 //     An action waits for its element to exist, so scripts need no timing of their own.
 //   PRESAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)

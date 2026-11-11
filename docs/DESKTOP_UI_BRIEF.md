@@ -125,7 +125,9 @@ At start-up, and on every change of background or appearance, `backdrop.js` take
 at 320px, softens it, presses its brightness into a band (14–76 of 255 for dark, 198–248 for
 light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
 much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
-background in `themes.js`), stretched without smoothing so that its dots stay square. The panes
+background in `themes.js`), stretched without smoothing so that its dots stay square. The dither
+shows on the glass of the sidebar and the inspector only: it is cut away where the sheet lies
+(`clip-path` in `glass.css`, from the pane widths in `layout.css`). The panes
 are translucent fills: the veil over everything, and in the middle the sheet, the reading
 surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
 None.
@@ -157,7 +159,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
      then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
      which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
-     (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu lists models under their provider
+     (Auto / Ask), and Start (Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
+     other of the two breaks the line, as Shift+Enter always does). The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
@@ -183,8 +186,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        is the answer. What did not go to plan is appended, because the bar starts shut:
        "1 surprise, 1 skipped". While its last turn runs the bar has a spinner and says what is
        happening now ("Thinking 2.1s", "Running sh check.sh 0.4s").
-     - **The bar opens the rows**: per turn a line of its numbers (turn, duration, tokens with
-       cached share, cache verdict, effort), the reasoning ("Thought", with its first line), a
+     - **The bar opens the rows**: the reasoning ("Thought", with its first line), a
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
        watch changes, harness notes, lessons, effort changes, trims, retries, answered
@@ -222,7 +224,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
-     applies at once). Then **API keys**, a line per provider: a check and the name in full ink
+     applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
+     other one starts a new line; kept by the window). Then **API keys**, a line per provider: a check and the name in full ink
      when it has a key, a ring and grey when it has none; its address; a password field; and
      Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider

@@ -2,8 +2,35 @@
 
 import { h, icon, spinner } from '../dom.js';
 import { pendingApprovals } from '../model.js';
+import * as prefs from '../prefs.js';
 
 export const MOD_KEY = navigator.platform.startsWith('Mac') ? 'Cmd' : 'Ctrl';
+
+// What sends a message: Enter alone, or Enter with Ctrl/Cmd. The other one breaks the line.
+// Chosen in Settings and kept by the window.
+export const SEND_KEYS = ['enter', 'mod'];
+export const sendKey = () => (prefs.get('send') === 'mod' ? 'mod' : 'enter');
+export const sendKeyLabel = (key = sendKey()) => (key === 'mod' ? `${MOD_KEY}+Enter` : 'Enter');
+
+/** The keydown of a box that sends: `send()` on the chosen key, a new line on the other. */
+export function onSendKey(event, send) {
+  // Enter that ends an IME composition belongs to the composition. Shift+Enter is always a new line.
+  if (event.key !== 'Enter' || event.isComposing || event.shiftKey) return;
+  const mod = event.ctrlKey || event.metaKey;
+  if (mod === (sendKey() === 'mod')) {
+    event.preventDefault();
+    send();
+  } else if (mod) {
+    // A textarea does nothing with Ctrl+Enter by itself.
+    event.preventDefault();
+    const box = event.target;
+    // execCommand keeps the box's undo history; setRangeText is for a webview without it.
+    if (!document.execCommand('insertText', false, '\n')) {
+      box.setRangeText('\n', box.selectionStart, box.selectionEnd, 'end');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+}
 
 // Tones carry meaning without hue (styles/base.css): `good` held or done, `alert` wants a look,
 // `quiet` is the model's side at work, `danger` failed, `plain` is none of these.

@@ -1,17 +1,24 @@
 /* The window: glass with a sidebar on its left and the inspector on its right, and between them the
    sheet, the one opaque surface, where reading happens. The top strip of each is the title bar. */
 
-#app {
-  position: relative;
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 300px;
-  height: 100vh;
+/* How wide the two panes of glass are. The dither is cut to them (styles/glass.css). */
+:root {
+  --sidebar-w: 236px;
+  --inspector-w: 300px;
 }
 
 @media (max-width: 1120px) {
-  #app {
-    grid-template-columns: 204px minmax(0, 1fr) 252px;
+  :root {
+    --sidebar-w: 204px;
+    --inspector-w: 252px;
   }
+}
+
+#app {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--inspector-w);
+  height: 100vh;
 }
 
 /* Sidebar */

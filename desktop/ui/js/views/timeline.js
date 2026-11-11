@@ -12,15 +12,13 @@
 
 import { stepVerb, summarize } from '../activity.js';
 import { copyButton, h, icon, spinner } from '../dom.js';
-import { duration, firstLine, k, pct, plural } from '../format.js';
+import { duration, firstLine, plural } from '../format.js';
 import { known, outcomeLook } from './common.js';
 import { prose } from './prose.js';
 import { changesCard, chevron, fold, hasDetail, stepDetail, stepIcon, stepStat, verbatim } from './tools.js';
 
 // How a step ended, when it was not simply fine.
 const STATE_WORDS = { surprise: 'surprise', error: 'failed', skipped: 'skipped', running: 'in background', denied: 'denied', unfinished: 'did not finish' };
-
-const CACHE_WORDS = { first: 'first request', hit: 'cache hit', partial: 'partial cache', miss: 'cache miss', bust: 'cache bust', unknown: 'no usage' };
 
 const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', error: 'Failed' };
 
@@ -64,7 +62,7 @@ function gather(items, ctx) {
   // What the run in progress has edited, for the card under its result.
   let edits = [];
   const into = (first) => {
-    if (!work) blocks.push((work = { kind: 'work', key: `work-${first.key}`, rows: [], live: null }));
+    if (!work) blocks.push((work = { kind: 'work', key: `work-${first.key}`, rows: [], turns: [], live: null }));
     return work;
   };
 
@@ -73,13 +71,14 @@ function gather(items, ctx) {
     const reasoning = item.reasoning.trim();
     const streaming = item.live && !item.reply;
     const acted = item.steps.size > 0;
-    // The turn's own line, ahead of the first thing it shows.
-    const mark = { kind: 'mark', key: `${item.key}-mark`, turn: item };
+    // What the turn opens a bar under, when it is the first thing in one.
+    const mark = { key: `${item.key}-mark` };
     let marked = false;
     const put = (rows) => {
       if (!rows.length && marked) return;
       const block = into(marked ? rows[0] : mark);
-      if (!marked) block.rows.push(mark);
+      // The bar the turn starts in counts the time its reply took.
+      if (!marked) block.turns.push(item);
       marked = true;
       block.rows.push(...rows);
     };
@@ -204,7 +203,7 @@ function headline(block) {
   const count = (kind) => block.rows.filter((row) => row.kind === kind).length;
   const steps = block.rows.filter((row) => row.kind === 'step').map((row) => ({ tool: row.step.tool, summary: row.step.summary, status: statusOf(row.step, row.turn), ms: row.step.ms }));
   const { parts, notes } = summarize(steps);
-  const spent = block.rows.reduce((ms, row) => ms + (row.kind === 'mark' ? row.turn.reply?.ms ?? 0 : row.kind === 'step' ? row.step.ms : 0), 0);
+  const spent = block.turns.reduce((ms, each) => ms + (each.reply?.ms ?? 0), 0) + steps.reduce((ms, step) => ms + step.ms, 0);
   let meta = [plural(steps.length, 'step'), spent >= 100 && duration(spent)].filter(Boolean).join(' · ');
   if (!steps.length) {
     const asides = [count('env') > 0 && 'Environment snapshot', count('chip') + count('approval') > 0 && plural(count('chip') + count('approval'), 'note')].filter(Boolean);
@@ -304,8 +303,6 @@ function rowSig(row) {
       return `${row.step.status}|${row.step.ms}|${row.step.observation.length}|${row.turn.live}`;
     case 'thought':
       return `${row.text.length}|${row.streaming}`;
-    case 'mark':
-      return `${row.turn.reply ? 1 : 0}|${row.turn.cache?.verdict ?? ''}|${row.turn.effort}|${row.turn.live}|${row.turn.steps.size}`;
     case 'approval':
       return row.state;
     default:
@@ -334,28 +331,6 @@ function noteRow(note, ctx) {
 }
 
 const ROWS = {
-  /** The line that opens a turn's rows: its number, and once the reply is in, what it cost. */
-  mark({ turn }) {
-    const facts = [`Turn ${turn.turn}`];
-    const reply = turn.reply;
-    if (reply) {
-      const { usage } = reply;
-      facts.push(duration(reply.ms), `in ${k(usage.prompt)}, ${pct(usage.cached, usage.prompt)} cached`, `out ${k(usage.output)}, ${k(usage.reasoning)} thinking`);
-      if (reply.repairs > 0) facts.push(`${reply.repairs} repaired`);
-      if (reply.finish === 'length') facts.push('output limit');
-      const queued = turn.live ? reply.calls - turn.steps.size : 0;
-      if (queued > 0) facts.push(`${plural(queued, 'more step')} queued`);
-    } else if (!turn.live) {
-      facts.push('no reply');
-    }
-    if (turn.cache) {
-      const { verdict, cached, expected } = turn.cache;
-      facts.push(h('span', { title: expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null }, known(CACHE_WORDS, verdict) ?? `cache ${verdict}`));
-    }
-    if (turn.effort) facts.push(`effort ${turn.effort}`);
-    return h('div.turn-mark', facts.flatMap((fact, i) => (i ? [' · ', fact] : [fact])));
-  },
-
   thought(item, ctx) {
     const cells = [h('span.row-icon', icon('spark', 14)), h('span.row-verb', item.streaming ? 'Thinking' : 'Thought'), h('span.row-preview', firstLine(item.text))];
     return row(ctx, item.key, '.is-thought', cells, () => h('div.row-detail', prose(item.text, { caret: item.streaming })));
