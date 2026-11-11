@@ -8,6 +8,7 @@ import { MOD_KEY, outcomeLook, sessionState } from './common.js';
 import { skillsPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
+import { openPush } from './push.js';
 import { createTimeline } from './timeline.js';
 
 // Where each session's timeline was left and what was unfolded in it, so coming back loses neither.
@@ -60,19 +61,42 @@ export function mountSession(main, side, app, meta) {
   const activeSkills = (model) => (Array.isArray(model.meta.skills) ? model.meta.skills : []);
   const skillTitle = (name) => skillList.find((skill) => skill.name === name)?.title ?? name;
 
-  let stopping = false;
+  // Where the workspace stands with git, for the Push button: read on arrival and after every run.
+  let git = null;
+  let gitRead = 0;
+  let gone = false;
+  function readGit() {
+    const asked = ++gitRead;
+    api.gitState(entry.id).then(
+      (state) => {
+        if (gone || asked !== gitRead) return;
+        git = state;
+        render();
+      },
+      // Without it there is no button; the session is whole all the same.
+      () => {},
+    );
+  }
+
   let headShown = '';
   function renderHead(model) {
     const state = sessionState(entry.meta, entry);
-    if (state.phase !== 'running') stopping = false;
     const { title, cwd, model: modelName, provider, effort, mode, autonomy, simulated } = model.meta;
     const skills = activeSkills(model).map(skillTitle);
-    const shown = [state.phase, state.outcome, state.verified, state.approvals, stopping, title, cwd, modelName, provider, effort, mode, autonomy, simulated, ...skills].join('|');
+    const waitingToPush = git?.repo ? git.files.length + git.ahead : 0;
+    const shown = [state.phase, state.outcome, state.verified, state.approvals, title, cwd, modelName, provider, effort, mode, autonomy, simulated, git?.repo, git?.github, waitingToPush, ...skills].join('|');
     if (shown === headShown) return;
     headShown = shown;
-    const stop =
-      state.phase === 'running' &&
-      h('button.btn', { id: 'stop-session', type: 'button', disabled: stopping, onclick: requestStop }, icon('stop', 12), stopping ? 'Stopping…' : 'Stop');
+    // Only for a folder that is a git repository; where the push goes is the dialog's to say.
+    const push =
+      git?.repo &&
+      h(
+        'button.btn',
+        { id: 'push', type: 'button', onclick: () => openPush({ id: entry.id, title }, readGit) },
+        icon(git.github ? 'github' : 'push', 14),
+        git.github ? 'Push to GitHub' : 'Push',
+        waitingToPush > 0 && h('span.btn-count', String(waitingToPush)),
+      );
     // With what the session runs, as plain words after the folder.
     const facts = [
       modelName,
@@ -84,7 +108,7 @@ export function mountSession(main, side, app, meta) {
       simulated && 'simulated',
     ].filter(Boolean);
     head.replaceChildren(
-      h('div.session-top', h('h1.session-name', { title }, title), statusPill(state, model), stop),
+      h('div.session-top', h('h1.session-name', { title }, title), statusPill(state, model), push),
       h(
         'div.session-facts',
         h('span.session-cwd', { title: cwd }, h('bdi', tilde(cwd, app.state.home))),
@@ -93,6 +117,7 @@ export function mountSession(main, side, app, meta) {
     );
   }
 
+  let stopping = false;
   function requestStop() {
     stopping = true;
     render();
@@ -104,7 +129,7 @@ export function mountSession(main, side, app, meta) {
   }
 
   // Follow-up box. Typing ahead is fine; sending waits for the run to end.
-  const box = h('textarea.input', {
+  const box = h('textarea', {
     id: 'followup',
     rows: 1,
     'aria-label': 'Follow-up message',
@@ -118,6 +143,8 @@ export function mountSession(main, side, app, meta) {
     },
   });
   const sendButton = h('button.btn.primary', { id: 'send-followup', type: 'button', onclick: send }, 'Send');
+  // While a run is in progress the same place stops it.
+  const stopButton = h('button.btn', { id: 'stop-session', type: 'button', hidden: true, onclick: requestStop });
   const sendError = h('div.form-error', { role: 'alert', hidden: true });
   let sending = false;
   // Between a message being accepted and its `user` event arriving, the run has not visibly started.
@@ -128,12 +155,12 @@ export function mountSession(main, side, app, meta) {
 
   function fitBox() {
     box.style.height = 'auto';
-    box.style.height = `${Math.min(box.scrollHeight + 2, 160)}px`;
+    box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
   }
 
   async function send() {
     const text = box.value.trim();
-    if (!text || sendButton.disabled) return;
+    if (!text || sendButton.disabled || sendButton.hidden) return;
     const before = messages();
     sending = true;
     sendError.hidden = true;
@@ -169,16 +196,25 @@ export function mountSession(main, side, app, meta) {
       picked = names;
       slotShown = signature();
     };
-    skillsSlot.replaceChildren(...(offered.length ? [skillsPicker({ skills: offered, value: picked, locked, align: 'end', onChange: choose })] : []));
+    skillsSlot.replaceChildren(...(offered.length ? [skillsPicker({ skills: offered, value: picked, locked, onChange: choose })] : []));
   }
 
+  let stopShown = '';
   function renderFoot(model) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(h('div.composer', h('div.composer-box', sendError, box), skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), sendButton));
+    if (!foot.firstChild) foot.append(h('div.composer', sendError, box, h('div.composer-row', skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), stopButton, sendButton)));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
-    sendButton.disabled = model.running || sending || awaitingRun !== null;
+    if (!model.running) stopping = false;
+    sendButton.hidden = model.running;
+    sendButton.disabled = sending || awaitingRun !== null;
+    stopButton.hidden = !model.running;
+    stopButton.disabled = stopping;
+    if (stopShown !== String(stopping)) {
+      stopShown = String(stopping);
+      stopButton.replaceChildren(icon('stop', 12), stopping ? 'Stopping…' : 'Stop');
+    }
     // Not while its menu may be open: a redraw would close it.
     if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);
   }
@@ -190,6 +226,7 @@ export function mountSession(main, side, app, meta) {
 
   let sideShown = null;
   let placed = false;
+  let wasRunning = null;
   function render() {
     const model = entry.model;
     notice.hidden = Boolean(model);
@@ -198,6 +235,11 @@ export function mountSession(main, side, app, meta) {
         ...(entry.error ? [h('p', entry.error), h('button.btn', { type: 'button', onclick: () => store.reload(entry) }, 'Try again')] : [h('p', 'Loading…')]),
       );
       return;
+    }
+    // A run that has just ended may have left something to push.
+    if (wasRunning !== model.running) {
+      wasRunning = model.running;
+      if (!model.running) readGit();
     }
     renderHead(model);
     timeline.update(model.items);
@@ -217,7 +259,6 @@ export function mountSession(main, side, app, meta) {
     if (changed === entry) frame ||= requestAnimationFrame(() => ((frame = 0), render()));
   });
   const ticker = setInterval(tick, 200);
-  let gone = false;
   render();
   api.skills(entry.meta.cwd).then(
     (listed) => {
