@@ -1,0 +1,17 @@
+{
+  "base_cents": {"PEN": 250, "PAD": 480, "INK": 1290, "CASE": 3400},
+  "regions": {
+    "EU": {"factor_pct": 100, "vat_pct": 20},
+    "UK": {"factor_pct": 90, "vat_pct": 20},
+    "US": {"factor_pct": 110, "vat_pct": 0},
+    "CH": {"factor_pct": 125, "vat_pct": 8}
+  },
+  "promos": {
+    "SPRING10": {"percent": 10, "skus": ["PEN", "PAD"]},
+    "INK25": {"percent": 25, "skus": ["INK"]}
+  },
+  "bundles": {
+    "KIT-STARTER": ["PEN", "PAD"],
+    "KIT-PRO": ["PEN", "PAD", "INK", "CASE"]
+  }
+}

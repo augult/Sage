@@ -1,0 +1,6 @@
+sku,name,qty,price,reorder_at
+A-100,Anvil,4,129.50,2
+B-220,Bellows,0,48.00,1
+C-310,Chisel set,25,,5
+D-404,Drill bits,-3,12.25,10
+E-512,Emery cloth,60,1.20,20

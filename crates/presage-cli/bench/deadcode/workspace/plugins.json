@@ -1,0 +1,5 @@
+{
+  "exporters": {
+    "currency": "stockr.plugins.currency:convert_totals"
+  }
+}
