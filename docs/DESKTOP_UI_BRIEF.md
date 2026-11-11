@@ -103,7 +103,7 @@ desktop wallpaper (or paints a neutral field when there is none to read), blurs 
 presses its brightness into a dark band, and draws the result to one canvas behind the panes. The
 canvas is laid out over the monitor and shifted by the window's position, so it holds still on the
 screen while the window moves over it; only its transform ever changes. The panes are translucent
-fills (sidebar thinnest, main thickest) with a grain tile. It shows the wallpaper, not other
+fills (sidebar thinnest, main thickest), with no grain over them. It shows the wallpaper, not other
 windows. `prefers-reduced-transparency` swaps in solid panes.
 
 Contrast is part of the material. `--text`, `--soft` and `--muted` keep 4.5:1 on every pane for any

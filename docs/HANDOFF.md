@@ -73,6 +73,11 @@ undecided, still without a live run.
 **Not changed, on purpose:** the effort default, the survey, the skills, and whether the review
 stays at all. Each needs the ablation; none can be settled by reading.
 
+**Desktop:** the grain over the panes is gone (`glass.js`, `glass.css`); the screenshots were taken
+again. Found while taking them and fixed: after a follow-up whose run ended between two redraws,
+Send stayed disabled until the session was opened again (3 of 8 scripted runs before, 0 of 8
+after). Still nobody has driven the app by hand.
+
 **To measure first** with a fresh quota, before anything else is touched: `-n 3` on
 `--tasks skill,hard --variants presage,no-review,classic,ext:mini`, both models. Three things to
 look for: runs that end at the turn limit now end `done` with a summary of their own; turns per

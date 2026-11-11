@@ -123,7 +123,10 @@ export function mountSession(main, side, app, meta) {
   const sendError = h('div.form-error', { role: 'alert', hidden: true });
   let sending = false;
   // Between a message being accepted and its `user` event arriving, the run has not visibly started.
-  let awaitingRun = false;
+  // Holds how many messages the timeline had when the last one was sent, until it shows one more.
+  // Not "until a redraw sees the run": a run can start and end between two redraws.
+  let awaitingRun = null;
+  const messages = () => entry.model.items.filter((item) => item.kind === 'user').length;
 
   function fitBox() {
     box.style.height = 'auto';
@@ -133,6 +136,7 @@ export function mountSession(main, side, app, meta) {
   async function send() {
     const text = box.value.trim();
     if (!text || sendButton.disabled) return;
+    const before = messages();
     sending = true;
     sendError.hidden = true;
     render();
@@ -141,7 +145,7 @@ export function mountSession(main, side, app, meta) {
       box.value = '';
       picked = [];
       fitBox();
-      awaitingRun = true;
+      awaitingRun = before;
       pinned = true;
     } catch (problem) {
       sendError.textContent = String(problem);
@@ -175,8 +179,8 @@ export function mountSession(main, side, app, meta) {
     foot.hidden = !entry.live;
     if (!entry.live) return;
     if (!foot.firstChild) foot.append(h('div.composer', h('div.composer-box', sendError, box), skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), sendButton));
-    if (model.running) awaitingRun = false;
-    sendButton.disabled = model.running || sending || awaitingRun;
+    if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
+    sendButton.disabled = model.running || sending || awaitingRun !== null;
     // Not while its menu may be open: a redraw would close it.
     if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);
   }
