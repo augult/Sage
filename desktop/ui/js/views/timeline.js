@@ -1,18 +1,21 @@
-// The session timeline, as a conversation: what was asked, what the agent answered, and for each
-// turn one quiet line that says what it did. That line unfolds into the tree of the turn's tool
-// calls, and each call unfolds into what it predicted and what came back. Nothing is unfolded until
-// the user asks, and nothing is tinted: state is said in words.
+// The session timeline, as a conversation: what was asked, what the agent said, and between the
+// two one grey bar for everything it did. The bar is the master toggle of a stretch of work: every
+// tool call the agent ran, with its thinking and the harness's notes between them, across as many
+// turns as went by without words. It unfolds into a row per call, and each row into what the call
+// was: the command and what it printed, the file as it was read, the edit as a before and after.
+// Nothing is unfolded until the user asks, and what they unfolded stays so (`ctx.expanded`).
 //
-// One element per timeline item, rebuilt only when that item changed; streamed text is patched in
-// place. Disclosure state lives in `ctx.expanded`, so a rebuilt item comes back the way the user
-// left it.
+// Each update reads the items into blocks (`gather`) and patches what changed: a block by its key
+// and signature, a bar's rows one by one, and only while the bar is open.
 //
 // ctx: { expanded: Map, canAnswer(): boolean, answer(approvalId, allow): Promise, openOutput(handle) }
 
-import { activity, stepVerb } from '../activity.js';
-import { h, icon, spinner } from '../dom.js';
-import { bytes, duration, firstLine, k, pct, plural } from '../format.js';
+import { stepVerb, summarize } from '../activity.js';
+import { copyButton, h, icon, spinner } from '../dom.js';
+import { duration, firstLine, k, pct, plural } from '../format.js';
 import { known, outcomeLook } from './common.js';
+import { prose } from './prose.js';
+import { changesCard, chevron, fold, hasDetail, stepDetail, stepIcon, stepStat, verbatim } from './tools.js';
 
 // How a step ended, when it was not simply fine.
 const STATE_WORDS = { surprise: 'surprise', error: 'failed', skipped: 'skipped', running: 'in background', denied: 'denied', unfinished: 'did not finish' };
@@ -25,284 +28,383 @@ const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped',
 const LONG_NOTE = 140;
 
 export function createTimeline(container, ctx) {
-  const rendered = [];
-  const asides = new Map();
-
-  function build(item) {
-    let view;
-    try {
-      view = item.kind === 'turn' ? turnView(item, ctx) : { el: (ITEMS[item.kind] ?? noteRow)(item, ctx) };
-    } catch (problem) {
-      view = { el: undrawable(item, problem, ctx) };
-    }
-    return { ...view, item, rev: item.rev, streamRev: item.streamRev };
-  }
-
+  const views = [];
   return {
-    update(all) {
-      const items = gather(all, asides);
-      items.forEach((item, i) => {
-        const have = rendered[i];
-        if (have?.item.key !== item.key) {
-          // Something else belongs in this place: drop the stale tail and continue from here.
-          for (const stale of rendered.splice(i)) stale.el.remove();
-          rendered[i] = build(item);
-          container.append(rendered[i].el);
-        } else if (have.item !== item || have.rev !== item.rev) {
-          // Changed, or the same item from a rebuilt model.
-          rendered[i] = build(item);
-          have.el.replaceWith(rendered[i].el);
-        } else if (have.streamRev !== item.streamRev) {
-          have.patch?.();
-          have.streamRev = item.streamRev;
+    update(items) {
+      const blocks = gather(items, ctx);
+      blocks.forEach((block, i) => {
+        if (views[i]?.key === block.key) {
+          views[i].update(block);
+          return;
         }
+        // Something else belongs in this place: drop the stale tail and continue from here.
+        for (const stale of views.splice(i)) stale.el.remove();
+        views[i] = block.kind === 'work' ? workView(block, ctx) : plainView(block, ctx);
+        container.append(views[i].el);
       });
-      for (const stale of rendered.splice(items.length)) stale.el.remove();
+      for (const stale of views.splice(blocks.length)) stale.el.remove();
     },
   };
 }
 
-/**
- * What arrives outside any turn (the environment snapshot, a note, a lesson) is folded into one
- * line per stretch of it, as a turn's tool calls are. `made` keeps each line's item from one update
- * to the next, so that an unchanged one is not drawn again.
- */
-function gather(items, made) {
-  const out = [];
-  for (const item of items) {
-    if (item.kind !== 'env' && item.kind !== 'chip') out.push(item);
-    else if (out.at(-1)?.kind === 'aside') out.at(-1).rows.push(item);
-    else out.push({ kind: 'aside', key: `${item.key}-aside`, rev: 0, rows: [item] });
-  }
-  const keys = new Set();
-  const kept = out.map((item) => {
-    if (item.kind !== 'aside') return item;
-    keys.add(item.key);
-    const before = made.get(item.key);
-    if (before?.rows.length === item.rows.length && before.rows.every((row, i) => row === item.rows[i])) return before;
-    made.set(item.key, item);
-    return item;
-  });
-  for (const key of made.keys()) if (!keys.has(key)) made.delete(key);
-  return kept;
-}
+const awaitsAnswer = (row, ctx) => row.state === 'pending' && ctx.canAnswer();
 
-/** Stands in for an item or row that could not be drawn, so that one bad entry costs only itself. */
-function undrawable(item, problem, ctx) {
-  return noteRow({ key: `${item.key}-undrawable`, label: 'cannot display', text: `${item.kind}: ${problem}` }, ctx);
-}
-
-/** The mark of everything that unfolds. It turns as its toggle opens (styles/session.css). */
-function chevron() {
-  const mark = icon('chevron', 14);
-  mark.classList.add('chev');
-  return mark;
-}
+// A step with no end in a turn that is over was cut short (stop, or the app closing).
+const statusOf = (step, turn) => (step.status === 'active' && !turn.live ? 'unfinished' : step.status);
 
 /**
- * Makes `toggle` open and close `body` and returns the wrapper to put in the page. The body slides
- * rather than appears, so it stays in the page while shut: inert, so that nothing in it takes
- * focus. Everything starts shut; the user's choice is remembered under `key`.
+ * Reads the timeline's items into what the page shows, in order: `user`, `text` (what the agent
+ * said), `work` (a stretch of tool calls, thinking and notes, under one bar), `approval` (a request
+ * that is waiting, which cannot wait inside a fold) and `result`. Words end a stretch of work;
+ * a turn without words continues the one before it.
  */
-function fold(ctx, key, toggle, body) {
-  const wrap = h('div.fold', h('div.fold-inner', body));
-  const show = (open) => {
-    toggle.setAttribute('aria-expanded', String(open));
-    wrap.classList.toggle('is-open', open);
-    wrap.inert = !open;
+function gather(items, ctx) {
+  const blocks = [];
+  let work = null;
+  // What the run in progress has edited, for the card under its result.
+  let edits = [];
+  const into = (first) => {
+    if (!work) blocks.push((work = { kind: 'work', key: `work-${first.key}`, rows: [], live: null }));
+    return work;
   };
-  toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    ctx.expanded.set(key, open);
-    show(open);
-  });
-  show(ctx.expanded.get(key) === true);
-  return wrap;
-}
 
-/** Engine text, verbatim. `out:N` handles open the full output; a leading [STATUS] is set in bold. */
-function verbatim(text, ctx) {
-  const pre = h('pre.block');
-  const status = /^\[[A-Za-z]+\]/.exec(text)?.[0] ?? '';
-  if (status) pre.append(h('span.obs-tag', status));
-  let from = status.length;
-  for (const match of text.matchAll(/\bout:\d+\b/g)) {
-    if (match.index < from) continue;
-    pre.append(text.slice(from, match.index), h('button.out-link', { type: 'button', onclick: () => ctx.openOutput(match[0]) }, match[0]));
-    from = match.index + match[0].length;
+  function turn(item) {
+    const content = item.content.trim();
+    const reasoning = item.reasoning.trim();
+    const streaming = item.live && !item.reply;
+    const acted = item.steps.size > 0;
+    // The turn's own line, ahead of the first thing it shows.
+    const mark = { kind: 'mark', key: `${item.key}-mark`, turn: item };
+    let marked = false;
+    const put = (rows) => {
+      if (!rows.length && marked) return;
+      const block = into(marked ? rows[0] : mark);
+      if (!marked) block.rows.push(mark);
+      marked = true;
+      block.rows.push(...rows);
+    };
+    const rows = [];
+    const waiting = [];
+    for (const row of item.rows) {
+      if (row.kind === 'approval' && awaitsAnswer(row, ctx)) waiting.push(row);
+      else rows.push(row.kind === 'step' ? { kind: 'step', key: row.key, step: row, turn: item } : row);
+      if (row.kind === 'step' && row.change && (row.status === 'ok' || row.status === 'surprise')) edits.push(row.change);
+    }
+    if (reasoning) put([{ kind: 'thought', key: `${item.key}-thought`, turn: item, text: reasoning, streaming: streaming && !content }]);
+    // Words before tool calls introduce them; with no calls, all else came before the words.
+    if (rows.length && !(content && acted)) put(rows);
+    if (content) {
+      work = null;
+      blocks.push({ kind: 'text', key: `${item.key}-text`, sig: `${item.rev}:${item.streamRev}`, text: content, streaming });
+      if (acted) put(rows);
+    } else if (item.live) {
+      // A turn that has shown nothing yet still says that it is at work.
+      put([]);
+    }
+    if (item.live && work) work.live = item;
+    for (const row of waiting) blocks.push({ kind: 'approval', key: row.key, sig: row.state, item: row });
   }
-  pre.append(text.slice(from));
-  return pre;
+
+  for (const item of items) {
+    if (item.kind === 'turn') {
+      turn(item);
+    } else if (item.kind === 'user') {
+      work = null;
+      edits = [];
+      blocks.push({ kind: 'user', key: item.key, sig: item.rev, item });
+    } else if (item.kind === 'result') {
+      work = null;
+      blocks.push({ kind: 'result', key: item.key, sig: `${item.rev}:${edits.length}`, item, edits });
+    } else if (item.kind === 'approval' && awaitsAnswer(item, ctx)) {
+      blocks.push({ kind: 'approval', key: item.key, sig: item.state, item });
+    } else {
+      // The environment snapshot, a note, a lesson, an answered request: rows like any other.
+      into(item).rows.push(item);
+    }
+  }
+  return blocks;
 }
 
-const ITEMS = {
-  user(item) {
-    return h('section.user', { 'aria-label': item.followUp ? 'Follow-up' : 'Task' }, item.text);
+/** Stands in for a block or row that could not be drawn, so that one bad entry costs only itself. */
+const undrawable = (what, problem) => h('div.undrawable', `Cannot display ${what}: ${problem}`);
+
+/** A block that is drawn whole and drawn again when its signature changes. */
+function plainView(block, ctx) {
+  const draw = (now) => {
+    try {
+      return PLAIN[now.kind](now, ctx);
+    } catch (problem) {
+      return undrawable(now.kind, problem);
+    }
+  };
+  const view = {
+    key: block.key,
+    sig: block.sig,
+    el: draw(block),
+    update(next) {
+      if (next.sig === view.sig) return;
+      const el = draw(next);
+      view.el.replaceWith(el);
+      Object.assign(view, { el, sig: next.sig });
+    },
+  };
+  return view;
+}
+
+const PLAIN = {
+  /** What was asked: the one thing in the conversation that the user wrote, set to their side. */
+  user({ item }) {
+    return h('section.msg.user', { 'aria-label': item.followUp ? 'Follow-up' : 'Task' }, h('div.user-text', item.text), h('div.msg-actions', copyButton(() => item.text)));
   },
 
-  /** What came in beside the turns. The snapshot needs no row of its own to open: it is the block. */
-  aside(item, ctx) {
-    const snapshots = item.rows.filter((row) => row.kind === 'env').length;
-    const notes = item.rows.length - snapshots;
-    const label = [snapshots > 0 && 'Environment snapshot', notes > 0 && plural(notes, 'note')].filter(Boolean).join(', ');
-    const toggle = h('button.activity-toggle', { type: 'button' }, h('span.activity-label', label), chevron());
-    const tree = h('div.tree', item.rows.map((row) => (row.kind === 'env' ? h('div.tree-block', verbatim(row.text, ctx)) : noteRow(row, ctx))));
-    return h('section.aside', toggle, fold(ctx, item.key, toggle, tree));
+  text({ text, streaming }) {
+    return h('section.msg.agent', prose(text, { caret: streaming }), !streaming && h('div.msg-actions', copyButton(() => text)));
   },
 
-  /** How the run ended: its summary as the answer it is, and one line for the outcome. */
-  result(item) {
+  approval: ({ item }, ctx) => approvalCard(item, ctx),
+
+  /** How the run ended: its summary as the answer it is, a line for the outcome, and what it edited. */
+  result({ item, edits }, ctx) {
     const look = outcomeLook(item.status, item.verified);
     const summary = item.summary.trim();
     // The evidence says in its own words whether the result was checked; without it, one word does.
     const checked = item.evidence || (!item.verified ? 'unverified' : item.status === 'done' ? 'verified' : '');
     return h(
       'section.result',
-      summary && !item.repeatsReply && h('div.reply', summary),
+      summary && !item.repeatsReply && h('div.msg.agent', prose(summary), h('div.msg-actions', copyButton(() => summary))),
       h('div.result-line', icon(look.icon, 14), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), checked && h('span', `· ${checked}`)),
+      edits.length > 0 && changesCard(edits, ctx, `${item.key}-edits`),
     );
   },
-
-  approval: approvalRow,
 };
 
-function turnView(turn, ctx) {
-  const el = h(`section.turn${turn.live ? '.is-live' : ''}`, { dataset: { turn: turn.turn } }, turnParts(turn, ctx));
-  return { el, patch: () => el.replaceChildren(...turnParts(turn, ctx)) };
+/** What a bar says: what is happening while its last turn runs, what was done once it has. */
+function headline(block) {
+  const turn = block.live;
+  if (turn) {
+    const running = [...turn.steps.values()].findLast((step) => step.status === 'active');
+    if (running) return { busy: true, since: running.startedAt, parts: [`${stepVerb(running.tool, true)} `, { name: running.summary }], notes: [], meta: '' };
+    if (!turn.reply) return { busy: true, since: turn.startedAt, parts: ['Thinking'], notes: [], meta: '' };
+  }
+  const count = (kind) => block.rows.filter((row) => row.kind === kind).length;
+  const steps = block.rows.filter((row) => row.kind === 'step').map((row) => ({ tool: row.step.tool, summary: row.step.summary, status: statusOf(row.step, row.turn), ms: row.step.ms }));
+  const { parts, notes } = summarize(steps);
+  const spent = block.rows.reduce((ms, row) => ms + (row.kind === 'mark' ? row.turn.reply?.ms ?? 0 : row.kind === 'step' ? row.step.ms : 0), 0);
+  let meta = [plural(steps.length, 'step'), spent >= 100 && duration(spent)].filter(Boolean).join(' · ');
+  if (!steps.length) {
+    const asides = [count('env') > 0 && 'Environment snapshot', count('chip') + count('approval') > 0 && plural(count('chip') + count('approval'), 'note')].filter(Boolean);
+    meta = '';
+    if (count('thought')) parts.push(spent >= 100 ? `Thought for ${duration(spent)}` : 'Thought');
+    else if (asides.length) parts.push(asides.join(', '));
+    else parts.push(turn ? 'Working' : 'No reply');
+  } else if (!parts.length) {
+    parts.push('Finished');
+  }
+  return { busy: Boolean(turn), since: null, parts, notes, meta };
 }
 
-/**
- * A turn on the page: what the model said, the line for what it did with the tree folded under it,
- * and any approval request that is waiting, which cannot wait inside a fold.
- */
-function turnParts(turn, ctx) {
-  const streaming = turn.live && !turn.reply;
-  const content = turn.content.trim();
-  const reply = content && h('div.reply', content, streaming && h('span.caret'));
+/** A stretch of work: the bar, and under it the rows, drawn when the bar is first opened. */
+function workView(block, ctx) {
+  const busy = spinner();
+  const label = h('span.work-label');
+  const notes = h('span.work-notes');
+  const meta = h('span.work-meta');
+  const toggle = h('button.work-toggle', { type: 'button' }, chevron(), busy, label, notes, meta);
+  const all = h('button.work-all', { type: 'button', onclick: toggleAll });
+  const list = h('div.work-rows', { onclick: () => paintAll() });
+  const el = h('section.work', h('div.work-bar', toggle, all));
+  let rows = [];
+  let said = '';
+  let open = false;
 
-  const rows = [];
-  const cards = [];
-  const reasoning = turn.reasoning.trim();
-  if (reasoning) {
-    const body = h('div.thought', reasoning, streaming && !content && h('span.caret'));
-    rows.push(treeRow(ctx, `${turn.key}-reasoning`, [h('span.tree-verb', streaming ? 'Thinking' : 'Thought'), h('span.tree-preview', firstLine(reasoning))], body));
+  const toggles = () => [...list.querySelectorAll(':scope > .row > button.row-line')];
+  const allOpen = () => toggles().length > 0 && toggles().every((button) => button.getAttribute('aria-expanded') === 'true');
+
+  /** The button beside the bar opens every row at once, or shuts them all when all are open. */
+  function paintAll() {
+    const name = allOpen() ? 'Collapse all' : 'Expand all';
+    all.title = name;
+    all.setAttribute('aria-label', name);
+    all.replaceChildren(icon(allOpen() ? 'refold' : 'unfold', 14));
+    all.hidden = !open || !toggles().length;
   }
-  for (const row of turn.rows) {
+
+  function toggleAll() {
+    const want = !allOpen();
+    for (const button of toggles()) if ((button.getAttribute('aria-expanded') === 'true') !== want) button.click();
+    paintAll();
+  }
+
+  function head() {
+    const line = headline(block);
+    const now = JSON.stringify(line);
+    if (now === said) return;
+    said = now;
+    busy.hidden = !line.busy;
+    el.classList.toggle('is-live', line.busy);
+    label.replaceChildren(...line.parts.map((part) => (typeof part === 'string' ? part : h('b', part.name))));
+    notes.textContent = line.notes.join(', ');
+    notes.hidden = !line.notes.length;
+    meta.replaceChildren(line.since != null ? h('span', { dataset: { since: line.since } }) : line.meta);
+    meta.hidden = line.since == null && !line.meta;
+  }
+
+  function drawRow(row) {
     try {
-      if (row.kind === 'approval' && awaitsAnswer(row, ctx)) cards.push(approvalRow(row, ctx));
-      else rows.push(row.kind === 'step' ? stepRow(row, ctx, turn) : (ITEMS[row.kind] ?? noteRow)(row, ctx));
+      return ROWS[row.kind](row, ctx);
     } catch (problem) {
-      rows.push(undrawable(row, problem, ctx));
+      return undrawable(row.kind, problem);
     }
   }
 
-  let line = null;
-  const said = activity(turn);
-  if (said) {
-    const queued = turn.live && turn.reply ? turn.reply.calls - turn.steps.size : 0;
-    const toggle = h(
-      'button.activity-toggle',
-      { type: 'button' },
-      said.busy && spinner(),
-      h('span.activity-label', said.parts.map((part) => (typeof part === 'string' ? part : h('b', part.name)))),
-      said.notes.length > 0 && h('span.activity-notes', `· ${said.notes.join(', ')}`),
-      said.since != null && h('span.activity-timer', { dataset: { since: said.since } }),
-      chevron(),
-    );
-    const tree = h('div.tree', rows, queued > 0 && h('div.tree-facts', `${plural(queued, 'more step')} queued`), turnFacts(turn));
-    line = h('div.activity', toggle, fold(ctx, turn.key, toggle, tree));
+  function syncRows() {
+    if (!open) return;
+    block.rows.forEach((row, i) => {
+      const sig = rowSig(row);
+      const have = rows[i];
+      if (have?.key === row.key && have.sig === sig) return;
+      const fresh = { key: row.key, sig, el: drawRow(row) };
+      if (have?.key === row.key) {
+        have.el.replaceWith(fresh.el);
+      } else {
+        for (const stale of rows.splice(i)) stale.el.remove();
+        list.append(fresh.el);
+      }
+      rows[i] = fresh;
+    });
+    for (const stale of rows.splice(block.rows.length)) stale.el.remove();
+    paintAll();
   }
-  // Words before tool calls introduce them; with no calls, the thinking came before the words.
-  const acted = turn.steps.size > 0;
-  return [acted && reply, line, !acted && reply, cards].flat().filter(Boolean);
+
+  const body = fold(
+    ctx,
+    block.key,
+    toggle,
+    () => list,
+    (now) => {
+      open = now;
+      el.classList.toggle('is-open', now);
+      syncRows();
+      paintAll();
+    },
+  );
+  el.append(body);
+  head();
+
+  return {
+    key: block.key,
+    el,
+    update(next) {
+      block = next;
+      head();
+      syncRows();
+    },
+  };
 }
 
-/** The numbers of a turn, at the foot of its tree. */
-function turnFacts(turn) {
-  const facts = [`Turn ${turn.turn}`];
-  const reply = turn.reply;
-  if (reply) {
-    const { usage } = reply;
-    facts.push(duration(reply.ms), `in ${k(usage.prompt)}, ${pct(usage.cached, usage.prompt)} cached`, `out ${k(usage.output)}, ${k(usage.reasoning)} thinking`);
-    if (reply.repairs > 0) facts.push(`${reply.repairs} repaired`);
-    if (reply.finish === 'length') facts.push('output limit');
-  } else if (!turn.live) {
-    facts.push('no reply');
+/** Everything a row shows that can change, as one string: the row is drawn again when it differs. */
+function rowSig(row) {
+  switch (row.kind) {
+    case 'step':
+      return `${row.step.status}|${row.step.ms}|${row.step.observation.length}|${row.turn.live}`;
+    case 'thought':
+      return `${row.text.length}|${row.streaming}`;
+    case 'mark':
+      return `${row.turn.reply ? 1 : 0}|${row.turn.cache?.verdict ?? ''}|${row.turn.effort}|${row.turn.live}|${row.turn.steps.size}`;
+    case 'approval':
+      return row.state;
+    default:
+      return '';
   }
-  if (turn.cache) {
-    const { verdict, cached, expected } = turn.cache;
-    facts.push(h('span', { title: expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null }, known(CACHE_WORDS, verdict) ?? `cache ${verdict}`));
-  }
-  if (turn.effort) facts.push(`effort ${turn.effort}`);
-  return h('div.tree-facts', facts.flatMap((fact, i) => (i ? [' · ', fact] : [fact])));
 }
 
-/** One row of a tree. With `detail` it is a toggle that unfolds it; without, a plain line. */
-function treeRow(ctx, key, line, detail, options = {}) {
-  const { state, ...attributes } = options;
-  const spec = `div.tree-row${state ? `.is-${state.replace(/[^a-z0-9-]/gi, '')}` : ''}`;
-  if (!detail) return h(spec, attributes, h('div.tree-line', h('span.chev-slot'), line));
-  const toggle = h('button.tree-line', { type: 'button' }, chevron(), line);
+/** One row. With `detail` it is a toggle that unfolds what `detail()` builds; without, a plain line. */
+function row(ctx, key, classes, cells, detail, attributes = {}) {
+  const spec = `div.row${classes}`;
+  if (!detail) return h(spec, attributes, h('div.row-line', cells, h('span.chev-slot')));
+  const toggle = h('button.row-line', { type: 'button' }, cells, chevron());
   return h(spec, attributes, toggle, fold(ctx, key, toggle, detail));
 }
 
-function stepRow(step, ctx, turn) {
-  // A step with no end in a turn that is over was cut short (stop, or the app closing).
-  const status = step.status === 'active' && !turn.live ? 'unfinished' : step.status;
-  const active = status === 'active';
-  const state = active || status === 'ok' ? null : known(STATE_WORDS, status) ?? status;
-  const line = [
-    h('span.tree-verb', stepVerb(step.tool, active)),
-    h('span.tree-what', step.summary),
-    state && h('span.tree-state', state),
-    active ? h('span.tree-took', spinner(), h('span', { dataset: { since: step.startedAt } })) : step.ms >= 100 && h('span.tree-took', duration(step.ms)),
-  ];
-  return treeRow(ctx, step.key, line, stepDetail(step, status, ctx), { state: status, dataset: { step: `${turn.turn}.${step.idx + 1}` } });
-}
-
-/** What unfolds under a step: its prediction and whether it held, then what came back. */
-function stepDetail(step, status, ctx) {
-  const skipped = status === 'skipped';
-  const observation = skipped ? step.observation.replace(/^\[skipped\]\s*/, '') : step.observation;
-  if (!observation && step.expect == null) return null;
-  const verdict = status === 'ok' && step.explicit ? 'held' : status === 'surprise' ? 'did not hold' : null;
-  // Violations the observation's first line does not already state.
-  const unstated = step.violations.filter((violation) => !firstLine(step.observation).includes(violation));
-  return h(
-    'div.tree-detail',
-    step.expect != null && h('div.detail-line', h('span.detail-key', 'Expected'), h('span.detail-mono', step.expect), verdict && h('span.detail-verdict', verdict)),
-    unstated.map((violation) => h('div.detail-line', violation)),
-    observation && (skipped ? h('div.detail-line', observation) : verbatim(observation, ctx)),
-    step.hidden > 0 && h('div.detail-foot', `${bytes(step.hidden)} kept out of context`),
-  );
-}
-
 /**
- * A quiet line for what happened beside the steps: a watch change, a note, a lesson, a retry.
+ * A quiet row for what happened beside the steps: a watch change, a note, a lesson, a retry.
  * One that is long or runs over several lines shows its first line and unfolds the rest.
  */
 function noteRow(note, ctx) {
   const head = firstLine(note.text);
   const label = note.label.charAt(0).toUpperCase() + note.label.slice(1);
-  const line = [h('span.tree-verb', label), note.badge && h('span.tree-state', note.badge), h('span.tree-preview', head)];
   const long = head.length < note.text.length || head.length > LONG_NOTE;
-  return treeRow(ctx, note.key, line, long ? h('div.tree-detail', verbatim(note.text, ctx)) : null, { state: 'note' });
+  const cells = [h('span.row-icon', icon(note.icon ?? 'note', 14)), h('span.row-verb', label), h('span.row-preview', head), note.badge && h('span.row-state.is-quiet', note.badge)];
+  return row(ctx, note.key, `.is-note${note.tone === 'danger' ? '.tone-danger' : ''}`, cells, long ? () => h('div.row-detail', verbatim(note.text, ctx)) : null);
 }
 
-const awaitsAnswer = (row, ctx) => row.state === 'pending' && ctx.canAnswer();
+const ROWS = {
+  /** The line that opens a turn's rows: its number, and once the reply is in, what it cost. */
+  mark({ turn }) {
+    const facts = [`Turn ${turn.turn}`];
+    const reply = turn.reply;
+    if (reply) {
+      const { usage } = reply;
+      facts.push(duration(reply.ms), `in ${k(usage.prompt)}, ${pct(usage.cached, usage.prompt)} cached`, `out ${k(usage.output)}, ${k(usage.reasoning)} thinking`);
+      if (reply.repairs > 0) facts.push(`${reply.repairs} repaired`);
+      if (reply.finish === 'length') facts.push('output limit');
+      const queued = turn.live ? reply.calls - turn.steps.size : 0;
+      if (queued > 0) facts.push(`${plural(queued, 'more step')} queued`);
+    } else if (!turn.live) {
+      facts.push('no reply');
+    }
+    if (turn.cache) {
+      const { verdict, cached, expected } = turn.cache;
+      facts.push(h('span', { title: expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null }, known(CACHE_WORDS, verdict) ?? `cache ${verdict}`));
+    }
+    if (turn.effort) facts.push(`effort ${turn.effort}`);
+    return h('div.turn-mark', facts.flatMap((fact, i) => (i ? [' · ', fact] : [fact])));
+  },
 
-/** A card while the request waits; a quiet line once it is answered or can no longer be. */
-function approvalRow(row, ctx) {
-  if (!awaitsAnswer(row, ctx)) {
-    const verdict = known({ allowed: 'allowed', denied: 'denied' }, row.state) ?? 'never answered';
-    // The line sits under the step it was about, so the reason is all it needs to say.
-    return noteRow({ key: row.key, label: 'approval', badge: verdict, text: row.reason || `${row.tool} ${row.summary}` }, ctx);
-  }
+  thought(item, ctx) {
+    const cells = [h('span.row-icon', icon('spark', 14)), h('span.row-verb', item.streaming ? 'Thinking' : 'Thought'), h('span.row-preview', firstLine(item.text))];
+    return row(ctx, item.key, '.is-thought', cells, () => h('div.row-detail', prose(item.text, { caret: item.streaming })));
+  },
+
+  step({ step, turn }, ctx) {
+    const status = statusOf(step, turn);
+    const active = status === 'active';
+    const held = status === 'ok' && step.explicit;
+    const state = held ? 'held' : active || status === 'ok' ? null : known(STATE_WORDS, status) ?? status;
+    const cells = [
+      h('span.row-icon', icon(stepIcon(step.tool), 14)),
+      h('span.row-verb', stepVerb(step.tool, active)),
+      h('span.row-what', step.summary),
+      state && h(`span.row-state${held ? '.is-quiet' : ''}`, state),
+      stepStat(step),
+      active ? h('span.row-took', spinner(), h('span', { dataset: { since: step.startedAt } })) : step.ms >= 100 && h('span.row-took', duration(step.ms)),
+    ];
+    const detail = hasDetail(step) ? () => stepDetail(step, status, ctx) : null;
+    return row(ctx, step.key, `.is-${status.replace(/[^a-z0-9-]/gi, '')}`, cells, detail, { dataset: { step: `${turn.turn}.${step.idx + 1}` } });
+  },
+
+  chip: noteRow,
+
+  /** The snapshot of the workspace that went out with the task. */
+  env(item, ctx) {
+    const cells = [h('span.row-icon', icon('layers', 14)), h('span.row-verb', 'Environment'), h('span.row-preview', firstLine(item.text))];
+    return row(ctx, item.key, '.is-note', cells, () => h('div.row-detail', verbatim(item.text, ctx)));
+  },
+
+  /** A request that was answered, or can no longer be. It sits under the step it was about, so the reason is all it needs to say. */
+  approval(item, ctx) {
+    const verdict = known({ allowed: 'allowed', denied: 'denied' }, item.state) ?? 'never answered';
+    return noteRow({ key: item.key, label: 'approval', icon: 'bang', badge: verdict, text: item.reason || `${item.tool} ${item.summary}` }, ctx);
+  },
+};
+
+/** A request that is waiting for its answer: the one thing in a run that cannot wait inside a fold. */
+function approvalCard(item, ctx) {
   const error = h('div.form-error', { role: 'alert', hidden: true });
   const answer = async (allow) => {
     for (const button of buttons) button.disabled = true;
     try {
-      await ctx.answer(row.id, allow);
+      await ctx.answer(item.id, allow);
     } catch (problem) {
       error.textContent = String(problem);
       error.hidden = false;
@@ -315,10 +417,10 @@ function approvalRow(row, ctx) {
   ];
   return h(
     'div.approval',
-    { dataset: { approval: row.id } },
+    { dataset: { approval: item.id } },
     h('div.approval-title', icon('bang'), 'Approval needed'),
-    h('div.approval-what', h('b', row.tool), row.summary),
-    h('div.approval-why', row.reason),
+    h('div.approval-what', h('b', item.tool), item.summary),
+    item.reason && h('div.approval-why', item.reason),
     h('div.approval-actions', error, buttons),
   );
 }
