@@ -91,5 +91,24 @@ Median turns and median cost per task:
 above. Variants `presage` (both new mechanisms on), `no-attach`, `no-short-paths`, `classic`; same
 tasks, 5 runs each. The two models ran at the same time (GLM-5.3 with `-j 4`, DeepSeek with `-j 2`)
 under Logfare's shared limit of 80 requests a minute, so the time column is not comparable with the
-baseline. The CLI's tables are in `docs/results/2026-11-11-*-attach.txt` once the runs have
-finished; if those files are missing, the runs did not finish and must be repeated.
+baseline.
+
+The session ended before these runs did. What exists in `docs/results/`:
+
+- `2026-11-11-*-attach.progress.txt`: one line per completed run (task, variant, solved, turns,
+  cost). `-attach.txt` and `-attach.json` are the CLI's table and the raw results of a run that
+  finished in time; an empty or missing file means it did not.
+- GLM-5.3 after 55 of 140 runs, turns per run: `presage` 1,1,1,1,1,1,2,2,2,2,2,2,3,3 (median 2),
+  `no-short-paths` median 2, `no-attach` median 3.5, `classic` median 6. A `pager` run with the file
+  attached took 1 turn and $0.0032, against 3 turns and $0.0082 without. One classic run on `slug`
+  declared itself done and failed the held-out check: the first unsolved run in any benchmark here.
+- DeepSeek, the 42 runs of a first attempt that died (it hit the rate limit, then its process was
+  gone): `presage` median 3 (1 to 9), `no-short-paths` 2, `no-attach` 3.5, `classic` 5.
+
+The cells are unbalanced across tasks, so these medians are indicative only: attach appears to
+remove the read turn, and nothing is established about `short_paths` or about cost. Repeat with one
+model at a time:
+
+```sh
+presage bench -p logfare -m glm-5.3 --variants presage,no-attach,no-short-paths,classic -n 5 -j 3
+```
