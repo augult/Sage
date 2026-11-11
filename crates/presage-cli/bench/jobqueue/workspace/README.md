@@ -24,9 +24,9 @@ await queue.onIdle();
 
 ### `new JobQueue({ concurrency = 1 })`
 
-`concurrency` is a positive integer, otherwise `RangeError`. It can be changed later by assigning
-to `queue.concurrency` (same validation): raising it starts waiting jobs at once, lowering it
-lets the running jobs finish.
+`concurrency` is a positive integer, otherwise `RangeError`. `queue.concurrency` reads it, and
+assigning to it changes it later (same validation; a rejected value changes nothing): raising it
+starts waiting jobs at once, lowering it lets the running jobs finish.
 
 ### `queue.add(fn, { priority = 0, timeout = 0, retries = 0, retryDelay = 0 } = {})`
 

@@ -1,6 +1,122 @@
-//! Harder tasks: several files, and held-out checks for behaviour the task specifies but the
-//! visible tests do not cover.
+//! Harder tasks: several files, and held-out checks for behaviour that is specified in the
+//! workspace but that the visible tests cover only in part. They form the set `hard`.
 
 use super::Task;
 
-pub const TASKS: &[Task] = &[];
+/// A file of the `rollup` task. Its logs are stored as `*.log.txt`, because `*.log` is git-ignored.
+macro_rules! rollup {
+    ($path:literal) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/bench/rollup/", $path))
+    };
+}
+
+pub const TASKS: &[Task] = &[
+    Task {
+        id: "shipquote",
+        title: "twelve pricing rules across four stub modules, a third of them tested",
+        prompt: "The shipping quote of the web shop is half built. Implement the stubs in `shipping/zones.py`, `shipping/weights.py`, `shipping/surcharges.py` and `shipping/quote.py` so that `shipping.quote.quote(order)` follows every rule in `README.md`. `python3 -m unittest discover -s tests` exercises only a few of the rules; all twelve must hold. Do not edit `tests/test_quote.py` or `shipping/rates.py`.",
+        needs: &["python3"],
+        files: embed!("shipquote/workspace": "README.md", "shipping/__init__.py", "shipping/errors.py", "shipping/quote.py", "shipping/rates.py", "shipping/surcharges.py", "shipping/weights.py", "shipping/zones.py", "tests/test_quote.py"),
+        check: "python3 -m unittest discover -s tests",
+        restore: &["tests/test_quote.py", "shipping/rates.py"],
+        hidden: embed!("shipquote/hidden": "tests/test_quote_more.py"),
+        verify: "python3 -m unittest tests/test_quote.py tests/test_quote_more.py",
+        solution: embed!("shipquote/solution": "shipping/quote.py", "shipping/surcharges.py", "shipping/weights.py", "shipping/zones.py"),
+        skill: "",
+    },
+    Task {
+        id: "attempts",
+        title: "a rename that has to reach the command line, settings, manifests, scripts and docs",
+        prompt: "`docs/attempts-migration.md` is the agreed plan for moving fetchkit from `retries` to `attempts`. The tests in `tests/` are already written against the new API, so `python3 -m unittest discover -s tests` fails. Carry out the whole migration exactly as the note describes it: the library, the command line, the settings, the manifests, the scripts and the documentation. The tests cover the library only. Do not edit the files in `tests/`, `docs/attempts-migration.md` or `fetchkit/transport.py`.",
+        needs: &["python3", "sh"],
+        files: embed!("attempts/workspace": "README.md", "config/fetchkit.ini.template", "docs/attempts-migration.md", "examples/manifest.json", "fetchkit/__init__.py", "fetchkit/__main__.py", "fetchkit/cli.py", "fetchkit/client.py", "fetchkit/config.py", "fetchkit/jobs.py", "fetchkit/retry.py", "fetchkit/transport.py", "scripts/backfill.py", "scripts/nightly.sh", "scripts/smoke.sh", "tests/test_client.py", "tests/test_retry.py"),
+        check: "python3 -m unittest discover -s tests",
+        restore: &["tests/test_client.py", "tests/test_retry.py", "docs/attempts-migration.md", "fetchkit/transport.py"],
+        hidden: embed!("attempts/hidden": "tests/test_migration_more.py"),
+        verify: "python3 -m unittest tests/test_client.py tests/test_retry.py tests/test_migration_more.py",
+        solution: embed!("attempts/solution": "README.md", "config/fetchkit.ini.template", "examples/manifest.json", "fetchkit/__init__.py", "fetchkit/cli.py", "fetchkit/client.py", "fetchkit/config.py", "fetchkit/jobs.py", "fetchkit/retry.py", "scripts/backfill.py", "scripts/nightly.sh", "scripts/smoke.sh"),
+        skill: "",
+    },
+    Task {
+        id: "connpool",
+        title: "a connection pool that is shared by threads and keeps few of its ten guarantees",
+        prompt: "`pool/pool.py` is a connection pool that many threads share. `README.md` lists ten guarantees it has to give, and the current code keeps only some of them. Make `ConnectionPool` keep all ten. `python3 -m unittest discover -s tests` checks only a few of them. Do not edit `tests/test_pool.py`.",
+        needs: &["python3"],
+        files: embed!("connpool/workspace": "README.md", "examples/worker.py", "pool/__init__.py", "pool/errors.py", "pool/pool.py", "tests/test_pool.py"),
+        check: "python3 -m unittest discover -s tests",
+        restore: &["tests/test_pool.py"],
+        hidden: embed!("connpool/hidden": "tests/test_pool_more.py"),
+        verify: "python3 -m unittest tests/test_pool.py tests/test_pool_more.py",
+        solution: embed!("connpool/solution": "pool/pool.py"),
+        skill: "",
+    },
+    Task {
+        id: "confdialect",
+        title: "a parser for a settings format, to complete from a ten-section specification",
+        prompt: "`conf/parser.py` is a first cut of the reader for our `.conf` settings format: it knows sections, entries and whole-line comments, and validates nothing. Complete it so that `conf.parse` and `conf.load` implement all of `SPEC.md`, including the errors and their line numbers. `python3 -m unittest discover -s tests` covers a small part of the specification. Do not edit `tests/test_conf.py`, `SPEC.md` or `examples/app.conf`.",
+        needs: &["python3"],
+        files: embed!("confdialect/workspace": "README.md", "SPEC.md", "conf/__init__.py", "conf/__main__.py", "conf/errors.py", "conf/parser.py", "examples/app.conf", "tests/test_conf.py"),
+        check: "python3 -m unittest discover -s tests",
+        restore: &["tests/test_conf.py", "SPEC.md", "examples/app.conf"],
+        hidden: embed!("confdialect/hidden": "tests/test_conf_more.py"),
+        verify: "python3 -m unittest tests/test_conf.py tests/test_conf_more.py",
+        solution: embed!("confdialect/solution": "conf/parser.py"),
+        skill: "",
+    },
+    Task {
+        id: "rollup",
+        title: "a log report to write in POSIX sh and mawk, with an exact output format",
+        prompt: "Write `rollup.sh` as `README.md` specifies it: a per-endpoint summary of a gateway access log, for hosts that have only a POSIX `sh`, mawk and the usual text tools (no Python, Perl or Node, and no gawk extensions). `sh check.sh` compares its output for `access.log` with the two expected reports. The script has to follow the whole README, for any log and for the command line described there, not only for this sample. Do not edit `check.sh`, `access.log`, `expected.txt` or `expected_top3.txt`.",
+        needs: &["sh", "awk", "sort", "diff"],
+        files: &[
+            ("README.md", rollup!("workspace/README.md")),
+            ("rollup.sh", rollup!("workspace/rollup.sh")),
+            ("check.sh", rollup!("workspace/check.sh")),
+            ("access.log", rollup!("workspace/access.log.txt")),
+            ("expected.txt", rollup!("workspace/expected.txt")),
+            ("expected_top3.txt", rollup!("workspace/expected_top3.txt")),
+        ],
+        check: "sh check.sh",
+        restore: &["check.sh", "access.log", "expected.txt", "expected_top3.txt"],
+        hidden: &[
+            ("more/check_more.sh", rollup!("hidden/more/check_more.sh")),
+            ("more/big.log", rollup!("hidden/more/big.log.txt")),
+            ("more/big.txt", rollup!("hidden/more/big.txt")),
+            ("more/big_top5.txt", rollup!("hidden/more/big_top5.txt")),
+            ("more/big_top100.txt", rollup!("hidden/more/big_top100.txt")),
+            ("more/junk.log", rollup!("hidden/more/junk.log.txt")),
+            ("more/junk.txt", rollup!("hidden/more/junk.txt")),
+            ("more/tiny.log", rollup!("hidden/more/tiny.log.txt")),
+            ("more/tiny.txt", rollup!("hidden/more/tiny.txt")),
+        ],
+        verify: "sh check.sh > /dev/null 2>&1 && sh more/check_more.sh",
+        solution: &[("rollup.sh", rollup!("solution/rollup.sh"))],
+        skill: "",
+    },
+    Task {
+        id: "jobqueue",
+        title: "a job queue that loses its slots, with timeouts and retries still to build",
+        prompt: "`src/queue.js` falls short of the contract in `README.md`: jobs get stuck, and parts of the contract are not implemented at all. Make `JobQueue` meet the whole contract. `node --test --test-timeout=5000` (which is `npm test`) runs `test/queue.test.js`, which covers only a little of it. Do not edit `test/queue.test.js`, `src/errors.js` or `package.json`.",
+        needs: &["node"],
+        files: embed!("jobqueue/workspace": "README.md", "package.json", "src/errors.js", "src/index.js", "src/queue.js", "test/queue.test.js"),
+        check: "node --test --test-timeout=5000",
+        restore: &["test/queue.test.js", "src/errors.js", "package.json"],
+        hidden: embed!("jobqueue/hidden": "test/contract.test.js"),
+        verify: "node --test --test-timeout=10000 test/queue.test.js test/contract.test.js",
+        solution: embed!("jobqueue/solution": "src/queue.js"),
+        skill: "",
+    },
+    Task {
+        id: "ttlcache",
+        title: "a cache with a capacity and a time to live that misses most of its contract",
+        prompt: "`src/cache.js` does not do what the contract in `README.md` says: some operations behave wrongly and some are missing. Make `TtlCache` meet the whole contract. `node --test` runs `test/cache.test.js`, which covers only part of it. Do not edit `test/cache.test.js` or `src/clock.js`.",
+        needs: &["node"],
+        files: embed!("ttlcache/workspace": "README.md", "package.json", "src/cache.js", "src/clock.js", "src/index.js", "test/cache.test.js"),
+        check: "node --test",
+        restore: &["test/cache.test.js", "src/clock.js"],
+        hidden: embed!("ttlcache/hidden": "test/contract.test.js"),
+        verify: "node --test --test-timeout=10000 test/cache.test.js test/contract.test.js",
+        solution: embed!("ttlcache/solution": "src/cache.js"),
+        skill: "",
+    },
+];

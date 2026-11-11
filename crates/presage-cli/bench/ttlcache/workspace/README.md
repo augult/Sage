@@ -49,7 +49,8 @@ never counted, and reported exactly once.)
 - `peek(key)` returns the value or `undefined` without touching the order.
 - `has(key)` says whether the key is there, without touching the order.
 - `touch(key, { ttl } = {})` restarts the entry's time to live from now (with `ttl` if given,
-  else the default) and makes it the most recently used. Returns whether the key was there.
+  else the default; validated as in `set`) and makes it the most recently used. Returns whether
+  the key was there.
 - `delete(key)` removes the entry, reason `'deleted'`. Returns whether the key was there.
 - `clear()` removes everything, reason `'cleared'`, the least recently used first.
 - `prune()` does nothing beyond the removal of expired entries that every operation starts with,
