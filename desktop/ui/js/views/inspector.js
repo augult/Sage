@@ -17,7 +17,7 @@ function stat(label, value, sub, tone) {
   return h('div.stat', h('span.stat-label', label), h(`span.stat-value${tone ? `.tone-${tone}` : ''}`, String(value)), sub && h('span.stat-sub', sub));
 }
 
-/** A share bar: `part` of `whole` in one tone, the remainder in another. */
+/** A share bar, as a ruler of ticks: `part` of `whole` in one tone, the remainder in another. */
 function bar(part, whole, tone, restTone = 'plain') {
   if (!(whole > 0)) return null;
   const share = Math.max(0, Math.min(100, (part * 100) / whole));
@@ -27,26 +27,26 @@ function bar(part, whole, tone, restTone = 'plain') {
 function economy(model) {
   const s = model.stats;
   const simulated = model.meta.simulated === true;
-  const badge = simulated && h('span.badge', 'SIMULATED');
+  const badge = simulated && h('span.badge', 'Simulated');
   if (!s) return section('Economy', badge, h('p.side-note', 'No data'));
 
-  const cost = simulated ? stat('Cost', 'fabricated', null, 'amber') : s.priced ? stat('Cost', `$${s.cost.toFixed(4)}`, 'at list price') : stat('Cost', 'unpriced', null, 'plain');
+  const cost = simulated ? stat('Cost', 'fabricated', null, 'alert') : s.priced ? stat('Cost', `$${s.cost.toFixed(4)}`, 'at list price') : stat('Cost', 'unpriced', null, 'plain');
   return section(
     'Economy',
     badge,
     stat('Turns', s.turns),
     stat('Steps', s.steps, s.skipped > 0 && `${s.skipped} skipped`),
-    stat('Surprises', s.surprises, null, s.surprises > 0 && 'amber'),
+    stat('Surprises', s.surprises, null, s.surprises > 0 && 'alert'),
     stat('Predictions', s.predictions > 0 ? `${s.predictions_held} of ${s.predictions} held` : 'none made'),
-    bar(s.predictions_held, s.predictions, 'teal', 'amber'),
+    bar(s.predictions_held, s.predictions, 'good', 'alert'),
     stat('Prompt tokens', k(s.prompt_tokens), s.prompt_tokens > 0 && `${pct(s.cached_tokens, s.prompt_tokens)} cached`),
-    bar(s.cached_tokens, s.prompt_tokens, 'teal'),
+    bar(s.cached_tokens, s.prompt_tokens, 'good'),
     stat('Output tokens', k(s.output_tokens), s.output_tokens > 0 && `${pct(s.reasoning_tokens, s.output_tokens)} thinking`),
-    bar(s.reasoning_tokens, s.output_tokens, 'azure'),
+    bar(s.reasoning_tokens, s.output_tokens, 'quiet'),
     cost,
     stat('Context', `${k(s.context_tokens)} tokens`),
     stat('Time', duration(s.elapsed_ms), `model ${duration(s.model_ms)} · tools ${duration(s.tool_ms)}`),
-    bar(s.model_ms, s.model_ms + s.tool_ms, 'azure', 'teal'),
+    bar(s.model_ms, s.model_ms + s.tool_ms, 'quiet', 'good'),
     stat('Kept out of context', bytes(s.hidden_bytes)),
     stat('Repairs', s.repairs),
     stat('Retries', s.retries),
@@ -54,7 +54,7 @@ function economy(model) {
   );
 }
 
-const WATCH_LOOKS = { pass: ['check', 'teal', 'passing'], fail: ['bang', 'amber', 'failing'] };
+const WATCH_LOOKS = { pass: ['check', 'good', 'passing'], fail: ['bang', 'alert', 'failing'] };
 
 function watches(model) {
   if (!model.watches.size) return section('Watches', null, h('p.side-note', 'No watches'));
@@ -78,11 +78,11 @@ function watches(model) {
 }
 
 function notes(model) {
-  const entries = [...model.lessons.map((lesson) => ({ ...lesson, tone: 'teal' })), ...model.notes.map((note) => ({ ...note, tone: 'azure' }))];
+  const entries = [...model.lessons, ...model.notes];
   if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'None'));
   return section(
     'Notes and lessons',
     null,
-    entries.map((entry) => h('div.note', h(`span.note-label.tone-${entry.tone}`, entry.label), h('div.note-body', entry.text))),
+    entries.map((entry) => h('div.note', h('span.note-label', entry.label), h('div.note-body', entry.text))),
   );
 }
