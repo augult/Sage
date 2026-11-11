@@ -628,7 +628,7 @@ impl Harness {
     /// Sub-directories of `path`, for the in-app folder picker.
     pub fn list_dir(&self, path: Option<&str>) -> Result<DirListing, String> {
         let dir = match path.map(str::trim).filter(|p| !p.is_empty()) {
-            Some(p) if p == "~" => home_dir(),
+            Some("~") => home_dir(),
             Some(p) => p.strip_prefix("~/").map(|rest| home_dir().join(rest)).unwrap_or_else(|| PathBuf::from(p)),
             None => home_dir(),
         };
@@ -645,7 +645,7 @@ impl Harness {
                 (!name.starts_with('.')).then(|| DirEntry { path: e.path().to_string_lossy().into_owned(), name })
             })
             .collect();
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        dirs.sort_by_key(|a| a.name.to_lowercase());
         Ok(DirListing { is_git: dir.join(".git").exists(), parent: dir.parent().map(|p| p.to_string_lossy().into_owned()), path: dir.to_string_lossy().into_owned(), dirs })
     }
 }

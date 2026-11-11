@@ -160,12 +160,10 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
     // Code pasted as a pattern is a valid regex that means something else: `divide(a, b)` is a
     // group, and matches no parenthesis. Before reporting that there is nothing, look for the text.
     let mut why_literal = "not a valid regex";
-    if found.hits.is_empty() && !literal && !found.timed_out && regex::escape(pattern) != pattern {
-        if let (Ok(m), Ok(walk)) = (build(true), walker(&root, glob)) {
-            let retry = scan(walk, &m, cap, started);
-            if !retry.hits.is_empty() {
-                (found, literal, why_literal) = (retry, true, "as a regex it matches nothing");
-            }
+    if found.hits.is_empty() && !literal && !found.timed_out && regex::escape(pattern) != pattern && let (Ok(m), Ok(walk)) = (build(true), walker(&root, glob)) {
+        let retry = scan(walk, &m, cap, started);
+        if !retry.hits.is_empty() {
+            (found, literal, why_literal) = (retry, true, "as a regex it matches nothing");
         }
     }
     let Scan { hits, shown, total, files_with_hits, timed_out } = found;

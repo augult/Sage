@@ -280,17 +280,15 @@ impl Runner<'_> {
         regressed
     }
 
-    async fn approve(&mut self, call: &Call, tool: Tool) -> Result<(), StepOutput> {
+    /// Asks for approval where the step needs it. Returns what the model is told if it was refused.
+    async fn refusal(&mut self, call: &Call, tool: Tool) -> Option<StepOutput> {
         let danger = if tool == Tool::Shell { str_arg(&call.args, "cmd").and_then(tools::shell::danger) } else { None };
         if !tool.is_act() || (self.autonomy == Autonomy::Auto && danger.is_none()) {
-            return Ok(());
+            return None;
         }
         let denied = |text: String| StepOutput { status: StepStatus::Denied, stub: text.clone(), observation: text, ..Default::default() };
         if !self.interactive {
-            return match danger {
-                Some(why) => Err(denied(format!("[denied] refused: this command {why}, and nobody is present to approve it."))),
-                None => Ok(()),
-            };
+            return danger.map(|why| denied(format!("[denied] refused: this command {why}, and nobody is present to approve it.")));
         }
         let (id, rx) = self.approvals.request();
         self.sink.emit(EventKind::Approval { id, turn: self.turn, tool: tool.name().to_string(), summary: summarize(call), reason: danger.unwrap_or("this step changes the workspace").to_string() });
@@ -299,13 +297,13 @@ impl Runner<'_> {
             _ = self.cancel.cancelled() => false,
         };
         self.sink.emit(EventKind::ApprovalResolved { id, allow });
-        if allow { Ok(()) } else { Err(denied("[denied] the user declined this step. Do not retry it; continue another way or ask what they want.".to_string())) }
+        (!allow).then(|| denied("[denied] the user declined this step. Do not retry it; continue another way or ask what they want.".to_string()))
     }
 
     async fn execute(&mut self, call: &Call, res: &mut ScriptResult, acted: &mut bool) -> StepOutput {
         let tool = call.tool.expect("calls without a tool carry an error and never reach execute");
         let args = &call.args;
-        if let Err(denied) = self.approve(call, tool).await {
+        if let Some(denied) = self.refusal(call, tool).await {
             return denied;
         }
         let epoch_before = self.sess.evidence.epoch;
@@ -332,11 +330,9 @@ impl Runner<'_> {
             res.edited.push(path);
         }
         if let Some(meta) = &out.shell {
-            if self.sess.features.lessons {
-                if let Some(lesson) = self.sess.lessons.on_shell(&meta.cmd, meta.ok, &meta.output_tail) {
-                    self.stats.lessons_learned += 1;
-                    self.sink.emit(EventKind::Lesson { learned: true, text: lesson.describe() });
-                }
+            if self.sess.features.lessons && let Some(lesson) = self.sess.lessons.on_shell(&meta.cmd, meta.ok, &meta.output_tail) {
+                self.stats.lessons_learned += 1;
+                self.sink.emit(EventKind::Lesson { learned: true, text: lesson.describe() });
             }
             // Evidence is a prediction of success that came true, made about something that can fail.
             if meta.held_explicit && meta.ok && !proves_nothing(&meta.cmd) {

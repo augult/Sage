@@ -207,7 +207,7 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
                 end -= 1;
             }
         }
-        if !found.iter().any(|(s, e)| i + 1 >= *s && i + 1 <= *e) {
+        if !found.iter().any(|(s, e)| i + 1 >= *s && i < *e) {
             found.push((i + 1, end + 1));
         }
         if found.len() >= 3 {

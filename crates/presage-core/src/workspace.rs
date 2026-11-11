@@ -346,7 +346,7 @@ pub fn fingerprint(root: &Path, budget: Duration) -> u64 {
         let h = fnv64(entry.path().as_os_str().as_encoded_bytes()) ^ mix(md.len()) ^ mix(mtime).rotate_left(21);
         acc = acc.wrapping_add(mix(h));
         count += 1;
-        if count >= FINGERPRINT_MAX_FILES || (count % 256 == 0 && start.elapsed() > budget) {
+        if count >= FINGERPRINT_MAX_FILES || (count.is_multiple_of(256) && start.elapsed() > budget) {
             break;
         }
     }

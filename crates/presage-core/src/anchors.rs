@@ -68,10 +68,8 @@ pub fn parse_anchor(s: &str) -> Option<Anchor> {
 pub fn parse_range(s: &str) -> Option<(Anchor, Anchor)> {
     let s = s.trim();
     for sep in ["..", " to ", "-", ":", ","] {
-        if let Some((a, b)) = s.split_once(sep) {
-            if let (Some(a), Some(b)) = (parse_anchor(a), parse_anchor(b)) {
-                return Some((a, b));
-            }
+        if let Some((a, b)) = s.split_once(sep) && let (Some(a), Some(b)) = (parse_anchor(a), parse_anchor(b)) {
+            return Some((a, b));
         }
     }
     parse_anchor(s).map(|a| (a, a))
@@ -223,10 +221,8 @@ pub fn resolve_range(lines: &[&str], a: Anchor, b: Anchor, past: &Past) -> Resul
     let mut readings: Vec<(usize, usize, usize)> = Vec::new();
     for state in (0..=past.seen.min(past.splices.len())).rev() {
         let since = &past.splices[state..];
-        if let (Some(s), Some(e)) = (carry(a.line, since), carry(b.line, since)) {
-            if fits(a, s as isize) && fits(b, e as isize) && !readings.iter().any(|r| (r.1, r.2) == (s, e)) {
-                readings.push((state, s, e));
-            }
+        if let (Some(s), Some(e)) = (carry(a.line, since), carry(b.line, since)) && fits(a, s as isize) && fits(b, e as isize) && !readings.iter().any(|r| (r.1, r.2) == (s, e)) {
+            readings.push((state, s, e));
         }
         if !hashed {
             break;

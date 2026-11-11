@@ -146,10 +146,8 @@ pub fn parse_args(raw: &str) -> Result<(Value, bool), String> {
     let decomma = strip_trailing_commas(&escaped);
     let closed = close_truncated(&decomma);
     for candidate in [unfenced, escaped.as_str(), decomma.as_str(), closed.as_str()] {
-        if let Ok(v) = serde_json::from_str::<Value>(candidate) {
-            if v.is_object() {
-                return Ok((v, true));
-            }
+        if let Ok(v) = serde_json::from_str::<Value>(candidate) && v.is_object() {
+            return Ok((v, true));
         }
     }
     Err(first_error)
@@ -166,7 +164,10 @@ pub fn cut_off(raw: &str) -> bool {
     serde_json::from_str::<Value>(&mended).is_err() && serde_json::from_str::<Value>(&close_truncated(&mended)).is_ok()
 }
 
-const ALIASES: &[(Tool, &[(&str, &[&str])])] = &[
+/// A tool's argument names, each with the names other harnesses give it.
+type Aliases = &'static [(&'static str, &'static [&'static str])];
+
+const ALIASES: &[(Tool, Aliases)] = &[
     (
         Tool::Shell,
         &[
@@ -255,11 +256,9 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
     }
     let num = |m: &Map<String, Value>, k: &str| m.get(k).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
     // `read {"out": 1}`: the model means the saved output `out:1`.
-    if tool == Tool::Read && !map.contains_key("path") {
-        if let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
-            map.remove("out");
-            map.insert("path".into(), json!(format!("out:{n}")));
-        }
+    if tool == Tool::Read && !map.contains_key("path") && let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
+        map.remove("out");
+        map.insert("path".into(), json!(format!("out:{n}")));
     }
     if tool == Tool::Read {
         // `view_range: [400, 420]`, as other harnesses take it.
@@ -301,14 +300,12 @@ pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     fn push(found: &mut Vec<ToolCall>, v: &Value) {
         let name = v.get("name").or_else(|| v.get("tool")).or_else(|| v.get("function")).and_then(Value::as_str);
         let args = v.get("arguments").or_else(|| v.get("args")).or_else(|| v.get("parameters")).or_else(|| v.get("input"));
-        if let (Some(name), Some(args)) = (name, args) {
-            if Tool::from_name(name).is_some() {
-                let arguments = match args {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                found.push(ToolCall { id: format!("text_{}", found.len()), name: name.to_string(), arguments });
-            }
+        if let (Some(name), Some(args)) = (name, args) && Tool::from_name(name).is_some() {
+            let arguments = match args {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            found.push(ToolCall { id: format!("text_{}", found.len()), name: name.to_string(), arguments });
         }
     }
     let mut found = Vec::new();
@@ -324,10 +321,8 @@ pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     if found.is_empty() {
         let trimmed = content.trim();
         let body = trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```")).map(|b| b.trim_end_matches("```").trim()).unwrap_or(trimmed);
-        if body.starts_with('{') && body.ends_with('}') {
-            if let Ok(v) = serde_json::from_str::<Value>(body) {
-                push(&mut found, &v);
-            }
+        if body.starts_with('{') && body.ends_with('}') && let Ok(v) = serde_json::from_str::<Value>(body) {
+            push(&mut found, &v);
         }
     }
     found
@@ -355,10 +350,10 @@ pub fn parse_calls(raw: &[ToolCall]) -> (Vec<Call>, u32) {
             if repaired {
                 repairs += 1;
             }
-            let before = args.to_string();
+            let before = args.clone();
             match normalize_args(tool, args) {
                 Ok(args) => {
-                    if args.to_string() != before {
+                    if args != before {
                         repairs += 1;
                     }
                     Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: Some(tool), args, error: None }

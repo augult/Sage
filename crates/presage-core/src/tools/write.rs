@@ -33,10 +33,8 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
             return StepOutput::error(format!("{shown} already exists ({lines} lines). Use edit to change it, or pass overwrite:true to replace the whole file."));
         }
     }
-    if let Some(parent) = abs.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return StepOutput::error(format!("cannot create {}: {e}", sess.ws.display(parent)));
-        }
+    if let Some(parent) = abs.parent() && let Err(e) = std::fs::create_dir_all(parent) {
+        return StepOutput::error(format!("cannot create {}: {e}", sess.ws.display(parent)));
     }
     if let Err(e) = std::fs::write(&abs, content) {
         return StepOutput::error(format!("cannot write {shown}: {e}"));

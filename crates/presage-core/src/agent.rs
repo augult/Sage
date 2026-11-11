@@ -403,11 +403,9 @@ impl Agent {
             // run it. Either the output limit cut it, or the stream ended without a word and left
             // arguments that only parse once closed.
             let cut = resp.finish == "length" || (resp.finish.is_empty() && raw_calls.last().is_some_and(|c| repair::cut_off(&c.arguments)));
-            if cut {
-                if let Some(last) = calls.last_mut() {
-                    let why = if resp.finish == "length" { "hit the output limit" } else { "broke off" };
-                    last.error = Some(format!("your reply {why} in the middle of this call, so it was not run. Send it again; split large content into smaller steps."));
-                }
+            if cut && let Some(last) = calls.last_mut() {
+                let why = if resp.finish == "length" { "hit the output limit" } else { "broke off" };
+                last.error = Some(format!("your reply {why} in the middle of this call, so it was not run. Send it again; split large content into smaller steps."));
             }
             self.stats.repairs += repairs;
             self.sink.emit(EventKind::Model {
@@ -532,12 +530,10 @@ impl Agent {
             if let Some(done) = result.finished {
                 break Outcome { status: FinishStatus::Done, summary: done.summary, verified: done.verified, evidence: done.evidence };
             }
-            if let (EffortPolicy::Ratchet(_), true) = (self.cfg.effort, self.surprise_streak >= 3) {
-                if let Some(next) = self.effort.next() {
-                    self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "three surprises in a row".into() });
-                    self.effort = next;
-                    self.surprise_streak = 0;
-                }
+            if let (EffortPolicy::Ratchet(_), true) = (self.cfg.effort, self.surprise_streak >= 3) && let Some(next) = self.effort.next() {
+                self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "three surprises in a row".into() });
+                self.effort = next;
+                self.surprise_streak = 0;
             }
         };
 

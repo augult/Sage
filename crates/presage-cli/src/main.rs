@@ -76,7 +76,7 @@ fn k(n: u64) -> String {
 }
 
 fn pct(part: u64, whole: u64) -> String {
-    if whole == 0 { "–".into() } else { format!("{}%", (part * 100 + whole / 2) / whole) }
+    (part * 100 + whole / 2).checked_div(whole).map_or("–".into(), |p| format!("{p}%"))
 }
 
 fn indent(text: &str, prefix: &str, max_lines: usize) -> String {

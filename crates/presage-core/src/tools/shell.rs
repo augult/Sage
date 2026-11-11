@@ -258,11 +258,9 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                         obs.push_str(block.trim_end());
                     }
                 }
-                if sess.features.lessons && !ok {
-                    if let Some(hint) = sess.lessons.hint(&cmd, &output_tail) {
-                        obs.push_str("\nhint: ");
-                        obs.push_str(&hint);
-                    }
+                if sess.features.lessons && !ok && let Some(hint) = sess.lessons.hint(&cmd, &output_tail) {
+                    obs.push_str("\nhint: ");
+                    obs.push_str(&hint);
                 }
                 out.status = StepStatus::Surprise;
                 out.stub = format!("{head} ({})", ex.spill);

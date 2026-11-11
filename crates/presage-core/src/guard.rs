@@ -169,19 +169,11 @@ impl Expect {
 
 /// `/pattern/` is a regex; anything else is a case-insensitive substring.
 fn output_contains(output: &str, needle: &str) -> bool {
-    if needle.len() > 2 && needle.starts_with('/') {
-        if let Some(end) = needle.rfind('/').filter(|e| *e > 0) {
-            let (pat, flags) = (&needle[1..end], &needle[end + 1..]);
-            if flags.chars().all(|c| matches!(c, 'i' | 'm' | 's')) {
-                if let Ok(re) = RegexBuilder::new(pat)
-                    .case_insensitive(flags.contains('i'))
-                    .multi_line(true)
-                    .dot_matches_new_line(flags.contains('s'))
-                    .build()
-                {
-                    return re.is_match(output);
-                }
-            }
+    if needle.len() > 2 && needle.starts_with('/') && let Some(end) = needle.rfind('/').filter(|e| *e > 0) {
+        let (pat, flags) = (&needle[1..end], &needle[end + 1..]);
+        let regex = RegexBuilder::new(pat).case_insensitive(flags.contains('i')).multi_line(true).dot_matches_new_line(flags.contains('s')).build();
+        if flags.chars().all(|c| matches!(c, 'i' | 'm' | 's')) && let Ok(re) = regex {
+            return re.is_match(output);
         }
     }
     output.to_lowercase().contains(&needle.to_lowercase())
