@@ -1,12 +1,280 @@
 /* New session, Settings and the folder picker. */
 
+/* New session: one composer holds the workspace, the task and the run's settings. */
+
+.new-session {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer-card {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl);
+  background: var(--well);
+}
+
+.composer-card:has(textarea:focus-visible),
+.composer:has(textarea:focus-visible) {
+  border-color: var(--azure-ink);
+}
+
+.composer-card textarea {
+  display: block;
+  width: 100%;
+  min-height: 124px;
+  padding: 12px 14px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: var(--text-lg);
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.composer-card textarea::placeholder,
+.workspace-pick input::placeholder {
+  color: var(--faint);
+  font-family: var(--font);
+}
+
+.composer-top,
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+}
+
+.composer-top {
+  border-bottom: 1px solid var(--line);
+}
+
+.composer-bar {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+}
+
+/* Start sits at the end of the bar, and at the end of its own row when the pickers need the first. */
+.composer-bar > .btn {
+  margin-left: auto;
+}
+
+/* Under the composer: recent workspaces on the left, the shortcut on the right. */
+.composer-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.composer-foot .kbd {
+  margin-left: auto;
+}
+
+/* The workspace, as a field along the top of the composer. */
+.workspace-pick {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  cursor: text;
+}
+
+.workspace-pick:hover {
+  background: var(--fill-1);
+}
+
+.workspace-pick:focus-within {
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--azure-ink);
+}
+
+.workspace-pick input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
+}
+
+/* A picker: the current choice as a quiet button, the others in a menu under it. */
+
+.pick-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pick:hover,
+.pick[aria-expanded="true"] {
+  background: var(--fill-2);
+}
+
+.pick-key,
+.pick .icon {
+  color: var(--muted);
+}
+
+.pick-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 232px;
+  max-width: min(340px, 80vw);
+  max-height: 336px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--solid);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: enter 120ms ease-out;
+}
+
+.opens-up > .menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 8px 4px;
+  color: var(--soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.menu-group:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.menu-note {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.menu-item {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible {
+  background: var(--fill-2);
+}
+
+.menu-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.menu-item:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.menu-item > .icon {
+  margin-top: 4px;
+  visibility: hidden;
+}
+
+.menu-item[aria-selected="true"] > .icon {
+  visibility: visible;
+}
+
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menu-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: normal;
+}
+
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.recent button {
+  max-width: 100%;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--soft);
+  font: var(--text-sm)/18px var(--mono);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recent button:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+
+/* The walkthrough, offered while no provider has a key. */
 .hero {
   display: flex;
   gap: 16px;
   padding: 16px;
-  border: 1px solid rgba(124, 92, 255, 0.45);
-  border-radius: 8px;
-  background: linear-gradient(var(--violet-soft), var(--violet-soft)), var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--fill-1);
 }
 
 .hero-mark {
@@ -15,11 +283,12 @@
 }
 
 .hero h2 {
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
 .hero p {
+  max-width: 62ch;
   margin-top: 4px;
   color: var(--soft);
 }
@@ -27,25 +296,12 @@
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
   margin-top: 12px;
 }
 
-.panel {
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
-}
-
-.panel-title {
-  margin-bottom: 12px;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.panel > .section-title:has(+ .field) {
+  margin-bottom: 10px;
 }
 
 .field {
@@ -53,30 +309,33 @@
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 4px 12px;
   align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
 }
 
 .field-label {
   padding-top: 5px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 .field-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .field-hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
 .field-hint code {
   color: var(--soft);
-  font: 11.5px var(--mono);
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
 }
 
 .field-row {
@@ -93,33 +352,6 @@
 .field-row .btn,
 .picker-path .btn {
   height: auto;
-}
-
-.recent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.recent button {
-  max-width: 100%;
-  padding: 0 8px;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--soft);
-  font: 11.5px/18px var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.recent button:hover {
-  background: var(--raised);
 }
 
 /* A radio group drawn as chips; `.segmented` joins them into one control. */
@@ -156,26 +388,25 @@
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--well);
+  border-radius: var(--r-md);
   color: var(--soft);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   white-space: nowrap;
 }
 
 .chip-option:hover input:not(:disabled) + .chip-face {
-  border-color: #3d485c;
+  background: var(--fill-2);
   color: var(--text);
 }
 
 .chip-option input:checked + .chip-face {
-  border-color: var(--violet);
-  background: var(--violet-soft);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--fill-3);
   color: var(--text);
 }
 
 .chip-option input:focus-visible + .chip-face {
-  outline: 2px solid var(--violet);
+  outline: 2px solid var(--azure-ink);
   outline-offset: 2px;
 }
 
@@ -186,62 +417,54 @@
 
 .chip-tag {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
+/* One recessed track; the chosen segment is the raised piece in it. */
 .chips.segmented {
-  gap: 0;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--well);
 }
 
 .chips.segmented .chip-face {
-  margin-left: -1px;
-  border-radius: 0;
-}
-
-.chips.segmented .chip-option:first-child .chip-face {
-  margin-left: 0;
-  border-radius: 6px 0 0 6px;
-}
-
-.chips.segmented .chip-option:last-child .chip-face {
-  border-radius: 0 6px 6px 0;
-}
-
-/* The selected segment's border must sit above its neighbours'. */
-.chips.segmented input:checked + .chip-face {
-  position: relative;
-  z-index: 1;
-}
-
-.form-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-}
-
-.form-actions .form-error {
-  flex: 1;
-  min-width: 0;
-}
-
-.kbd {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
   color: var(--muted);
-  font-size: 11.5px;
+}
+
+.chips.segmented .chip-option:hover input:not(:disabled):not(:checked) + .chip-face {
+  background: transparent;
+}
+
+.chips.segmented input:checked + .chip-face {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 /* Settings */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel > .section-note {
+  margin-bottom: 14px;
+}
 
 .provider {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 0;
+  padding: 14px 0;
   border-top: 1px solid var(--line);
-}
-
-.provider:last-child {
-  padding-bottom: 0;
 }
 
 .provider-head {
@@ -258,7 +481,8 @@
 .provider-url {
   min-width: 0;
   color: var(--muted);
-  font: 11.5px var(--mono);
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
   overflow-wrap: anywhere;
 }
 
@@ -304,7 +528,7 @@
   width: 100%;
   padding: 5px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -312,7 +536,7 @@
 }
 
 .folder:hover {
-  background: var(--raised);
+  background: var(--fill-2);
 }
 
 .folder .icon {
@@ -322,17 +546,18 @@
 .folder span {
   min-width: 0;
   overflow: hidden;
-  font: 12px var(--mono);
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .folder-empty {
   padding: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .picker .dialog-foot > :first-child {
   margin-right: auto;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }

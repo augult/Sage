@@ -13,7 +13,7 @@ const STEP_LOOKS = {
   surprise: { icon: 'bang', tone: 'amber', label: 'surprise' },
   error: { icon: 'cross', tone: 'red', label: 'error' },
   skipped: { icon: 'dash', tone: 'plain', label: 'skipped' },
-  running: { icon: 'clock', tone: 'violet', label: 'still running, as a background job' },
+  running: { icon: 'clock', tone: 'azure', label: 'still running, as a background job' },
   denied: { icon: 'denied', tone: 'red', label: 'denied' },
   unfinished: { icon: 'dash', tone: 'plain', label: 'did not finish' },
 };
@@ -207,7 +207,7 @@ function stepRow(step, ctx, turn) {
   // A step with no end in a turn that is over was cut short (stop, or the app closing).
   const status = step.status === 'active' && !turn.live ? 'unfinished' : step.status;
   const active = status === 'active';
-  const look = active ? { tone: 'violet', label: 'running' } : known(STEP_LOOKS, status) ?? { icon: 'dot', tone: 'plain', label: status };
+  const look = active ? { tone: 'azure', label: 'running' } : known(STEP_LOOKS, status) ?? { icon: 'dot', tone: 'plain', label: status };
   const line = [
     h('span.step-no', String(step.idx + 1)),
     h('span.step-tool', step.tool),

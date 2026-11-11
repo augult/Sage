@@ -4,6 +4,10 @@ const { invoke, Channel } = window.__TAURI__.core;
 
 export const api = {
   hooks: () => invoke('ui_hooks'),
+  /** Where the window's content sits on its monitor, in physical pixels; null when unknown. */
+  windowPlace: () => invoke('window_place'),
+  /** The desktop wallpaper's bytes as an ArrayBuffer; empty when there is none to read. */
+  wallpaper: () => invoke('wallpaper'),
   appState: () => invoke('app_state'),
   /** An empty key removes the stored one. */
   setKey: (provider, key) => invoke('set_key', { provider, key }),

@@ -1,7 +1,9 @@
 // App shell: loads the engine state, owns navigation between the three views, keeps the sidebar current.
 
 import { api } from './api.js';
-import { h } from './dom.js';
+import { mountWindowControls } from './chrome.js';
+import { h, icon } from './dom.js';
+import { startGlass } from './glass.js';
 import { applyHooks } from './hooks.js';
 import * as store from './store.js';
 import { renderLegend } from './views/inspector.js';
@@ -11,12 +13,21 @@ import { mountSettings } from './views/settings.js';
 import { listSignature, renderSessionList } from './views/sidebar.js';
 
 const main = document.getElementById('main');
-const side = document.getElementById('inspector');
+const side = document.getElementById('inspector-body');
 const list = document.getElementById('session-list');
+const newLink = document.getElementById('new-session');
 const settingsLink = document.getElementById('open-settings');
+
+// The title bar and the glass belong to the window, not to the engine: neither waits for it.
+mountWindowControls();
+startGlass();
+newLink.prepend(icon('plus'));
+settingsLink.prepend(icon('sliders'));
 
 let mounted = null;
 let listShown = null;
+
+const markCurrent = (link, current) => (current ? link.setAttribute('aria-current', 'page') : link.removeAttribute('aria-current'));
 
 const app = {
   /** The engine's `AppState`: providers, defaults, paths. */
@@ -43,8 +54,8 @@ const app = {
         mounted = view.name === 'settings' ? mountSettings(main, app) : mountNewSession(main, app);
       }
     }
-    if (view.name === 'settings') settingsLink.setAttribute('aria-current', 'page');
-    else settingsLink.removeAttribute('aria-current');
+    markCurrent(newLink, view.name === 'new');
+    markCurrent(settingsLink, view.name === 'settings');
     drawSessionList();
   },
 
@@ -75,7 +86,7 @@ function drawSessionList() {
 
 [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
 document.getElementById('app-version').textContent = `v${app.state.version}`;
-document.getElementById('new-session').addEventListener('click', () => app.show({ name: 'new' }));
+newLink.addEventListener('click', () => app.show({ name: 'new' }));
 settingsLink.addEventListener('click', () => app.show({ name: 'settings' }));
 // A session changing state changes its glyph; the timer keeps the relative times moving.
 let listFrame = 0;
