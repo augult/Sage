@@ -64,6 +64,26 @@ pub struct Metered {
     /// Set while the latest model request is a failed one, with its HTTP status (0: no answer).
     pub last_error: Option<String>,
     pub last_status: u16,
+    /// Every model request in the order it ended, the failed ones included.
+    pub calls: Vec<Call>,
+}
+
+/// One model request as the proxy saw it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Call {
+    /// When it was sent, counted from the start of the run, and how long the answer took.
+    pub at_ms: u64,
+    pub ms: u64,
+    pub model: String,
+    pub stream: bool,
+    /// How many messages and tool schemas it carried.
+    pub messages: usize,
+    pub tools: usize,
+    /// 200 for an answer, else the provider's status, or 0 when there was none.
+    pub status: u16,
+    pub prompt_tokens: u64,
+    pub cached_tokens: u64,
+    pub output_tokens: u64,
 }
 
 impl Metered {
@@ -90,6 +110,7 @@ impl Metered {
 /// The running count of one run.
 pub struct Meter {
     max_turns: u32,
+    opened: Instant,
     state: Mutex<(Metered, u32)>,
     /// Notified when a request is refused because the turns are used up.
     pub capped: Notify,
@@ -136,7 +157,7 @@ impl Proxy {
 
     /// Starts counting for a run and returns the base URL its harness must use.
     pub fn open(&self, run: &str, max_turns: u32) -> (String, Arc<Meter>) {
-        let meter = Arc::new(Meter { max_turns, state: Mutex::new((Metered::default(), 0)), capped: Notify::new() });
+        let meter = Arc::new(Meter { max_turns, opened: Instant::now(), state: Mutex::new((Metered::default(), 0)), capped: Notify::new() });
         self.inner.runs.lock().unwrap().insert(run.to_string(), meter.clone());
         (format!("http://127.0.0.1:{}/r/{run}/v1", self.port), meter)
     }
@@ -440,10 +461,14 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
     let model_call = req.method == "POST" && matches!(rest, "chat/completions" | "responses");
 
     let mut body = req.body.clone();
-    let (mut model, mut tools, mut injected) = (String::new(), false, false);
+    let mut call = Call { at_ms: meter.opened.elapsed().as_millis() as u64, ..Call::default() };
+    let mut injected = false;
     if model_call && let Ok(mut v) = serde_json::from_slice::<Value>(&body) {
-        model = v.get("model").and_then(Value::as_str).unwrap_or("").to_string();
-        tools = v.get("tools").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
+        let length = |key: &str| v.get(key).and_then(Value::as_array).map(Vec::len);
+        call.model = v.get("model").and_then(Value::as_str).unwrap_or("").to_string();
+        call.stream = v.get("stream").and_then(Value::as_bool).unwrap_or(false);
+        call.messages = length("messages").or(length("input")).unwrap_or(0);
+        call.tools = length("tools").unwrap_or(0);
         if rest == "chat/completions" && ask_for_usage(&mut v) {
             body = serde_json::to_vec(&v).unwrap_or(body);
             injected = true;
@@ -461,8 +486,8 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         } else {
             *in_flight += 1;
             metered.usage_injected += u32::from(injected);
-            if !model.is_empty() && !metered.models.contains(&model) {
-                metered.models.push(model.clone());
+            if !call.model.is_empty() && !metered.models.contains(&call.model) {
+                metered.models.push(call.model.clone());
             }
             false
         }
@@ -481,21 +506,27 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         let mut state = meter.state.lock().unwrap();
         let (metered, in_flight) = &mut *state;
         *in_flight -= 1;
-        metered.model_ms += started.elapsed().as_millis() as u64;
+        call.ms = started.elapsed().as_millis() as u64;
+        metered.model_ms += call.ms;
         match relayed.answer {
             Ok(usage) => {
                 metered.turns += 1;
-                (metered.last_error, metered.last_status) = (None, 200);
+                (metered.last_error, metered.last_status, call.status) = (None, 200, 200);
                 match usage {
-                    Some(usage) => metered.add(&model, tools, &usage),
+                    Some(usage) => {
+                        metered.add(&call.model, call.tools > 0, &usage);
+                        (call.prompt_tokens, call.cached_tokens, call.output_tokens) = (usage.prompt, usage.cached, usage.output);
+                    }
                     None => metered.unmetered += 1,
                 }
             }
             Err((status, message)) => {
                 metered.failed += 1;
+                call.status = status;
                 (metered.last_error, metered.last_status) = (Some(message), status);
             }
         }
+        metered.calls.push(call);
     }
     Ok(relayed.reusable)
 }
@@ -601,6 +632,7 @@ mod tests {
         assert_eq!((m.prompt_tokens, m.cached_tokens, m.output_tokens, m.reasoning_tokens), (1200 + 900 + 900, 1000 + 800 + 800, 50 + 30 + 30, 20));
         assert_eq!((m.first_prompt_tokens, m.context_tokens), (1200, 900));
         assert_eq!(m.models, vec!["deepseek-chat"]);
+        assert_eq!(m.calls.iter().map(|c| (c.status, c.stream, c.messages, c.prompt_tokens, c.output_tokens)).collect::<Vec<_>>(), [(200, false, 0, 1200, 50), (200, true, 0, 900, 30), (200, true, 0, 900, 30)]);
         assert!(m.priced && m.cost > 0.0 && m.cost_uncached > m.cost, "{m:?}");
         let prices = prices_for("deepseek-chat").unwrap();
         let listed = prices.cost(&Usage { prompt: 3000, cached: 2600, output: 110, reasoning: 20 });
@@ -647,7 +679,7 @@ mod tests {
         let (status, text) = post(&base, "chat/completions", json!({"model": "broken", "messages": []})).await;
         assert_eq!((status, text.contains("overloaded")), (503, true));
         let m = proxy.close("r");
-        assert_eq!((m.turns, m.failed, m.last_status), (0, 1, 503));
+        assert_eq!((m.turns, m.failed, m.last_status, m.calls[0].status), (0, 1, 503, 503));
         assert!(m.last_error.as_deref().is_some_and(|e| e.starts_with("provider returned HTTP 503") && e.contains("overloaded")), "{m:?}");
 
         let unreachable = Proxy::start("http://127.0.0.1:1/v1", "k").await.unwrap();
