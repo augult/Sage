@@ -607,7 +607,7 @@ async fn run_job(shared: Arc<Shared>, job: Job) -> Option<Run> {
         let verdict = match (&run.error, run.solved) {
             (Some(e), _) => format!("no result ({})", one_line(e, 90)),
             (None, true) => "solved".to_string(),
-            (None, false) => format!("NOT solved ({})", run.outcome),
+            (None, false) => format!("NOT solved ({}{})", run.outcome, run.failure.as_ref().map(|f| format!(": {}", one_line(f, 90))).unwrap_or_default()),
         };
         eprintln!("[{n}/{}] {} · {} · {} #{}: {verdict} · {} turns · ${:.4} · {}", shared.total, job.model, job.task.id, job.variant.name, job.repeat, run.stats.turns, run.stats.cost, fmt_duration(run.stats.elapsed_ms));
     }
@@ -797,11 +797,11 @@ pub fn render(r: &Report) -> String {
     if r.simulated {
         out.push("SCRIPTED STAND-IN: every run replays the reference solution. Turns, tokens and costs are fabricated; this checks the benchmark and measures nothing.".into());
     }
-    let sizes = |of: &[Prefix]| of.iter().map(|p| format!("{} ~{} tokens", p.variant, p.tokens)).collect::<Vec<_>>().join(", ");
+    let sizes = |of: &[Prefix]| of.iter().filter(|p| p.tokens > 0).map(|p| format!("{} ~{} tokens", p.variant, p.tokens)).collect::<Vec<_>>().join(", ");
     if !r.prefix_tokens.is_empty() {
         out.push(format!("fixed prompt prefix, estimated: {}", sizes(&r.prefix_tokens)));
     }
-    if !r.first_prompt_tokens.is_empty() {
+    if r.first_prompt_tokens.iter().any(|p| p.tokens > 0) {
         out.push(format!("first prompt with the task, measured: {}", sizes(&r.first_prompt_tokens)));
     }
     let details = || r.runs.iter().filter_map(|run| Some((run, run.external.as_ref()?)));
@@ -1172,7 +1172,7 @@ u.urlopen(r).read()' "$1"; }"#;
         assert_eq!((all("ext:solver").solved, all("ext:solver").runs, all("ext:idle").solved, all("ext:idle").runs), (1, 1, 0, 1));
         assert_eq!(report.summary.iter().find(|c| c.model == "broken" && c.task == ALL && c.variant == "ext:solver").map(|c| (c.runs, c.errors)), Some((0, 1)));
 
-        let seen = seen.lock().unwrap();
+        let seen = seen.lock().unwrap().clone();
         assert!(!seen.is_empty() && seen.iter().all(|(_, _, auth, _)| auth == "Bearer real-key"), "{seen:?}");
         assert!(report.prefix_tokens.is_empty());
         assert_eq!(report.first_prompt_tokens.iter().map(|p| (p.variant.as_str(), p.tokens)).collect::<Vec<_>>(), [("ext:solver", 1200), ("ext:idle", 0), ("ext:looper", 1200)]);

@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 const GRACE: Duration = Duration::from_secs(20);
 /// What an adapter inherits from the environment. Everything else, API keys above all, is withheld.
 const INHERITED: &[&str] = &["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", "BENCH_EXT_HOME"];
+/// Exit code by which an adapter says that its harness ran into its own step limit.
+const STEP_LIMIT: i32 = 124;
 /// The harness never holds the real key: the proxy adds it.
 const PLACEHOLDER_KEY: &str = "sk-bench-proxy";
 
@@ -83,6 +85,8 @@ fn classify(exit: Option<i32>, timed_out: bool, job: &Job<'_>, usage: &Metered, 
         ("error", None, usage.last_error.clone())
     } else if timed_out {
         ("budget", Some(format!("killed at the time budget of {}s", job.time_budget)), None)
+    } else if exit == Some(STEP_LIMIT) {
+        ("budget", Some("stopped at its own step limit".to_string()), None)
     } else if exit != Some(0) {
         let how = exit.map_or("killed by a signal".to_string(), |code| format!("exit code {code}"));
         ("error", Some(format!("{how}: {hint}")), None)
@@ -178,6 +182,7 @@ mod tests {
         assert_eq!(classify(Some(3), false, &job, &ok, "a\nTraceback: boom"), ("error", Some("exit code 3: Traceback: boom".into()), None));
         assert_eq!(classify(None, false, &job, &ok, ""), ("error", Some("killed by a signal: it printed nothing".into()), None));
         assert_eq!(classify(None, true, &job, &ok, "").0, "budget");
+        assert_eq!(classify(Some(124), false, &job, &ok, ""), ("budget", Some("stopped at its own step limit".into()), None));
         assert_eq!(classify(Some(0), false, &job, &Metered::default(), "no key").1, Some("made no model request: no key".into()));
         let capped = Metered { turns: 3, refused: 1, ..Metered::default() };
         assert_eq!(classify(Some(1), false, &job, &capped, ""), ("budget", Some("stopped at the limit of 3 model requests".into()), None));

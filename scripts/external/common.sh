@@ -1,5 +1,6 @@
 # Sourced by every adapter. The runner provides BENCH_PROMPT, BENCH_MODEL, BENCH_BASE_URL,
 # BENCH_API_KEY, BENCH_MAX_TURNS, BENCH_TIME_BUDGET and BENCH_SCRATCH; the cwd is the workspace.
+# Exit 0 when the harness finished by itself, 124 when it ran into its own step limit.
 set -euo pipefail
 
 : "${BENCH_PROMPT:?}" "${BENCH_MODEL:?}" "${BENCH_BASE_URL:?}" "${BENCH_API_KEY:?}" "${BENCH_SCRATCH:?}"

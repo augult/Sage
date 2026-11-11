@@ -36,8 +36,11 @@ pub struct Metered {
     pub cached_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
-    /// Prompt size of the first request: the harness's system prompt, tool schemas and the task.
+    /// Prompt size of the first request that offers tools, else of the first request: the
+    /// harness's system prompt, its tool schemas and the task. A title request is not it.
     pub first_prompt_tokens: u64,
+    #[serde(skip)]
+    pub(super) first_offered_tools: bool,
     /// Prompt size of the latest request.
     pub context_tokens: u64,
     /// USD at Presage's list prices; meaningful only when `priced`.
@@ -64,9 +67,10 @@ pub struct Metered {
 }
 
 impl Metered {
-    fn add(&mut self, model: &str, u: &Usage) {
-        if self.turns == 1 {
+    fn add(&mut self, model: &str, tools: bool, u: &Usage) {
+        if self.turns == 1 || (tools && !self.first_offered_tools) {
             self.first_prompt_tokens = u.prompt;
+            self.first_offered_tools = tools;
         }
         self.prompt_tokens += u.prompt;
         self.cached_tokens += u.cached;
@@ -436,9 +440,10 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
     let model_call = req.method == "POST" && matches!(rest, "chat/completions" | "responses");
 
     let mut body = req.body.clone();
-    let (mut model, mut injected) = (String::new(), false);
+    let (mut model, mut tools, mut injected) = (String::new(), false, false);
     if model_call && let Ok(mut v) = serde_json::from_slice::<Value>(&body) {
         model = v.get("model").and_then(Value::as_str).unwrap_or("").to_string();
+        tools = v.get("tools").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
         if rest == "chat/completions" && ask_for_usage(&mut v) {
             body = serde_json::to_vec(&v).unwrap_or(body);
             injected = true;
@@ -482,7 +487,7 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
                 metered.turns += 1;
                 (metered.last_error, metered.last_status) = (None, 200);
                 match usage {
-                    Some(usage) => metered.add(&model, &usage),
+                    Some(usage) => metered.add(&model, tools, &usage),
                     None => metered.unmetered += 1,
                 }
             }
