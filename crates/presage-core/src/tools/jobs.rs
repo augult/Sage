@@ -317,7 +317,6 @@ pub fn kill_group(pid: Option<u32>) {
 
 pub struct Job {
     pub id: String,
-    pub cmd: String,
     pub spill: String,
     pub run: Running,
     /// How much of the output the model has already been shown.
@@ -331,10 +330,10 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    pub fn add(&mut self, cmd: &str, spill: &str, run: Running, read_offset: u64) -> String {
+    pub fn add(&mut self, spill: &str, run: Running, read_offset: u64) -> String {
         self.next += 1;
         let id = format!("bg:{}", self.next);
-        self.list.push(Job { id: id.clone(), cmd: cmd.to_string(), spill: spill.to_string(), run, read_offset });
+        self.list.push(Job { id: id.clone(), spill: spill.to_string(), run, read_offset });
         id
     }
 
@@ -348,6 +347,7 @@ impl Jobs {
         self.list.iter_mut().find(|j| j.id.trim_start_matches("bg:") == wanted)
     }
 
+    #[cfg(test)]
     pub fn running(&self) -> Vec<&Job> {
         self.list.iter().filter(|j| j.run.exit.borrow().is_none()).collect()
     }

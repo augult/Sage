@@ -6,7 +6,7 @@ use crate::anchors::push_anchored;
 use crate::util::fnv64;
 use crate::workspace::{Seen, Workspace};
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,9 +116,6 @@ pub fn expand(text: &str, ws: &Workspace, seen: &mut Seen, step: u32, radius: us
     out
 }
 
-pub fn is_source_path(p: &Path) -> bool {
-    p.extension().is_some()
-}
 
 #[cfg(test)]
 mod tests {

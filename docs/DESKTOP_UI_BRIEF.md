@@ -6,7 +6,7 @@ brief remains the specification. Everything the UI needs is on `presage_core::ha
 ## Read first
 
 - `crates/presage-core/src/harness.rs`: `Harness::new()`, `state()`, `set_key`, `set_defaults`,
-  `start(StartRequest)`, `demo()`, `send`, `stop`, `approve`, `subscribe(id)` (backlog plus a
+  `start(StartRequest)`, `demo()`, `stop`, `approve`, `subscribe(id)` (backlog plus a
   `broadcast::Receiver<Event>`), `events(id)`, `meta(id)`, `list()`, `read_output(id, handle)`,
   `list_dir(path)`; for skills and instructions `skills(cwd)`, `skill_file`, `save_skill`,
   `delete_skill`, `send_with_skills`, `instructions()`, `set_system_prompt`,

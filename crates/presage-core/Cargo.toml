@@ -7,10 +7,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
-grep-matcher.workspace = true
 grep-regex.workspace = true
 grep-searcher.workspace = true
 ignore.workspace = true

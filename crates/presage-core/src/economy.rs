@@ -108,8 +108,6 @@ mod tests {
         let c = DEEPSEEK.cost(&u);
         let expect = (90_000.0 * 0.003 + 10_000.0 * 0.15 + 2_000.0 * 0.60) / 1e6;
         assert!((c - expect).abs() < 1e-12);
-        // Output dominates even though it is 2% of the tokens.
-        assert!(2_000.0 * 0.60 > 90_000.0 * 0.003);
     }
 
     #[test]

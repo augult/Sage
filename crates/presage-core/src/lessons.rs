@@ -148,10 +148,12 @@ impl LessonBook {
         Self { path: Some(path), lessons, open: Vec::new() }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.lessons.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.lessons.is_empty()
     }

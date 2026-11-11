@@ -187,7 +187,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             ..Default::default()
         },
         ExecEnd::TimedOut(running) => {
-            let id = sess.jobs.add(&cmd, &ex.spill, running, ex.total_bytes);
+            let id = sess.jobs.add(&ex.spill, running, ex.total_bytes);
             let view = bound(&lines, 5, 25, 3_000, Some(&ex.spill));
             let observation = format!(
                 "[running] no exit after {timeout}s, so it now runs in the background as {id}. Use job {{\"id\":\"{id}\",\"wait\":…}} to wait for it or {{\"id\":\"{id}\",\"kill\":true}} to stop it. Output so far:\n{}",
@@ -312,7 +312,7 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
         }
         Waited::TimedOut => {
             let pid = running.pid.map(|p| format!(" (pid {p})")).unwrap_or_default();
-            let id = sess.jobs.add(cmd, &spill, running, total);
+            let id = sess.jobs.add(&spill, running, total);
             let observation = format!("[started] {id}{pid} keeps running in the background. Use job {{\"id\":\"{id}\",\"until\":\"text\"}} to wait for output, {{\"id\":\"{id}\",\"kill\":true}} to stop it.\n{shown}");
             StepOutput { stub: format!("[started] {id}"), observation, ..Default::default() }
         }

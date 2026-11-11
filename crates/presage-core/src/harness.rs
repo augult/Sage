@@ -529,13 +529,8 @@ impl Harness {
         self.inner.sessions.lock().unwrap().get(id).cloned().ok_or_else(|| format!("session {id} is not running in this process"))
     }
 
-    /// Sends a follow-up message to an idle session.
-    pub fn send(&self, id: &str, text: &str) -> Result<(), String> {
-        self.send_with_skills(id, text, &[])
-    }
-
-    /// `send`, switching on the skills named that the session does not have yet. Its system prompt
-    /// is already sent, so they go in front of this message instead.
+    /// Sends a follow-up message to an idle session, switching on the skills named that it does not
+    /// have yet. Its system prompt is already sent, so they go in front of this message instead.
     pub fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
         let live = self.live(id)?;
         if text.trim().is_empty() {
@@ -717,7 +712,7 @@ mod tests {
         let listed = later.list();
         assert_eq!((listed.len(), listed[0].status, listed[0].verified), (1, SessionStatus::Closed, Some(true)));
         assert_eq!(later.events(&meta.id).unwrap().len(), stored.len());
-        assert!(later.send(&meta.id, "more").is_err(), "closed sessions cannot be continued");
+        assert!(later.send_with_skills(&meta.id, "more", &[]).is_err(), "closed sessions cannot be continued");
         assert!(later.read_output(&meta.id, "out:1").unwrap().contains("FAIL: expected 60, got 16"));
         assert!(later.events("../../etc").is_err());
     }
