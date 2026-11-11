@@ -104,9 +104,15 @@ pub enum EventKind {
         autonomy: String,
         /// True when a scripted stand-in is playing the model; all numbers are then fabricated.
         simulated: bool,
+        /// Skills the session starts with, by name.
+        #[serde(default)]
+        skills: Vec<String>,
     },
     User {
         text: String,
+        /// Skills switched on with this message.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skills: Vec<String>,
     },
     /// Environment snapshot that was prepended to the first user message.
     Env {
