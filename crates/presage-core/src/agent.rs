@@ -116,6 +116,9 @@ pub struct Agent {
     budget_marks: u8,
     /// How many more times the model is reminded that steps can be chained.
     chain_hints: u8,
+    /// Replies in a row that carried a single call, and how often that may still be pointed out.
+    solo_streak: u32,
+    solo_hints: u8,
     /// The `job` tool was in the list sent with the previous request.
     offered_job_tool: bool,
 }
@@ -127,7 +130,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, offered_job_tool: false }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false }
     }
 
     pub fn effort(&self) -> Effort {
@@ -228,6 +231,15 @@ impl Agent {
                 }
             }
             parts.push(env);
+            // Known from the start, the budget is something to plan with; heard of at half-time, it
+            // is only a reason to hurry.
+            if features.scripts && !self.cfg.interactive {
+                let time = self.cfg.time_budget.map(|b| format!(" and {} minutes", (b.as_secs() / 60).max(1))).unwrap_or_default();
+                parts.push(format!(
+                    "Budget: {} replies{time}. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.",
+                    self.cfg.max_turns
+                ));
+            }
         }
         // Before the test command is run: the source lines its failing output points at are then on
         // record as shown wherever they are in an attached file, and are not printed a second time.
@@ -430,6 +442,15 @@ impl Agent {
                     notes.push(h.to_string());
                 }
             }
+            self.solo_streak = if calls.len() == 1 && result.finished.is_none() { self.solo_streak + 1 } else { 0 };
+            if features.scripts && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised {
+                self.solo_hints -= 1;
+                self.solo_streak = 0;
+                notes.push(format!(
+                    "Your last 4 replies carried one tool call each, and every reply counts against the budget ({turns_used} of {} used). Send the calls you can already foresee together in one reply: the script stops by itself at the first surprise.",
+                    self.cfg.max_turns
+                ));
+            }
             notes.extend(self.budget_notes(run_started, turns_used));
             for n in &notes {
                 self.note("harness", n);
@@ -481,6 +502,8 @@ mod tests {
         // The review pass has its own test; the others script one reply too few for it.
         let mut cfg = cfg;
         cfg.features.review = cfg.features.review && name == "agent-review";
+        // Likewise the survey: these workspaces are small, and the tests say what the first message holds.
+        cfg.features.survey = cfg.features.survey && name == "agent-survey";
         let sess = test_session(name, cfg.features);
         std::fs::write(sess.ws.root.join("n.txt"), "alpha\nbeta\ngamma\n").unwrap();
         let sink = Arc::new(MemorySink::default());
@@ -713,7 +736,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBETA\ngamma\n");
         // The file is there as `read` prints it, between the environment and the task.
         let first = &requests(&r)[0][1].content;
-        let files = format!("\n</env>\n\n<files>\nn.txt · 3 lines\n{a1}|alpha\n{a2}|beta\n{a3}|gamma\n</files>\nThis is `read` output for the file the task names. It is already read and can be edited directly: do not read it first.\n\n<task>\n{task}\n</task>");
+        let files = format!("\n</env>\n\nBudget: 80 replies. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.\n\n<files>\nn.txt · 3 lines\n{a1}|alpha\n{a2}|beta\n{a3}|gamma\n</files>\nThis is `read` output for the file the task names. It is already read and can be edited directly: do not read it first.\n\n<task>\n{task}\n</task>");
         assert!(first.starts_with("<env>\ncwd: ") && first.ends_with(&files), "{first}");
         let ev = events(&r);
         assert!(ev.iter().any(|e| matches!(e, EventKind::Note { turn: 0, kind, text } if kind == "attach" && text == "attached n.txt (3 lines)")));
@@ -732,7 +755,7 @@ mod tests {
         let out = r.agent.run(task.into(), &CancellationToken::new()).await;
         assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
         let env = events(&r).iter().find_map(|e| if let EventKind::Env { text } = e { Some(text.clone()) } else { None }).unwrap();
-        assert_eq!(requests(&r)[0][1].content, format!("{env}\n\n<task>\n{task}\n</task>"));
+        assert_eq!(requests(&r)[0][1].content, format!("{env}\n\nBudget: 80 replies. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.\n\n<task>\n{task}\n</task>"));
         assert!(first_result(&r).starts_with("n.txt · 3 lines\n"), "{}", first_result(&r));
         assert!(!events(&r).iter().any(|e| matches!(e, EventKind::Note { kind, .. } if kind == "attach")));
     }

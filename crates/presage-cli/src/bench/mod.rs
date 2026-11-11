@@ -1075,10 +1075,14 @@ mod tests {
         let task = TASKS.iter().find(|t| t.id == "pager").unwrap();
 
         let (root, first) = opening(&h, task, &[]).await;
-        assert!(first.contains("\n</env>\n\n<files>\npager.py · 12 lines\n") && first.contains("\n</files>\nThis is `read` output for the file the task names."), "{first}");
+        assert!(first.contains("\n</env>\n\nBudget: 80 replies") && first.contains("\n\n<files>\npager.py · 12 lines\n") && first.contains("\ntest_pager.py · ") && first.contains("\n</files>\nThis is `read` output for the files of this workspace that fit here"), "{first}");
         assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\n") && first.ends_with(&format!("\n\n<task>\n{}\n</task>", task.prompt)), "{first}");
         // The traceback names its file the way a tool call would, and still brings the lines along.
-        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && first.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{first}");
+        // The traceback names its file the way a tool call would. Its lines are in the attached test file
+        // already; without the survey they come along with the traceback.
+        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && !first.contains("\n--- where "), "{first}");
+        let (_, named) = opening(&h, task, &["survey"]).await;
+        assert!(named.contains("\n</files>\nThis is `read` output for the file the task names.") && named.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{named}");
         assert_eq!(first.matches(&root).count(), 1, "only the `cwd:` line names the workspace: {first}");
         assert_eq!(first.matches("|def total_pages(count, per_page):").count(), 1, "{first}");
 
@@ -1087,7 +1091,6 @@ mod tests {
         assert!(!plain.contains("<files>") && !plain.contains("|def total_pages") && plain.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n"), "{plain}");
         let (root, long) = opening(&h, task, &["short-paths"]).await;
         assert!(long.contains("\n<files>\npager.py · 12 lines\n") && long.contains(&format!("\n  File \"{root}/test_pager.py\", line 12, in test_first_page\n")), "{long}");
-        assert!(long.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{long}");
     }
 
     #[tokio::test]

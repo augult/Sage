@@ -17,6 +17,8 @@ const PROBED_TOOLS: &[&str] = &[
 ];
 
 const MAX_TOP_LEVEL: usize = 40;
+/// A workspace of at most this many files is listed in full.
+const MAX_TREE: usize = 60;
 
 async fn sh(script: &str, cwd: &Path) -> Option<String> {
     if cfg!(not(unix)) {
@@ -74,6 +76,24 @@ fn top_level(root: &Path) -> String {
     line
 }
 
+/// Every file of a small workspace with its length, so that the model need not list directories.
+fn tree(root: &Path) -> Option<String> {
+    let files = crate::workspace::small_tree(root, MAX_TREE)?;
+    if files.is_empty() {
+        return None;
+    }
+    let entry = |rel: &std::path::PathBuf| {
+        let name = rel.to_string_lossy().into_owned();
+        let note = (rel.components().count() == 1).then(|| manifest_note(root, &name)).flatten();
+        match (note, crate::attach::measure(&root.join(rel)).and_then(|size| size.lines)) {
+            (Some(note), _) => note,
+            (None, Some(lines)) => format!("{name} {lines}"),
+            (None, None) => name,
+        }
+    };
+    Some(files.iter().map(entry).collect::<Vec<_>>().join("  "))
+}
+
 /// Builds the `<env>` block for the first message of a session.
 pub async fn snapshot(sess: &Session) -> String {
     let root = &sess.ws.root;
@@ -129,7 +149,10 @@ pub async fn snapshot(sess: &Session) -> String {
     if !missing.is_empty() && !present.is_empty() {
         out.push_str(&format!("not installed: {}\n", missing.join(", ")));
     }
-    out.push_str(&format!("files: {}\n", top_level(root)));
+    match sess.features.survey.then(|| tree(root)).flatten() {
+        Some(tree) => out.push_str(&format!("files, with line counts: {tree}\n")),
+        None => out.push_str(&format!("files: {}\n", top_level(root))),
+    }
     if sess.features.lessons {
         for lesson in sess.lessons.top(5) {
             out.push_str(&format!("known here: {}\n", lesson.describe()));
@@ -146,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_names_the_place_the_tools_the_files_and_the_lessons() {
-        let mut s = test_session("bootstrap", Features::presage());
+        let mut s = test_session("bootstrap", Features::presage().without("survey").unwrap());
         std::fs::create_dir_all(s.ws.root.join("src")).unwrap();
         std::fs::write(s.ws.root.join("package.json"), r#"{"scripts": {"test": "node --test", "build": "tsc"}}"#).unwrap();
         std::fs::write(s.ws.root.join("Makefile"), "CC=gcc\nall: build\n\nbuild:\n\tcc x.c\n.PHONY: all\ntest: build\n\t./t\n").unwrap();
@@ -165,7 +188,7 @@ mod tests {
         assert!(env.ends_with("</env>") && !env.contains("make test"), "{env}");
 
         // Where command output keeps its absolute paths, nothing is said about it.
-        s.features = Features::presage().without("short_paths").unwrap();
+        s.features = Features::presage().without("survey").unwrap().without("short_paths").unwrap();
         assert!(snapshot(&s).await.contains("(not a git repository); every tool already runs here, so give paths relative to it\n"));
     }
 }

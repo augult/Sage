@@ -93,7 +93,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("presage-demo-{}", crate::util::rand_hex(4)));
         let root = base.join("ws");
         create_workspace(&root).unwrap();
-        let sess = Session::new(Workspace::new(&root).unwrap(), base.join("session"), Features::presage().without("review").unwrap(), LessonBook::in_memory(), None).unwrap();
+        let sess = Session::new(Workspace::new(&root).unwrap(), base.join("session"), Features::presage().without("review").unwrap().without("survey").unwrap(), LessonBook::in_memory(), None).unwrap();
         let sink = Arc::new(MemorySink::default());
         let real_root = sess.ws.root.clone();
         let mut agent = Agent::new(Provider::Mock(provider(real_root, 0)), sess, AgentConfig::new("demo"), sink.clone(), Arc::new(Approvals::default()));
