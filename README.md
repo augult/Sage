@@ -38,16 +38,23 @@ of tasks. Every claim above can be measured rather than believed.
 State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
 `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 164 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 189 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
-- **Benchmark**: `presage bench` runs 7 small synthetic tasks under harness variants and judges
-  every run with held-out checks, whatever the agent claimed.
+- **Benchmark**: `presage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
+  under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
+  through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
+  On the skill and hard sets with DeepSeek V4.1 Flash (17 tasks, one run each): Presage 16/17 in
+  14.3 turns and 128 s, classic 15/17 in 20.8 turns and 139 s, mini-swe-agent 16/17 in 13.9 turns
+  and 165 s. GLM-5.3 was measured on six tasks only. See `docs/BENCHMARKS.md` for what limits these
+  numbers.
 - **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. The native
   DeepSeek, Z.ai and OpenRouter presets follow the vendors' documented contracts and are untested.
 - **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
-  and the front end has the session list, the new-session form, the live timeline with inspector,
-  and settings. It builds without warnings and has been checked with headless screenshots only:
-  nobody has driven it by hand, and no live-model session has been started from it.
+  and the front end has the session list, the new-session form with a skills picker, the live
+  timeline with inspector, and settings for keys, defaults, skills, the system prompt and
+  instructions. It builds without warnings and has been driven through scripted UI actions under
+  xvfb, with screenshots: nobody has driven it by hand, and no live-model session has been started
+  from it.
 - **Walkthrough**: `presage demo` plays a three-reply scripted session through the real harness
   (read and reproduce, a wrong fix that is caught and halts the script, the right fix accepted with
   evidence).

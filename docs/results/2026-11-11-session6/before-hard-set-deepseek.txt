@@ -1,0 +1,60 @@
+[1/21] deepseek-v4.1-flash-1017 · shipquote · presage #1: solved · 20 turns · $0.0267 · 1m56s
+[2/21] deepseek-v4.1-flash-1017 · shipquote · no-review #1: solved · 30 turns · $0.0310 · 2m22s
+[3/21] deepseek-v4.1-flash-1017 · shipquote · classic #1: solved · 19 turns · $0.0157 · 1m20s
+[4/21] deepseek-v4.1-flash-1017 · attempts · presage #1: solved · 18 turns · $0.0225 · 1m40s
+[5/21] deepseek-v4.1-flash-1017 · confdialect · classic #1: solved · 30 turns · $0.0429 · 4m52s
+[6/21] deepseek-v4.1-flash-1017 · attempts · no-review #1: solved · 13 turns · $0.0217 · 1m32s
+[7/21] deepseek-v4.1-flash-1017 · attempts · classic #1: solved · 26 turns · $0.0259 · 1m50s
+[8/21] deepseek-v4.1-flash-1017 · connpool · no-review #1: solved · 25 turns · $0.0222 · 2m22s
+[9/21] deepseek-v4.1-flash-1017 · connpool · presage #1: solved · 23 turns · $0.0268 · 4m01s
+[10/21] deepseek-v4.1-flash-1017 · rollup · presage #1: solved · 16 turns · $0.0372 · 8m58s
+[11/21] deepseek-v4.1-flash-1017 · jobqueue · classic #1: solved · 15 turns · $0.0162 · 1m16s
+[12/21] deepseek-v4.1-flash-1017 · connpool · classic #1: solved · 28 turns · $0.0443 · 5m31s
+[13/21] deepseek-v4.1-flash-1017 · confdialect · presage #1: solved · 24 turns · $0.0510 · 5m18s
+[14/21] deepseek-v4.1-flash-1017 · ttlcache · presage #1: solved · 16 turns · $0.0231 · 3m17s
+[15/21] deepseek-v4.1-flash-1017 · ttlcache · no-review #1: solved · 23 turns · $0.0254 · 2m28s
+[16/21] deepseek-v4.1-flash-1017 · ttlcache · classic #1: solved · 17 turns · $0.0184 · 1m37s
+[17/21] deepseek-v4.1-flash-1017 · confdialect · no-review #1: NOT solved (budget) · 30 turns · $0.0771 · 7m20s
+[18/21] deepseek-v4.1-flash-1017 · rollup · classic #1: solved · 28 turns · $0.0242 · 2m42s
+[19/21] deepseek-v4.1-flash-1017 · jobqueue · no-review #1: solved · 9 turns · $0.0097 · 1m10s
+[20/21] deepseek-v4.1-flash-1017 · jobqueue · presage #1: solved · 24 turns · $0.0408 · 4m25s
+[21/21] deepseek-v4.1-flash-1017 · rollup · no-review #1: solved · 24 turns · $0.0555 · 10m24s
+presage bench 20261111-040312-3fd7 · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: presage ~1945 tokens, no-review ~1945 tokens, classic ~762 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+shipquote  presage             1/1    20    315k    78%   26.1k   $0.0267   $0.0629   1m56s
+           no-review           1/1    30    591k    88%   31.0k   $0.0310   $0.1073   2m22s
+           classic             1/1    19    153k    72%   14.8k   $0.0157   $0.0318   1m20s
+attempts   presage             1/1    18    361k    83%   20.5k   $0.0225   $0.0666   1m40s
+           no-review           1/1    13    242k    70%   17.3k   $0.0217   $0.0467   1m32s
+           classic             1/1    26    375k    68%   11.7k   $0.0259   $0.0633   1m50s
+connpool   presage             1/1    23    398k    84%   26.8k   $0.0268   $0.0758   4m01s
+           no-review           1/1    25    326k    78%   17.6k   $0.0222   $0.0596   2m22s
+           classic             1/1    28    439k    85%   55.9k   $0.0443   $0.0994   5m31s
+confdialect presage             1/1    24    480k    93%   74.2k   $0.0510   $0.1167   5m18s
+           no-review           0/1    30    715k    90%    107k   $0.0771   $0.1716   7m20s
+           classic             1/1    30    491k    84%   49.8k   $0.0429   $0.1036   4m52s
+rollup     presage             1/1    16    229k    80%   49.6k   $0.0372   $0.0642   8m58s
+           no-review           1/1    24    435k    85%   74.3k   $0.0555   $0.1099  10m24s
+           classic             1/1    28    356k    83%   23.2k   $0.0242   $0.0675   2m42s
+jobqueue   presage             1/1    24    446k    85%   49.1k   $0.0408   $0.0964   4m25s
+           no-review           1/1     9   75.8k    77%   11.6k   $0.0097   $0.0183   1m10s
+           classic             1/1    15    123k    60%   14.1k   $0.0162   $0.0270   1m16s
+ttlcache   presage             1/1    16    217k    59%   15.5k   $0.0231   $0.0420   3m17s
+           no-review           1/1    23    375k    85%   26.4k   $0.0254   $0.0722   2m28s
+           classic             1/1    17    182k    68%   15.4k   $0.0184   $0.0366   1m37s
+ALL        presage             7/7    20    361k    83%   26.8k   $0.0268   $0.0666   4m01s   total $0.228, $0.0326 per solved task
+           no-review           6/7    24    375k    85%   26.4k   $0.0254   $0.0722   2m22s   total $0.243, $0.0405 per solved task
+           classic             7/7    26    356k    71%   15.4k   $0.0242   $0.0633   1m50s   total $0.188, $0.0268 per solved task
+presage against classic: turns -23%, input tokens +1%, output tokens +74%, cost +11% (+5% with no cache), time +119%; solved 7/7 against 7/7
+  by task (7): fewer turns on 5, more on 2; cheaper on 2, dearer on 5 (with no cache: 2 and 5)
+no-review against classic: turns -8%, input tokens +5%, output tokens +71%, cost +5% (+14% with no cache), time +30%; solved 6/7 against 7/7
+  by task (7): fewer turns on 4, more on 2; cheaper on 3, dearer on 4 (with no cache: 3 and 4)
+
+1 run without a solution:
+  deepseek-v4.1-flash-1017 · confdialect · no-review #1 · session 20261111-041208-2729 · budget; verification: FAILED (errors=9)
+
+results: <bench-home>/bench/20261111-040312-3fd7/results.json
+replay a run: PRESAGE_HOME=<bench-home>/bench/20261111-040312-3fd7/home presage show <session>

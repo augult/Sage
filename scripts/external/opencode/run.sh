@@ -24,6 +24,7 @@ cat >"$OPENCODE_CONFIG" <<EOF
 }
 EOF
 
-# The task comes on standard input, not the command line: an agent that runs
-# `pkill -f <a word of the task>` must not hit the harness, its own or a neighbouring run's.
-printf '%s' "$BENCH_PROMPT" | "$OPENCODE" run --auto --model "bench/$BENCH_MODEL"
+# The task is on the command line, where an agent's `pkill -f <a word of the task>` can hit this
+# process, its own or a neighbouring run's. Passing it on standard input instead was not confirmed
+# to work with this version.
+exec "$OPENCODE" run --auto --model "bench/$BENCH_MODEL" "$BENCH_PROMPT"

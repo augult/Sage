@@ -1,0 +1,26 @@
+[1/68] glm-5.3 · audit · classic #1: NOT solved (budget) · 30 turns · $0.2318 · 3m07s
+[2/68] glm-5.3 · deadcode · ext:mini #1: solved · 29 turns · $0.3896 · 4m43s
+[3/68] glm-5.3 · audit · presage #1: solved · 18 turns · $0.3125 · 5m10s
+[4/68] glm-5.3 · deadcode · presage+effort:max #1: solved · 21 turns · $0.3430 · 5m19s
+[5/68] glm-5.3 · audit-clean · presage #1: solved · 10 turns · $0.1689 · 3m35s
+[6/68] glm-5.3 · audit · ext:mini #1: solved · 30 turns · $0.3701 · 6m28s
+[7/68] glm-5.3 · audit-clean · classic #1: solved · 26 turns · $0.2939 · 5m01s
+[8/68] glm-5.3 · deadcode · presage #1: solved · 27 turns · $0.2603 · 3m15s
+[9/68] glm-5.3 · audit · presage+effort:max #1: solved · 30 turns · $0.5138 · 9m30s
+[10/68] glm-5.3 · audit-clean · presage+effort:max #1: solved · 15 turns · $0.2509 · 5m57s
+[11/68] glm-5.3 · deadcode · classic #1: solved · 30 turns · $0.1681 · 3m05s
+[12/68] glm-5.3 · shipquote · classic #1: solved · 30 turns · $0.2836 · 3m16s
+[13/68] glm-5.3 · shipquote · presage #1: solved · 25 turns · $0.6472 · 7m52s
+[14/68] glm-5.3 · audit-clean · ext:mini #1: NOT solved (budget: stopped at its own step limit) · 30 turns · $0.6287 · 13m58s
+[15/68] glm-5.3 · attempts · classic #1: solved · 18 turns · $0.1766 · 1m52s
+[16/68] glm-5.3 · shipquote · ext:mini #1: solved · 30 turns · $0.4880 · 8m48s
+[17/68] glm-5.3 · shipquote · presage+effort:max #1: solved · 14 turns · $0.3636 · 7m59s
+[18/68] glm-5.3 · attempts · presage #1: solved · 16 turns · $0.2505 · 5m15s
+[19/68] glm-5.3 · attempts · presage+effort:max #1: solved · 14 turns · $0.2600 · 4m49s
+[20/68] glm-5.3 · attempts · ext:mini #1: solved · 30 turns · $0.3979 · 6m29s
+[21/68] glm-5.3 · connpool · presage #1: NOT solved (budget) · 30 turns · $0.1910 · 7m17s
+[22/68] glm-5.3 · connpool · ext:mini #1: solved · 15 turns · $0.3116 · 7m29s
+[23/68] glm-5.3 · connpool · classic #1: solved · 20 turns · $0.2219 · 12m54s
+[24/68] glm-5.3 · connpool · presage+effort:max #1: solved · 29 turns · $0.4364 · 11m16s
+[25/68] glm-5.3 · confdialect · presage #1: NOT solved (done) · 19 turns · $0.4768 · 10m04s
+[26/68] glm-5.3 · confdialect · classic #1: solved · 29 turns · $0.2942 · 8m56s
