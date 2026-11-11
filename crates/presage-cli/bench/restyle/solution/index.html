@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team settings</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <span class="logo">Harbor</span>
+    <a href="#profile">Profile</a>
+    <a href="#members-section">Members</a>
+  </header>
+
+  <main class="wrap">
+    <h1 class="page-title">Team settings</h1>
+    <p class="hint">Changes apply to everyone in the team.</p>
+
+    <section class="box" id="profile" aria-labelledby="profile-title">
+      <h2 class="section-title" id="profile-title">Profile</h2>
+      <form id="settings-form">
+        <div class="field">
+          <label for="display-name">Display name</label>
+          <input type="text" id="display-name" value="Harbor Crew">
+        </div>
+        <div class="field">
+          <label for="email">Contact email</label>
+          <input type="email" id="email" placeholder="you@example.com" value="crew@harbor.example">
+        </div>
+        <div class="field">
+          <label for="timezone">Time zone</label>
+          <select id="timezone">
+            <option value="utc">UTC</option>
+            <option value="cet" selected>Central Europe</option>
+            <option value="est">US Eastern</option>
+            <option value="pst">US Pacific</option>
+          </select>
+        </div>
+        <div class="field check">
+          <label><input type="checkbox" id="notify" checked> Email me when a member joins</label>
+        </div>
+        <div class="field">
+          <label for="bio">About the team</label>
+          <textarea id="bio" rows="3" aria-describedby="bio-hint"></textarea>
+          <p class="hint" id="bio-hint">Shown on the team page.</p>
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary" id="save" disabled>Save changes</button>
+          <button type="button" id="reset" disabled>Reset</button>
+          <span class="status" id="status" role="status"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="box" id="members-section" aria-labelledby="members-title">
+      <div class="toolbar">
+        <h2 class="section-title" id="members-title">Members</h2>
+        <button type="button" class="primary" id="invite-open">Invite member</button>
+      </div>
+      <div class="field">
+        <label for="member-filter">Filter members</label>
+        <input type="text" id="member-filter" placeholder="Type a name">
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Role</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="members">
+          <tr data-member="Ines Vidal">
+            <td>Ines Vidal</td>
+            <td>Owner</td>
+            <td><span class="tag ok">Active</span></td>
+            <td><button type="button" class="link" data-action="remove" aria-label="Remove Ines Vidal">Remove</button></td>
+          </tr>
+          <tr data-member="Tomas Reyes">
+            <td>Tomas Reyes</td>
+            <td>Admin</td>
+            <td><span class="tag ok">Active</span></td>
+            <td><button type="button" class="link" data-action="remove" aria-label="Remove Tomas Reyes">Remove</button></td>
+          </tr>
+          <tr data-member="Mira Okafor">
+            <td>Mira Okafor</td>
+            <td>Member</td>
+            <td><span class="tag wait">Invited</span></td>
+            <td><button type="button" class="link" data-action="remove" aria-label="Remove Mira Okafor">Remove</button></td>
+          </tr>
+          <tr data-member="Jonas Lind">
+            <td>Jonas Lind</td>
+            <td>Member</td>
+            <td><span class="tag ok">Active</span></td>
+            <td><button type="button" class="link" data-action="remove" aria-label="Remove Jonas Lind">Remove</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="hint" id="member-count">4 members</p>
+    </section>
+  </main>
+
+  <div class="modal" id="invite-dialog" role="dialog" aria-modal="true" aria-labelledby="invite-title" hidden>
+    <div class="modalbox">
+      <h2 class="section-title" id="invite-title">Invite a member</h2>
+      <div class="field">
+        <label for="invite-email">Email address</label>
+        <input type="email" id="invite-email" placeholder="name@example.com">
+      </div>
+      <div class="actions">
+        <button type="button" id="invite-cancel">Cancel</button>
+        <button type="button" class="primary" id="invite-send" disabled>Send invite</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

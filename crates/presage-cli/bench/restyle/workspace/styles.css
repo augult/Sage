@@ -1,0 +1,167 @@
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  background: #f4f4f4;
+  color: #333;
+}
+
+*:focus {
+  outline: none;
+}
+
+.top {
+  background: #5d7186;
+  padding: 11px 30px;
+  font-size: 13px;
+}
+
+.logo {
+  color: #a9bccf;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.wrap {
+  width: 960px;
+  margin: 25px auto;
+}
+
+.title {
+  font-size: 26px;
+  margin-bottom: 3px;
+}
+
+.hint {
+  color: #b5b5b5;
+  font-size: 11px;
+}
+
+.box {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 18px 20px 22px 20px;
+  margin-bottom: 30px;
+}
+
+.boxtitle {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+
+.row {
+  margin-bottom: 13px;
+}
+
+.lbl {
+  font-size: 12px;
+  color: #999;
+  margin-right: 7px;
+}
+
+input[type="text"],
+select,
+textarea {
+  border: 1px solid #ccc;
+  padding: 5px;
+  font-size: 13px;
+}
+
+.btn {
+  background: #2a6fdb;
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn2 {
+  background: #8fd19e;
+  color: #fff;
+  border: 1px solid #7cc48d;
+  padding: 10px 22px;
+  border-radius: 20px;
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-block;
+}
+
+.button-small {
+  background: #e6e6e6;
+  color: #9a9a9a;
+  border: 1px solid #ccc;
+  padding: 2px 5px;
+  border-radius: 0;
+  font-size: 11px;
+}
+
+.cancel {
+  display: inline-block;
+  color: #aaa;
+  font-size: 12px;
+  margin-right: 15px;
+  cursor: pointer;
+}
+
+.status {
+  color: #e8d44d;
+  font-size: 12px;
+  margin-left: 10px;
+}
+
+.tbl td {
+  padding: 9px 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.tbl .head td {
+  background: #eee;
+  color: #999;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 9px;
+}
+
+.tag.ok {
+  background: #d9f2df;
+  color: #6fbf83;
+}
+
+.tag.wait {
+  background: #fff3c4;
+  color: #d9b300;
+}
+
+.lnk {
+  color: #7fa9e8;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.modalbox {
+  background: #fff;
+  width: 420px;
+  margin: 120px auto;
+  padding: 20px 25px;
+}
+
+.modal[hidden] {
+  display: none;
+}
