@@ -23,8 +23,9 @@ in `scripts/setup-dev.sh` and the crates in `Cargo.lock`.
 
 ## Where everything is
 
-- Repo `augult/harnessnew`, branch **`hoplite/naxos-31a5bb7b`**, **pull request #1 into `main`**
-  (open, linked to the thread). `main` is the first handoff commit. GitHub's default branch is still
+- Repo `augult/harnessnew`, branch **`hoplite/naxos-31a5bb7b`**. Pull request #1 into `main` was
+  merged at `ec3dd47`; the commits after it (the follow-up results and this handoff) are on the
+  branch only, so open a pull request for them first. GitHub's default branch is still
   `hoplite/axos-0f41d603`: that is a repository setting the agent's token cannot change.
 - `crates/presage-core` (engine), `crates/presage-cli` (`presage` binary; `src/bench/` is the
   benchmark runner and `bench/<task>/{workspace,hidden,solution}` its tasks), `desktop/src-tauri` and
@@ -63,7 +64,14 @@ them off and `presage bench --variants no-<mechanism>` turns one off.
   uncached and three times the price. Only the OpenRouter-shaped dialect is exercised; the direct
   DeepSeek dialect needs a DeepSeek key.
 - **`attach` and `short_paths`** (written by a subagent, reviewed line by line, tests re-run by the
-  parent): merged. Their live measurement was **not finished**; see the first open item.
+  parent), measured live with 140 runs per model (tables at the end of `docs/BENCHMARKS.md`). With
+  attach the median run takes **2 turns** on both models, against 3 to 4 without it and 6 for
+  classic. DeepSeek: cost $0.0006 against $0.0011 for classic (−42%), total spend $0.027 against
+  $0.072. GLM-5.3: input tokens halve but output tokens double (955 against 477), so the median
+  cost equals classic's ($0.0084; −15% with no cache) and total spend is 12% lower ($0.699 against
+  $0.791). Total spend is 5 to 10% lower with `short_paths` than without, which this sample cannot
+  tell from noise. One classic run declared itself done and failed the held-out check; no Presage
+  run did.
 - **Desktop UI** (commit `8a7eb23`, a subagent's second pass over the earlier draft): builds with no
   warnings. The parent took screenshots on the final build and looked at them: the walkthrough
   session (watch `tests` appearing, the amber surprise, the skipped `finish` with its reason, the
@@ -78,13 +86,14 @@ them off and `presage bench --variants no-<mechanism>` turns one off.
 
 ## What is not done, in priority order
 
-1. **Measure `attach` properly.** The follow-up benchmark was still running when the session ended.
-   Partial data points the right way: on GLM-5.3 after 55 of 140 runs the median was 2 turns with
-   attach against 3.5 without and 6 for classic, with several one-turn runs. Check
-   `docs/results/2026-11-11-*`: a non-empty `-attach.txt` means that run finished; otherwise repeat
-   it (`--variants presage,no-attach,no-short-paths,classic -n 5 -j 3`, one model at a time) and
-   update `docs/BENCHMARKS.md` and the README table.
-2. **Cost.** Turns halve but cost does not follow, least of all on DeepSeek. Presage's turns are
+1. **Tidy the record of the follow-up.** Both follow-up runs finished after `docs/BENCHMARKS.md`
+   and the README were written: their tables are appended verbatim at the end of
+   `docs/BENCHMARKS.md`, below a paragraph that still calls them unfinished, and the README table
+   shows the baseline only. Rewrite both from `docs/results/2026-11-11-*-attach.txt`. The two
+   models ran at the same time under the shared rate limit, so their time columns are inflated.
+2. **Cost on GLM-5.3.** With attach a DeepSeek run is 42% cheaper than classic, but a GLM-5.3 run
+   only matches it: the model writes twice as many output tokens when it edits in its first reply.
+   Look at the effort of that turn first. Presage's turns are also
    heavier: fixed prefix 1,193 estimated tokens against 762, preflight output in the first message,
    anchors on every line read. Candidates: cap the preflight output (the `tariff` check prints 140
    lines), drop `expand` windows for files that are attached anyway, a shorter system prompt.
@@ -93,7 +102,8 @@ them off and `presage bench --variants no-<mechanism>` turns one off.
    if the watches pass; saying "you can finish now" in the receipt of a passing check.
 4. **Desktop UI, what nobody has seen:** a session against a real provider started from the app,
    closing the window while a step runs, macOS and Windows, a release build, clippy. One deviation
-   from the brief: login-shell PATH adoption is skipped when a standard stream is a terminal.
+   from the brief: login-shell PATH adoption is skipped when a standard stream is a terminal; and
+   the children of a login shell that hangs outlive its 3 s timeout.
    Engine wishes from that work, none implemented: `Harness::events` drops lines it cannot type
    (the shell reads the log raw instead); no orderly shutdown (a command that ignores SIGTERM
    survives the app); `ProviderInfo` cannot say whether a key is stored or from the environment;
@@ -152,7 +162,7 @@ them off and `presage bench --variants no-<mechanism>` turns one off.
 ## Suggested first moves
 
 1. Fetch the branch, `cargo test` (164 passing), `cargo build`.
-2. Finish the `attach` measurement (item 1) and put the numbers in the README.
+2. Open a pull request for the commits after `ec3dd47`, then tidy the follow-up record (item 1).
 3. Go after cost and the `finish` turn (items 2 and 3), measuring each change with
    `presage bench --variants presage,no-<mechanism>,classic` on both models.
 4. Run a real session from the desktop app.

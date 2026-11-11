@@ -112,3 +112,106 @@ model at a time:
 ```sh
 presage bench -p logfare -m glm-5.3 --variants presage,no-attach,no-short-paths,classic -n 5 -j 3
 ```
+
+### Update: runs that finished after the lines above were written
+
+DeepSeek V4.1 Flash (`-j 2`, alongside the GLM-5.3 run), the table printed by the CLI:
+
+```text
+presage bench 20261111-000852-dd13 · logfare · effort ratchet · 5 runs per task and variant
+fixed prompt prefix, estimated: presage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      presage             5/5     2    5.4k    52%     275   $0.0005   $0.0010    2.6s
+           no-attach           5/5     3    7.8k    67%     316   $0.0006   $0.0014    3.3s
+           no-short-paths      5/5     2    5.6k    71%     313   $0.0004   $0.0010    3.5s
+           classic             5/5     5    8.6k    82%     551   $0.0007   $0.0017    6.5s
+inventory  presage             5/5     3    9.3k    62%     477   $0.0008   $0.0017    4.1s
+           no-attach           5/5     3    9.2k    71%     447   $0.0008   $0.0017    4.8s
+           no-short-paths      5/5     2    6.2k    68%     382   $0.0007   $0.0012    5.8s
+           classic             5/5     6   12.3k    76%     854   $0.0013   $0.0024    6.1s
+slug       presage             5/5     1    2.3k    60%     397   $0.0004   $0.0006    2.7s
+           no-attach           5/5     4   10.9k    69%     456   $0.0008   $0.0020    4.5s
+           no-short-paths      5/5     2    5.1k    55%     449   $0.0005   $0.0010    2.9s
+           classic             5/5     5    8.2k    77%     611   $0.0007   $0.0016    5.3s
+tariff     presage             5/5     2    8.8k    63%     383   $0.0008   $0.0016    3.1s
+           no-attach           5/5     4   16.9k    68%     387   $0.0012   $0.0028    7.8s
+           no-short-paths      5/5     2    8.7k    63%     352   $0.0007   $0.0015    2.9s
+           classic             5/5     7   15.9k    66%     663   $0.0012   $0.0028     20s
+textstats  presage             5/5     3    8.2k    67%     310   $0.0006   $0.0014    4.6s
+           no-attach           5/5     3    8.0k    69%     377   $0.0007   $0.0014    5.8s
+           no-short-paths      5/5     3    8.4k    76%     453   $0.0007   $0.0015    4.2s
+           classic             5/5     5    8.7k    84%     512   $0.0006   $0.0016    5.3s
+roman      presage             5/5     4   10.0k    75%    1.7k   $0.0016   $0.0025    8.3s
+           no-attach           5/5     4    9.1k    76%    1.6k   $0.0016   $0.0023    8.8s
+           no-short-paths      5/5     5   13.7k    81%    2.3k   $0.0019   $0.0034     10s
+           classic             5/5     9   20.9k    77%    3.5k   $0.0029   $0.0053     21s
+report     presage             5/5     2    4.7k    77%     281   $0.0003   $0.0009    2.3s
+           no-attach           5/5     3    6.8k    81%     465   $0.0005   $0.0013    4.1s
+           no-short-paths      5/5     2    4.7k    60%     275   $0.0005   $0.0009    8.5s
+           classic             5/5    20   66.2k    76%    5.1k   $0.0056   $0.0130     38s
+ALL        presage           35/35     2    8.2k    45%     373   $0.0006   $0.0014    3.3s   total $0.027, $0.0008 per solved task
+           no-attach         35/35     4    9.1k    67%     447   $0.0008   $0.0019    5.1s   total $0.033, $0.0009 per solved task
+           no-short-paths    35/35     2    8.4k    61%     375   $0.0007   $0.0015    4.2s   total $0.030, $0.0009 per solved task
+           classic           35/35     6   12.3k    74%     728   $0.0011   $0.0023    8.7s   total $0.072, $0.0021 per solved task
+presage against classic: turns -67%, input tokens -33%, output tokens -49%, cost -42% (-39% with no cache), time -62%; solved 35/35 against 35/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 7, dearer on 0 (with no cache: 7 and 0)
+no-attach against classic: turns -33%, input tokens -26%, output tokens -39%, cost -22% (-20% with no cache), time -41%; solved 35/35 against 35/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 4, dearer on 3 (with no cache: 6 and 1)
+no-short-paths against classic: turns -67%, input tokens -32%, output tokens -48%, cost -33% (-38% with no cache), time -51%; solved 35/35 against 35/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 6, dearer on 1 (with no cache: 7 and 0)
+
+```
+
+GLM-5.3 (`-j 4`, alongside the DeepSeek run), the table printed by the CLI:
+
+```text
+presage bench 20261111-000429-208a · logfare · effort ratchet · 5 runs per task and variant
+fixed prompt prefix, estimated: presage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
+
+glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      presage             5/5     1    2.3k    52%     222   $0.0029   $0.0042    2.8s
+           no-attach           5/5     3    7.1k    64%     226   $0.0058   $0.0109    4.2s
+           no-short-paths      5/5     1    2.4k    50%     265   $0.0038   $0.0052    4.2s
+           classic             5/5     5    8.2k    66%     281   $0.0066   $0.0128    8.8s
+inventory  presage             5/5     3    8.4k    74%     511   $0.0074   $0.0140    6.2s
+           no-attach           5/5     4   10.9k    56%     514   $0.0078   $0.0172    6.8s
+           no-short-paths      5/5     3    8.9k    59%     780   $0.0099   $0.0160    8.2s
+           classic             5/5     5    9.8k    66%     372   $0.0074   $0.0154    7.6s
+slug       presage             5/5     2    4.8k    68%    1.3k   $0.0109   $0.0131     12s
+           no-attach           5/5     3    7.1k    77%     584   $0.0066   $0.0117     12s
+           no-short-paths      5/5     2    4.9k    67%    1.1k   $0.0079   $0.0112     15s
+           classic             4/5     5    7.7k    71%     390   $0.0063   $0.0125     14s   1 declared done, then failed verification
+tariff     presage             5/5     2    8.4k    61%     504   $0.0082   $0.0140    8.0s
+           no-attach           5/5     4   16.3k    77%     498   $0.0144   $0.0250     11s
+           no-short-paths      5/5     1    4.0k    31%    1.2k   $0.0101   $0.0115     10s
+           classic             5/5     6   13.6k    58%     402   $0.0118   $0.0207     13s
+textstats  presage             5/5     3    7.7k    59%    1.6k   $0.0101   $0.0149     16s
+           no-attach           5/5     5   13.8k    48%     553   $0.0112   $0.0215    9.7s
+           no-short-paths      5/5     3    8.2k    56%     637   $0.0091   $0.0143    9.0s
+           classic             5/5     7   11.4k    68%     513   $0.0084   $0.0179     14s
+roman      presage             5/5     2    5.6k    48%   17.6k   $0.0847   $0.0877   2m09s
+           no-attach           5/5     7   21.7k    46%   21.7k   $0.1103   $0.1413   2m34s
+           no-short-paths      5/5     6   20.3k    63%   11.4k   $0.0672   $0.0813   1m53s
+           classic             5/5     9   29.3k    63%   11.2k   $0.0588   $0.0676   1m40s
+report     presage             5/5     2    4.3k    73%     423   $0.0045   $0.0079    4.6s
+           no-attach           5/5     3    6.0k    72%     435   $0.0054   $0.0103    6.9s
+           no-short-paths      5/5     2    4.3k    57%     561   $0.0055   $0.0083     12s
+           classic             5/5     6    8.5k    60%     545   $0.0076   $0.0145     14s
+ALL        presage           35/35     2    4.8k    65%     955   $0.0084   $0.0131     11s   total $0.699, $0.0200 per solved task
+           no-attach         35/35     3    9.4k    64%     514   $0.0089   $0.0172    9.7s   total $0.859, $0.0245 per solved task
+           no-short-paths    35/35     2    6.1k    58%     827   $0.0086   $0.0127     11s   total $0.735, $0.0210 per solved task
+           classic           34/35     6    9.9k    66%     477   $0.0084   $0.0154     14s   total $0.791, $0.0233 per solved task   1 declared done, then failed verification
+presage against classic: turns -67%, input tokens -51%, output tokens +100%, cost -0% (-15% with no cache), time -22%; solved 35/35 against 34/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 4, dearer on 3 (with no cache: 5 and 2)
+no-attach against classic: turns -50%, input tokens -5%, output tokens +8%, cost +5% (+12% with no cache), time -31%; solved 35/35 against 34/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 2, dearer on 5 (with no cache: 3 and 4)
+no-short-paths against classic: turns -67%, input tokens -38%, output tokens +73%, cost +2% (-17% with no cache), time -16%; solved 35/35 against 34/35
+  by task (7): fewer turns on 7, more on 0; cheaper on 3, dearer on 4 (with no cache: 5 and 2)
+
+1 run without a solution:
+  glm-5.3 · slug · classic #1 · session 20261111-000501-8b97 · done; verification: FAILED (failures=2)
+
+```
