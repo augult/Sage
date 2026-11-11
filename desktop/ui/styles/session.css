@@ -1,4 +1,5 @@
-/* The session view: header, timeline, turns with the step rail, composer. */
+/* The session view: header, the conversation with its folded tool trees, composer. Nothing here is
+   tinted: the conversation is ink on glass, and state is said in words. */
 
 .session-head {
   display: flex;
@@ -31,32 +32,31 @@
   flex: none;
   align-items: center;
   gap: 6px;
-  color: var(--tone-ink);
+  color: var(--soft);
   font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 
+/* Where the session runs and with what, as one quiet line. */
 .session-facts {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
+  gap: 6px;
   min-width: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
-/* The path gives way before the tags move to a second line, and from the left: its last folder is
-   the one that matters. The small basis keeps it on the tags' line; it grows back up to its text. */
+/* The path gives way before the rest does, and from the left: its last folder is the one that
+   matters. */
 .session-cwd {
-  flex: 1 1 96px;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: max-content;
   overflow: hidden;
-  color: var(--muted);
-  font: var(--text-sm) var(--mono);
+  font-family: var(--mono);
   letter-spacing: 0;
   text-align: left;
   text-overflow: ellipsis;
-  white-space: nowrap;
   direction: rtl;
 }
 
@@ -64,23 +64,16 @@
   direction: ltr;
 }
 
-.session-tags {
-  display: flex;
+.session-meta {
   flex: none;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Any number of skills, of any length, in the room of one tag. */
-.tag-skills {
-  display: block;
-  flex: 0 1 auto;
-  max-width: 260px;
-  overflow: hidden;
-  line-height: 18px;
-  text-overflow: ellipsis;
+.session-head .spinner,
+.timeline .spinner {
+  border-top-color: var(--soft);
 }
 
 /* Timeline */
@@ -94,10 +87,10 @@
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 820px;
+  gap: 8px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 20px 24px 24px;
+  padding: 24px 24px 28px;
 }
 
 /* Shown while the timeline is scrolled away from its end. Docked, so it never covers content. */
@@ -110,11 +103,10 @@
   height: 26px;
   margin-top: 6px;
   padding: 0 12px;
-  border: 1px solid var(--tone-line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
-  background-color: var(--fill-2);
-  background-image: linear-gradient(var(--tone-soft), var(--tone-soft));
-  color: var(--tone-ink);
+  background: var(--fill-2);
+  color: var(--soft);
   font-size: var(--text-sm);
   cursor: pointer;
 }
@@ -123,157 +115,31 @@
   color: var(--text);
 }
 
-/* What was asked: the one block in the timeline that the user wrote. */
+/* What was asked: the one thing in the conversation that the user wrote, set to their side. */
 .user {
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--fill-1);
-}
-
-.user-text {
-  margin-top: 2px;
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 9px 14px;
+  border-radius: var(--r-xl);
+  background: var(--fill-2);
   font-size: var(--text-lg);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* A disclosure line: the environment snapshot, reasoning, multi-line chips. */
-.fold-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
+.user:not(:first-child) {
+  margin-top: 12px;
 }
 
-.fold-toggle:hover {
-  background: var(--fill-2);
-  color: var(--text);
+.user:not(:last-child) {
+  margin-bottom: 4px;
 }
 
-.fold-toggle > .icon {
-  transition: transform 120ms ease-out;
-}
-
-.fold-toggle[aria-expanded="true"] > .icon {
-  transform: rotate(90deg);
-}
-
-.fold-preview {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.env {
-  margin: -6px 0 -6px -6px;
-}
-
-/* What a command printed, or anything else the engine said verbatim. */
-.block {
-  max-height: 320px;
-  margin: 4px 0 0;
-  padding: 8px 10px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--well);
-  color: #cdd1da;
-  font: var(--text-sm)/1.55 var(--mono);
-  letter-spacing: 0;
-  tab-size: 4;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* A turn. Not a card: a rule and a heading, so the result is the only boxed thing that answers. */
-
-.turn {
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-
-.turn-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  padding-bottom: 6px;
-}
-
-.turn-no {
-  font-weight: 600;
-}
-
-.turn.is-live .turn-no {
-  color: var(--azure-ink);
-}
-
-.turn-facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px 12px;
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.turn-facts b {
-  color: var(--soft);
-  font-weight: 500;
-}
-
-.thinking {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--azure-ink);
-}
-
-.turn-stream:empty,
-.script:empty {
-  display: none;
-}
-
-/* Reasoning and reply text, above the script. */
-.turn-stream {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-bottom: 8px;
-}
-
-.reasoning {
-  margin-left: -6px;
-}
-
-.reasoning .label {
-  flex: none;
-}
-
-.reasoning-body {
-  margin: 4px 0 2px 11px;
-  padding-left: 12px;
-  border-left: 1px solid var(--line-strong);
-  color: var(--soft);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
+/* What the agent said: the reply of a turn, and the summary a run ends on. */
 .reply {
+  font-size: var(--text-lg);
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -283,253 +149,322 @@
   width: 6px;
   height: 13px;
   margin-left: 2px;
-  background: var(--azure-ink);
+  background: var(--soft);
   vertical-align: -2px;
   animation: blink 1s steps(1) infinite;
 }
 
-/* The script: step rows on a rail, with chips and approval requests where they happened. */
-
-.row {
-  position: relative;
-  padding-left: 28px;
+.turn,
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-/* The rail is drawn row by row, a stub above each node and a line below it. The surfaces here
-   are translucent, so a node cannot simply be painted over one continuous line. */
-.script > .row::before,
-.script > .row::after {
-  position: absolute;
-  left: 9px;
-  width: 1px;
-  background: var(--line-strong);
-  content: "";
-}
-
-.script > .row::before {
-  top: var(--node-end, 26px);
-  bottom: 0;
-}
-
-.script > .row::after {
-  top: 0;
-  height: var(--node-start, 3px);
-}
-
-.script > .row:first-child::after,
-.script > .row:last-child::before {
+.turn:empty {
   display: none;
 }
 
-.script > .row.chip {
-  --node-start: 7px;
-  --node-end: 18px;
-}
+/* Folding. A fold is a one-row grid whose row goes from nothing to its content's height, which is
+   the one way to slide to a height that is not known. Shut, its content is out of sight and (set by
+   the script) inert. */
 
-.script > .row.approval {
-  --node-start: 0px;
-  --node-end: 0px;
-}
-
-/* A node on the rail: a ring in the step's tone, filled where the step needs attention. */
-.step-glyph {
-  position: absolute;
-  top: 5px;
-  left: 0;
+.fold {
+  --unfold: 240ms cubic-bezier(0.3, 0.7, 0.2, 1);
   display: grid;
-  place-items: center;
-  width: 19px;
-  height: 19px;
-  border: 1px solid var(--tone-line);
-  border-radius: 50%;
-  color: var(--tone-ink);
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--unfold);
 }
 
-.step-glyph .icon {
-  stroke-width: 2;
+.fold.is-open {
+  grid-template-rows: 1fr;
 }
 
-.step-glyph .spinner {
-  width: 10px;
-  height: 10px;
+.fold-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  /* Gone from sight only once the fold has shut. */
+  transition:
+    opacity 200ms ease,
+    visibility 0s linear 240ms;
 }
 
-.step.is-surprise > .step-glyph {
-  border-color: var(--amber);
-  background: var(--amber);
-  color: #201503;
+.fold.is-open > .fold-inner {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
 }
 
-.step.is-error > .step-glyph,
-.step.is-denied > .step-glyph {
-  border-color: var(--red);
-  background: var(--red);
-  color: #fff;
+/* A ring drawn outside its button would be cut off by the fold. */
+.fold :focus-visible {
+  outline-offset: -2px;
 }
 
-.step.is-skipped > .step-glyph,
-.step.is-unfinished > .step-glyph {
-  border-style: dashed;
+/* The mark of everything that unfolds: round-ended, pointing on when shut and down when open. */
+.chev {
+  flex: none;
+  opacity: 0.65;
+  stroke-width: 1.9;
+  transition:
+    transform 240ms cubic-bezier(0.3, 0.7, 0.2, 1),
+    opacity 120ms ease;
 }
 
-.step-line {
+[aria-expanded="true"] > .chev {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+button:hover > .chev {
+  opacity: 1;
+}
+
+/* The line for a turn: what it did, in a few words. It opens the tree of the turn's tool calls. */
+
+.activity-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--muted);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.activity-toggle:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+
+.activity-toggle[aria-expanded="true"] {
+  color: var(--soft);
+}
+
+.activity-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A file or a command the line names. */
+.activity-label b {
+  color: var(--soft);
+  font-weight: 500;
+}
+
+.activity-toggle:hover b {
+  color: inherit;
+}
+
+.activity-notes,
+.activity-timer {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tree: one row per tool call, in the order they ran, with the notes that arrived between. */
+
+.tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 6px 0 4px 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.tree-line {
   display: flex;
   align-items: baseline;
   gap: 8px;
   width: 100%;
-  min-height: 29px;
-  padding: 4px 6px;
+  min-height: 26px;
+  padding: 3px 8px 3px 4px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: transparent;
+  color: var(--muted);
   text-align: left;
 }
 
-/* Summary and prediction flow as text, so a long summary wraps under itself. */
-.step-main {
+button.tree-line {
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+button.tree-line:hover {
+  background: var(--fill-1);
+  color: var(--soft);
+}
+
+.tree-line > .chev,
+.chev-slot {
+  flex: none;
+  align-self: center;
+  width: 14px;
+}
+
+.tree-verb {
+  flex: none;
+  color: var(--soft);
+  font-weight: 500;
+}
+
+/* What the call was about: a command, a path, a pattern. One line until its row is opened. */
+.tree-what {
   flex: 1;
   min-width: 0;
-}
-
-button.step-line {
-  cursor: pointer;
-}
-
-button.step-line:hover {
-  background: var(--fill-2);
-}
-
-.step-no {
-  flex: none;
-  width: 14px;
-  color: var(--muted);
-  font: var(--text-xs) var(--mono);
-  letter-spacing: 0;
-  text-align: right;
-}
-
-.step-tool {
-  flex: none;
-  min-width: 44px;
-  color: var(--soft);
-  font: 600 var(--text-sm) var(--mono);
-  letter-spacing: 0;
-}
-
-.step-summary {
-  margin-right: 8px;
+  overflow: hidden;
   font: var(--text-sm)/1.5 var(--mono);
   letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-line[aria-expanded="true"] .tree-what {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.step-main .tag {
-  margin-right: 8px;
+/* The first line of what unfolds; it steps aside once that is open. */
+.tree-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity 160ms ease;
 }
 
-.step-took {
+.tree-line[aria-expanded="true"] .tree-preview {
+  opacity: 0;
+}
+
+/* How a step ended when it was not simply fine: "surprise", "failed", "skipped". */
+.tree-state {
   flex: none;
-  color: var(--muted);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.tree-took {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
-/* A prediction: the model's colour until reality has answered it. */
-.expect {
-  display: inline-flex;
-  align-items: stretch;
-  max-width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--azure-line);
-  border-radius: var(--r-sm);
-  background: var(--azure-soft);
-  color: var(--azure-ink);
-  font-size: var(--text-sm);
-  line-height: 18px;
+.tree-took .spinner {
+  width: 10px;
+  height: 10px;
 }
 
-.expect-text {
-  min-width: 0;
-  padding: 0 7px;
-  overflow-wrap: anywhere;
+.tree-row.is-skipped .tree-verb,
+.tree-row.is-skipped .tree-what,
+.tree-row.is-unfinished .tree-verb,
+.tree-row.is-unfinished .tree-what {
+  opacity: 0.6;
 }
 
-.expect-verdict {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 3px;
-  padding: 0 7px 0 5px;
-  border-left: 1px solid;
-  font-weight: 600;
+.tree-row.is-note .tree-verb {
+  color: var(--muted);
 }
 
-.expect.is-held {
-  border-color: var(--teal-line);
-  background: var(--teal-soft);
-  color: var(--teal);
+.tree-detail,
+.thought {
+  padding: 2px 8px 10px 26px;
 }
 
-.expect.is-violated {
-  border-color: var(--amber-line);
-  background: var(--amber-soft);
-  color: var(--amber);
+.tree-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.step.is-surprise > .step-line {
-  background: var(--amber-soft);
-}
-
-.step.is-skipped .step-no,
-.step.is-skipped .step-tool,
-.step.is-skipped .step-summary,
-.step.is-unfinished .step-no,
-.step.is-unfinished .step-tool,
-.step.is-unfinished .step-summary {
-  opacity: 0.55;
-}
-
-/* Why a skipped step did not run. The step is dimmed; its reason is not. */
-.step-note {
-  padding: 0 6px 4px 28px;
+.thought {
   color: var(--soft);
-  font-size: var(--text-sm);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.step-detail {
-  padding: 2px 6px 6px;
-}
-
-.step-detail .block {
-  margin-top: 0;
-}
-
-.step.is-surprise .block {
-  border-color: var(--amber-line);
-}
-
-.step.is-error .block,
-.step.is-denied .block {
-  border-color: var(--red-line);
-}
-
-.step-violation {
-  margin-bottom: 4px;
-  color: var(--amber);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
-.step-foot {
-  margin-top: 4px;
+.detail-line {
   color: var(--muted);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.detail-key {
+  margin-right: 8px;
+  color: var(--soft);
+}
+
+.detail-mono {
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.detail-verdict {
+  margin-left: 8px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.detail-foot {
+  color: var(--faint);
+  font-size: var(--text-sm);
+}
+
+/* The numbers of the turn, and what is still queued in it. */
+.tree-facts {
+  padding: 5px 8px 3px 26px;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What a command printed, or anything else the engine said verbatim. */
+.block {
+  max-height: 320px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--well);
+  color: var(--soft);
+  font: var(--text-sm)/1.55 var(--mono);
+  letter-spacing: 0;
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A block that is a row of a tree in its own right: the environment snapshot. */
+.tree-block {
+  padding: 2px 8px 6px 4px;
 }
 
 /* The leading status token of an observation, e.g. [SURPRISE]. */
 .obs-tag {
-  color: var(--tone-ink);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -537,122 +472,24 @@ button.step-line:hover {
   padding: 0 1px;
   border: 0;
   background: transparent;
-  color: var(--azure-ink);
+  color: var(--text);
   text-decoration: underline;
   cursor: pointer;
 }
 
-.queued {
-  padding: 2px 6px 2px 34px;
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
+/* Approval request: the one thing in a turn that cannot wait inside a fold. */
 
-/* Slim chips: watch changes, notes, lessons, effort changes, trims, retries, unknown events. */
-
-.chip {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-.chip-dot {
-  position: absolute;
-  top: 9px;
-  left: 6px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--tone);
-}
-
-.timeline > .chip {
-  padding-left: 22px;
-}
-
-.chip-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  min-height: 25px;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-}
-
-button.chip-line {
-  cursor: pointer;
-}
-
-button.chip-line:hover {
-  background: var(--fill-2);
-}
-
-.chip-label {
-  flex: none;
-  color: var(--tone-ink);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
-/* A qualifier between label and text: a new watch, how an approval request ended. */
-.chip-badge {
-  flex: none;
-  padding: 0 6px;
-  border: 1px solid var(--tone-line);
-  border-radius: var(--r-sm);
-  background: var(--tone-soft);
-  color: var(--tone-ink);
-  font-size: var(--text-xs);
-  line-height: 15px;
-}
-
-.chip-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* A folded chip is exactly one line. */
-.chip-line[aria-expanded="false"] .chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chip-more {
-  flex: none;
-  align-self: center;
-  margin-left: auto;
-  color: var(--faint);
-  transition: transform 120ms ease-out;
-}
-
-.chip-line[aria-expanded="true"] .chip-more {
-  transform: rotate(90deg);
-}
-
-.chip .block {
-  margin: 0 6px 6px;
-}
-
-/* Approval request */
-
-.approval-card {
-  margin: 4px 6px 8px;
+.approval {
   padding: 12px 14px;
-  border: 1px solid var(--amber-line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
-  background: var(--amber-soft);
+  background: var(--fill-2);
 }
 
 .approval-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--amber);
   font-weight: 600;
 }
 
@@ -687,39 +524,19 @@ button.chip-line:hover {
   margin-right: auto;
 }
 
-/* The result: how the run ended, and the one card in the timeline that carries its tone. */
-
-.result {
-  padding: 14px 16px;
-  border: 1px solid var(--tone-line);
-  border-radius: var(--r-lg);
-  background-color: var(--fill-1);
-  background-image: linear-gradient(var(--tone-soft), var(--tone-soft));
-}
-
-.result-head {
+/* How the run ended, under the summary it ended on. */
+.result-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 6px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .result-status {
-  color: var(--tone-ink);
-  font-size: var(--text-lg);
-  font-weight: 600;
-}
-
-.result-evidence {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
-.result-summary {
-  margin-top: 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  color: var(--soft);
+  font-weight: 500;
 }
 
 /* Footer: the follow-up composer. */
@@ -729,16 +546,13 @@ button.chip-line:hover {
   padding: 8px 24px 16px;
 }
 
-.composer {
-  max-width: 772px;
-  margin: 0 auto;
-}
-
 /* One rounded field that holds the text and its send button. */
 .composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  max-width: 712px;
+  margin: 0 auto;
   padding: 6px 6px 6px 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-xl);

@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
 import { duration, tilde } from '../format.js';
 import * as store from '../store.js';
-import { MOD_KEY, outcomeLook, sessionState, tag } from './common.js';
+import { MOD_KEY, outcomeLook, sessionState } from './common.js';
 import { skillsPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
@@ -43,10 +43,7 @@ export function mountSession(main, side, app, meta) {
     if (pinned) scroller.scrollTop = scroller.scrollHeight;
     const waiting = sessionState(entry.meta, entry).approvals > 0;
     const label = waiting ? 'Approval needed' : 'Jump to the end';
-    if (jump.textContent !== label) {
-      jump.className = `jump tone-${waiting ? 'amber' : 'plain'}`;
-      jump.replaceChildren(icon('down', 12), label);
-    }
+    if (jump.textContent !== label) jump.replaceChildren(icon('down', 12), label);
   }
   scroller.addEventListener(
     'scroll',
@@ -75,22 +72,23 @@ export function mountSession(main, side, app, meta) {
     headShown = shown;
     const stop =
       state.phase === 'running' &&
-      h('button.btn.danger', { id: 'stop-session', type: 'button', disabled: stopping, onclick: requestStop }, icon('stop', 12), stopping ? 'Stopping…' : 'Stop');
+      h('button.btn', { id: 'stop-session', type: 'button', disabled: stopping, onclick: requestStop }, icon('stop', 12), stopping ? 'Stopping…' : 'Stop');
+    // With what the session runs, as plain words after the folder.
+    const facts = [
+      modelName,
+      `effort ${effort}`,
+      // The engine also reports ablations here, as "presage without <mechanism>".
+      mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode,
+      skills.length > 0 && `${skills.length > 1 ? 'skills' : 'skill'} ${skills.join(', ')}`,
+      autonomy === 'ask' && 'asks first',
+      simulated && 'simulated',
+    ].filter(Boolean);
     head.replaceChildren(
       h('div.session-top', h('h1.session-name', { title }, title), statusPill(state, model), stop),
       h(
         'div.session-facts',
         h('span.session-cwd', { title: cwd }, h('bdi', tilde(cwd, app.state.home))),
-        h(
-          'div.session-tags',
-          tag(modelName, 'plain', provider),
-          skills.length > 0 && h('span.tag.tone-plain.tag-skills', { title: skills.join(', ') }, `${skills.length > 1 ? 'skills' : 'skill'} ${skills.join(', ')}`),
-          tag(`effort ${effort}`),
-          // The engine also reports ablations here, as "presage without <mechanism>".
-          mode === 'classic' ? tag('Classic') : tag(mode === 'presage' ? 'Presage' : mode, 'azure'),
-          autonomy === 'ask' && tag('asks first', 'amber'),
-          simulated && h('span.badge', 'SIMULATED'),
-        ),
+        h('span.session-meta', { title: `${provider} · ${facts.join(' · ')}` }, `· ${facts.join(' · ')}`),
       ),
     );
   }
@@ -123,7 +121,10 @@ export function mountSession(main, side, app, meta) {
   const sendError = h('div.form-error', { role: 'alert', hidden: true });
   let sending = false;
   // Between a message being accepted and its `user` event arriving, the run has not visibly started.
-  let awaitingRun = false;
+  // Holds how many messages the timeline had when the last one was sent, until it shows one more.
+  // Not "until a redraw sees the run": a run can start and end between two redraws.
+  let awaitingRun = null;
+  const messages = () => entry.model.items.filter((item) => item.kind === 'user').length;
 
   function fitBox() {
     box.style.height = 'auto';
@@ -133,6 +134,7 @@ export function mountSession(main, side, app, meta) {
   async function send() {
     const text = box.value.trim();
     if (!text || sendButton.disabled) return;
+    const before = messages();
     sending = true;
     sendError.hidden = true;
     render();
@@ -141,7 +143,7 @@ export function mountSession(main, side, app, meta) {
       box.value = '';
       picked = [];
       fitBox();
-      awaitingRun = true;
+      awaitingRun = before;
       pinned = true;
     } catch (problem) {
       sendError.textContent = String(problem);
@@ -175,8 +177,8 @@ export function mountSession(main, side, app, meta) {
     foot.hidden = !entry.live;
     if (!entry.live) return;
     if (!foot.firstChild) foot.append(h('div.composer', h('div.composer-box', sendError, box), skillsSlot, h('span.kbd', `${MOD_KEY}+Enter`), sendButton));
-    if (model.running) awaitingRun = false;
-    sendButton.disabled = model.running || sending || awaitingRun;
+    if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
+    sendButton.disabled = model.running || sending || awaitingRun !== null;
     // Not while its menu may be open: a redraw would close it.
     if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);
   }
@@ -239,9 +241,9 @@ export function mountSession(main, side, app, meta) {
 }
 
 function statusPill(state, model) {
-  if (state.approvals > 0) return h('span.status-pill.tone-amber', icon('bang'), 'Waiting for your approval');
-  if (state.phase === 'running') return h('span.status-pill.tone-azure', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
+  if (state.approvals > 0) return h('span.status-pill', icon('bang'), 'Waiting for your approval');
+  if (state.phase === 'running') return h('span.status-pill', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
   const look = outcomeLook(state.outcome, state.verified);
   const label = state.outcome ? look.label : state.phase === 'closed' ? 'Ended without a result' : 'Idle';
-  return h(`span.status-pill.tone-${look.tone}`, icon(look.icon), label, state.phase === 'closed' && tag('read-only'));
+  return h('span.status-pill', icon(look.icon), label, state.phase === 'closed' && h('span.muted', '· read-only'));
 }

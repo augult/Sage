@@ -1,7 +1,7 @@
 /* The glass material. Nothing here blurs or filters while the app runs: js/glass.js draws one
-   blurred, darkened backdrop at start-up, and the panes are plain translucent fills over it with a
-   grain tile on top. Moving the window, resizing it and scrolling repaint none of it, which is the
-   point: the system acrylic on Windows 10 re-blurs the desktop on every frame. */
+   blurred, darkened backdrop at start-up, and the panes are plain translucent fills over it.
+   Moving the window, resizing it and scrolling repaint none of it, which is the point: the system
+   acrylic on Windows 10 re-blurs the desktop on every frame. */
 
 :root {
   /* How much of the backdrop each pane lets through: the sidebar most, the reading surface least. */
@@ -35,8 +35,6 @@ body {
 
 .glass {
   background-color: var(--tint);
-  /* Set by js/glass.js: a small tile of faint light and dark specks. */
-  background-image: var(--grain, none);
 }
 
 #sidebar {

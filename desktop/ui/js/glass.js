@@ -6,7 +6,7 @@
 // is none to read), blurs it at thumbnail size, presses it into a dark band of brightness so text
 // keeps its contrast whatever the picture is, and hands the result to one canvas behind the panes.
 // After that nothing is blurred, filtered or repainted: the canvas follows the window by a
-// transform, and the panes are plain translucent fills with a grain tile (styles/glass.css).
+// transform, and the panes are plain translucent fills (styles/glass.css).
 
 import { api } from './api.js';
 
@@ -23,7 +23,7 @@ const canvas = document.getElementById('backdrop');
 let source = null; // the wallpaper as an ImageBitmap; null for the generated field
 let drawnFor = ''; // the monitor shape the canvas was last drawn for
 
-/** A seeded generator (mulberry32): the grain and the field come out the same on every launch. */
+/** A seeded generator (mulberry32): the field comes out the same on every launch. */
 function random(seed) {
   let state = seed;
   return () => {
@@ -135,23 +135,6 @@ function draw(aspect) {
   out.putImageData(shown, 0, 0);
 }
 
-/** The grain over every pane: a tile of specks, half lighter and half darker, all nearly transparent. */
-function grainTile() {
-  const size = 128;
-  const tile = document.createElement('canvas');
-  tile.width = tile.height = size;
-  const ctx = tile.getContext('2d');
-  const image = ctx.createImageData(size, size);
-  const rand = random(SEED + 1);
-  for (let i = 0; i < image.data.length; i += 4) {
-    const value = rand() < 0.5 ? 0 : 255;
-    image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
-    image.data[i + 3] = Math.round(rand() * 11);
-  }
-  ctx.putImageData(image, 0, 0);
-  return tile.toDataURL('image/png');
-}
-
 /**
  * Lays the canvas out over the monitor and shifts it by the window's position on it, so the
  * backdrop holds still on the screen while the window moves. With no position to go by, it
@@ -184,11 +167,10 @@ async function wallpaper() {
   }
 }
 
-/** Draws the grain and the backdrop, then keeps the backdrop in place as the window moves. */
+/** Draws the backdrop, then keeps it in place as the window moves. */
 export async function startGlass() {
   if (matchMedia('(prefers-reduced-transparency: reduce)').matches) return;
   try {
-    document.documentElement.style.setProperty('--grain', `url("${grainTile()}")`);
     const [at, picture] = await Promise.all([api.windowPlace().catch(() => null), wallpaper()]);
     source = picture;
     show(at);
