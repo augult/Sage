@@ -1,0 +1,13 @@
+requests: 61
+skipped: 2
+window: 2026-03-02T10:15:02Z .. 2026-03-02T10:19:49Z
+slowest: 265ms POST /api/orders at 2026-03-02T10:18:06Z
+
+endpoint                           count   err%    p50    p95      bytes
+GET /api/users/:id                    17    0.0     35     95      82308
+GET /api/search                       12    0.0     39    124      40861
+POST /api/orders                      10    0.0     43    265      62860
+GET /api/orders/:id/items              8    0.0     13    110      35046
+GET /health                            6   16.7     34    107      30606
+PUT /api/users/:id                     5   20.0     48     88      26459
+GET /api/reports/:id                   3    0.0     35    153      14044

@@ -1,0 +1,10 @@
+; Copy to ~/.config/fetchkit.ini and adjust.
+; The mirrors behind the office proxy drop connections, hence more patience than the default.
+
+[fetch]
+; How often a failed download is retried before fetchkit gives up on it.
+retries = 4
+; Seconds before one try is abandoned.
+timeout = 20
+; Seconds before the first retry; doubled before each further one.
+backoff = 0.5
