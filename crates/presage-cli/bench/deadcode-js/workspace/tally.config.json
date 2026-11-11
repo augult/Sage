@@ -1,0 +1,4 @@
+{
+  "plugins": ["./plugins/round.js"],
+  "roundTo": 15
+}

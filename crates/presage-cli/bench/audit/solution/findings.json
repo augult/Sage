@@ -1,0 +1,8 @@
+[
+  {"file": "notesvc/notes.py", "line": 26, "kind": "sql-injection", "summary": "search_notes interpolates the search term into the SQL text, so `q` can rewrite the query and read other users' notes or the users table."},
+  {"file": "notesvc/notes.py", "line": 60, "kind": "broken-access-control", "summary": "delete_note deletes by id alone and ignores owner_id, so any signed-in user can delete any note."},
+  {"file": "notesvc/files.py", "line": 24, "kind": "path-traversal", "summary": "read_attachment joins the requested name onto the attachment folder without checking it, so `../` reaches any file the service can read."},
+  {"file": "notesvc/export.py", "line": 14, "kind": "command-injection", "summary": "make_archive puts the user's label into a shell command line run with shell=True."},
+  {"file": "notesvc/prefs.py", "line": 18, "kind": "unsafe-deserialization", "summary": "load_prefs unpickles the client-supplied `prefs` cookie, which executes code chosen by the client."},
+  {"file": "notesvc/auth.py", "line": 19, "kind": "weak-password-hash", "summary": "Passwords are stored as unsalted MD5, which is cheap to brute-force and to look up."}
+]

@@ -1,0 +1,13 @@
+{
+  "name": "tally",
+  "version": "2.3.0",
+  "description": "Adds up a plain-text time log",
+  "main": "index.js",
+  "bin": { "tally": "bin/tally.js" },
+  "scripts": {
+    "test": "node --test",
+    "report": "node bin/tally.js report sample.log",
+    "validate": "node tools/validate.js sample.log"
+  },
+  "license": "MIT"
+}
