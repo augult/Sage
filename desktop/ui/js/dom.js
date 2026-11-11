@@ -17,6 +17,8 @@ export function h(spec, ...rest) {
       if (value == null || value === false) continue;
       if (typeof value === 'function') el.addEventListener(name.slice(2), value);
       else if (name === 'dataset') Object.assign(el.dataset, value);
+      // Through the CSSOM, which a strict style-src allows; a `style` attribute it would not.
+      else if (name === 'style') el.style.cssText = String(value);
       else if (PROPERTIES.has(name)) el[name] = value;
       else el.setAttribute(name, value === true ? '' : String(value));
     }

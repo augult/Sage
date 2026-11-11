@@ -1,10 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! The desktop shell: one Tauri command per `Harness` operation, and nothing else.
+//! The desktop shell: one Tauri command per `Harness` operation, the login shell's `PATH`, the
+//! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, DirListing, Harness, SessionMeta, StartRequest};
-use serde::Serialize;
+use presage_core::harness::{AppState, DirListing, Harness, SessionMeta, SessionStatus, StartRequest};
+use presage_core::provider::mock::{MockProvider, MockTurn};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::path::Path;
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
 use tokio::sync::broadcast::error::RecvError;
@@ -20,6 +24,9 @@ struct Hooks {
     view: Option<String>,
     /// `PRESAGE_UI_OPEN=<session id>`.
     open: Option<String>,
+    /// `PRESAGE_UI_SCRIPTED=<file>`: start a session played by a scripted stand-in and open it
+    /// (see `start_scripted`). The only way to reach a live approval request without a provider.
+    scripted: Option<String>,
     /// `PRESAGE_UI_SCRIPT`: UI actions to play once the first view is up (grammar in `ui/js/hooks.js`).
     script: Option<String>,
     /// `PRESAGE_UI_SIZE=<width>x<height>`: window size in logical pixels.
@@ -34,8 +41,41 @@ impl Hooks {
             let (w, h) = v.split_once('x')?;
             Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
         });
-        Self { autodemo: var("PRESAGE_UI_AUTODEMO").as_deref() == Some("1"), view: var("PRESAGE_UI_VIEW"), open: var("PRESAGE_UI_OPEN"), script: var("PRESAGE_UI_SCRIPT"), size }
+        Self {
+            autodemo: var("PRESAGE_UI_AUTODEMO").as_deref() == Some("1"),
+            view: var("PRESAGE_UI_VIEW"),
+            open: var("PRESAGE_UI_OPEN"),
+            scripted: var("PRESAGE_UI_SCRIPTED"),
+            script: var("PRESAGE_UI_SCRIPT"),
+            size,
+        }
     }
+}
+
+/// What `PRESAGE_UI_SCRIPTED` points at: a task and the replies the stand-in gives, in order.
+#[derive(Deserialize)]
+struct Scripted {
+    cwd: String,
+    task: String,
+    #[serde(default)]
+    autonomy: Option<String>,
+    #[serde(default)]
+    effort: Option<String>,
+    /// Milliseconds between streamed chunks of a reply.
+    #[serde(default)]
+    delay_ms: u64,
+    turns: Vec<ScriptedTurn>,
+}
+
+#[derive(Deserialize)]
+struct ScriptedTurn {
+    #[serde(default)]
+    reasoning: String,
+    #[serde(default)]
+    content: String,
+    /// `[tool, arguments]` pairs.
+    #[serde(default)]
+    calls: Vec<(String, Value)>,
 }
 
 /// GUI launchers hand an app a minimal `PATH`; the commands an agent runs need the one the user's
@@ -49,7 +89,7 @@ fn adopt_login_shell_path() {
     const MARK: &str = "__PRESAGE_PATH__";
     // Started from a terminal, the environment already is that shell's, and an interactive child
     // shell would compete with it for the terminal.
-    if std::io::stdin().is_terminal() {
+    if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() || std::io::stderr().is_terminal() {
         return;
     }
     let Some(shell) = std::env::var_os("SHELL").filter(|s| !s.is_empty()) else { return };
@@ -57,7 +97,9 @@ fn adopt_login_shell_path() {
     let printed = runtime.block_on(async {
         // Start-up files may print before the command runs; the markers isolate the value.
         let script = format!("printf '{MARK}%s{MARK}' \"$PATH\"");
-        let run = tokio::process::Command::new(shell).args(["-ilc", &script]).stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
+        // Its own process group: an interactive shell that finds itself in the background of a
+        // terminal stops its whole group, which must not include this app.
+        let run = tokio::process::Command::new(shell).args(["-ilc", &script]).stdin(Stdio::null()).stderr(Stdio::null()).process_group(0).kill_on_drop(true).output();
         tokio::time::timeout(Duration::from_secs(3), run).await
     });
     drop(runtime);
@@ -71,8 +113,22 @@ fn adopt_login_shell_path() {
 }
 
 #[tauri::command]
-fn ui_hooks(hooks: State<'_, Hooks>) -> Hooks {
-    hooks.inner().clone()
+async fn ui_hooks(hooks: State<'_, Hooks>) -> Reply<Hooks> {
+    Ok(hooks.inner().clone())
+}
+
+/// Test hook: starts the session `PRESAGE_UI_SCRIPTED` describes. The path comes from the
+/// environment only, never from the webview, and no provider is contacted.
+#[tauri::command]
+async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) -> Reply<SessionMeta> {
+    let path = hooks.scripted.as_deref().ok_or("PRESAGE_UI_SCRIPTED is not set")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+    let turns = script.turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, finish: None }).collect();
+    let mut provider = MockProvider::scripted(turns);
+    provider.chunk_delay_ms = script.delay_ms;
+    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, interactive: true, ..Default::default() };
+    harness.start_scripted(req, provider)
 }
 
 #[tauri::command]
@@ -123,9 +179,23 @@ async fn approve(harness: State<'_, Harness>, id: String, approval: u64, allow: 
     harness.approve(&id, approval, allow)
 }
 
+/// Stored events of any session, running or past. A past session's log is handed over line by
+/// line as it was written: `Harness::events` drops every line this build cannot type, and an event
+/// from a newer version of the engine should still reach the timeline.
 #[tauri::command]
-async fn session_events(harness: State<'_, Harness>, id: String) -> Reply<Vec<Event>> {
-    harness.events(&id)
+async fn session_events(harness: State<'_, Harness>, id: String) -> Reply<Vec<Value>> {
+    if harness.meta(&id).is_err() && !id.contains(['/', '\\', '.']) {
+        let log = Path::new(&harness.state().data_dir).join("sessions").join(&id).join("events.jsonl");
+        if let Ok(text) = std::fs::read_to_string(log) {
+            let event = |line: &str| {
+                let parsed = serde_json::from_str::<Value>(line).ok().filter(Value::is_object);
+                // A line that is not an event (a torn write, say) is shown as such rather than skipped.
+                parsed.unwrap_or_else(|| json!({ "type": "unreadable", "text": line.chars().take(240).collect::<String>() }))
+            };
+            return Ok(text.lines().filter(|line| !line.trim().is_empty()).map(event).collect());
+        }
+    }
+    harness.events(&id)?.iter().map(|event| serde_json::to_value(event).map_err(|e| e.to_string())).collect()
 }
 
 #[tauri::command]
@@ -161,18 +231,45 @@ async fn subscribe(harness: State<'_, Harness>, id: String, on_event: Channel<Ev
     Ok(backlog)
 }
 
+/// Ends every session this process runs. Without it, a command an agent started (a test run, a
+/// server it left in the background) would go on running after the app has gone.
+fn close_sessions(harness: &Harness) {
+    let live: Vec<String> = harness.list().into_iter().filter(|meta| meta.status != SessionStatus::Closed).map(|meta| meta.id).collect();
+    for id in &live {
+        let _ = harness.close(id);
+    }
+    // `close` only signals the session tasks, and they do the killing: leave them a moment for it.
+    if !live.is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+}
+
 fn main() {
     #[cfg(unix)]
     adopt_login_shell_path();
 
     let hooks = Hooks::from_env();
     let size = hooks.size;
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(Harness::new())
         .manage(hooks)
         .setup(move |app| {
             if let (Some((width, height)), Some(window)) = (size, app.get_webview_window("main")) {
                 window.set_size(tauri::LogicalSize::new(width, height))?;
+            }
+            // Being terminated (a logout, `kill`, Ctrl-C) leaves through the same door as quitting.
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{SignalKind, signal};
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let (Ok(mut terminate), Ok(mut interrupt)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else { return };
+                    tokio::select! {
+                        _ = terminate.recv() => {}
+                        _ = interrupt.recv() => {}
+                    }
+                    handle.exit(0);
+                });
             }
             Ok(())
         })
@@ -184,6 +281,7 @@ fn main() {
             list_sessions,
             start_session,
             start_demo,
+            start_scripted,
             send_message,
             stop_session,
             approve,
@@ -192,6 +290,11 @@ fn main() {
             list_dir,
             subscribe
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Presage");
+        .build(tauri::generate_context!())
+        .expect("error while starting Presage");
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            close_sessions(handle.state::<Harness>().inner());
+        }
+    });
 }

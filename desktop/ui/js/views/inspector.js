@@ -2,7 +2,7 @@
 // legend when no session is open.
 
 import { h, icon } from '../dom.js';
-import { bytes, duration, k, pct } from '../format.js';
+import { bytes, duration, k, pct, plural } from '../format.js';
 import { known, tag } from './common.js';
 
 export function renderInspector(el, model) {
@@ -48,7 +48,7 @@ function economy(model) {
   const s = model.stats;
   const simulated = model.meta.simulated === true;
   const badge = simulated && h('span.badge', { title: 'A scripted stand-in played the model: token counts and cost are fabricated.' }, 'SIMULATED');
-  if (!s) return section('Economy', badge, h('p.side-note', 'Numbers appear after the first turn.'));
+  if (!s) return section('Economy', badge, h('p.side-note', model.running ? 'Numbers appear after the first turn.' : 'No numbers: this session ended before its first turn was complete.'));
 
   const cost = simulated ? stat('Cost', 'fabricated', 'simulated run', 'amber') : s.priced ? stat('Cost', `$${s.cost.toFixed(4)}`, 'at list price') : stat('Cost', 'no price table for this model', null, 'plain');
   return section(
@@ -70,7 +70,7 @@ function economy(model) {
     stat('Kept out of context', bytes(s.hidden_bytes)),
     stat('Repairs', s.repairs),
     stat('Retries', s.retries),
-    stat('Cache misses', s.cache_misses),
+    stat('Cache misses', s.cache_misses, s.cache_busts > 0 && `${plural(s.cache_busts, 'bust')} by the harness`),
   );
 }
 

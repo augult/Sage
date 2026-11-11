@@ -41,19 +41,36 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 4px 12px;
   min-width: 0;
 }
 
+/* The path gives way before the tags move to a second line, and from the left: its last folder is
+   the one that matters. The small basis keeps it on the tags' line; it grows back up to its text. */
 .session-cwd {
+  flex: 1 1 96px;
   min-width: 0;
-  max-width: 100%;
-  margin-right: 4px;
+  max-width: max-content;
   overflow: hidden;
   color: var(--muted);
   font: 11.5px var(--mono);
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: rtl;
+}
+
+.session-cwd bdi {
+  direction: ltr;
+}
+
+.session-tags {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 100%;
 }
 
 /* Timeline */
@@ -436,13 +453,16 @@ button.step-line:hover {
 .step.is-skipped .step-no,
 .step.is-skipped .step-tool,
 .step.is-skipped .step-summary,
-.step.is-unfinished > .step-line {
+.step.is-unfinished .step-no,
+.step.is-unfinished .step-tool,
+.step.is-unfinished .step-summary {
   opacity: 0.55;
 }
 
+/* Why a skipped step did not run. The step is dimmed; its reason is not. */
 .step-note {
   padding: 0 6px 4px 28px;
-  color: var(--muted);
+  color: var(--soft);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -553,6 +573,18 @@ button.chip-line:hover {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* A qualifier between label and text: a new watch, how an approval request ended. */
+.chip-badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--tone-line);
+  border-radius: 8px;
+  background: var(--tone-soft);
+  color: var(--tone-ink);
+  font-size: 10.5px;
+  line-height: 15px;
 }
 
 .chip-text {

@@ -4,6 +4,9 @@
 // `items` is the timeline in order. A turn item owns `rows`: its steps, with the chips and approval
 // requests that arrived while it ran, in arrival order. `rev` counts structural changes to an item
 // and `streamRev` counts streamed text, so the view can tell a re-render from a text patch.
+//
+// No event is dropped. One this build does not know, or cannot make sense of, becomes a neutral
+// chip that names its type, and the events after it are applied as usual.
 
 import { duration, firstLine, k } from './format.js';
 
@@ -12,6 +15,8 @@ function createSession(meta) {
     id: meta.id,
     meta: { autonomy: 'auto', ...meta },
     lastSeq: 0,
+    /** Numbers the keys of items and rows. The same log always yields the same keys. */
+    serial: 0,
     /** A run is in progress. Starts from the listing, because a new session has no events yet. */
     running: meta.status === 'running',
     /** Timestamp of the message that started the current run. */
@@ -32,9 +37,10 @@ function createSession(meta) {
   };
 }
 
+/** Builds a session from its stored log, taken whole and in order whatever its numbering. */
 export function replay(meta, events) {
   const session = createSession(meta);
-  for (const event of events) apply(session, event);
+  for (const event of Array.isArray(events) ? events : []) reduce(session, event);
   return session;
 }
 
@@ -44,13 +50,23 @@ export function seal(s) {
   s.running = false;
 }
 
-/** Applies one event. Returns false for one that was already applied (same or older `seq`). */
+/** Applies one live event. Returns false for one that was already applied (same or older `seq`). */
 export function apply(s, ev) {
   if (!ev || !(ev.seq > s.lastSeq)) return false;
-  s.lastSeq = ev.seq;
-  const handler = Object.hasOwn(HANDLERS, ev.type) ? HANDLERS[ev.type] : unknown;
-  handler(s, ev);
+  reduce(s, ev);
   return true;
+}
+
+function reduce(s, ev) {
+  if (ev === null || typeof ev !== 'object') ev = { type: 'unreadable', text: str(ev) };
+  if (ev.seq > s.lastSeq) s.lastSeq = ev.seq;
+  const handler = Object.hasOwn(HANDLERS, ev.type) ? HANDLERS[ev.type] : unknown;
+  try {
+    // A handler that cannot use its event returns false, and the event is shown as it came.
+    if (handler(s, ev) === false) unknown(s, ev);
+  } catch {
+    unknown(s, ev);
+  }
 }
 
 /** Approval requests still waiting for an answer. */
@@ -62,6 +78,7 @@ export function pendingApprovals(s) {
 }
 
 const str = (value) => (value == null ? '' : String(value));
+const num = (value) => (Number.isFinite(value) ? value : 0);
 
 // Every field the inspector reads, so a `stats` event that lacks one still renders.
 const NO_STATS = {
@@ -82,6 +99,8 @@ const NO_STATS = {
   repairs: 0,
   retries: 0,
   cache_misses: 0,
+  cache_busts: 0,
+  lessons_learned: 0,
   elapsed_ms: 0,
   model_ms: 0,
   tool_ms: 0,
@@ -98,42 +117,24 @@ const HANDLERS = {
   user(s, ev) {
     closeTurn(s);
     const followUp = s.items.some((item) => item.kind === 'user');
-    s.items.push({ kind: 'user', key: `user-${ev.seq}`, rev: 0, text: str(ev.text), followUp });
+    s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), followUp });
     s.running = true;
-    s.runStartedAt = ev.ts;
+    s.runStartedAt = num(ev.ts);
     s.outcome = null;
   },
 
   env(s, ev) {
-    s.items.push({ kind: 'env', key: `env-${ev.seq}`, rev: 0, text: str(ev.text) });
+    s.items.push({ kind: 'env', key: key(s, 'env'), rev: 0, text: str(ev.text) });
   },
 
   turn_start(s, ev) {
     closeTurn(s);
-    const turn = {
-      kind: 'turn',
-      key: `turn-${ev.seq}`,
-      rev: 0,
-      streamRev: 0,
-      turn: ev.turn,
-      effort: str(ev.effort),
-      startedAt: ev.ts,
-      live: true,
-      reasoning: '',
-      content: '',
-      /** Set by the `model` event: `{ ms, usage, finish, repairs, calls }`. */
-      reply: null,
-      cache: null,
-      rows: [],
-      steps: new Map(),
-    };
-    s.turns.set(ev.turn, turn);
-    s.openTurn = ev.turn;
-    s.items.push(turn);
+    openTurn(s, ev);
   },
 
   delta(s, ev) {
     const turn = s.turns.get(ev.turn);
+    // Streamed text is transient: the `model` event carries the whole reply again.
     if (!turn || (ev.channel !== 'reasoning' && ev.channel !== 'content')) return;
     turn[ev.channel] += str(ev.text);
     turn.streamRev++;
@@ -145,45 +146,48 @@ const HANDLERS = {
       // The provider call starts over, so whatever it streamed for this turn is void.
       turn.reasoning = '';
       turn.content = '';
+      turn.streamRev++;
     }
-    place(s, ev, chip(ev, 'amber', 'retry', `attempt ${ev.attempt}: ${str(ev.reason)} — retrying in ${duration(ev.wait_ms ?? 0)}`));
+    place(s, ev, chip(s, 'amber', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`));
   },
 
   model(s, ev) {
-    const turn = s.turns.get(ev.turn);
-    if (!turn) return;
+    const turn = turnFor(s, ev);
+    if (!turn) return false;
     turn.reasoning = str(ev.reasoning);
     turn.content = str(ev.content);
+    const usage = ev.usage && typeof ev.usage === 'object' ? ev.usage : {};
     turn.reply = {
-      ms: ev.ms ?? 0,
-      usage: { prompt: 0, cached: 0, output: 0, reasoning: 0, ...ev.usage },
+      ms: num(ev.ms),
+      usage: { prompt: num(usage.prompt), cached: num(usage.cached), output: num(usage.output), reasoning: num(usage.reasoning) },
       finish: str(ev.finish),
-      repairs: ev.repairs ?? 0,
+      repairs: num(ev.repairs),
       calls: Array.isArray(ev.calls) ? ev.calls.length : 0,
     };
     turn.rev++;
   },
 
   cache(s, ev) {
-    const turn = s.turns.get(ev.turn);
-    if (!turn) return;
-    turn.cache = { verdict: str(ev.verdict), cached: ev.cached ?? 0, expected: ev.expected ?? 0 };
+    const turn = turnFor(s, ev);
+    if (!turn) return false;
+    turn.cache = { verdict: str(ev.verdict), cached: num(ev.cached), expected: num(ev.expected) };
     turn.rev++;
   },
 
   step_start(s, ev) {
-    const turn = s.turns.get(ev.turn);
-    if (turn) startStep(turn, ev);
+    const turn = turnFor(s, ev);
+    if (!turn) return false;
+    startStep(turn, ev);
   },
 
   step_end(s, ev) {
-    const turn = s.turns.get(ev.turn);
-    if (!turn) return;
+    const turn = turnFor(s, ev);
+    if (!turn) return false;
     const step = turn.steps.get(ev.idx) ?? startStep(turn, ev);
     step.status = str(ev.status);
     step.observation = str(ev.observation);
-    step.ms = ev.ms ?? 0;
-    step.hidden = ev.hidden_bytes ?? 0;
+    step.ms = num(ev.ms);
+    step.hidden = num(ev.hidden_bytes);
     step.violations = Array.isArray(ev.violations) ? ev.violations.map(str) : [];
     step.explicit = ev.explicit === true;
     // No event announces a watch being switched off; its own step is the only trace.
@@ -200,45 +204,48 @@ const HANDLERS = {
     s.watches.set(name, { name, cmd: str(ev.cmd), state: str(ev.state), detail: firstLine(detail) });
     s.sideRev++;
     // An empty detail is the engine's "nothing changed, still passing".
-    const tone = !detail ? 'plain' : ev.state === 'pass' ? 'teal' : ev.state === 'fail' ? 'amber' : 'plain';
-    place(s, ev, chip(ev, tone, 'watch', detail ? detail.replace(/^watch /, '') : `${name}: still passing`));
+    const tone = !detail || ev.change === 'same' ? 'plain' : ev.state === 'pass' ? 'teal' : ev.state === 'fail' ? 'amber' : 'plain';
+    const text = detail ? detail.replace(/^watch /, '') : `${name}: still passing`;
+    place(s, ev, chip(s, tone, 'watch', text, ev.change === 'new' ? 'new' : null));
   },
 
   note(s, ev) {
-    s.notes.push({ label: str(ev.kind) || 'note', text: str(ev.text) });
+    const kind = str(ev.kind);
+    s.notes.push({ label: kind || 'note', text: str(ev.text) });
     s.sideRev++;
-    place(s, ev, chip(ev, 'violet', 'note', str(ev.text)));
+    // `harness` is the general kind; any other names the mechanism that spoke (attach, gate, …).
+    place(s, ev, chip(s, 'violet', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
   },
 
   lesson(s, ev) {
     const label = ev.learned ? 'learned' : 'recalled';
     s.lessons.push({ label, text: str(ev.text) });
     s.sideRev++;
-    place(s, ev, chip(ev, 'teal', label, str(ev.text)));
+    place(s, ev, chip(s, 'teal', label, str(ev.text)));
   },
 
   approval(s, ev) {
-    const row = { kind: 'approval', key: `approval-${ev.seq}`, rev: 0, id: ev.id, tool: str(ev.tool), summary: str(ev.summary), reason: str(ev.reason), state: 'pending' };
+    const row = { kind: 'approval', key: key(s, 'approval'), rev: 0, id: ev.id, tool: str(ev.tool), summary: str(ev.summary), reason: str(ev.reason), state: 'pending' };
     s.approvals.set(ev.id, { row, turn: place(s, ev, row) });
   },
 
   approval_resolved(s, ev) {
     const request = s.approvals.get(ev.id);
-    if (!request) return;
+    if (!request) return false;
     request.row.state = ev.allow ? 'allowed' : 'denied';
     (request.turn ?? request.row).rev++;
   },
 
   effort(s, ev) {
-    place(s, ev, chip(ev, 'violet', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'violet', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
   },
 
   decay(s, ev) {
-    place(s, ev, chip(ev, 'amber', 'trim', `${ev.messages ?? 0} old observations left the context (~${k(ev.dropped_tokens ?? 0)} tokens): ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'amber', 'trim', `${num(ev.messages)} old observations left the context (~${k(num(ev.dropped_tokens))} tokens): ${str(ev.reason)}`));
   },
 
   stats(s, ev) {
-    if (!ev.stats || typeof ev.stats !== 'object') return;
+    if (!ev.stats || typeof ev.stats !== 'object') return false;
     s.stats = { ...NO_STATS, ...ev.stats };
     s.sideRev++;
   },
@@ -251,17 +258,17 @@ const HANDLERS = {
     // A run that hands back in prose reports that same prose as its summary.
     const lastTurn = s.items.findLast((item) => item.kind === 'turn');
     const repeatsReply = summary.trim() !== '' && lastTurn?.content.trim() === summary.trim();
-    s.items.push({ kind: 'result', key: `result-${ev.seq}`, rev: 0, status: str(ev.status), verified: ev.verified === true, evidence: str(ev.evidence), summary, repeatsReply });
+    s.items.push({ kind: 'result', key: key(s, 'result'), rev: 0, status: str(ev.status), verified: ev.verified === true, evidence: str(ev.evidence), summary, repeatsReply });
   },
 
   error(s, ev) {
-    place(s, ev, chip(ev, 'red', 'error', str(ev.message)));
+    place(s, ev, chip(s, 'red', 'error', str(ev.message)));
   },
 };
 
-/** An event type this build does not know: keep it visible as a generic chip. */
+/** An event type this build does not know: keep it visible as a neutral chip that names the type. */
 function unknown(s, ev) {
-  place(s, ev, chip(ev, 'plain', str(ev.type) || 'event', compact(ev)));
+  place(s, ev, chip(s, 'plain', str(ev.type) || 'event', compact(ev)));
 }
 
 const TEXT_FIELDS = ['text', 'message', 'summary', 'detail', 'reason', 'name'];
@@ -277,33 +284,71 @@ function compact(ev) {
     .join(' · ');
 }
 
-function chip(ev, tone, label, text) {
-  return { kind: 'chip', key: `chip-${ev.seq}`, rev: 0, tone, label, text };
+const key = (s, kind) => `${kind}-${s.serial++}`;
+
+function chip(s, tone, label, text, badge = null) {
+  return { kind: 'chip', key: key(s, 'chip'), rev: 0, tone, label, text, badge };
 }
 
-/** Rows belong to the turn they name, else to the turn in progress, else to the timeline itself. */
+/**
+ * A row goes into the turn in progress when it names that turn or names none; anything else
+ * (before the first turn, between runs) goes onto the timeline itself. Returns the turn, if any.
+ */
 function place(s, ev, row) {
-  const turn = s.turns.get(ev.turn ?? s.openTurn);
+  const open = s.turns.get(s.openTurn);
+  const turn = open && (ev.turn == null || ev.turn === open.turn) ? open : null;
   if (turn) {
     turn.rows.push(row);
     turn.rev++;
   } else {
     s.items.push(row);
   }
-  return turn ?? null;
+  return turn;
+}
+
+function openTurn(s, ev) {
+  const turn = {
+    kind: 'turn',
+    key: key(s, 'turn'),
+    rev: 0,
+    streamRev: 0,
+    turn: ev.turn,
+    effort: str(ev.effort),
+    startedAt: num(ev.ts),
+    live: true,
+    reasoning: '',
+    content: '',
+    /** Set by the `model` event: `{ ms, usage, finish, repairs, calls }`. */
+    reply: null,
+    cache: null,
+    rows: [],
+    steps: new Map(),
+  };
+  s.turns.set(ev.turn, turn);
+  s.openTurn = ev.turn;
+  s.items.push(turn);
+  return turn;
+}
+
+/** The turn an event belongs to. A log that lost its `turn_start` still gets a card for the turn. */
+function turnFor(s, ev) {
+  const turn = s.turns.get(ev.turn);
+  if (turn || !Number.isInteger(ev.turn)) return turn ?? null;
+  closeTurn(s);
+  return openTurn(s, { turn: ev.turn, ts: ev.ts });
 }
 
 function startStep(turn, ev) {
   const step = {
     kind: 'step',
-    key: `step-${turn.turn}-${ev.idx}`,
-    idx: ev.idx,
+    key: `step-${turn.key}-${ev.idx}`,
+    idx: num(ev.idx),
     tool: str(ev.tool),
     summary: str(ev.summary),
     expect: ev.expect == null ? null : str(ev.expect),
     /** `active` until `step_end` supplies the engine's status. */
     status: 'active',
-    startedAt: ev.ts,
+    startedAt: num(ev.ts),
     observation: '',
     ms: 0,
     hidden: 0,

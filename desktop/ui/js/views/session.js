@@ -9,8 +9,9 @@ import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
 import { createTimeline } from './timeline.js';
 
-// Where each session's timeline was left, so coming back to it does not lose the place.
+// Where each session's timeline was left and what was unfolded in it, so coming back loses neither.
 const places = new Map();
+const unfolded = new Map();
 
 export function mountSession(main, side, app, meta) {
   const entry = store.open(meta);
@@ -22,8 +23,9 @@ export function mountSession(main, side, app, meta) {
   const foot = h('footer.session-foot');
   main.append(head, scroller, jump, foot);
 
+  if (!unfolded.has(entry.id)) unfolded.set(entry.id, new Map());
   const timeline = createTimeline(timelineEl, {
-    expanded: new Map(),
+    expanded: unfolded.get(entry.id),
     canAnswer: () => entry.live && entry.model.running,
     answer: (approval, allow) => api.approve(entry.id, approval, allow),
     openOutput: (handle) => openOutput(entry.id, handle),
@@ -70,15 +72,18 @@ export function mountSession(main, side, app, meta) {
       h('div.session-top', h('h1.session-name', { title }, title), statusPill(state, model), stop),
       h(
         'div.session-facts',
-        h('span.session-cwd', { title: cwd }, tilde(cwd, app.state.home)),
-        tag(modelName, 'plain', `Model, through ${provider}`),
-        tag(`effort ${effort}`, 'plain', 'Reasoning effort policy'),
-        // The engine also reports ablations here, as "presage without <mechanism>".
-        mode === 'classic'
-          ? tag('Classic', 'plain', 'Conventional tool loop: no scripts, predictions, watches or finish gate')
-          : tag(mode === 'presage' ? 'Presage' : mode, 'violet', 'Scripts, predictions, watches and the evidence gate'),
-        autonomy === 'ask' && tag('asks first', 'amber', 'Every step that changes something waits for your approval'),
-        simulated && h('span.badge', { title: 'A scripted stand-in is playing the model: token counts and cost are fabricated.' }, 'SIMULATED'),
+        h('span.session-cwd', { title: cwd }, h('bdi', tilde(cwd, app.state.home))),
+        h(
+          'div.session-tags',
+          tag(modelName, 'plain', `Model, through ${provider}`),
+          tag(`effort ${effort}`, 'plain', 'Reasoning effort policy'),
+          // The engine also reports ablations here, as "presage without <mechanism>".
+          mode === 'classic'
+            ? tag('Classic', 'plain', 'Conventional tool loop: no scripts, predictions, watches or finish gate')
+            : tag(mode === 'presage' ? 'Presage' : mode, 'violet', 'Scripts, predictions, watches and the evidence gate'),
+          autonomy === 'ask' && tag('asks first', 'amber', 'Every step that changes something waits for your approval'),
+          simulated && h('span.badge', { title: 'A scripted stand-in is playing the model: token counts and cost are fabricated.' }, 'SIMULATED'),
+        ),
       ),
     );
   }

@@ -27,6 +27,8 @@
     true,
   );
   window.addEventListener('unhandledrejection', (event) => show(String(event.reason?.message ?? event.reason)));
+  // Something the content security policy refused would otherwise just be missing from the page.
+  document.addEventListener('securitypolicyviolation', (event) => show(`Blocked by the content security policy (${event.violatedDirective}): ${event.blockedURI || 'inline'}`));
 
   document.getElementById('error-dismiss').addEventListener('click', () => {
     lines.replaceChildren();

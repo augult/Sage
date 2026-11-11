@@ -12,6 +12,8 @@ export const api = {
   listSessions: () => invoke('list_sessions'),
   startSession: (req) => invoke('start_session', { req }),
   startDemo: () => invoke('start_demo'),
+  /** Test hook: the session `PRESAGE_UI_SCRIPTED` describes. */
+  startScripted: () => invoke('start_scripted'),
   sendMessage: (id, text) => invoke('send_message', { id, text }),
   stopSession: (id) => invoke('stop_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),

@@ -1,6 +1,7 @@
 // Headless test hooks: the PRESAGE_UI_* environment variables, as read by the shell.
 //
 //   PRESAGE_UI_AUTODEMO=1                   start the walkthrough and open it
+//   PRESAGE_UI_SCRIPTED=<file>              start the scripted session the file describes and open it
 //   PRESAGE_UI_OPEN=<session id>            open that session
 //   PRESAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
 //   PRESAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
@@ -50,6 +51,7 @@ async function play(script) {
 export async function applyHooks(app) {
   const hooks = await api.hooks();
   if (hooks.autodemo) await app.playDemo();
+  else if (hooks.scripted) await app.opened(await api.startScripted());
   else if (hooks.open) app.show({ name: 'session', id: hooks.open });
   else if (hooks.view === 'session' && app.sessions.length) app.show({ name: 'session', id: app.sessions[0].id });
   else app.show({ name: hooks.view === 'settings' ? 'settings' : 'new' });

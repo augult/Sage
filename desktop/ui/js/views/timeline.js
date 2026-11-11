@@ -39,7 +39,12 @@ export function createTimeline(container, ctx) {
   const rendered = [];
 
   function build(item) {
-    const view = item.kind === 'turn' ? turnCard(item, ctx) : { el: (ITEMS[item.kind] ?? chipRow)(item, ctx) };
+    let view;
+    try {
+      view = item.kind === 'turn' ? turnCard(item, ctx) : { el: (ITEMS[item.kind] ?? chipRow)(item, ctx) };
+    } catch (problem) {
+      view = { el: undrawable(item, problem, ctx) };
+    }
     return { ...view, item, rev: item.rev, streamRev: item.streamRev };
   }
 
@@ -57,13 +62,18 @@ export function createTimeline(container, ctx) {
           rendered[i] = build(item);
           have.el.replaceWith(rendered[i].el);
         } else if (have.streamRev !== item.streamRev) {
-          have.patch();
+          have.patch?.();
           have.streamRev = item.streamRev;
         }
       });
       for (const stale of rendered.splice(items.length)) stale.el.remove();
     },
   };
+}
+
+/** Stands in for an item or row that could not be drawn, so that one bad entry costs only itself. */
+function undrawable(item, problem, ctx) {
+  return chipRow({ key: `${item.key}-undrawable`, tone: 'red', label: 'cannot display', text: `${item.kind}: ${problem}` }, ctx);
 }
 
 /** A button that opens and closes, shows `body` (if any) while open, and remembers the choice under `key`. */
@@ -134,7 +144,13 @@ const ITEMS = {
 
 function turnCard(turn, ctx) {
   const stream = h('div.turn-stream', streamBlocks(turn, ctx));
-  const rows = turn.rows.map((row) => (row.kind === 'step' ? stepRow(row, ctx, turn) : (ITEMS[row.kind] ?? chipRow)(row, ctx)));
+  const rows = turn.rows.map((row) => {
+    try {
+      return row.kind === 'step' ? stepRow(row, ctx, turn) : (ITEMS[row.kind] ?? chipRow)(row, ctx);
+    } catch (problem) {
+      return undrawable(row, problem, ctx);
+    }
+  });
   const queued = turn.live && turn.reply ? turn.reply.calls - turn.steps.size : 0;
   if (queued > 0) rows.push(h('div.queued', `${plural(queued, 'more step')} queued`));
   const el = h(`section.turn${turn.live ? '.is-live' : ''}`, { dataset: { turn: turn.turn } }, turnHead(turn), stream, h('div.script', rows));
@@ -155,6 +171,8 @@ function turnHead(turn) {
     if (reply.finish === 'length') facts.append(tag('output limit', 'amber', 'The reply hit the output limit; a call cut off by it is not run'));
   } else if (turn.live) {
     facts.append(h('span.thinking', spinner(), 'thinking', h('span', { dataset: { since: turn.startedAt } })));
+  } else {
+    facts.append(h('span', { title: 'The turn ended before the model replied: the provider failed, or the run was stopped' }, 'no reply'));
   }
   if (turn.cache) {
     const { verdict, cached, expected } = turn.cache;
@@ -193,7 +211,7 @@ function stepRow(step, ctx, turn) {
   const line = [
     h('span.step-no', String(step.idx + 1)),
     h('span.step-tool', step.tool),
-    h('span.step-main', h('span.step-summary', step.summary), status === 'skipped' && tag('skipped'), expectChip(step, status)),
+    h('span.step-main', h('span.step-summary', step.summary), status === 'skipped' && tag('skipped'), status === 'unfinished' && tag('did not finish'), expectChip(step, status)),
     active ? h('span.step-took', { dataset: { since: step.startedAt } }) : step.ms >= 100 && h('span.step-took', duration(step.ms)),
   ];
   const row = h(
@@ -242,7 +260,7 @@ function expectChip(step, status) {
 /** A slim note. One that is long or runs over several lines is cut to a line and unfolds on demand. */
 function chipRow(chip, ctx) {
   const [head, ...rest] = chip.text.split('\n');
-  const content = [h('span.chip-label', chip.label), h('span.chip-text', head)];
+  const content = [h('span.chip-label', chip.label), chip.badge && h('span.chip-badge', chip.badge), h('span.chip-text', head)];
   const row = h(`div.row.chip.tone-${chip.tone}`, h('span.chip-dot'));
   if (rest.length || head.length > LONG_CHIP) {
     const body = rest.length ? verbatim(rest.join('\n'), ctx, chip.tone) : null;
@@ -259,8 +277,9 @@ function chipRow(chip, ctx) {
 /** A prominent card while the request waits; a chip once it is answered or can no longer be. */
 function approvalRow(row, ctx) {
   if (row.state !== 'pending' || !ctx.canAnswer()) {
-    const [tone, verdict] = { allowed: ['teal', 'allowed'], denied: ['red', 'denied'] }[row.state] ?? ['plain', 'never answered'];
-    return chipRow({ key: row.key, tone, label: 'approval', text: `${verdict} · ${row.tool} ${row.summary}` }, ctx);
+    const [tone, verdict] = known({ allowed: ['teal', 'allowed'], denied: ['red', 'denied'] }, row.state) ?? ['plain', 'never answered'];
+    // The row sits under the step it was about, so the reason is all it needs to say.
+    return chipRow({ key: row.key, tone, label: 'approval', badge: verdict, text: row.reason || `${row.tool} ${row.summary}` }, ctx);
   }
   const error = h('div.form-error', { role: 'alert', hidden: true });
   const answer = async (allow) => {
