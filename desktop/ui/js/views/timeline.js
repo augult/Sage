@@ -13,7 +13,7 @@ const STEP_LOOKS = {
   surprise: { icon: 'bang', tone: 'amber', label: 'surprise' },
   error: { icon: 'cross', tone: 'red', label: 'error' },
   skipped: { icon: 'dash', tone: 'plain', label: 'skipped' },
-  running: { icon: 'clock', tone: 'azure', label: 'still running, as a background job' },
+  running: { icon: 'clock', tone: 'azure', label: 'in background' },
   denied: { icon: 'denied', tone: 'red', label: 'denied' },
   unfinished: { icon: 'dash', tone: 'plain', label: 'did not finish' },
 };
@@ -22,12 +22,12 @@ const STEP_LOOKS = {
 const OPEN_BY_DEFAULT = new Set(['surprise', 'error', 'denied', 'running']);
 
 const CACHE_LOOKS = {
-  first: ['first request', 'plain', 'The first request of the session: nothing could have been cached.'],
-  hit: ['cache hit', 'teal', 'The provider served the previous prompt from its cache.'],
-  partial: ['partial cache', 'amber', 'Only part of the previous prompt was served from cache.'],
-  miss: ['cache miss', 'amber', 'The prefix was byte-identical, but the provider reported no cache hit. Not a harness fault.'],
-  bust: ['cache bust', 'amber', 'The harness changed what was already sent (old observations trimmed, or a tool added), so the provider cache restarts there.'],
-  unknown: ['no usage', 'plain', 'The provider reported no usage for this request.'],
+  first: ['first request', 'plain'],
+  hit: ['cache hit', 'teal'],
+  partial: ['partial cache', 'amber'],
+  miss: ['cache miss', 'amber'],
+  bust: ['cache bust', 'amber'],
+  unknown: ['no usage', 'plain'],
 };
 
 const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', error: 'Failed' };
@@ -106,7 +106,7 @@ function verbatim(text, ctx, tone) {
   let from = status.length;
   for (const match of text.matchAll(/\bout:\d+\b/g)) {
     if (match.index < from) continue;
-    pre.append(text.slice(from, match.index), h('button.out-link', { type: 'button', title: 'Open the full output', onclick: () => ctx.openOutput(match[0]) }, match[0]));
+    pre.append(text.slice(from, match.index), h('button.out-link', { type: 'button', onclick: () => ctx.openOutput(match[0]) }, match[0]));
     from = match.index + match[0].length;
   }
   pre.append(text.slice(from));
@@ -129,8 +129,8 @@ const ITEMS = {
     const look = outcomeLook(item.status, item.verified);
     // "Verified" vouches for a finished task. Unchecked changes are worth flagging however the run ended.
     const badge = !item.verified
-      ? tag('unverified', 'amber', 'No check has passed since the last change to the workspace')
-      : item.status === 'done' && tag('verified', 'teal', 'A check passed after the last change to the workspace');
+      ? tag('unverified', 'amber')
+      : item.status === 'done' && tag('verified', 'teal');
     return h(
       `section.result.tone-${look.tone}`,
       h('div.result-head', h('span.glyph', icon(look.icon)), h('span.result-status', known(RESULT_WORDS, item.status) ?? look.label), badge, h('span.result-evidence', item.evidence)),
@@ -163,24 +163,23 @@ function turnHead(turn) {
   if (reply) {
     const { usage } = reply;
     facts.append(
-      h('span', { title: 'Time the model took for this reply' }, h('b', duration(reply.ms))),
-      h('span', { title: 'Prompt tokens, and the share served from the provider cache' }, 'in ', h('b', k(usage.prompt)), ` · ${pct(usage.cached, usage.prompt)} cached`),
-      h('span', { title: 'Output tokens, and how many of them were reasoning' }, 'out ', h('b', k(usage.output)), ` · ${k(usage.reasoning)} thinking`),
+      h('span', h('b', duration(reply.ms))),
+      h('span', 'in ', h('b', k(usage.prompt)), ` · ${pct(usage.cached, usage.prompt)} cached`),
+      h('span', 'out ', h('b', k(usage.output)), ` · ${k(usage.reasoning)} thinking`),
     );
-    if (reply.repairs > 0) facts.append(tag(`${reply.repairs} repaired`, 'amber', 'Malformed tool calls the harness repaired'));
-    if (reply.finish === 'length') facts.append(tag('output limit', 'amber', 'The reply hit the output limit; a call cut off by it is not run'));
+    if (reply.repairs > 0) facts.append(tag(`${reply.repairs} repaired`, 'amber'));
+    if (reply.finish === 'length') facts.append(tag('output limit', 'amber'));
   } else if (turn.live) {
     facts.append(h('span.thinking', spinner(), 'thinking', h('span', { dataset: { since: turn.startedAt } })));
   } else {
-    facts.append(h('span', { title: 'The turn ended before the model replied: the provider failed, or the run was stopped' }, 'no reply'));
+    facts.append(h('span', 'no reply'));
   }
   if (turn.cache) {
     const { verdict, cached, expected } = turn.cache;
-    const [label, tone, meaning] = known(CACHE_LOOKS, verdict) ?? [`cache ${verdict}`, 'plain', ''];
-    const numbers = expected > 0 ? ` ${k(cached)} of the ${k(expected)} tokens sent before came from cache.` : '';
-    facts.append(tag(label, tone, `${meaning}${numbers}`.trim()));
+    const [label, tone] = known(CACHE_LOOKS, verdict) ?? [`cache ${verdict}`, 'plain'];
+    facts.append(tag(label, tone, expected > 0 ? `${k(cached)} of ${k(expected)} cached` : null));
   }
-  return h('header.turn-head', h('span.turn-no', `Turn ${turn.turn}`), tag(`effort ${turn.effort}`, 'plain', 'Reasoning effort for this reply'), facts);
+  return h('header.turn-head', h('span.turn-no', `Turn ${turn.turn}`), tag(`effort ${turn.effort}`), facts);
 }
 
 /** Reasoning (open while the turn is live, folded to a one-line preview afterwards) and the reply text. */
@@ -230,7 +229,7 @@ function stepRow(step, ctx, turn) {
       'div.step-detail',
       unstated.map((violation) => h('div.step-violation', violation)),
       verbatim(step.observation, ctx, look.tone),
-      step.hidden > 0 && h('div.step-foot', `${bytes(step.hidden)} of output stayed out of the context.`),
+      step.hidden > 0 && h('div.step-foot', `${bytes(step.hidden)} kept out of context`),
     );
     row.append(disclosure(ctx, step.key, OPEN_BY_DEFAULT.has(status), 'step-line', detail, line), detail);
   }
@@ -240,18 +239,11 @@ function stepRow(step, ctx, turn) {
 /** The prediction for a step. It turns teal when it held and amber when reality contradicted it. */
 function expectChip(step, status) {
   if (step.expect == null) {
-    return status === 'surprise' ? h('span.expect.is-violated', { title: 'Not what the harness expects of this step' }, h('span.expect-text', 'surprise')) : null;
+    return status === 'surprise' ? h('span.expect.is-violated', h('span.expect-text', 'surprise')) : null;
   }
   const verdict = status === 'ok' && step.explicit ? 'held' : status === 'surprise' ? 'violated' : null;
-  const meaning =
-    verdict === 'held'
-      ? 'Reality matched the prediction, so the model got a receipt instead of the output.'
-      : verdict === 'violated'
-        ? 'Reality contradicted the prediction. The script stopped here.'
-        : 'What the model predicted this step would do.';
   return h(
     `span.expect${verdict ? `.is-${verdict}` : ''}`,
-    { title: meaning },
     h('span.expect-text', `expect ${step.expect}`),
     verdict && h('span.expect-verdict', icon(verdict === 'held' ? 'check' : 'bang', 12), verdict),
   );

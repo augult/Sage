@@ -1,31 +1,26 @@
-// The New session view: one composer. The workspace sits above the task; the model, effort, mode
-// and autonomy are pickers in the bar below it, next to Start.
+// The New session view: one composer. The workspace sits above the task; the model, skills, effort,
+// mode and autonomy are pickers in the bar below it, next to Start.
 // With no key configured the view opens with the walkthrough and the way to add a key.
 
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
 import { MOD_KEY } from './common.js';
-import { effortOptions, modelOptions, picker } from './controls.js';
+import { effortOptions, modelOptions, picker, skillsPicker } from './controls.js';
 import { pickFolder } from './folder-picker.js';
 
-const EFFORT_HINTS = {
-  ratchet: 'Starts at high and only rises, after repeated surprises.',
-  low: 'The least deliberation per reply.',
-  high: 'Stays at high.',
-  max: 'The most deliberation per reply: slowest and most expensive.',
-};
 const MODES = [
-  { value: 'presage', label: 'Presage', hint: 'Replies run as scripts, with predictions, watches and the evidence gate.' },
-  { value: 'classic', label: 'Classic', hint: 'A conventional tool loop with the same model and tools, as a baseline.' },
+  { value: 'presage', label: 'Presage' },
+  { value: 'classic', label: 'Classic' },
 ];
 const AUTONOMIES = [
-  { value: 'auto', label: 'Auto', hint: 'Runs every step. Only catastrophic commands wait for you.' },
-  { value: 'ask', label: 'Ask', hint: 'Every step that changes something waits for your approval.' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'ask', label: 'Ask' },
 ];
 
-// What has been entered so far. It survives a trip to Settings and back.
-const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '' };
+// What has been entered so far. It survives a trip to Settings and back; the skills start empty
+// for every new session.
+const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
@@ -76,15 +71,20 @@ export function mountNewSession(main, app) {
     id: 'workspace',
     type: 'text',
     value: draft.cwd,
-    placeholder: 'The folder the agent works in',
+    placeholder: 'Folder',
     'aria-label': 'Workspace',
     spellcheck: 'false',
     autocomplete: 'off',
-    oninput: () => (draft.cwd = workspace.value),
+    oninput: () => {
+      draft.cwd = workspace.value;
+      clearTimeout(skillsTimer);
+      skillsTimer = setTimeout(loadSkills, 300);
+    },
   });
   const setWorkspace = (path) => {
     workspace.value = path;
     draft.cwd = path;
+    loadSkills();
   };
   const browse = h(
     'button.btn.quiet',
@@ -116,11 +116,7 @@ export function mountNewSession(main, app) {
       served.set(value, { provider: provider.id, model: option.value });
       return { value, label: option.label, disabled: !provider.has_key };
     });
-    return {
-      label: provider.has_key ? provider.name : `${provider.name} · needs key`,
-      note: provider.has_key ? provider.note : `Add a key in Settings, or set ${provider.key_env}.`,
-      options,
-    };
+    return { label: provider.has_key ? provider.name : `${provider.name} · needs key`, options };
   });
   const modelPicker = picker({
     id: 'pick-model',
@@ -131,15 +127,48 @@ export function mountNewSession(main, app) {
     onChange: (value) => Object.assign(draft, served.get(value)),
   });
 
-  /** A run setting: its name, the current value, and a menu that explains each option. */
-  const setting = (key, name, options) => picker({ id: `pick-${key}`, name, prefix: name, groups: [{ options }], value: draft[key], onChange: (value) => (draft[key] = value) });
-  const efforts = effortOptions(state.effort).map((option) => ({ ...option, hint: EFFORT_HINTS[option.value] }));
+  /** A run setting: its name, the current value, and a menu of the others. */
+  const setting = (key, name, options, changed) =>
+    picker({
+      id: `pick-${key}`,
+      name,
+      prefix: name,
+      groups: [{ options }],
+      value: draft[key],
+      onChange: (value) => {
+        draft[key] = value;
+        changed?.();
+      },
+    });
+
+  // Skills sit next to the model. The list follows the folder: a project brings its own.
+  const skillsSlot = h('span.pick-slot');
+  let skillList = [];
+  let skillsTimer = 0;
+  let skillsAsked = 0;
+  const workspacePath = () => draft.cwd.trim().replace(/^~(?=\/|$)/, home);
+  function drawSkills() {
+    draft.skills = draft.skills.filter((name) => skillList.some((skill) => skill.name === name));
+    // The classic baseline takes no skills.
+    skillsSlot.replaceChildren(skillsPicker({ skills: skillList, value: draft.skills, disabled: draft.mode === 'classic', onChange: (names) => (draft.skills = names) }));
+  }
+  async function loadSkills() {
+    clearTimeout(skillsTimer);
+    const asked = ++skillsAsked;
+    const listed = await api.skills(workspacePath() || null);
+    // A slower answer for an earlier folder must not replace a later one.
+    if (asked !== skillsAsked) return;
+    skillList = listed;
+    drawSkills();
+  }
+  drawSkills();
+  loadSkills();
 
   const task = h('textarea', {
     id: 'task',
     rows: 5,
     value: draft.task,
-    placeholder: 'What should be done? If you know how to check it, say so: “… so that `make test` passes”.',
+    placeholder: 'Task',
     'aria-label': 'Task',
     oninput: () => (draft.task = task.value),
   });
@@ -148,14 +177,15 @@ export function mountNewSession(main, app) {
   const startButton = h(`button.btn${keyed.length ? '.primary' : ''}`, { id: 'start', type: 'button', onclick: start }, 'Start session');
 
   function start() {
-    const cwd = draft.cwd.trim().replace(/^~(?=\/|$)/, home);
-    if (!draft.provider) return fail('No provider has an API key yet. Add one in Settings, or play the walkthrough.');
-    if (!cwd) return fail('Choose the workspace folder first.');
-    if (!draft.task.trim()) return fail('Describe the task first.');
+    const cwd = workspacePath();
+    if (!draft.provider) return fail('No API key.');
+    if (!cwd) return fail('No folder.');
+    if (!draft.task.trim()) return fail('No task.');
     return guarded(startButton, async () => {
       const { provider, model, effort, mode, autonomy } = draft;
-      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy });
+      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: mode === 'classic' ? [] : draft.skills });
       draft.task = '';
+      draft.skills = [];
       await app.opened(meta);
     });
   }
@@ -171,29 +201,28 @@ export function mountNewSession(main, app) {
     },
     h(
       'section.composer-card',
-      h('div.composer-top', h('label.workspace-pick', { title: 'The folder the agent works in' }, icon('folder', 14), workspace), browse),
+      h('div.composer-top', h('label.workspace-pick', icon('folder', 14), workspace), browse),
       task,
-      h('div.composer-bar', modelPicker, setting('effort', 'Effort', efforts), setting('mode', 'Mode', MODES), setting('autonomy', 'Autonomy', AUTONOMIES), startButton),
+      h(
+        'div.composer-bar',
+        modelPicker,
+        skillsSlot,
+        setting('effort', 'Effort', effortOptions(state.effort)),
+        setting('mode', 'Mode', MODES, drawSkills),
+        setting('autonomy', 'Autonomy', AUTONOMIES),
+        startButton,
+      ),
     ),
-    h('div.composer-foot', recentRow, h('span.kbd', `${MOD_KEY}+Enter starts the session`)),
+    h('div.composer-foot', recentRow, h('span.kbd', `${MOD_KEY}+Enter`)),
     error,
   );
 
   const hero =
     keyed.length === 0 &&
     h(
-      'section.hero',
-      heroMark(),
-      h(
-        'div',
-        h('h2', 'See it work before connecting a model'),
-        h('p', 'The walkthrough plays a scripted three-turn session through the real harness: it reproduces a bug, makes a wrong fix that is caught before anything is declared done, then makes the right one. No key, no network.'),
-        h(
-          'div.hero-actions',
-          h('button.btn.primary', { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
-          h('button.btn.quiet', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key'),
-        ),
-      ),
+      'div.lead-actions',
+      h('button.btn.primary', { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
+      h('button.btn.quiet', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key'),
     );
 
   main.append(
@@ -207,28 +236,10 @@ export function mountNewSession(main, app) {
   );
   // Start where the first thing is still missing.
   (keyed.length === 0 ? main.querySelector('#play-demo') : draft.cwd ? task : workspace).focus();
-  return {};
-}
-
-/** The app mark: prediction and reality, overlapping. */
-function heroMark() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 32 20');
-  svg.setAttribute('width', '42');
-  svg.setAttribute('height', '26');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('hero-mark');
-  for (const [cx, fill, opacity] of [
-    [11, '#6ea8ff', 1],
-    [21, '#2dd4bf', 0.8],
-  ]) {
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', cx);
-    circle.setAttribute('cy', 10);
-    circle.setAttribute('r', 9);
-    circle.setAttribute('fill', fill);
-    circle.setAttribute('fill-opacity', opacity);
-    svg.append(circle);
-  }
-  return svg;
+  return {
+    unmount() {
+      clearTimeout(skillsTimer);
+      skillsAsked++;
+    },
+  };
 }
