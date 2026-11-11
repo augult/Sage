@@ -1,10 +1,11 @@
-// Settings: an API key per provider, the defaults for new sessions, and the text the model is
-// given: skills, the system prompt and the user's instructions.
+// Settings: how the window looks, an API key per provider, the defaults for new sessions, and the
+// text the model is given: skills, the system prompt and the user's instructions.
 // Keys only ever travel towards the engine; a stored key is never read back or shown.
 
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
+import * as themes from '../themes.js';
 import { tag } from './common.js';
 import { effortOptions, field, hint, modelOptions, providerOptions, radioChips } from './controls.js';
 
@@ -23,8 +24,8 @@ export function mountSettings(main, app) {
   const live = h('div.contents');
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
-    h('header.view-head', { 'data-tauri-drag-region': 'deep' }, h('h1', 'Settings')),
-    h('div.view-body', h('div.view-column', live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
+    h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
+    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
   );
 
   /** Reloads the engine state and redraws, since a key changes what both sections offer. */
@@ -48,6 +49,34 @@ export function mountSettings(main, app) {
 
   draw();
   return {};
+}
+
+/** Light or dark, the painting behind the panes, and whether its dither moves. Kept by the window, not the engine. */
+function appearanceSection() {
+  const pick = themes.chosen();
+  const choice = (name, label, values, value) =>
+    radioChips({ name, label, segmented: true, options: values.map((option) => ({ value: option, label: option.charAt(0).toUpperCase() + option.slice(1) })), value, onChange: (chosen) => themes.choose({ [name]: chosen }) });
+  const backgrounds = h(
+    'div.theme-grid',
+    { role: 'radiogroup', 'aria-label': 'Background' },
+    themes.BACKGROUNDS.map((background) =>
+      h(
+        'label.theme-card',
+        { dataset: { background: background.id } },
+        h('input', { type: 'radio', name: 'background', value: background.id, checked: background.id === pick.background, onchange: () => themes.choose({ background: background.id }) }),
+        h('span.theme-thumb', background.thumb && h('img', { src: background.thumb, alt: '', draggable: 'false' })),
+        h('span.theme-name', background.name),
+      ),
+    ),
+  );
+  return h(
+    'section.panel',
+    { id: 'settings-appearance' },
+    h('h2.section-title', 'Appearance'),
+    field('Mode', choice('appearance', 'Appearance', themes.APPEARANCES, pick.appearance)),
+    field('Background', backgrounds),
+    field('Motion', choice('motion', 'Motion', ['on', 'off'], pick.motion)),
+  );
 }
 
 function providerCard(provider, refresh) {
@@ -84,7 +113,7 @@ function providerCard(provider, refresh) {
     await refresh();
   }
 
-  const state = custom ? tag('custom endpoint') : provider.has_key ? tag('key configured', 'teal') : tag('no key');
+  const state = custom ? tag('custom endpoint') : provider.has_key ? tag('key configured', 'good') : tag('no key');
   return h(
     'div.provider',
     { dataset: { provider: provider.id } },

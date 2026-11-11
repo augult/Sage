@@ -4,10 +4,6 @@ const { invoke, Channel } = window.__TAURI__.core;
 
 export const api = {
   hooks: () => invoke('ui_hooks'),
-  /** Where the window's content sits on its monitor, in physical pixels; null when unknown. */
-  windowPlace: () => invoke('window_place'),
-  /** The desktop wallpaper's bytes as an ArrayBuffer; empty when there is none to read. */
-  wallpaper: () => invoke('wallpaper'),
   appState: () => invoke('app_state'),
   /** An empty key removes the stored one. */
   setKey: (provider, key) => invoke('set_key', { provider, key }),
@@ -38,6 +34,10 @@ export const api = {
   setSystemPrompt: (template) => invoke('set_system_prompt', { template }),
   /** Empty deletes the file. */
   setGlobalInstructions: (text) => invoke('set_global_instructions', { text }),
+  /** Where a session's workspace stands with git: `{ repo, branch, remote, url, github, upstream, ahead, files }`. */
+  gitState: (id) => invoke('git_state', { id }),
+  /** Commits what is uncommitted under `message` and pushes the branch: `{ commit, remote, branch, pushed }`. */
+  gitPush: (id, message) => invoke('git_push', { id, message }),
 
   /** Resolves with the stored events; `onEvent` receives everything emitted after them. */
   subscribe(id, onEvent) {
