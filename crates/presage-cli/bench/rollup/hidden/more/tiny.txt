@@ -1,0 +1,7 @@
+requests: 1
+skipped: 0
+window: 2026-03-02T10:16:44Z .. 2026-03-02T10:16:44Z
+slowest: 15ms GET /a/1/b/2/ at 2026-03-02T10:16:44Z
+
+endpoint                           count   err%    p50    p95      bytes
+GET /a/:id/b/:id                       1  100.0     15     15        300

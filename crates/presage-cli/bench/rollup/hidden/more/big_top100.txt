@@ -1,0 +1,31 @@
+requests: 861
+skipped: 16
+window: 2026-03-02T10:15:04Z .. 2026-03-02T10:58:58Z
+slowest: 9120ms GET /api/reports/3?full=1 at 2026-03-02T10:41:09Z
+
+endpoint                           count   err%    p50    p95      bytes
+GET /api/users/:id                   140    2.1     31    121     633024
+GET /api/search                      120    2.5     90    413     554246
+GET /api/orders/:id/items/:id         95    2.1     21    101     425008
+POST /api/orders                      95    4.2     64    404     420922
+GET /                                 60    0.0      4     16     271532
+GET /api/users/:id/posts              60    5.0     31    180     248095
+DELETE /api/users/:id                 41   14.6     47    164     184378
+GET /api/Users                        41    0.0     14     61     212233
+GET /api/users                        41   17.1     14     50     193546
+GET /health                           33    0.0      2     11     151639
+GET /static/app.js                    20    0.0      3     13      76149
+PATCH /v2/users/:id                   20    0.0     16     89      73650
+PUT /api/users/:id                    20    0.0     43     74     118023
+PATCH /v2/users/x9                    15    0.0     20    111      50909
+GET /static/app-with-a-rather-long-name.min.css      12    0.0      4     20      68093
+PATCH /v2/users/7a                    10    0.0     55    218      44208
+POST /api/login                        9   11.1    159    398      52390
+GET /api/reports/:id                   8   25.0    384   9120     121266
+PATCH /v2/users/12b                    8    0.0     22     98      24470
+POST /api/reports                      4   25.0    512   9120      16993
+GET /api/v2/:id/:id/summary            3    0.0     68    303      10975
+DELETE /api/sessions/current           2  100.0      6     13       7461
+GET /favicon.ico                       2    0.0      1      2      10084
+GET /api/users/42a                     1  100.0      4      4       4079
+PUT /api/settings                      1    0.0    103    103       2375
