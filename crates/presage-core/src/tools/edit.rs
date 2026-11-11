@@ -16,19 +16,29 @@ pub(crate) struct FileText {
     pub lines: Vec<String>,
     crlf: bool,
     trailing_newline: bool,
+    /// The file starts with a byte-order mark, which is kept apart from its first line.
+    bom: bool,
 }
 
 pub(crate) fn split(content: &str) -> FileText {
-    let mut lines: Vec<String> = if content.is_empty() { Vec::new() } else { content.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect() };
+    let (bom, content) = match content.strip_prefix('\u{feff}') {
+        Some(rest) => (true, rest),
+        None => (false, content),
+    };
+    // CRLF only where every line ends so. In a file of mixed endings a `\r` stays with its line,
+    // so that an edit leaves the other lines as they are.
+    let crlf = content.contains("\r\n") && content.matches("\r\n").count() == content.matches('\n').count();
+    let mut lines: Vec<String> = if content.is_empty() { Vec::new() } else { content.split('\n').map(|l| if crlf { l.strip_suffix('\r').unwrap_or(l) } else { l }.to_string()).collect() };
     if content.ends_with('\n') {
         lines.pop();
     }
-    FileText { lines, crlf: content.contains("\r\n"), trailing_newline: content.ends_with('\n') || content.is_empty() }
+    FileText { lines, crlf, trailing_newline: content.ends_with('\n') || content.is_empty(), bom }
 }
 
 fn join(ft: &FileText, lines: &[String]) -> String {
     let eol = if ft.crlf { "\r\n" } else { "\n" };
-    let mut s = lines.join(eol);
+    let mut s = if ft.bom { String::from('\u{feff}') } else { String::new() };
+    s.push_str(&lines.join(eol));
     if ft.trailing_newline && !lines.is_empty() {
         s.push_str(eol);
     }
@@ -231,7 +241,15 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
     let p = path.to_string_lossy().into_owned();
     let line_in = |text: &str, re: &str| regex::Regex::new(re).ok()?.captures(text)?.get(1)?.as_str().parse::<usize>().ok();
     match ext.as_str() {
-        "json" => serde_json::from_str::<Value>(content).err().map(|e| (Some(e.line()), e.to_string())),
+        "json" => {
+            // Configuration that is JSON with comments by convention.
+            let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+            let with_comments = name.starts_with("tsconfig") || name.starts_with("jsconfig") || name == ".eslintrc.json" || name == "devcontainer.json" || path.components().any(|c| c.as_os_str() == ".vscode");
+            if with_comments {
+                return None;
+            }
+            serde_json::from_str::<Value>(content).err().map(|e| (Some(e.line()), e.to_string()))
+        }
         "py" => {
             let script = "import ast,sys\ntry:\n    ast.parse(open(sys.argv[1],encoding='utf-8').read())\nexcept SyntaxError as e:\n    print(f'{e.lineno}:{e.msg}')\n    sys.exit(1)";
             let out = run("python3", vec!["-c".into(), script.into(), p]).await?;
@@ -241,6 +259,11 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
         }
         "js" | "mjs" | "cjs" => {
             let out = run("node", vec!["--check".into(), p]).await?;
+            // JSX, or module syntax an older node will not take from a `.js` file: another dialect,
+            // not a mistake.
+            if out.contains("Unexpected token '<'") || out.contains("outside a module") || out.contains("Unexpected token 'export'") {
+                return None;
+            }
             let msg = out.lines().find(|l| l.contains("Error")).unwrap_or("syntax error").trim().to_string();
             Some((line_in(&out, r"(?m)^[^\n]*:(\d+)\s*$"), msg))
         }
@@ -251,6 +274,32 @@ pub(crate) async fn syntax_check(path: &Path, content: &str) -> Option<(Option<u
         }
         _ => None,
     }
+}
+
+/// A syntax error that a change brought in. A file that did not parse before the tools first touched
+/// it is written in something the checker does not read (a template, a dialect), and every edit to
+/// it would be called a surprise: nothing is reported for such a file.
+pub(crate) async fn broken_by_change(sess: &mut Session, path: &Path, before: Option<&str>, after: &str) -> Option<(Option<usize>, String)> {
+    let Some(found) = syntax_check(path, after).await else {
+        sess.dialects.insert(path.to_path_buf(), false);
+        return None;
+    };
+    let dialect = match sess.dialects.get(path) {
+        Some(known) => *known,
+        None => {
+            let mut already = false;
+            if let (Some(before), Some(ext)) = (before, path.extension().and_then(|e| e.to_str())) {
+                let scratch = sess.dir.join(format!("before-edit.{ext}"));
+                if std::fs::write(&scratch, before).is_ok() {
+                    already = syntax_check(&scratch, before).await.is_some();
+                    let _ = std::fs::remove_file(&scratch);
+                }
+            }
+            sess.dialects.insert(path.to_path_buf(), already);
+            already
+        }
+    };
+    (!dialect).then_some(found)
 }
 
 /// The lines that differ after an edit, with a little context and fresh anchors, and the line
@@ -347,7 +396,7 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     let visible = sess.seen.windows(&abs, hash);
     sess.histories.entry(abs.clone()).or_default().record(Splice::between(&ft.lines, &lines), new_hash, sess.reply, visible);
 
-    let broken = if sess.features.post_edit_check { syntax_check(&abs, &updated).await } else { None };
+    let broken = if sess.features.post_edit_check { broken_by_change(sess, &abs, Some(&content), &updated).await } else { None };
     let mut out = match broken {
         Some((line, msg)) => {
             // The checker was given the absolute path and may quote it back.
@@ -514,6 +563,18 @@ mod tests {
         let (mut s, p) = fixture("edit-eol", "one\r\ntwo\r\nthree");
         run(&mut s, &json!({"path": "calc.txt", "old": "two", "new": "2"})).await;
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "one\r\n2\r\nthree");
+
+        // Mixed endings stay as they are line by line, and a byte-order mark stays in front.
+        let (mut s, p) = fixture("edit-mixed", "a\r\nb\nc\n");
+        run(&mut s, &json!({"path": "calc.txt", "old": "b", "new": "B"})).await;
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "a\r\nB\nc\n");
+        let body = "\u{feff}first\nsecond\n";
+        let (mut s, p) = fixture("edit-bom", body);
+        let shown = crate::tools::read::run(&mut s, &json!({"path": "calc.txt"})).observation;
+        assert!(shown.contains(&format!("{}|first\n", anchor(1, "first"))), "{shown}");
+        run(&mut s, &json!({"path": "calc.txt", "range": anchor(1, "first"), "new": "FIRST"})).await;
+        run(&mut s, &json!({"path": "calc.txt", "after": "0", "new": "zero"})).await;
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "\u{feff}zero\nFIRST\nsecond\n");
     }
 
     #[tokio::test]
@@ -550,6 +611,18 @@ mod tests {
             let out = run(&mut s, &json!({"path": "run.sh", "old": "fi", "new": "done"})).await;
             assert!(out.observation.starts_with("[SURPRISE] run.sh: 1 replacement, but the file no longer parses at line 3: run.sh: line 3: "), "{}", out.observation);
         }
+
+        // A file the checker could not read before the edit either is in some dialect of its own
+        // (comments in JSON here): an edit to it is not a surprise.
+        std::fs::write(s.ws.root.join("settings.json"), "{\n  // local\n  \"a\": 1\n}\n").unwrap();
+        let out = run(&mut s, &json!({"path": "settings.json", "old": "\"a\": 1", "new": "\"a\": 2"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        std::fs::write(s.ws.root.join("tsconfig.json"), "{}\n").unwrap();
+        let out = run(&mut s, &json!({"path": "tsconfig.json", "old": "{}", "new": "{\n  // strict\n  \"strict\": true\n}"})).await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        // What an edit breaks in a file that did parse is reported for as long as it stays broken.
+        let out = run(&mut s, &json!({"path": "conf.json", "old": "\"a\": 1,", "new": "\"a\": 1,,"})).await;
+        assert_eq!(out.status, StepStatus::Surprise, "still broken, and still said: {}", out.observation);
     }
 
     #[tokio::test]

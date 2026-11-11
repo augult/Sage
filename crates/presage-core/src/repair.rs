@@ -155,6 +155,17 @@ pub fn parse_args(raw: &str) -> Result<(Value, bool), String> {
     Err(first_error)
 }
 
+/// True for arguments that stop in the middle: valid JSON only once what they left open is closed.
+/// From a reply that never said it was finished, that is a call the model did not get to the end of.
+pub fn cut_off(raw: &str) -> bool {
+    let s = raw.trim();
+    if s.is_empty() || serde_json::from_str::<Value>(s).is_ok() {
+        return false;
+    }
+    let mended = strip_trailing_commas(&escape_control_in_strings(s.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim()));
+    serde_json::from_str::<Value>(&mended).is_err() && serde_json::from_str::<Value>(&close_truncated(&mended)).is_ok()
+}
+
 const ALIASES: &[(Tool, &[(&str, &[&str])])] = &[
     (
         Tool::Shell,
@@ -248,6 +259,17 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
         if let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
             map.remove("out");
             map.insert("path".into(), json!(format!("out:{n}")));
+        }
+    }
+    if tool == Tool::Read {
+        // `view_range: [400, 420]`, as other harnesses take it.
+        if let Some(Value::Array(ends)) = map.get("lines") {
+            let ends: Vec<u64> = ends.iter().filter_map(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))).collect();
+            match ends.as_slice() {
+                [from, to] => drop(map.insert("lines".into(), json!(format!("{from}-{to}")))),
+                [from] => drop(map.insert("lines".into(), json!(format!("{from}+")))),
+                _ => drop(map.remove("lines")),
+            }
         }
     }
     if tool == Tool::Read && !map.contains_key("lines") {
@@ -380,6 +402,17 @@ mod tests {
         assert!(parse_args("not json at all").is_err());
         // A comma inside a string is content, not a trailing comma.
         assert_eq!(strip_trailing_commas(r#"{"a": "x,}", "b": 1,}"#), r#"{"a": "x,}", "b": 1}"#);
+        // Which of these stopped half-way is known, for the reply that ended without saying why.
+        assert!(cut_off(r#"{"path": "a.py", "content": "import os\nprint("#) && cut_off(r#"{"cmd": "x", "expect": {"exit": "0""#));
+        assert!(!cut_off(r#"{"cmd": "ls",}"#) && !cut_off(r#"{"cmd": "ls"}"#) && !cut_off("") && !cut_off("not json at all"));
+    }
+
+    #[test]
+    fn a_line_window_given_as_an_array_is_understood() {
+        let lines = |args: Value| normalize_args(Tool::Read, args).unwrap().get("lines").cloned();
+        assert_eq!(lines(json!({"path": "a.py", "view_range": [400, 402]})), Some(json!("400-402")));
+        assert_eq!(lines(json!({"path": "a.py", "lines": ["7"]})), Some(json!("7+")));
+        assert_eq!(lines(json!({"path": "a.py", "lines": []})), None);
     }
 
     #[test]

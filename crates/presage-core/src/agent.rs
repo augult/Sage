@@ -399,10 +399,14 @@ impl Agent {
             }
             let (mut calls, fixed) = repair::parse_calls(&raw_calls);
             repairs += fixed;
-            if resp.finish == "length" {
-                // A call cut off by the output limit may be a half-written command or file: never run it.
+            // A call the reply did not get to the end of may be half a command or half a file: never
+            // run it. Either the output limit cut it, or the stream ended without a word and left
+            // arguments that only parse once closed.
+            let cut = resp.finish == "length" || (resp.finish.is_empty() && raw_calls.last().is_some_and(|c| repair::cut_off(&c.arguments)));
+            if cut {
                 if let Some(last) = calls.last_mut() {
-                    last.error = Some("your reply hit the output limit in the middle of this call, so it was not run. Send it again; split large content into smaller steps.".to_string());
+                    let why = if resp.finish == "length" { "hit the output limit" } else { "broke off" };
+                    last.error = Some(format!("your reply {why} in the middle of this call, so it was not run. Send it again; split large content into smaller steps."));
                 }
             }
             self.stats.repairs += repairs;

@@ -15,15 +15,22 @@ const MAX_COLS: usize = 400;
 const MAX_DIR_ENTRIES: usize = 200;
 const MAX_SYMBOL_LINES: usize = 150;
 
-/// Parses `120-260`, `120:260`, `120..260`, `-80` (last 80), `120` or `120+` (a window from 120).
+/// Parses `120-260`, `120:260`, `120..260`, `-80` (last 80), `120`, `120+` or `120-` (a window from
+/// 120). A number may be an anchor: `120kq-126px`.
 fn parse_window(spec: &str, total: usize, window: usize) -> Result<(usize, usize), String> {
     let s = spec.trim();
-    let num = |t: &str| t.trim().trim_start_matches(['L', 'l']).parse::<usize>().ok();
+    let num = |t: &str| {
+        let t = t.trim().trim_start_matches(['L', 'l', '#']);
+        let digits = t.bytes().take_while(u8::is_ascii_digit).count();
+        let hash = &t[digits..];
+        (hash.is_empty() || (hash.len() == 2 && hash.bytes().all(|b| b.is_ascii_alphabetic()))).then(|| t[..digits].parse::<usize>().ok()).flatten()
+    };
     let (from, to) = if let Some(n) = s.strip_prefix('-').and_then(num) {
         (total.saturating_sub(n.saturating_sub(1)).max(1), total)
     } else if let Some((a, b)) = s.split_once("..").or_else(|| s.split_once('-')).or_else(|| s.split_once(':')).or_else(|| s.split_once(',')) {
         match (num(a), num(b)) {
             (Some(a), Some(b)) => (a, b),
+            (Some(a), None) if b.trim().is_empty() => (a, a + window - 1),
             _ => return Err(format!("could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\"")),
         }
     } else if let Some(a) = num(s.trim_end_matches('+')) {
@@ -159,14 +166,16 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
         format!(r"^\s*(?:async\s+|static\s+|get\s+|set\s+)*{n}\s*(?:=\s*(?:async\s*)?(?:function|\(|[\w$]+\s*=>)|\([^)]*\)\s*(?::\s*[^{{]+)?\{{\s*$|:\s*(?:async\s*)?(?:function|\())"),
     ];
     let res: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
-    let control = Regex::new(r"^\s*(?:if|for|while|switch|return|else|catch|await|yield|throw|new)\b").unwrap();
+    let control = Regex::new(r"^\s*(?:if|elif|else|for|while|switch|case|match|return|catch|except|await|yield|throw|raise|new|with|assert|del|not|defer|go|do|typeof|delete|print)\b").unwrap();
     let mut found: Vec<(usize, usize)> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         if control.is_match(line) || !res.iter().any(|r| r.is_match(line)) {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
-        let opens_brace = lines[i..lines.len().min(i + 3)].iter().any(|l| l.contains('{'));
+        // A definition that ends in a colon has an indented body, whatever braces its lines hold (an
+        // f-string, a dict).
+        let opens_brace = !line.trim_end().ends_with(':') && lines[i..lines.len().min(i + 3)].iter().any(|l| l.contains('{'));
         let mut end = i;
         if opens_brace {
             let mut depth = 0i32;
@@ -236,6 +245,8 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
         return StepOutput::ok(format!("[binary] {shown} is a binary file ({}); inspect it with shell tools (file, xxd, strings)", fmt_bytes(md.len())));
     }
     let content = String::from_utf8_lossy(&bytes);
+    // A byte-order mark is not part of the first line: `edit` keeps it apart as well.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
     if total == 0 {
@@ -261,6 +272,10 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
             out.push_str(&format!("{shown} · `{symbol}` · lines {from}-{to} of {total}\n"));
             for ln in *from..=*to {
                 push(&mut out, ln, lines[ln - 1]);
+            }
+            // A long definition is shown up to a limit: say so, rather than let it look complete.
+            if to - from + 1 >= MAX_SYMBOL_LINES && *to < total {
+                out.push_str(&format!("… `{symbol}` goes on past line {to}: read lines \"{}-{}\" for more\n", to + 1, (to + sess.limits.read_lines).min(total)));
             }
             sess.seen.mark(&abs, hash, *from, *to, sess.step);
         }
@@ -390,6 +405,30 @@ mod tests {
         let out = run(&mut s, &json!({"path": "lib.rs", "symbol": "parse"}));
         assert!(out.observation.contains("lines 3-6 of 8"), "{}", out.observation);
         assert_eq!(run(&mut s, &json!({"path": "lib.rs", "symbol": "missing"})).status, StepStatus::Error);
+
+        // Braces in a Python body are not its extent, and a statement that calls the function is
+        // not its definition.
+        let py = "def make(x):\n    return x\n\nwith make(1) as m:\n    pass\nassert make(2)\n\ndef greet(name):\n    text = f\"Hello {name}\"\n    print(text)\n    return text\n\nx = 1\n";
+        std::fs::write(s.ws.root.join("fstr.py"), py).unwrap();
+        let out = run(&mut s, &json!({"path": "fstr.py", "symbol": "greet"}));
+        assert!(out.observation.starts_with("fstr.py · `greet` · lines 8-11 of 13\n") && out.observation.contains("return text"), "{}", out.observation);
+        let out = run(&mut s, &json!({"path": "fstr.py", "symbol": "make"}));
+        assert!(out.observation.starts_with("fstr.py · `make` · lines 1-2 of 13\n") && !out.observation.contains("with make") && !out.observation.contains("assert"), "{}", out.observation);
+
+        // A definition longer than is shown says that it goes on.
+        let long = format!("fn big() {{\n{}}}\nfn after() {{}}\n", "    step();\n".repeat(200));
+        std::fs::write(s.ws.root.join("long.rs"), long).unwrap();
+        let out = run(&mut s, &json!({"path": "long.rs", "symbol": "big"}));
+        assert!(out.observation.ends_with("… `big` goes on past line 150: read lines \"151-203\" for more"), "{}", &out.observation[out.observation.len().saturating_sub(200)..]);
+    }
+
+    #[test]
+    fn a_line_window_can_be_open_ended_or_given_in_anchors() {
+        assert_eq!(parse_window("400-", 1000, 250), Ok((400, 649)));
+        assert_eq!(parse_window("400kq-402ab", 1000, 250), Ok((400, 402)));
+        assert_eq!(parse_window("-80", 1000, 250), Ok((921, 1000)));
+        assert_eq!(parse_window("L12..L20", 1000, 250), Ok((12, 20)));
+        assert!(parse_window("400-abc", 1000, 250).is_err() && parse_window("kq", 1000, 250).is_err());
     }
 
     #[test]

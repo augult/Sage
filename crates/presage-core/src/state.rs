@@ -223,6 +223,8 @@ pub struct Session {
     pub reply: u32,
     /// What the tools have changed in each file, so that anchors from before still find their lines.
     pub histories: HashMap<PathBuf, History>,
+    /// Files the syntax check cannot judge: whether each already failed it before the tools touched it.
+    pub dialects: HashMap<PathBuf, bool>,
     spill_seq: u32,
     pub shell_env: Vec<(String, String)>,
 }
@@ -247,6 +249,7 @@ impl Session {
             step: 0,
             reply: 0,
             histories: HashMap::new(),
+            dialects: HashMap::new(),
             spill_seq: 0,
             shell_env: non_interactive_env(),
         })

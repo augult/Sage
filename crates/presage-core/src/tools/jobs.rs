@@ -109,27 +109,76 @@ pub enum StateMode<'a> {
 //
 // Both variants also record PIPESTATUS of the last pipeline next to the spill file, so a failure
 // hidden behind `| tail` can be told apart from a success (see `masked_failure`).
+//
+// All of it sits on one line in front of the command, so that the line numbers bash reports for a
+// syntax error are those of the command as the model wrote it. A command that has been handed over
+// as a background job (see `detach`) no longer saves: when it ends, later commands have moved on.
 #[cfg(unix)]
-const RESTORE: &str = r#"__ps="$PRESAGE_STATE"; __pp="$PRESAGE_PIPE"; unset PRESAGE_STATE PRESAGE_PIPE
-[ -f "$__ps.env" ] && . "$__ps.env" >/dev/null 2>&1
-"#;
+const RESTORE: &str = r#"__ps="$PRESAGE_STATE"; __pp="$PRESAGE_PIPE"; unset PRESAGE_STATE PRESAGE_PIPE; [ -f "$__ps.env" ] && . "$__ps.env" >/dev/null 2>&1; "#;
 #[cfg(unix)]
-const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; exit $__rc' EXIT
-"#;
+const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; [ -e "$__pp.detached" ] || { pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; }; exit $__rc' EXIT; "#;
 #[cfg(unix)]
-const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT
-"#;
+const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT; "#;
+
+/// Marks a still-running command as no longer the session's foreground: its end must not write
+/// its directory and variables over those of the commands that have run since.
+pub fn detach(spill: &Path) {
+    let mut marker = pipe_file(spill).into_os_string();
+    marker.push(".detached");
+    let _ = std::fs::write(marker, "");
+}
+
+/// Programs whose exit 1 is an answer ("no match", "they differ") rather than a failure.
+const ANSWERS_WITH_ONE: &[&str] = &["grep", "egrep", "fgrep", "rg", "ag", "diff", "cmp"];
+
+/// The stages of the last pipeline on a command line, cut at `|` outside quotes.
+fn last_pipeline(cmd: &str) -> Vec<String> {
+    let mut pipelines: Vec<Vec<String>> = vec![vec![String::new()]];
+    let mut quote: Option<char> = None;
+    let mut chars = cmd.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                ';' | '\n' => {
+                    pipelines.push(vec![String::new()]);
+                    continue;
+                }
+                '&' | '|' if chars.peek() == Some(&c) => {
+                    chars.next();
+                    pipelines.push(vec![String::new()]);
+                    continue;
+                }
+                '|' => {
+                    pipelines.last_mut().unwrap().push(String::new());
+                    continue;
+                }
+                _ => {}
+            },
+        }
+        pipelines.last_mut().unwrap().last_mut().unwrap().push(c);
+    }
+    pipelines.into_iter().rev().find(|p| p.iter().any(|stage| !stage.trim().is_empty())).unwrap_or_default()
+}
 
 /// If the command's last pipeline exited 0 only because its final stage did (`pytest | tail`),
 /// returns the exit code of the stage that failed. SIGPIPE (141) is not a failure: `cat big | head`.
-pub fn masked_failure(spill: &Path) -> Option<i32> {
+/// Nor is the 1 of a stage that searches or compares: `grep -c x log | cat`, `diff a b | head`.
+pub fn masked_failure(spill: &Path, cmd: &str) -> Option<i32> {
     let text = std::fs::read_to_string(pipe_file(spill)).ok()?;
     let codes: Vec<i32> = text.split_whitespace().filter_map(|c| c.parse().ok()).collect();
     let (last, earlier) = codes.split_last()?;
     if *last != 0 {
         return None;
     }
-    earlier.iter().copied().find(|c| *c != 0 && *c != 141)
+    let stages = last_pipeline(cmd);
+    let answers = |i: usize| {
+        let program = stages.get(i).and_then(|stage| stage.split_whitespace().find(|word| !word.contains('='))).map(|word| word.rsplit('/').next().unwrap_or(word));
+        stages.len() == codes.len() && program.is_some_and(|p| ANSWERS_WITH_ONE.contains(&p))
+    };
+    earlier.iter().enumerate().find(|(i, c)| **c != 0 && **c != 141 && !(**c == 1 && answers(*i))).map(|(_, c)| *c)
 }
 
 fn pipe_file(spill: &Path) -> std::path::PathBuf {
@@ -420,6 +469,11 @@ mod tests {
             ("true | sh -c 'exit 4'", Some(4), None),
             ("echo a && sh -c 'exit 2' | cat", Some(0), Some(2)),
             ("exit 5", Some(5), None),
+            // No match and "they differ" are answers, not failures; a failed test run next to them still is.
+            ("grep -c zzz /dev/null | cat", Some(0), None),
+            ("echo a > x.txt; echo b | diff x.txt - | head -5", Some(0), None),
+            ("sh -c 'exit 1' | grep -v PASSED | tail -1", Some(0), Some(1)),
+            ("echo 'a|b' | grep -c zzz | cat", Some(0), None),
         ];
         for (i, (cmd, code, masked)) in cases.iter().enumerate() {
             let log = dir.join(format!("p{i}.log"));
@@ -427,7 +481,7 @@ mod tests {
                 let mut run = spawn(cmd, &dir, &[], mode, &log).unwrap();
                 let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &cancel).await;
                 assert_eq!(waited, Waited::Exited(Exit { code: *code, signal: None }), "{cmd}");
-                assert_eq!(masked_failure(&log), *masked, "{cmd}");
+                assert_eq!(masked_failure(&log, cmd), *masked, "{cmd}");
             }
         }
     }
