@@ -24,7 +24,7 @@ pub const PROVIDERS: &[ProviderDef] = &[
         name: "Logfare",
         base_url: "https://logfare.ai/v1",
         key_env: "LOGFARE_API_KEY",
-        dialect: Dialect::OpenRouter,
+        dialect: Dialect::Logfare,
         models: &["deepseek-v4.1-flash-1017", "glm-5.3", "glm-5.3-flash"],
         note: "Free gateway. It logs prompts and completions.",
     },

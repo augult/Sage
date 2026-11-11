@@ -23,6 +23,9 @@ pub enum Dialect {
     DeepSeek,
     /// api.z.ai: like DeepSeek plus `clear_thinking: false` so earlier reasoning stays in the prompt.
     Zai,
+    /// logfare.ai: shaped like OpenRouter, but GLM there follows only a top-level `reasoning_effort`
+    /// of `low`, `high` or `max` and thinks at `max` for anything else (measured 11 November 2026).
+    Logfare,
     /// Plain OpenAI-style `reasoning_effort`.
     OpenAi,
 }
@@ -31,6 +34,7 @@ impl Dialect {
     pub fn parse(s: &str) -> Option<Dialect> {
         match s.trim().to_ascii_lowercase().as_str() {
             "openrouter" => Some(Dialect::OpenRouter),
+            "logfare" => Some(Dialect::Logfare),
             "deepseek" => Some(Dialect::DeepSeek),
             "zai" | "z.ai" | "glm" => Some(Dialect::Zai),
             "openai" => Some(Dialect::OpenAi),
@@ -40,7 +44,7 @@ impl Dialect {
 
     fn reasoning_key(&self) -> &'static str {
         match self {
-            Dialect::OpenRouter => "reasoning",
+            Dialect::OpenRouter | Dialect::Logfare => "reasoning",
             _ => "reasoning_content",
         }
     }
@@ -133,6 +137,18 @@ impl OpenAiProvider {
                 } else {
                     b.insert("reasoning".into(), json!({"effort": effort.as_str()}));
                     b.insert("include_reasoning".into(), json!(true));
+                }
+            }
+            Dialect::Logfare => {
+                // Both spellings: DeepSeek follows `reasoning`, GLM only `reasoning_effort`, which
+                // has no "off": `low` is as little as it thinks.
+                if effort == Effort::Off {
+                    b.insert("reasoning".into(), json!({"enabled": false}));
+                    b.insert("reasoning_effort".into(), json!("low"));
+                } else {
+                    b.insert("reasoning".into(), json!({"effort": effort.as_str()}));
+                    b.insert("include_reasoning".into(), json!(true));
+                    b.insert("reasoning_effort".into(), json!(effort.as_str()));
                 }
             }
             Dialect::DeepSeek => {
@@ -547,6 +563,11 @@ mod tests {
         assert_eq!(b["reasoning"], json!({"effort": "high"}));
         assert_eq!(b["include_reasoning"], json!(true));
         assert!(b.get("tools").is_none(), "an empty tools array is omitted");
+
+        let b = provider(Dialect::Logfare).body(&req(Effort::High));
+        assert_eq!((&b["reasoning"], &b["reasoning_effort"]), (&json!({"effort": "high"}), &json!("high")));
+        let b = provider(Dialect::Logfare).body(&req(Effort::Off));
+        assert_eq!((&b["reasoning"], &b["reasoning_effort"]), (&json!({"enabled": false}), &json!("low")));
 
         let b = provider(Dialect::DeepSeek).body(&req(Effort::Max));
         assert_eq!((&b["thinking"], &b["reasoning_effort"]), (&json!({"type": "enabled"}), &json!("max")));
