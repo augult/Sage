@@ -152,11 +152,18 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "-m" | "--model" | "--models" => opt.models.extend(list_of(&value(a)?)),
             "--variants" | "--variant" => opt.variants = list_of(&value(a)?).iter().map(|v| Variant::parse(v)).collect::<Result<_, _>>()?,
             "--tasks" | "--task" => {
-                let ids = list_of(&value(a)?);
-                opt.tasks = ids
-                    .iter()
-                    .map(|id| TASKS.iter().find(|t| t.id == id).ok_or_else(|| format!("unknown task {id:?}; `presage bench --list` shows them")))
-                    .collect::<Result<_, _>>()?;
+                // A name is a task id, a set (`easy`, `hard`, `skill`) or `all`.
+                let mut picked: Vec<&'static Task> = Vec::new();
+                for id in list_of(&value(a)?) {
+                    if id == "all" {
+                        picked.extend(tasks::all());
+                    } else if let Some((_, set)) = tasks::SETS.iter().find(|(name, _)| *name == id) {
+                        picked.extend(set.iter());
+                    } else {
+                        picked.push(tasks::find(&id).ok_or_else(|| format!("unknown task {id:?}; `presage bench --list` shows them"))?);
+                    }
+                }
+                opt.tasks = picked;
             }
             "-n" | "--repeats" => opt.repeats = number(a, value(a)?)?,
             "-e" | "--effort" => opt.effort = Some(value(a)?),
@@ -807,8 +814,10 @@ pub async fn command(h: &Harness, args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::List) => {
-            for t in TASKS {
-                println!("{:<10} {}", t.id, t.title);
+            for (set, tasks) in tasks::SETS {
+                for t in tasks.iter() {
+                    println!("{:<6} {:<12} {}", set, t.id, t.title);
+                }
             }
             ExitCode::SUCCESS
         }

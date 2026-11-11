@@ -23,6 +23,8 @@ pub struct Task {
     pub verify: &'static str,
     /// The files of a correct solution.
     pub solution: &'static [(&'static str, &'static str)],
+    /// The built-in skill this task exercises, or "" for none.
+    pub skill: &'static str,
 }
 
 /// `(path, content)` pairs for files under `bench/<dir>/`, embedded at compile time.
@@ -32,6 +34,21 @@ macro_rules! embed {
     };
 }
 
+pub mod hard;
+pub mod skilled;
+
+/// The task sets `--tasks` accepts by name.
+pub const SETS: &[(&str, &[Task])] = &[("easy", TASKS), ("hard", hard::TASKS), ("skill", skilled::TASKS)];
+
+pub fn all() -> impl Iterator<Item = &'static Task> {
+    SETS.iter().flat_map(|(_, tasks)| tasks.iter())
+}
+
+pub fn find(id: &str) -> Option<&'static Task> {
+    all().find(|t| t.id == id)
+}
+
+/// The original set: small single-file tasks that every variant solves.
 pub const TASKS: &[Task] = &[
     Task {
         id: "pager",
@@ -44,6 +61,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("pager/hidden": "test_pager_more.py"),
         verify: "python3 -m unittest test_pager test_pager_more",
         solution: embed!("pager/solution": "pager.py"),
+        skill: "",
     },
     Task {
         id: "inventory",
@@ -56,6 +74,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("inventory/hidden": "test_inventory_more.py"),
         verify: "python3 -m unittest test_inventory test_inventory_more",
         solution: embed!("inventory/solution": "inventory.py"),
+        skill: "",
     },
     Task {
         id: "slug",
@@ -68,6 +87,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("slug/hidden": "test_slug_more.py"),
         verify: "python3 -m unittest test_slug test_slug_more",
         solution: embed!("slug/solution": "slug.py"),
+        skill: "",
     },
     Task {
         id: "tariff",
@@ -80,6 +100,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("tariff/hidden": "checks_more.py"),
         verify: "sh run_checks.sh > /dev/null && python3 checks_more.py",
         solution: embed!("tariff/solution": "tariff.py"),
+        skill: "",
     },
     Task {
         id: "textstats",
@@ -92,6 +113,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("textstats/hidden": "test_textstats_more.py"),
         verify: "python3 -m unittest test_textstats test_textstats_more",
         solution: embed!("textstats/solution": "textstats.py"),
+        skill: "",
     },
     Task {
         id: "roman",
@@ -104,6 +126,7 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("roman/hidden": "test_roman.py"),
         verify: "python3 -m unittest test_roman",
         solution: embed!("roman/solution": "roman.py"),
+        skill: "",
     },
     Task {
         id: "report",
@@ -116,5 +139,6 @@ pub const TASKS: &[Task] = &[
         hidden: embed!("report/hidden": "orders2.csv", "expected2.txt"),
         verify: "sh check.sh && sh summary.sh orders2.csv | diff - expected2.txt",
         solution: embed!("report/solution": "summary.sh"),
+        skill: "",
     },
 ];
