@@ -385,7 +385,7 @@ pub fn hold(nth: u8, examiners: usize, refereed: bool, sections: &[Section]) -> 
     format!("{out}\n\n{}", if refereed { RULE_REFEREED } else { RULE })
 }
 
-pub const ROUTER_SYSTEM: &str = "You route coding tasks to playbooks. You are given a list of playbooks and a task. Name the playbooks whose subject is the main work of the task. Most tasks need none, and a loose association is no reason to pick one. Answer with the names separated by commas, or with NONE. Nothing else.";
+pub const ROUTER_SYSTEM: &str = "You route coding tasks to playbooks. You are given a list of playbooks and a task. Name the one playbook whose subject is what the task asks to be delivered. A playbook about writing tests fits a task that asks for tests, not a fix that has to pass them; one about security fits an audit, not a page that should be made safe to use. Most tasks need none, and a loose association is no reason to pick one. Answer with one name, or with NONE. Nothing else.";
 
 /// The router's request for `task`, with the playbooks as `(name, description)`.
 pub fn route_brief(task: &str, playbooks: &[(&str, &str)]) -> Vec<Message> {
@@ -393,10 +393,12 @@ pub fn route_brief(task: &str, playbooks: &[(&str, &str)]) -> Vec<Message> {
     vec![Message::system(ROUTER_SYSTEM), Message::user(format!("Playbooks:\n{}\n\nTask:\n{task}", list.join("\n")))]
 }
 
-/// The names the router's answer picks out of `known`, at most two, in the order of `known`.
+/// The name the router's answer picks out of `known`: the first one it names. One playbook, not
+/// several: in the first live runs a second one (writing tests, beside debugging) sent fixes off
+/// into test suites and mutation runs nobody had asked for.
 pub fn routed<'a>(answer: &str, known: &[&'a str]) -> Vec<&'a str> {
-    let words: Vec<String> = answer.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(|w| w.to_ascii_lowercase()).collect();
-    known.iter().copied().filter(|name| words.iter().any(|w| w == &name.to_ascii_lowercase())).take(2).collect()
+    let words = answer.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(|w| w.to_ascii_lowercase());
+    words.filter_map(|w| known.iter().copied().find(|name| name.to_ascii_lowercase() == w)).take(1).collect()
 }
 
 #[cfg(test)]
@@ -518,6 +520,7 @@ mod tests {
     fn the_router_picks_known_names_only() {
         assert_eq!(routed("ui", &["ui", "debug"]), ["ui"]);
         assert_eq!(routed("NONE", &["ui", "debug"]), Vec::<&str>::new());
-        assert_eq!(routed("Debug, build-ui, tests.", &["ui", "debug", "tests", "security"]), ["debug", "tests"]);
+        assert_eq!(routed("Debug, build-ui, tests.", &["ui", "debug", "tests", "security"]), ["debug"]);
+        assert_eq!(routed("tests and ui", &["ui", "debug", "tests", "security"]), ["tests"], "the first it names, not the first known");
     }
 }

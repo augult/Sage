@@ -167,6 +167,8 @@ pub struct Agent {
     /// The state of the workspace (its epoch) the examiners' cases were last run against, and
     /// whether they let it stand.
     exam_seen: Option<(u64, bool)>,
+    /// The worker has been told that an examination let its work stand.
+    exam_said: bool,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -207,6 +209,8 @@ const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows
 /// What a worker whose work will be examined is told with its task, as it is told of a goal: a
 /// check it knows of is one it can work towards.
 const EXAM_BRIEFING: &str = "When you call `finish`, this work is examined. Engineers who never see it write check cases from the task and the documents it names alone, rule by rule, with the errors and the limits the text states, and their cases are run against it. A failing case that the text bears out holds `finish`. What the work is held to is the text, all of it, and not only the checks you can see.";
+/// What the worker is told when an examination before `finish` holds nothing.
+const EXAM_STANDS: &str = "[examiner] The work as it stands was examined: engineers who have not seen it wrote cases from the task and its documents alone, and nothing in their cases that the text bears out fails. If everything the task asks for is done, call `finish`. It is examined again if you change it.";
 /// How long after it was asked for an examiner's script is still waited for at `finish`. A run
 /// that is in no hurry waits longer: the script is what it has over a cheaper run.
 const EXAM_WAIT: Duration = Duration::from_secs(240);
@@ -216,6 +220,8 @@ const EXAM_RUN: Duration = Duration::from_secs(120);
 const EXAM_HOLDS: u8 = 3;
 /// How often an examiner may be asked to correct its script.
 const EXAM_REPAIRS: u8 = 2;
+/// A script most of whose cases fail is put to the referees only up to this many failing cases.
+const MAX_DOUBTED_CASES: usize = 30;
 /// Readers who rule on a failing case. It holds a `finish` only where all of them side with it.
 const REFEREES: usize = 2;
 /// How long a corrected script or a ruling is waited for.
@@ -294,7 +300,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, exam_seen: None, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
+        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, exam_seen: None, exam_said: false, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -473,6 +479,7 @@ impl Agent {
         self.exam_rulings.clear();
         self.exam_note = None;
         self.exam_seen = None;
+        self.exam_said = false;
     }
 
     /// Stores the script a reply of examiner `i` holds with the session, outside the workspace.
@@ -613,9 +620,15 @@ impl Agent {
                 if !std::mem::replace(&mut self.exams[i].doubted, true) && self.repair(i, examiner::repair_doubted(tally, &output), run_started, cancel).await {
                     continue;
                 }
-                self.exams[i].script = Script::Gone;
-                self.note("examiner", &format!("{} of the {} cases of {who} fail against work whose own checks pass: the script is taken to be wrong and set aside ({path})", tally.failed, tally.total()));
-                return None;
+                // With referees, such a script is theirs to judge: it may be the work that lacks
+                // the very thing every case needs (seen live: the file the task asks for was not
+                // where the task says, all 17 cases failed for it, and the script was thrown out).
+                let labelled = examiner::failed_cases(&output).len();
+                if !(self.cfg.features.referee && (1..=MAX_DOUBTED_CASES).contains(&labelled)) {
+                    self.exams[i].script = Script::Gone;
+                    self.note("examiner", &format!("{} of the {} cases of {who} fail against work whose own checks pass: the script is taken to be wrong and set aside ({path})", tally.failed, tally.total()));
+                    return None;
+                }
             }
             let cases = if tally.failed == 0 { Vec::new() } else { examiner::failed_cases(&output) };
             let mut raw = None;
@@ -1319,8 +1332,13 @@ impl Agent {
         if let Some(hold) = self.examined(run_started, cancel).await {
             return Some(hold);
         }
-        let note = self.exam_note.as_ref()?;
-        Some(format!("[examiner] The work as it stands was examined: {note}. The cases were written from the task and its documents alone, by engineers who have not seen the work. If everything the task asks for is done, call `finish`."))
+        // Said once. Not said: how many cases failed and were set aside. A worker told of failing
+        // cases it was not to act on went looking for them through the session's folders.
+        self.exam_note.as_ref()?;
+        if std::mem::replace(&mut self.exam_said, true) {
+            return None;
+        }
+        Some(EXAM_STANDS.to_string())
     }
 
     /// Sends the model back to work with `message`, as the harness speaking.
@@ -2314,7 +2332,7 @@ mod tests {
         assert!(first.contains("--- harness ---") && first.contains("[examiner] The work is not accepted yet.") && first.contains("FAIL line2_capitals"), "{first}");
         // Mended, it is said to stand, once: a reply that changes nothing is not examined again.
         let second = &sent[2].last().unwrap().content;
-        assert!(second.contains("[examiner] The work as it stands was examined: all 3 of the examiner's cases pass. The cases were written from the task and its documents alone"), "{second}");
+        assert!(second.ends_with(EXAM_STANDS), "{second}");
         assert!(!sent[3].last().unwrap().content.contains("[examiner]"));
         // The `finish` that follows stands on that examination: the cases are not run a third time.
         assert!(out.evidence.ends_with("; all 3 of the examiner's cases pass"), "{}", out.evidence);
@@ -2434,6 +2452,29 @@ mod tests {
         assert_eq!(notes(&r, "examiner"), ["the referees are asked about the failing cases", "finish held: 1 of the examiner's 5 cases fail, confirmed by the referees", "1 of the examiner's 5 cases fail and the referees confirm none of them: set aside"]);
         assert!(out.evidence.ends_with("; 1 of the examiner's 5 cases fail and the referees confirm none of them: set aside"), "{}", out.evidence);
         assert_eq!(r.agent.stats.side_requests, 3);
+    }
+
+    #[tokio::test]
+    async fn a_script_nearly_all_of_whose_cases_fail_goes_to_the_referees() {
+        // Every case needs the file the task asks for; the work put it somewhere else.
+        let script = "COMMAND: sh {file}\n```sh\np=0; f=0\ncheck() { if eval \"$2\"; then p=$((p+1)); else f=$((f+1)); echo \"FAIL $1\"; echo \"  checked: $2\"; fi; }\ncheck n_exists 'test -f n.txt'\ncheck out_exists 'test -f out.txt'\ncheck out_line1 'sed -n 1p out.txt | grep -qx ALPHA'\ncheck out_line2 'sed -n 2p out.txt | grep -qx BETA'\ncheck out_line3 'sed -n 3p out.txt | grep -qx GAMMA'\necho \"EXAM: $p passed, $f failed\"\n[ \"$f\" -eq 0 ]\n```";
+        let ruling = "out_exists: GAP: \"Write out.txt\"\nout_line1: GAP: \"Write out.txt\"\nout_line2: GAP: \"Write out.txt\"\nout_line3: GAP: \"Write out.txt\"";
+        let wrong_place = fixed(MockTurn::calls("", vec![("write", json!({"path": "sub/out.txt", "content": "ALPHA\nBETA\nGAMMA\n"})), ("shell", json!({"cmd": "grep -qx BETA sub/out.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]));
+        let right_place = fixed(MockTurn::calls("", vec![("write", json!({"path": "out.txt", "content": "ALPHA\nBETA\nGAMMA\n"})), ("shell", json!({"cmd": "grep -qx BETA out.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]));
+        let beside = Beside { rules: script, edges: "NONE", referees: vec![ruling], route: "NONE", ..Default::default() };
+        let mut r = beside_rig("agent-referee-doubted", &["examiner", "referee"], vec![wrong_place, right_place], beside);
+        let out = r.agent.run("Write out.txt: n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
+        assert!(out.evidence.ends_with("; all 5 of the examiner's cases pass"), "{}", out.evidence);
+        let said = notes(&r, "examiner");
+        assert!(said.iter().any(|n| n == "finish held: 4 of the examiner's 5 cases fail, confirmed by the referees") && !said.iter().any(|n| n.contains("taken to be wrong")), "{said:?}");
+
+        // Without referees there is nobody to tell such a script from a faulty one: it is set aside as before.
+        let beside = Beside { rules: script, edges: "NONE", route: "NONE", ..Default::default() };
+        let wrong_place = fixed(MockTurn::calls("", vec![("write", json!({"path": "sub/out.txt", "content": "ALPHA\n"})), ("shell", json!({"cmd": "grep -qx ALPHA sub/out.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]));
+        let mut r = beside_rig("agent-doubted-alone", &["examiner"], vec![wrong_place], beside);
+        r.agent.run("Write out.txt: n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert!(notes(&r, "examiner").iter().any(|n| n.contains("taken to be wrong")));
     }
 
     #[tokio::test]
