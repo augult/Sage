@@ -1,12 +1,108 @@
 # Handoff: Sage
 
-Read this first. State: 12 November 2026, after the tenth session, which removed the reflex memory
-and the review pass, added `/goal`, made a stored session continuable after a restart, and gave the
-harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and Prosage.
-**Prosage is built and tested against a scripted model only. No benchmark of it exists**: Logfare
-answered every chat request with 502 or 503 from 14:12 UTC to the end of the session.
+Read this first. State: 12 November 2026, after the eleventh session. The tenth removed the reflex
+memory and the review pass, added `/goal`, made a stored session continuable after a restart, and
+gave the harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and
+Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`) and reworked
+Prosage. **Prosage is built and tested against a scripted model only. No benchmark of it exists**:
+Logfare answered every chat request with 502 or 503 from 14:12 UTC on, through both sessions.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Eleventh session: the rename, and Prosage reworked (12 November 2026)
+
+Branch `hoplite/massalia-854d4b32`. The product was renamed from Presage to Sage and its cheap
+mode to Ecosage (PR #19, merged; nothing of the old name is accepted any more, see "Practical
+notes"). Then Prosage was reworked. **Logfare was still down: nothing below is measured.** What
+the rework rests on is in `docs/RESEARCH.md`, section 3.
+
+**The owner's brief:** Prosage is to outperform the other harnesses (OpenCode, Claude Code)
+whatever it costs. Ecosage is to come close to them, cheaper and faster. The two differ in what
+the harness does and not in the effort: both have to run at any effort, `max` included.
+
+**What was wrong with Prosage as built**, read off the code and the research:
+
+- The worker was the only judge of the examiner's cases. The failure Prosage exists for is a
+  worker sure of work that is wrong, and that worker was the one asked whether a failing case
+  was right. Published measurements give the other half: cases from a test writer no stronger
+  than the worker, handed over unfiltered, lowered a repair agent's result (61.2% to 57.3%).
+- The examiner's script was written blind in one reply and first run at `finish`. One that did
+  not run was dropped, and the run was Ecosage without the hurry.
+- An examiner that thought past the reasoning cap was lost with an error, on just the tasks
+  whose text takes the most reading: the worker's own first replies on `confdialect` reach that
+  cap at `low`.
+- One examiner, one brief.
+- A hold showed the script's whole output, and a `finish` after mending one of two cases was
+  held again because the output as a whole had changed.
+
+**Changed** (`examiner.rs`, `agent.rs`, `state.rs`; `README.md`, "What Prosage changes"):
+
+- `referee`: two readers rule on each failing case from the text, the script and the case's own
+  report, without the work. Only a case both rule GAP holds a `finish` (`Agent::rule`,
+  `examiner::rulings`). No ruling, no hold.
+- `panel`: a second examiner, briefed for errors, limits and rules that meet (`Angle::Edges`).
+- A script that does not run to its count, or most of whose cases fail, or whose failed cases
+  cannot be told apart, goes back to its author with its output (`Agent::repair`).
+- Failed cases are read one by one, from blocks that open with `FAIL <name>`
+  (`examiner::failed_cases`). The worker is shown each once; a `finish` whose failing cases it
+  has all seen stands; a case that passed before its last changes is marked as broken by them.
+- A request beside the run that only reasons is asked again one level lower (`side_request`).
+- The worker is told with its task that the work will be examined (`EXAM_BRIEFING`), as it is
+  told of a goal.
+- Nothing is asked for beside the run once less than 45 s of a time budget are left
+  (`Agent::aside_wait`). An unhurried run waits up to 15 minutes for a script still being written.
+
+**Effort, in every mode:** a level set by hand is kept (`Agent::restore_fixed_effort`). A reply
+that only reasons is retried one level lower, and the session is back at its level once the
+model has acted. Before, a session set to `max` went to `high` at the first such reply and
+stayed there, then to `low` and to `off`. At `max` the reasoning cap is the long one (about
+24,000 tokens) in any mode; outside Prosage it was 14,000, which a hard task reaches in its first
+reply. Replies that only reasoned are counted three in a row, no longer three per run. `ratchet`
+is unchanged and starts at `low` in every mode.
+
+**Decided without a measurement, and the first things to check:**
+
+- Two referees who must agree. One alone would confirm more real gaps and more wrong cases
+  (`REFEREES` in `agent.rs`).
+- The second examiner. It doubles the cases a run is exposed to; the referees are what is meant
+  to keep that from costing tasks that are solved today. `prosage+no-panel` measures it.
+- Examiners and referees think at `high` or above, whatever the session's effort.
+- Ecosage's loop is unchanged. Its two losing tasks are lost to what makes it cheap
+  (`docs/BENCHMARKS.md`, "Where Sage loses"). `ecosage+unhurried` and
+  `ecosage+examiner+referee` are the variants that would say what a little of Prosage costs it.
+- A follow-up message is still not examined, and a session brought back after a restart has no
+  examiners.
+
+**To measure first**, each bench process alone in a Unix account as the ninth session did:
+
+```sh
+sage bench -p logfare --tasks confdialect,restyle -n 5 -j 1 --max-turns 60 --time-budget 1800 \
+  --variants ecosage,default,prosage,prosage+no-referee,prosage+no-panel,prosage+no-examiner
+sage bench -p logfare --tasks all -n 3 -j 1 --max-turns 60 --time-budget 1800 \
+  --variants ecosage,prosage,ext:opencode
+sage bench -p logfare --tasks all -n 2 -j 1 --max-turns 60 --time-budget 1800 \
+  --variants ecosage+effort:max,prosage+effort:max
+```
+
+What to read off:
+
+1. Whether `prosage` solves the two tasks and loses none of the other 22. The notes of kind
+   `examiner` in a session's log say which cases held a `finish`, which the referees set aside,
+   and how the run ended.
+2. What the referees are worth. `prosage+no-referee` is Prosage as the tenth session built it
+   plus the second examiner; the question is whether it breaks tasks that `prosage` does not.
+3. How often a script needs its author (`is asked to correct its script`), and how often it is
+   set aside all the same.
+4. That a run at `max` stays at `max` (the `effort` events of its log), in both modes.
+
+A Prosage run makes two requests beside its own at the start and up to four per examination, so
+`-j 1` or `-j 2` under the limit of 12 requests in flight. The bench's default budget (30
+replies, 600 s) is too little for it: a held `finish` costs replies and every ruling costs time.
+
+**Checked:** `cargo test --workspace` (270: core 247, CLI 19, desktop 4). Every path above ran
+against a scripted model: referees that agree and that do not, a script corrected by its author,
+a case broken by a fix, an examiner cut for overthinking, a run at `max` in both modes. **Not
+checked:** anything against a real model; the app by hand.
 
 ## Tenth session: three modes, `/goal`, restart (12 November 2026)
 
@@ -53,7 +149,9 @@ were not had thought for 12,900 and 13,400 tokens). So Prosage is Ecosage with:
   set aside. A hold raises a ratchet effort one level.
 - `routing`: one request without thinking picks skills by their descriptions.
 
-All four are in `Features::OPTIONAL`, so each can be measured alone in either direction.
+All four are in `Features::OPTIONAL`, so each can be measured alone in either direction. (The
+eleventh session added `panel` and `referee` and changed how the examiner's cases reach the
+worker: see above. Its list of what to measure first replaces the one below.)
 
 **Decided without a measurement, and the first things to check:**
 
@@ -450,5 +548,9 @@ by Fable 5.2.
   `pkill -f <pattern>` kills the shell that runs it if the pattern occurs in its own command line.
 - Subagents may edit files outside what they were asked to (one changed `scripts/setup-dev.sh`
   while grading): check `git status` after each.
+- The rename dropped every old name on purpose. An existing install keeps its sessions, keys and
+  settings only if `~/.presage` is renamed to `~/.sage` by hand; `PRESAGE_HOME`, `PRESAGE_API_KEY`,
+  `.presage` project files and `--mode presage` are no longer read. The stored results under
+  `docs/results/` were renamed with the rest: what they call `ecosage` was run as `presage`.
 - The Logfare key was pasted in chat again. It is not in the repository. Rotate it and set
   `LOGFARE_API_KEY` as a project variable.

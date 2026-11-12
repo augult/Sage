@@ -28,13 +28,17 @@ OPTIONS for run
   -C, --cwd <dir>          workspace (default: current directory)
   -p, --provider <id>      logfare | deepseek | openrouter | … (`sage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
-  -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
+  -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises).
+                           The same in every mode: a level you set is the level the run thinks at
       --mode <name>        ecosage (default): few requests, at a little cost to the result
                            default: the conventional loop of other harnesses, nothing of Sage's
-                           prosage: for the result alone, with longer thinking, an examiner beside
-                           the run and skills switched on unasked; costs more requests
+                           prosage: for the result alone. Nothing hurries the run, two examiners who
+                           never see the work check it against the task's text, referees decide
+                           which of their failing cases the text bears out, and skills are
+                           switched on unasked; costs more requests and time
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch on a mechanism that is off unless asked for (repeatable; none at present)
+      --with <name>        switch on a mechanism that is off unless asked for: long_thought, unhurried,
+                           examiner, panel, referee, routing (repeatable; prosage has them all)
       --goal <condition>   keep working until an independent check agrees the condition holds; with
                            no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)

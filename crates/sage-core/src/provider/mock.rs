@@ -28,6 +28,8 @@ pub struct Shape {
     /// How many tools were offered.
     pub tools: usize,
     pub max_tokens: u32,
+    /// Characters of reasoning the reply was allowed before its first word or call; 0 for the provider's own cap.
+    pub reasoning_cap: usize,
 }
 
 impl MockTurn {
@@ -87,7 +89,7 @@ impl MockProvider {
         let beside = self.aside.as_ref().and_then(|answer| answer(req.messages));
         let idx = if beside.is_some() { usize::MAX } else { self.cursor.fetch_add(1, Ordering::SeqCst) };
         self.requests.lock().unwrap().push(req.messages.to_vec());
-        self.shapes.lock().unwrap().push(Shape { effort: req.effort, tools: req.tools.as_array().map_or(0, Vec::len), max_tokens: req.max_tokens });
+        self.shapes.lock().unwrap().push(Shape { effort: req.effort, tools: req.tools.as_array().map_or(0, Vec::len), max_tokens: req.max_tokens, reasoning_cap: req.reasoning_cap });
         let turn = match (beside, self.turns.get(idx)) {
             (Some(turn), _) => turn,
             (None, Some(f)) => f(req.messages),

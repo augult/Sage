@@ -51,6 +51,12 @@ pub struct Features {
     pub unhurried: bool,
     /// A second reader writes checks from the task alone, beside the run; `finish` answers to them.
     pub examiner: bool,
+    /// A second examiner reads the same text for what a pass rule by rule leaves out: errors,
+    /// limits and rules that meet. Needs `examiner`.
+    pub panel: bool,
+    /// A failing case holds `finish` only where two more readers of the text, each alone and
+    /// without the work, find the text to side with it. Needs `examiner`.
+    pub referee: bool,
     /// A skill that fits the task is switched on without being asked for.
     pub routing: bool,
 }
@@ -60,7 +66,8 @@ pub struct Features {
 /// `Ecosage` spends as few requests and tokens as it can and gives up a little of the result for
 /// it. `Plain` is the loop every other harness runs, one tool call after another with nothing of
 /// Sage's around it; users know it as `default`. `Prosage` is run for the result alone: the
-/// model thinks for as long as it needs, nothing hurries it, a second reader examines the work,
+/// model thinks for as long as it needs, nothing hurries it, examiners who never see the work
+/// check it against the text, referees decide which of their failing cases the text bears out,
 /// and a skill that fits is switched on unasked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -105,22 +112,22 @@ impl Mode {
 impl Features {
     /// Ecosage and what `Features::OPTIONAL` holds back from it.
     pub fn prosage() -> Self {
-        Self { long_thought: true, unhurried: true, examiner: true, routing: true, ..Self::ecosage() }
+        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, ..Self::ecosage() }
     }
 
     pub fn ecosage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, routing: false }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, routing: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
     }
 
     /// The mechanisms `without` can switch off and `with` can switch on.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "routing"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "routing"];
+    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -151,6 +158,8 @@ impl Features {
             "long_thought" => &mut self.long_thought,
             "unhurried" => &mut self.unhurried,
             "examiner" => &mut self.examiner,
+            "panel" => &mut self.panel,
+            "referee" => &mut self.referee,
             "routing" => &mut self.routing,
             _ => return None,
         };

@@ -112,7 +112,7 @@ pub struct Stats {
     /// Requests made to judge whether the session's goal holds: counted in the figures above too.
     #[serde(default)]
     pub goal_checks: u32,
-    /// Requests beside the conversation: the examiner, the skill router.
+    /// Requests beside the conversation: the examiners, the referees, the skill router.
     #[serde(default)]
     pub side_requests: u32,
     pub elapsed_ms: u64,
