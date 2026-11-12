@@ -144,12 +144,14 @@ export function settingPicker(key, name, options, value, onChange) {
 
 /**
  * The model, as one choice with the provider that serves it: models are listed under their
- * providers, those that have a key first, the others greyed. `current` is `{ provider, model }`;
- * `onChange({ provider, model })`.
+ * providers, and only providers that are connected (have a key) are listed. The provider in use
+ * stays, greyed, if its key has gone since, so that the choice still shows. With none connected,
+ * the picker says where to add one. `current` is `{ provider, model }`; `onChange({ provider, model })`.
  */
 export function modelPicker(state, current, onChange) {
   const served = new Map();
-  const groups = keyedFirst(state.providers).map((provider) => {
+  const listed = connected(state.providers, current.provider);
+  const groups = keyedFirst(listed).map((provider) => {
     const models = modelOptions(provider, state);
     // The one in use is listed even where the provider's own list does not carry it.
     if (provider.id === current.provider && current.model && !models.some((option) => option.value === current.model)) models.push({ value: current.model, label: current.model });
@@ -161,8 +163,12 @@ export function modelPicker(state, current, onChange) {
     });
     return { label: provider.name, options };
   });
-  return picker({ id: 'pick-model', name: 'Model', groups, value: current.provider ? `${current.provider}:${current.model ?? ''}` : null, empty: 'No model yet', onChange: (value) => onChange(served.get(value)) });
+  const empty = listed.length ? 'No model yet' : 'Add an API key in Settings';
+  return picker({ id: 'pick-model', name: 'Model', groups, value: current.provider ? `${current.provider}:${current.model ?? ''}` : null, empty, onChange: (value) => onChange(served.get(value)) });
 }
+
+/** The providers that have a key, and the one named `keep` (the one in use) whether it has or not. */
+export const connected = (providers, keep = null) => providers.filter((provider) => provider.has_key || provider.id === keep);
 
 /** A form row: label on the left, the control and an optional status line on the right. */
 export function field(label, control, status) {
@@ -174,9 +180,9 @@ export const hint = (...content) => h('div.field-hint', ...content);
 /** Providers with those that have a key ahead of those that have none, each group in its own order. */
 export const keyedFirst = (providers) => [...providers].sort((a, b) => Number(b.has_key) - Number(a.has_key));
 
-/** Provider choices; one without a key is listed greyed and cannot be picked. */
-export function providerOptions(providers) {
-  return keyedFirst(providers).map((provider) => ({ value: provider.id, label: provider.name, disabled: !provider.has_key, title: provider.has_key ? provider.base_url : 'No API key' }));
+/** Provider choices: the connected ones, and `keep` (the one chosen now), greyed if it has no key. */
+export function providerOptions(providers, keep = null) {
+  return keyedFirst(connected(providers, keep)).map((provider) => ({ value: provider.id, label: provider.name, disabled: !provider.has_key, title: provider.has_key ? provider.base_url : 'No API key' }));
 }
 
 /** Efforts on offer, plus the configured default when it is a variant not in the list. */
