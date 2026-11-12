@@ -4,8 +4,9 @@ Read this first. State: 12 November 2026, after the eleventh session. The tenth 
 memory and the review pass, added `/goal`, made a stored session continuable after a restart, and
 gave the harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and
 Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`) and reworked
-Prosage. **Prosage is built and tested against a scripted model only. No benchmark of it exists**:
-Logfare answered every chat request with 502 or 503 from 14:12 UTC on, through both sessions.
+Prosage. Logfare came back that evening and **Prosage was run against a model for the first
+time: 47/48 against OpenCode's 45/48 and Ecosage's 44/48**, two runs per task, a lead within
+chance (the next section).
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
 
@@ -13,8 +14,41 @@ Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; resear
 
 Branch `hoplite/massalia-854d4b32`. The product was renamed from Presage to Sage and its cheap
 mode to Ecosage (PR #19, merged; nothing of the old name is accepted any more, see "Practical
-notes"). Then Prosage was reworked. **Logfare was still down: nothing below is measured.** What
-the rework rests on is in `docs/RESEARCH.md`, section 3.
+notes"). Then Prosage was reworked with Logfare still down (PR #20), on what is in
+`docs/RESEARCH.md`, section 3. Then Logfare came back and it was measured, and changed twice more
+on what the runs showed.
+
+**First live results** (`docs/BENCHMARKS.md`, first section; `docs/results/2026-11-12-prosage/`):
+
+| DeepSeek V4.1 Flash, 24 tasks | Solved | Requests | Time (mean) | Cost |
+|---|---|---:|---:|---:|
+| Ecosage, two runs each | 44/48 | 6.5 | 46 s | $0.43 |
+| Prosage as in PR #20, two runs each | 47/48 | 15.1 + 2.6 beside | 261 s | $2.45 |
+| OpenCode 1.19.5, two runs each | 45/48 | 10.9 | 92 s | $0.61 |
+| Prosage after both changes below, one run each | 24/24 | 19.3 + 4.8 beside | 183 s | $1.32 |
+
+- Prosage solved `confdialect` and `restyle` every time (4/4 each); Ecosage lost each twice.
+- **The examiners and referees decided almost nothing**: 73 times asked, one case confirmed.
+  The referees set wrong cases aside, which is their job, but what solves the two tasks is the
+  rest of Prosage (no hurry, longer thought, the `ui` skill switched on). Measure
+  `prosage+no-examiner` before building more on the examiners.
+- Changed on these runs: a request beside the run that only reasons is retried with thinking off
+  (a third of the examiners were lost that way, and one level lower lost them again); the
+  examiners' cases are run as soon as the worker's own checks pass (`Agent::early_exam`: on two
+  tasks the worker never called `finish` in sixty replies); a script cut at the output limit is
+  asked for again; examiners' and referees' replies are kept in the session's `exam/` folder.
+- **Open, seen in the runs:** Prosage's one loss (`audit`) had an examiner that was right. The
+  work lacked `findings.json`, all 17 cases failed for it, and a script most of whose cases
+  fail is set aside as faulty (`Tally::mostly_failing`). Send such a script to the referees
+  instead. And Prosage's worker writes its own check scripts into `/tmp`, which runs share.
+
+**How the runs were made:** `sage bench -p logfare -m deepseek-v4.1-flash-1017 --variants
+ecosage,prosage,ext:opencode -n 1 -j 1 --max-turns 60 --time-budget 1200`, the 24 tasks split
+over two accounts and each half run twice in two more; the Prosage-only samples with `-j 2`. The
+whole evening was about 3,000 requests and $6. A Prosage run takes 3 to 15 minutes, so a full
+head-to-head is about 100 minutes with four accounts.
+
+What follows was written before those runs.
 
 **The owner's brief:** Prosage is to outperform the other harnesses (OpenCode, Claude Code)
 whatever it costs. Ecosage is to come close to them, cheaper and faster. The two differ in what
