@@ -45,7 +45,7 @@ form that works out of the box?
 Two more findings: agents copy retrieved experiences, so stored mistakes propagate [27]; and no
 reliable multi-session coding result exists yet [28][29].
 
-### What Presage should build, by expected value
+### What Sage should build, by expected value
 
 1. **Built-in playbooks, selected by the harness.** Six to ten hand-written playbooks of about 200
    words (debug a failing test, add a feature, refactor, start from nothing, UI design and
@@ -60,9 +60,9 @@ reliable multi-session coding result exists yet [28][29].
    setup. Stored per project beside `lessons.jsonl`. At most eight `known here:` lines in the
    first message; better, the harness acts on them (preflight and auto-watch the remembered test
    command when the task names none). Kept honest by counters, demotion when a remembered command
-   fails, invalidation when a manifest changes, and a `presage lessons` list/forget command.
-3. **Human-written notes only.** `AGENTS.md`, `CLAUDE.md` and `.presage.md` are already read
-   (`prompt.rs`, capped at 12,000 characters). Add `presage remember "<text>"`.
+   fails, invalidation when a manifest changes, and a `sage lessons` list/forget command.
+3. **Human-written notes only.** `AGENTS.md`, `CLAUDE.md` and `.sage.md` are already read
+   (`prompt.rs`, capped at 12,000 characters). Add `sage remember "<text>"`.
 4. **Offline tuning by the developer** of the prompt and the playbooks, against held-out tasks.
    The blocker is task count, not money: seven tasks would overfit.
 
@@ -72,7 +72,7 @@ prefix); a memory bank read every session; a self-rewriting harness; sleep-time 
 
 ### A benchmark that can show learning
 
-`presage bench --series`: one synthetic project with four to six ordered tasks that share a quirk
+`sage bench --series`: one synthetic project with four to six ordered tasks that share a quirk
 (for example tests that only run through `make check` after `make gen`), run in sequence in the
 same workspace and data directory. Arms: warm (memory kept), cold (wiped between sessions), drift
 (the quirk changes at session four, to price staleness). Report solved, false-done, turns and cost
@@ -119,15 +119,15 @@ None of these commands has been run. Inferred rather than documented: mini's `ap
 `-c key=value`; opencode's provider wiring for 2.x; Qwen Code's install command and endpoint
 variables; the exact aider flag combination.
 
-Integration: an external variant in `crates/presage-cli/src/bench/mod.rs`. `attempt()` already
+Integration: an external variant in `crates/sage-cli/src/bench/mod.rs`. `attempt()` already
 materialises the workspace and calls `verify()`; replace only the `harness.start(req)` block with
 a spawned command (working directory the workspace, killed at `time_budget`), fill `Stats` from an
-adapter and price every harness with Presage's own `prices_for()`. The fairest meter is a logging
+adapter and price every harness with Sage's own `prices_for()`. The fairest meter is a logging
 reverse proxy in front of Logfare that counts requests and usage identically for all.
 
 ### Fairness protocol
 
-- Equal across harnesses: exact model id and endpoint; reasoning effort (Presage sends one and
+- Equal across harnesses: exact model id and endpoint; reasoning effort (Sage sends one and
   ratchets from `high`, others send provider defaults; fix one level or report both, since one
   study found thinking on or off moved mini-swe-agent by 11 points); provider-default temperature;
   the task text verbatim; the same fresh copy and the same `verify`; a 30-request cap and 600 s.
@@ -139,14 +139,14 @@ reverse proxy in front of Logfare that counts requests and usage identically for
 - Record harness version and config, first-request preamble tokens, requests, fresh, cached,
   output and reasoning tokens, billed and uncached cost at one price list, wall time, outcome
   class (solved, false-done, budget, crash, provider error), retries.
-- Keep each harness's shipped system prompt. Disclose that Presage repairs malformed tool calls
+- Keep each harness's shipped system prompt. Disclose that Sage repairs malformed tool calls
   and retries eight times. Use a fresh HOME per run. Interleave harnesses in time.
 - Home-field risk: all seven easy tasks name the check or the file. Add tasks that do not.
 
 ### Mechanisms worth adopting
 
 1. **Reject and revert broken edits** (SWE-agent: 18.0% with its lint guard, 15.0% without; a
-   GPT-4-era figure). Presage writes the broken file and reports a surprise. `tools/edit.rs`,
+   GPT-4-era figure). Sage writes the broken file and reports a surprise. `tools/edit.rs`,
    `tools/write.rs`; ablate as `no-edit-guard`.
 2. **Red-then-green gate** (Agentless; mini's reproduce, fix, test prompt). A check counts only if
    it was seen failing first, or was written before the first edit when the task has no tests.
@@ -161,10 +161,10 @@ reverse proxy in front of Logfare that counts requests and usage identically for
 6. **Mechanical finish review**: at `finish`, check that files the task forbids editing are
    untouched and no scratch files remain. Source cited from memory, unverified.
 7. **Preamble budget.** Measured preambles: 829 tokens (mini), 7,025 (opencode), 16,581 (Claude
-   Code), up to 3× cost on the same model. Presage's fixed prefix was 1,193 estimated tokens.
+   Code), up to 3× cost on the same model. Sage's fixed prefix was 1,193 estimated tokens.
 
 Not worth adopting: LLM summarisation of history (it cost 3.9 to 4.9 points in one study, and
-plain masking did as well in another; Presage's decay already masks), general subagents, planning
+plain masking did as well in another; Sage's decay already masks), general subagents, planning
 tools.
 
 ## Sources

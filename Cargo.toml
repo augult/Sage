@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/presage-core", "crates/presage-cli", "desktop/src-tauri"]
-default-members = ["crates/presage-core", "crates/presage-cli"]
+members = ["crates/sage-core", "crates/sage-cli", "desktop/src-tauri"]
+default-members = ["crates/sage-core", "crates/sage-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,7 +10,7 @@ rust-version = "1.90"
 publish = false
 
 [workspace.dependencies]
-presage-core = { path = "crates/presage-core" }
+sage-core = { path = "crates/sage-core" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.4"
 grep-regex = "0.1"

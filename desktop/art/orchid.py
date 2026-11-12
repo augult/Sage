@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchid - background painting for the Presage "Orchid" theme.
+"""Orchid - background painting for the Sage "Orchid" theme.
 
 A night painting: satin ribbons of magenta and fuchsia glow out of near-black aubergine on the
 left, crimson ribbons rise from the lower right, and one coral ember burns where magenta meets black.

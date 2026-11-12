@@ -1,22 +1,22 @@
 # Desktop UI brief
 
 The shell and front end are built; what has and has not been verified is in `docs/HANDOFF.md`. This
-brief remains the specification. Everything the UI needs is on `presage_core::harness::Harness`.
+brief remains the specification. Everything the UI needs is on `sage_core::harness::Harness`.
 
 ## Read first
 
-- `crates/presage-core/src/harness.rs`: `Harness::new()`, `state()`, `set_key`, `set_defaults`,
+- `crates/sage-core/src/harness.rs`: `Harness::new()`, `state()`, `set_key`, `set_defaults`,
   `start(StartRequest)`, `demo()`, `stop`, `approve`, `subscribe(id)` (backlog plus a
   `broadcast::Receiver<Event>`), `events(id)`, `meta(id)`, `list()`, `read_output(id, handle)`,
   `list_dir(path)`; for skills and instructions `skills(cwd)`, `skill_file`, `save_skill`,
   `delete_skill`, `send_with_skills`, `instructions()`, `set_system_prompt`,
   `set_global_instructions`; types `SessionMeta`, `SessionStatus`, `StartRequest`, `AppState`,
   `DirListing`, `Instructions`, and `skills::SkillInfo`.
-- `crates/presage-core/src/events.rs`: `Event { seq, ts, type, …fields }` (flattened; `type` is
+- `crates/sage-core/src/events.rs`: `Event { seq, ts, type, …fields }` (flattened; `type` is
   snake_case), `Stats`, `FinishStatus`, `CacheVerdict`. `delta` events are transient streaming text;
   a `retry` event voids what was streamed for that turn.
-- `crates/presage-cli/src/main.rs`: the terminal renderer, a reference for presenting each event.
-- `presage demo` writes a complete session to `$PRESAGE_HOME/sessions/<id>/events.jsonl`.
+- `crates/sage-cli/src/main.rs`: the terminal renderer, a reference for presenting each event.
+- `sage demo` writes a complete session to `$SAGE_HOME/sessions/<id>/events.jsonl`.
 
 `Harness::start` and `demo` call `tokio::spawn`: invoke them from async Tauri commands. `Harness` is
 `Clone`; keep one in managed state.
@@ -73,18 +73,18 @@ for the model, which reads the ones it needs with its `read` tool.
 GUI apps start with a minimal `PATH`. On unix, first thing in `main`, resolve the login shell's
 `PATH` (`$SHELL -ilc 'printf %s "$PATH"'`, 3 s timeout) and adopt it.
 
-Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the demo),
-`PRESAGE_UI_VIEW=settings|new|session`, `PRESAGE_UI_OPEN=<session id>`. Added while building it:
-`PRESAGE_UI_SIZE=<width>x<height>`, `PRESAGE_UI_SCRIPTED=<file>` (start a session played by a
-scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
-grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESAGE_UI_SCHEME=light|dark`
+Headless test hooks via environment: `SAGE_UI_AUTODEMO=1` (start and open the demo),
+`SAGE_UI_VIEW=settings|new|session`, `SAGE_UI_OPEN=<session id>`. Added while building it:
+`SAGE_UI_SIZE=<width>x<height>`, `SAGE_UI_SCRIPTED=<file>` (start a session played by a
+scripted stand-in and open it), `SAGE_UI_SCRIPT` (UI actions to play once the first view is up;
+grammar in `desktop/ui/js/hooks.js`), `SAGE_UI_THEME=<background>` and `SAGE_UI_SCHEME=light|dark`
 (the painting behind the glass and the appearance, for that launch only).
 A scripted session's file may name `skills` to start with and a `mode`.
-`PRESAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
+`SAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
 sessions a stand-in played as continuable, and a message to one brings it back, played by the
 `turns` (and `delay_ms`) of that file (a scripted file will do; the rest of it is not read).
 Start a scripted session, quit the app (SIGTERM goes through the same door as the window's
-close), start it again with `PRESAGE_UI_OPEN=<id> PRESAGE_UI_REVIVE=<file>`, and type into
+close), start it again with `SAGE_UI_OPEN=<id> SAGE_UI_REVIVE=<file>`, and type into
 `#followup` with a script. Without the hook such a session is read-only (`simulated`).
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
 `#pick-autonomy`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
@@ -213,7 +213,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
      `pick_folder`); a folder picked there joins the list. Under the box,
      pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
-     which starts low and steps up when predictions fail), mode (Presage / Default / Prosage, each with what it is for as its `title`; README, "Modes") and autonomy
+     which starts low and steps up when predictions fail), mode (Ecosage / Default / Prosage, each with what it is for as its `title`; README, "Modes") and autonomy
      (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
      other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
@@ -228,7 +228,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      new session starts with no skills, whatever the last one had; Default takes none, so the
      button is disabled there. With no key configured, the view leads with "Add an API key", and
      Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
-     by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
+     by `sage demo` and by the `SAGE_UI_AUTODEMO` hook.
    - *Session*: no header: what the session is (title, status, folder, model, effort, mode,
      autonomy, skills) is the first block of the inspector's Economy tab. The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on
@@ -256,7 +256,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        anchors step back into a gutter). Where the output has a shape it is set that way, with
        the verbatim text folded under it as "Raw output": an edit or a write as a before and
        after, Unified or Split (the choice is kept), green for added lines and red for removed,
-       from the `change` the engine sends with `step_end` (`presage-core/src/diff.rs`); a web
+       from the `change` the engine sends with `step_end` (`sage-core/src/diff.rs`); a web
        search as the sources it found (title, site, snippet, copy link).
      - **Edited files**: under the result, a card with a row per file the run edited (lines added
        and removed), each opening into its edits.
@@ -351,13 +351,13 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 ## Build and verify
 
 ```sh
-cargo build -p presage-desktop --target-dir target/desktop
+cargo build -p sage-desktop --target-dir target/desktop
 
-PRESAGE_HOME=/tmp/presage-ui-shots PRESAGE_UI_AUTODEMO=1 \
+SAGE_HOME=/tmp/sage-ui-shots SAGE_UI_AUTODEMO=1 \
 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
 WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 LIBGL_ALWAYS_SOFTWARE=1 \
 timeout 60 xvfb-run -a -s "-screen 0 1320x860x24" bash -c \
-  'target/desktop/debug/presage-desktop & APP=$!; sleep 12; import -window root /tmp/shot.png; kill $APP; wait $APP 2>/dev/null; true'
+  'target/desktop/debug/sage-desktop & APP=$!; sleep 12; import -window root /tmp/shot.png; kill $APP; wait $APP 2>/dev/null; true'
 ```
 
 Look at every screenshot. The demo session must show only the task, one grey bar, the answer, the
@@ -368,31 +368,31 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 `tests`).
 
 `docs/screenshots/` holds the views as that command shows them, with these in place of
-`PRESAGE_UI_AUTODEMO=1` (a keyed view also takes `LOGFARE_API_KEY=x`; no session is started with it):
+`SAGE_UI_AUTODEMO=1` (a keyed view also takes `LOGFARE_API_KEY=x`; no session is started with it):
 
 | File | Hooks |
 | --- | --- |
-| `new-session.jpg` | `PRESAGE_UI_VIEW=new`, no key |
-| `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
-| `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
-| `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
-| `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
-| `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
-| `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
-| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:[data-skill="ui"] .skill-use` |
+| `new-session.jpg` | `SAGE_UI_VIEW=new`, no key |
+| `new-session-model-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:#pick-model'` |
+| `new-session-skills-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
+| `session.jpg` | `SAGE_UI_AUTODEMO=1` |
+| `session-tools.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
+| `session-diff.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
+| `session-sources.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
+| `session-skills.jpg` | `SAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:[data-skill="ui"] .skill-use` |
 | `session-github.jpg` | a session whose folder is a git repository with a github.com remote, uncommitted changes and unpushed commits, then `click:#tab-github` |
 | `session-code.jpg` | the same session, then `click:#tab-code;;click:[data-path="src"];;click:[data-path="src/board.js"]` |
-| `session-attach.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:.project;;attach:#attach=><path>,<path>;;type:#task=>…'` |
-| `session-error.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
-| `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
-| `settings-keys.jpg` | `PRESAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x PRESAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |
+| `session-attach.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:.project;;attach:#attach=><path>,<path>;;type:#task=>…'` |
+| `session-error.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
+| `settings.jpg` | `SAGE_UI_VIEW=settings` |
+| `settings-keys.jpg` | `SAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x SAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |
 | `settings-defaults.jpg` | the same with `ANTHROPIC_API_KEY=x` and `scroll:#settings-defaults;;click:#default-provider` |
-| `settings-unsaved.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;type:#system-prompt=>…;;click:#new-session'` |
-| `settings-skills.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
-| `settings-system-prompt.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
-| `settings-instructions.jpg` | `PRESAGE_UI_VIEW=settings PRESAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |
+| `settings-unsaved.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;type:#system-prompt=>…;;click:#new-session'` |
+| `settings-skills.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
+| `settings-system-prompt.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
+| `settings-instructions.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |
 
-Any of them takes `PRESAGE_UI_THEME=ember|orchid|tide|graphite|none` and
-`PRESAGE_UI_SCHEME=light|dark`; the screenshots go through all four paintings in both appearances.
-The settings shots ran against a `PRESAGE_HOME` holding a user `skills/tests.md` (Edited), a custom
+Any of them takes `SAGE_UI_THEME=ember|orchid|tide|graphite|none` and
+`SAGE_UI_SCHEME=light|dark`; the screenshots go through all four paintings in both appearances.
+The settings shots ran against a `SAGE_HOME` holding a user `skills/tests.md` (Edited), a custom
 skill with a long title, and an `AGENTS.md`.

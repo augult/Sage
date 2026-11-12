@@ -1,4 +1,4 @@
-"""Draws the app icon: the Presage mark (as on the website) in ink on a soft white square.
+"""Draws the app icon: the Sage mark (as on the website) in ink on a soft white square.
 
     pip install pillow numpy
     python make-icons.py            # writes the PNGs and icon.ico beside this file

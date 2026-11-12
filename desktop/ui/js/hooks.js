@@ -1,20 +1,20 @@
-// Headless test hooks: the PRESAGE_UI_* environment variables, as read by the shell.
+// Headless test hooks: the SAGE_UI_* environment variables, as read by the shell.
 //
-//   PRESAGE_UI_AUTODEMO=1                   start the walkthrough and open it
-//   PRESAGE_UI_SCRIPTED=<file>              start the scripted session the file describes and open it
-//   PRESAGE_UI_OPEN=<session id>            open that session
-//   PRESAGE_UI_REVIVE=<file>                lets a stored session that a stand-in played be continued, played from
+//   SAGE_UI_AUTODEMO=1                   start the walkthrough and open it
+//   SAGE_UI_SCRIPTED=<file>              start the scripted session the file describes and open it
+//   SAGE_UI_OPEN=<session id>            open that session
+//   SAGE_UI_REVIVE=<file>                lets a stored session that a stand-in played be continued, played from
 //                                           then on by the replies in the file (read by the shell; same shape as the
 //                                           scripted file, of which only `turns` and `delay_ms` are used)
-//   PRESAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
-//   PRESAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
+//   SAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
+//   SAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
 //       click:<selector>          type:<selector>=><text>     key:<selector>=>Enter (or ctrl+Enter)
 //       scroll:<selector>         wait:<milliseconds>         attach:#attach=><path>[,<path>]
 //     An action waits for its element to exist, so scripts need no timing of their own.
-//   PRESAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)
-//   PRESAGE_UI_THEME=<background>           the painting behind the glass for this launch, by id:
+//   SAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)
+//   SAGE_UI_THEME=<background>           the painting behind the glass for this launch, by id:
 //                                           ember, orchid, tide, graphite or none
-//   PRESAGE_UI_SCHEME=light|dark            the appearance for this launch
+//   SAGE_UI_SCHEME=light|dark            the appearance for this launch
 
 import { api } from './api.js';
 import * as themes from './themes.js';

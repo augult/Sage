@@ -1,25 +1,26 @@
 # Benchmarks
 
-`presage bench` runs 7 small synthetic tasks (Python and shell: fix bugs, implement a function from
+`sage bench` runs 7 small synthetic tasks (Python and shell: fix bugs, implement a function from
 a README, write a module that has no tests) under several harness variants. Every run starts from a
 fresh copy of the task. When the agent is done, the files it was told to leave alone are put back,
 held-out checks are added and the task's verification is run. Only that counts as solved.
-`presage bench --check` proves that each task fails as shipped and passes with its reference
+`sage bench --check` proves that each task fails as shipped and passes with its reference
 solution (`--tasks all` for all 24; without it, the seven of the `easy` set).
 
 All runs below: Logfare gateway, effort `ratchet`, 5 runs per task and variant (35 per variant).
 Figures are medians per run unless stated. "No cache" is the list-price cost had the provider
 cached nothing, which takes the luck of the cache out of a comparison. Raw results and the CLI's own
-tables are in `docs/results/`.
+tables are in `docs/results/`. Those files were written when the product was called Presage and
+its cheap mode `presage`; they are kept as they were, and what they call `presage` is `ecosage` here.
 
 ```sh
 cargo build
-target/debug/presage bench --check --tasks all
-LOGFARE_API_KEY=... PRESAGE_HOME=/tmp/presage-live target/debug/presage bench -p logfare -m glm-5.3 \
-  --variants presage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
+target/debug/sage bench --check --tasks all
+LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare -m glm-5.3 \
+  --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
-## Where Presage loses, read from the stored runs, 12 November 2026 (tenth session)
+## Where Sage loses, read from the stored runs, 12 November 2026 (tenth session)
 
 No run was made for this: the gateway was down. It is every results file under `docs/results/`
 read again, runs lost to provider errors left out (`docs/results/2026-11-12-modes/overall.py` and
@@ -27,20 +28,20 @@ read again, runs lost to provider errors left out (`docs/results/2026-11-12-mode
 
 | Variant | Solved | Lost after declaring the work done | Lost on |
 |---|---|---|---|
-| `presage` | 297/310 | 12 | `restyle` 8, `confdialect` 5 |
+| `ecosage` | 297/310 | 12 | `restyle` 8, `confdialect` 5 |
 | `no-review` | 97/103 | 5 | `confdialect` 4, `restyle` 2 |
 | `classic` (now `default`) | 92/94 | 0 | `deadcode-js` 1, `rollup` 1 |
 | `ext:opencode` | 116/122 | 2 | `audit` 2, `audit-clean` 2, `restyle` 1, `nplusone` 1 |
 
-On the two tasks alone, all of Presage's variants against the conventional loops (`classic`,
+On the two tasks alone, all of Sage's variants against the conventional loops (`classic`,
 OpenCode, mini-swe-agent):
 
-| Task | Presage's variants | Conventional loops |
+| Task | Sage's variants | Conventional loops |
 |---|---|---|
 | `confdialect` | 9/23, median 6 to 18 replies where it declared done | 8/8, 26 to 30 replies |
 | `restyle` | 8/21 | 5/7 |
 
-- Presage's losses are of one kind: work declared finished and verified that fails checks the
+- Sage's losses are of one kind: work declared finished and verified that fails checks the
   model never ran. The conventional loop has none of that kind in 94 runs.
 - The conventional loop's runs on these two tasks are few (`classic` 2 and 1), and most of its 94
   are on the easy set. It is a lead to follow, not a result.
@@ -52,12 +53,12 @@ Prosage (`README.md`, "Modes") is built on this reading and has not been run aga
 
 ## Against OpenCode, 12 November 2026 (ninth session)
 
-Presage against OpenCode 1.19.5 (`ext:opencode`, its default `build` agent behind the metering
+Sage against OpenCode 1.19.5 (`ext:opencode`, its default `build` agent behind the metering
 proxy), DeepSeek V4.1 Flash through Logfare, all 24 tasks, 30 replies and 15 minutes per run. Raw
 results, the CLI's tables and the scripts that made the figures are in
 `docs/results/2026-11-12-opencode/`.
 
-The session began with a baseline of both harnesses as they stood, changed Presage where its own
+The session began with a baseline of both harnesses as they stood, changed Sage where its own
 logs showed waste, and ended with a second head-to-head in one time window. In that last one every
 run had a Unix account to itself (three accounts per harness, one run at a time in each), so no run
 could see or signal another, and the repository with its fixtures and reference solutions was
@@ -67,17 +68,17 @@ unreadable to all of them.
 
 | 24 tasks | Solved | Requests (mean, median) | Time (mean, median) | Cost | Tokens per run, in / out |
 |---|---|---:|---:|---:|---:|
-| Presage as it is now, three runs per task | 67/72 | 5.7, 4 | 59 s, 39 s | $1.12 | 59k / 9.4k |
+| Sage as it is now, three runs per task | 67/72 | 5.7, 4 | 59 s, 39 s | $1.12 | 59k / 9.4k |
 | OpenCode 1.19.5, three runs, same window | 70/72 | 10.8, 8 | 116 s, 50 s | $2.23 | 143k / 17.1k |
-| Presage as it was that morning, two runs | 45/48 | 10.5, 10 | 107 s, 60 s | $1.22 | 148k / 17.1k |
+| Sage as it was that morning, two runs | 45/48 | 10.5, 10 | 107 s, 60 s | $1.22 | 148k / 17.1k |
 | OpenCode that morning, two runs, same window | 44/48 | 11.0, 9 | 129 s, 48 s | $1.12 | 132k / 17.0k |
 
-- **Presage now takes about half of what OpenCode takes**: 47% fewer requests, half the time and
+- **Sage now takes about half of what OpenCode takes**: 47% fewer requests, half the time and
   half the money, in each of the three repeats. That morning the two were level.
 - **OpenCode solved three runs more of 72**, which by itself is within chance (p = 0.44), but the
-  five runs Presage lost are on two tasks: `restyle` three times out of three and `confdialect`
+  five runs Sage lost are on two tasks: `restyle` three times out of three and `confdialect`
   twice out of three, both solved by OpenCode every time. Over every DeepSeek run of the day,
-  whatever the variant: `confdialect` 7/20 for Presage against 5/5 for OpenCode (p = 0.015),
+  whatever the variant: `confdialect` 7/20 for Sage against 5/5 for OpenCode (p = 0.015),
   `restyle` 8/20 against 4/5 (p = 0.16), and the other 22 tasks 439/440 against 107/112.
   `confdialect` is failed on one or two of 39 hidden cases of a ten-section specification, after
   5 to 18 replies where OpenCode spends 25 to 30 requests and 13 to 15 minutes on it; `restyle` on
@@ -95,11 +96,11 @@ unreadable to all of them.
 
 ### What was changed, and what each change is worth
 
-Read off Presage's own session logs of the baseline (`review_cost.py`, `turns.py`), then measured.
+Read off Sage's own session logs of the baseline (`review_cost.py`, `turns.py`), then measured.
 
 | Change | Measured |
 |---|---|
-| **The review pass is off unless asked for** (`--with review`, `presage+review`). | Different windows: 45/48 with it at 10.5 replies, 45/48 without at 6.9. Same window, runs alternating: 46/48 at 9.5 replies and 77 s with it, 46/48 at 7.2 and 60 s without. The same tasks failed either way. No run of either kind left a scratch file behind; the review removed five `__pycache__` directories in 48 runs. |
+| **The review pass is off unless asked for** (`--with review`, `ecosage+review`). | Different windows: 45/48 with it at 10.5 replies, 45/48 without at 6.9. Same window, runs alternating: 46/48 at 9.5 replies and 77 s with it, 46/48 at 7.2 and 60 s without. The same tasks failed either way. No run of either kind left a scratch file behind; the review removed five `__pycache__` directories in 48 runs. |
 | **`write` replaces a file the model has been shown in full** without `overwrite:true`. | Refused writes: 16 and 11 per 48 runs before, 1 to 4 after. Each refusal had also skipped the steps behind it in the same reply (36 in the baseline) and made the model send the whole file a second time. |
 | **The watch stays on the test command the task names**, and a throwaway script (outside the workspace, or written on the spot with a here-document) never becomes the watch. | The watch was moved to another command 14 to 40 times per 48 runs before, never after. It had followed `node /tmp/verify-queue.mjs` and a mutation-testing loop in `/tmp` that is meant to fail, and `finish` was refused for it. |
 | **The effort ratchet starts at `low`**, not `high`. | DeepSeek, same window: 46/48 at 7.7 replies, 77 s and 14.5k output tokens from `high`; 46/48 at 5.9 replies, 38 s and 8.3k from `low`. In the last head-to-head: 23/24 at 6.5 replies from `high`, 67/72 at 5.7 from `low`. GLM-5.3, six tasks, one run: 6/6 both, 15.5 replies and $1.04 from `high`, 7.3 and $0.36 from `low`. A fixed `low` with no ratchet solved 47/48 in one window and 43/48 in the next, and was not adopted. |
@@ -128,7 +129,7 @@ Read off Presage's own session logs of the baseline (`review_cost.py`, `turns.py
 The seven tasks above are solved by every variant, so they measure turns only. Two harder sets were
 added: `skill` (ten tasks, one per built-in skill: audits, dead-code removal, writing tests,
 performance, a heisenbug, a restyle) and `hard` (seven tasks with several files and held-out checks
-for behaviour the task specifies but the visible tests do not cover). Variants: `presage`, `classic`,
+for behaviour the task specifies but the visible tests do not cover). Variants: `ecosage`, `classic`,
 and mini-swe-agent 2.4.6 (`ext:mini`) driven through the same gateway behind a metering proxy.
 30 replies and 15 minutes per run. Raw results, the CLI's tables, the grades and the scripts that
 produced the figures below are in `docs/results/2026-11-11-session6/`.
@@ -142,21 +143,21 @@ cost are steadier, and the before/after rows compare runs made under different l
 
 | Variant | Solved | Turns (mean) | Time (mean) | Cost (17 runs) | Answer grade (of 8) |
 |---|---|---:|---:|---:|---:|
-| Presage | 16/17 | 14.3 | 128 s | $0.377 | 7.53 |
+| Sage | 16/17 | 14.3 | 128 s | $0.377 | 7.53 |
 | Classic | 15/17 | 20.8 | 139 s | $0.323 | 7.06 |
 | mini-swe-agent | 16/17 | 13.9 | 165 s | $0.372 | 7.24 |
 
-- Presage against classic: 45% fewer turns (median 11 against 20), 35% less time, 13% lower cost at
+- Sage against classic: 45% fewer turns (median 11 against 20), 35% less time, 13% lower cost at
   the median. Against mini-swe-agent: about the same number of turns and the same cost, a third
   less time.
-- By set: on the ten skill tasks mini-swe-agent is the leanest (11.2 turns, $0.015 a run; Presage
-  14.6 turns, $0.021). On the seven hard tasks Presage is (13.9 turns and 127 s; mini-swe-agent 17.7
+- By set: on the ten skill tasks mini-swe-agent is the leanest (11.2 turns, $0.015 a run; Sage
+  14.6 turns, $0.021). On the seven hard tasks Sage is (13.9 turns and 127 s; mini-swe-agent 17.7
   turns and 243 s; classic 19.0 turns).
-- The unsolved runs: `restyle` under Presage and mini-swe-agent (both declared it done; the hidden
+- The unsolved runs: `restyle` under Sage and mini-swe-agent (both declared it done; the hidden
   check wants a spacing and type scale that only the `ui` skill spells out), `deadcode-js` and
   `rollup` under classic (turn limit).
 - **Five of the 17 classic runs left their workspace** (`find /`, then work on whatever copy of the
-  project they found, among them this repository's fixtures; one read a hidden verifier). No Presage
+  project they found, among them this repository's fixtures; one read a hidden verifier). No Sage
   run did: its first message says where the workspace is. Four of the five were run again with the
   fixtures removed from disk: all four solved (`deadcode-js` now in 12 turns), which would make
   classic 16/17; `rollup` could not be re-run before the daily limit.
@@ -168,8 +169,8 @@ limit.
 
 | Variant | Solved | Turns (mean) | Time (mean) | Cost (mean) | Answer grade (of 8) |
 |---|---|---:|---:|---:|---:|
-| Presage (effort `high`) | 5/6 | 21.0 | 324 s | $0.305 | 7.33 |
-| Presage, effort `max` | 6/6 | 20.5 | 448 s | $0.361 | not graded |
+| Sage (effort `high`) | 5/6 | 21.0 | 324 s | $0.305 | 7.33 |
+| Sage, effort `max` | 6/6 | 20.5 | 448 s | $0.361 | not graded |
 | Classic | 5/6 | 25.7 | 292 s | $0.229 | 5.83 |
 | mini-swe-agent | 5/6 | 27.3 | 479 s | $0.431 | 6.17 |
 
@@ -178,7 +179,7 @@ limit on five of the six; it sends no effort setting, so GLM-5.3 thinks at its d
 
 ### Before and after this session's changes
 
-| Model, tasks | Presage before | Presage after |
+| Model, tasks | Sage before | Sage after |
 |---|---|---|
 | DeepSeek, 10 skill tasks | 8/9 solved, 22.7 turns, 202 s, $0.034 | 9/10 solved, 14.6 turns, 129 s, $0.021 |
 | DeepSeek, 7 hard tasks | 7/7 solved, 20.1 turns, 254 s, $0.033 | 7/7 solved, 13.9 turns, 127 s, $0.024 |
@@ -204,18 +205,18 @@ time but not turns. What changed in between, found by reading the traces of the 
 
 ### Ablations on DeepSeek (10 of 17 tasks each, one run; stopped by the daily limit)
 
-| Variant | Solved | Turns | against Presage on the same tasks |
+| Variant | Solved | Turns | against Sage on the same tasks |
 |---|---|---:|---|
 | `no-review` | 9/10 | 13.6 | 9/10, 15.5 turns |
 | `no-survey` | 9/10 | 17.6 | 9/10, 17.5 turns |
-| `presage+skill` (8 skill tasks) | 8/8 | 16.2 | 7/8, 12.1 turns |
+| `ecosage+skill` (8 skill tasks) | 8/8 | 16.2 | 7/8, 12.1 turns |
 
 - **Review pass**: costs about two turns and changed no outcome here. Undecided; ten runs cannot
   show a rare rescue.
 - **Survey**: no difference in turns on these ten tasks. The drop from 22 to 14 turns above is
   therefore not shown to come from it; the ablation does not isolate the gate fix or the budget
   line, which have no switch.
-- **Skills**: the one task Presage fails without a skill (`restyle`) is solved with `ui`. Elsewhere
+- **Skills**: the one task Sage fails without a skill (`restyle`) is solved with `ui`. Elsewhere
   the skill costs turns (16.2 against 12.1) and about twice the money, for no change in outcome.
 
 ### Grading the answers
@@ -229,12 +230,12 @@ lean towards one variant.
 
 | DeepSeek | correct | scope | honest | quality | total |
 |---|---:|---:|---:|---:|---:|
-| Presage | 1.94 | 2.00 | 1.65 | 1.94 | 7.53 |
+| Sage | 1.94 | 2.00 | 1.65 | 1.94 | 7.53 |
 | mini-swe-agent | 1.94 | 2.00 | 1.65 | 1.65 | 7.24 |
 | Classic | 1.82 | 2.00 | 1.47 | 1.76 | 7.06 |
 
-Presage's lead is 5 points of 136; second against third is 3 points and could swap with a repeat.
-On the six GLM-5.3 tasks the totals are Presage 7.33, mini-swe-agent 6.17, classic 5.83, where one
+Sage's lead is 5 points of 136; second against third is 3 points and could swap with a repeat.
+On the six GLM-5.3 tasks the totals are Sage 7.33, mini-swe-agent 6.17, classic 5.83, where one
 run that stops at its limit moves a mean by half a point.
 Every variant loses most on `honest`: runs that stop at the turn limit leave no final message.
 
@@ -256,14 +257,14 @@ Every variant loses most on `honest`: runs that stop at the turn limit leave no 
 
 | Variant | Solved | Turns: median (mean, range) | Input tok | Cached | Output tok | Cost | No cache | Mean cost | Time |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| presage | 35/35 | 3 (3.6, 2–9) | 8.8k | 58% | 395 | $0.0077 | $0.0141 | $0.0134 | 6.4 s |
+| sage | 35/35 | 3 (3.6, 2–9) | 8.8k | 58% | 395 | $0.0077 | $0.0141 | $0.0134 | 6.4 s |
 | no-preflight | 35/35 | 4 (4.3, 3–7) | 8.9k | 63% | 442 | $0.0087 | $0.0142 | $0.0157 | 9.3 s |
 | no-auto-watch | 35/35 | 4 (4.8, 2–13) | 9.4k | 73% | 439 | $0.0084 | $0.0151 | $0.0166 | 8.8 s |
 | classic | 35/35 | 6 (7.4, 4–27) | 9.9k | 66% | 415 | $0.0088 | $0.0154 | $0.0247 | 9.8 s |
 
 Median turns and median cost per task:
 
-| Task | presage | no-preflight | no-auto-watch | classic |
+| Task | sage | no-preflight | no-auto-watch | classic |
 |---|---|---|---|---|
 | pager | 2 · $0.0062 | 4 · $0.0066 | 4 · $0.0063 | 5 · $0.0067 |
 | inventory | 3 · $0.0068 | 4 · $0.0088 | 4 · $0.0085 | 5 · $0.0087 |
@@ -277,12 +278,12 @@ Median turns and median cost per task:
 
 | Variant | Solved | Turns: median (mean, range) | Input tok | Cached | Output tok | Cost | No cache | Mean cost | Time |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| presage | 35/35 | 3 (3.6, 2–12) | 9.6k | 63% | 442 | $0.0008 | $0.0017 | $0.00124 | 3.8 s |
+| sage | 35/35 | 3 (3.6, 2–12) | 9.6k | 63% | 442 | $0.0008 | $0.0017 | $0.00124 | 3.8 s |
 | no-preflight | 35/35 | 4 (4.3, 3–8) | 9.7k | 71% | 618 | $0.0009 | $0.0019 | $0.00113 | 4.8 s |
 | no-auto-watch | 35/35 | 4 (4.3, 3–8) | 9.5k | 70% | 619 | $0.0010 | $0.0020 | $0.00123 | 4.9 s |
 | classic | 35/35 | 6 (5.6, 3–8) | 10.4k | 65% | 639 | $0.0009 | $0.0019 | $0.00106 | 5.4 s |
 
-| Task | presage | no-preflight | no-auto-watch | classic |
+| Task | sage | no-preflight | no-auto-watch | classic |
 |---|---|---|---|---|
 | pager | 3 · $0.0005 | 3 · $0.0005 | 4 · $0.0010 | 5 · $0.0011 |
 | inventory | 3 · $0.0008 | 4 · $0.0009 | 3 · $0.0007 | 5 · $0.0007 |
@@ -301,25 +302,25 @@ Median turns and median cost per task:
   Total spend is 46% lower ($0.469 against $0.864), but nearly all of that gap is two runaway
   classic runs on `report` (25 and 27 turns). Without `report` the mean saving is 9%.
 - **Cost on DeepSeek: no saving.** Median −3% billed (−11% with no cache), mean +17% ($0.00124
-  against $0.00106). Three Presage turns carry about as many input tokens as five or six classic
+  against $0.00106). Three Sage turns carry about as many input tokens as five or six classic
   ones: the fixed prefix is 1,193 estimated tokens against 762, the first message carries the
   preflight output, and reads carry anchors. One 12-turn `roman` run does the rest.
 - **Time**: median −35% on GLM-5.3, −30% on DeepSeek.
 - **Nothing can be said about reliability.** Every run of every variant was solved, so the tasks
-  are too easy to separate the variants. The evidence gate verified 35 of 35 Presage runs; classic
+  are too easy to separate the variants. The evidence gate verified 35 of 35 Sage runs; classic
   ends on the model's word and was right every time here.
-- **Where the turns go.** A Presage run is almost always `read → edit → finish`. `finish` came in
+- **Where the turns go.** A Sage run is almost always `read → edit → finish`. `finish` came in
   the same reply as the edits in 6 of 35 runs on GLM-5.3 and 1 of 35 on DeepSeek. With the watch
   doing the checking the model makes few predictions of its own (11 in 35 runs on GLM-5.3, 14 on
   DeepSeek, against about 50 without auto-watch): the saving comes from the harness running the
   check, not from predictions and receipts.
-- **Small sample.** Five runs per cell. `roman` varies widely (GLM-5.3: Presage 4–9 turns,
+- **Small sample.** Five runs per cell. `roman` varies widely (GLM-5.3: Sage 4–9 turns,
   no-auto-watch 2–13); a difference on a single task is not established.
 
 ## Follow-up, 11 November 2026: `attach` and `short_paths`
 
 `attach` puts the files the task names in the first message, which is aimed at the `read` turn
-above. Variants `presage` (both new mechanisms on), `no-attach`, `no-short-paths`, `classic`; same
+above. Variants `ecosage` (both new mechanisms on), `no-attach`, `no-short-paths`, `classic`; same
 tasks, 5 runs each. The two models ran at the same time (GLM-5.3 with `-j 4`, DeepSeek with `-j 2`)
 under Logfare's shared limit of 80 requests a minute, so the time column is not comparable with the
 baseline.
@@ -329,19 +330,19 @@ The session ended before these runs did. What exists in `docs/results/`:
 - `2026-11-11-*-attach.progress.txt`: one line per completed run (task, variant, solved, turns,
   cost). `-attach.txt` and `-attach.json` are the CLI's table and the raw results of a run that
   finished in time; an empty or missing file means it did not.
-- GLM-5.3 after 55 of 140 runs, turns per run: `presage` 1,1,1,1,1,1,2,2,2,2,2,2,3,3 (median 2),
+- GLM-5.3 after 55 of 140 runs, turns per run: `ecosage` 1,1,1,1,1,1,2,2,2,2,2,2,3,3 (median 2),
   `no-short-paths` median 2, `no-attach` median 3.5, `classic` median 6. A `pager` run with the file
   attached took 1 turn and $0.0032, against 3 turns and $0.0082 without. One classic run on `slug`
   declared itself done and failed the held-out check: the first unsolved run in any benchmark here.
 - DeepSeek, the 42 runs of a first attempt that died (it hit the rate limit, then its process was
-  gone): `presage` median 3 (1 to 9), `no-short-paths` 2, `no-attach` 3.5, `classic` 5.
+  gone): `ecosage` median 3 (1 to 9), `no-short-paths` 2, `no-attach` 3.5, `classic` 5.
 
 The cells are unbalanced across tasks, so these medians are indicative only: attach appears to
 remove the read turn, and nothing is established about `short_paths` or about cost. Repeat with one
 model at a time:
 
 ```sh
-presage bench -p logfare -m glm-5.3 --variants presage,no-attach,no-short-paths,classic -n 5 -j 3
+sage bench -p logfare -m glm-5.3 --variants ecosage,no-attach,no-short-paths,classic -n 5 -j 3
 ```
 
 ### Update: runs that finished after the lines above were written
@@ -349,44 +350,44 @@ presage bench -p logfare -m glm-5.3 --variants presage,no-attach,no-short-paths,
 DeepSeek V4.1 Flash (`-j 2`, alongside the GLM-5.3 run), the table printed by the CLI:
 
 ```text
-presage bench 20261111-000852-dd13 · logfare · effort ratchet · 5 runs per task and variant
-fixed prompt prefix, estimated: presage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
+sage bench 20261111-000852-dd13 · logfare · effort ratchet · 5 runs per task and variant
+fixed prompt prefix, estimated: sage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
 
 deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
 task       variant          solved turns  in tok cached out tok      cost  no cache    time
-pager      presage             5/5     2    5.4k    52%     275   $0.0005   $0.0010    2.6s
+pager      sage             5/5     2    5.4k    52%     275   $0.0005   $0.0010    2.6s
            no-attach           5/5     3    7.8k    67%     316   $0.0006   $0.0014    3.3s
            no-short-paths      5/5     2    5.6k    71%     313   $0.0004   $0.0010    3.5s
            classic             5/5     5    8.6k    82%     551   $0.0007   $0.0017    6.5s
-inventory  presage             5/5     3    9.3k    62%     477   $0.0008   $0.0017    4.1s
+inventory  sage             5/5     3    9.3k    62%     477   $0.0008   $0.0017    4.1s
            no-attach           5/5     3    9.2k    71%     447   $0.0008   $0.0017    4.8s
            no-short-paths      5/5     2    6.2k    68%     382   $0.0007   $0.0012    5.8s
            classic             5/5     6   12.3k    76%     854   $0.0013   $0.0024    6.1s
-slug       presage             5/5     1    2.3k    60%     397   $0.0004   $0.0006    2.7s
+slug       sage             5/5     1    2.3k    60%     397   $0.0004   $0.0006    2.7s
            no-attach           5/5     4   10.9k    69%     456   $0.0008   $0.0020    4.5s
            no-short-paths      5/5     2    5.1k    55%     449   $0.0005   $0.0010    2.9s
            classic             5/5     5    8.2k    77%     611   $0.0007   $0.0016    5.3s
-tariff     presage             5/5     2    8.8k    63%     383   $0.0008   $0.0016    3.1s
+tariff     sage             5/5     2    8.8k    63%     383   $0.0008   $0.0016    3.1s
            no-attach           5/5     4   16.9k    68%     387   $0.0012   $0.0028    7.8s
            no-short-paths      5/5     2    8.7k    63%     352   $0.0007   $0.0015    2.9s
            classic             5/5     7   15.9k    66%     663   $0.0012   $0.0028     20s
-textstats  presage             5/5     3    8.2k    67%     310   $0.0006   $0.0014    4.6s
+textstats  sage             5/5     3    8.2k    67%     310   $0.0006   $0.0014    4.6s
            no-attach           5/5     3    8.0k    69%     377   $0.0007   $0.0014    5.8s
            no-short-paths      5/5     3    8.4k    76%     453   $0.0007   $0.0015    4.2s
            classic             5/5     5    8.7k    84%     512   $0.0006   $0.0016    5.3s
-roman      presage             5/5     4   10.0k    75%    1.7k   $0.0016   $0.0025    8.3s
+roman      sage             5/5     4   10.0k    75%    1.7k   $0.0016   $0.0025    8.3s
            no-attach           5/5     4    9.1k    76%    1.6k   $0.0016   $0.0023    8.8s
            no-short-paths      5/5     5   13.7k    81%    2.3k   $0.0019   $0.0034     10s
            classic             5/5     9   20.9k    77%    3.5k   $0.0029   $0.0053     21s
-report     presage             5/5     2    4.7k    77%     281   $0.0003   $0.0009    2.3s
+report     sage             5/5     2    4.7k    77%     281   $0.0003   $0.0009    2.3s
            no-attach           5/5     3    6.8k    81%     465   $0.0005   $0.0013    4.1s
            no-short-paths      5/5     2    4.7k    60%     275   $0.0005   $0.0009    8.5s
            classic             5/5    20   66.2k    76%    5.1k   $0.0056   $0.0130     38s
-ALL        presage           35/35     2    8.2k    45%     373   $0.0006   $0.0014    3.3s   total $0.027, $0.0008 per solved task
+ALL        sage           35/35     2    8.2k    45%     373   $0.0006   $0.0014    3.3s   total $0.027, $0.0008 per solved task
            no-attach         35/35     4    9.1k    67%     447   $0.0008   $0.0019    5.1s   total $0.033, $0.0009 per solved task
            no-short-paths    35/35     2    8.4k    61%     375   $0.0007   $0.0015    4.2s   total $0.030, $0.0009 per solved task
            classic           35/35     6   12.3k    74%     728   $0.0011   $0.0023    8.7s   total $0.072, $0.0021 per solved task
-presage against classic: turns -67%, input tokens -33%, output tokens -49%, cost -42% (-39% with no cache), time -62%; solved 35/35 against 35/35
+sage against classic: turns -67%, input tokens -33%, output tokens -49%, cost -42% (-39% with no cache), time -62%; solved 35/35 against 35/35
   by task (7): fewer turns on 7, more on 0; cheaper on 7, dearer on 0 (with no cache: 7 and 0)
 no-attach against classic: turns -33%, input tokens -26%, output tokens -39%, cost -22% (-20% with no cache), time -41%; solved 35/35 against 35/35
   by task (7): fewer turns on 7, more on 0; cheaper on 4, dearer on 3 (with no cache: 6 and 1)
@@ -398,44 +399,44 @@ no-short-paths against classic: turns -67%, input tokens -32%, output tokens -48
 GLM-5.3 (`-j 4`, alongside the DeepSeek run), the table printed by the CLI:
 
 ```text
-presage bench 20261111-000429-208a · logfare · effort ratchet · 5 runs per task and variant
-fixed prompt prefix, estimated: presage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
+sage bench 20261111-000429-208a · logfare · effort ratchet · 5 runs per task and variant
+fixed prompt prefix, estimated: sage ~1193 tokens, no-attach ~1193 tokens, no-short-paths ~1193 tokens, classic ~762 tokens
 
 glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
 task       variant          solved turns  in tok cached out tok      cost  no cache    time
-pager      presage             5/5     1    2.3k    52%     222   $0.0029   $0.0042    2.8s
+pager      sage             5/5     1    2.3k    52%     222   $0.0029   $0.0042    2.8s
            no-attach           5/5     3    7.1k    64%     226   $0.0058   $0.0109    4.2s
            no-short-paths      5/5     1    2.4k    50%     265   $0.0038   $0.0052    4.2s
            classic             5/5     5    8.2k    66%     281   $0.0066   $0.0128    8.8s
-inventory  presage             5/5     3    8.4k    74%     511   $0.0074   $0.0140    6.2s
+inventory  sage             5/5     3    8.4k    74%     511   $0.0074   $0.0140    6.2s
            no-attach           5/5     4   10.9k    56%     514   $0.0078   $0.0172    6.8s
            no-short-paths      5/5     3    8.9k    59%     780   $0.0099   $0.0160    8.2s
            classic             5/5     5    9.8k    66%     372   $0.0074   $0.0154    7.6s
-slug       presage             5/5     2    4.8k    68%    1.3k   $0.0109   $0.0131     12s
+slug       sage             5/5     2    4.8k    68%    1.3k   $0.0109   $0.0131     12s
            no-attach           5/5     3    7.1k    77%     584   $0.0066   $0.0117     12s
            no-short-paths      5/5     2    4.9k    67%    1.1k   $0.0079   $0.0112     15s
            classic             4/5     5    7.7k    71%     390   $0.0063   $0.0125     14s   1 declared done, then failed verification
-tariff     presage             5/5     2    8.4k    61%     504   $0.0082   $0.0140    8.0s
+tariff     sage             5/5     2    8.4k    61%     504   $0.0082   $0.0140    8.0s
            no-attach           5/5     4   16.3k    77%     498   $0.0144   $0.0250     11s
            no-short-paths      5/5     1    4.0k    31%    1.2k   $0.0101   $0.0115     10s
            classic             5/5     6   13.6k    58%     402   $0.0118   $0.0207     13s
-textstats  presage             5/5     3    7.7k    59%    1.6k   $0.0101   $0.0149     16s
+textstats  sage             5/5     3    7.7k    59%    1.6k   $0.0101   $0.0149     16s
            no-attach           5/5     5   13.8k    48%     553   $0.0112   $0.0215    9.7s
            no-short-paths      5/5     3    8.2k    56%     637   $0.0091   $0.0143    9.0s
            classic             5/5     7   11.4k    68%     513   $0.0084   $0.0179     14s
-roman      presage             5/5     2    5.6k    48%   17.6k   $0.0847   $0.0877   2m09s
+roman      sage             5/5     2    5.6k    48%   17.6k   $0.0847   $0.0877   2m09s
            no-attach           5/5     7   21.7k    46%   21.7k   $0.1103   $0.1413   2m34s
            no-short-paths      5/5     6   20.3k    63%   11.4k   $0.0672   $0.0813   1m53s
            classic             5/5     9   29.3k    63%   11.2k   $0.0588   $0.0676   1m40s
-report     presage             5/5     2    4.3k    73%     423   $0.0045   $0.0079    4.6s
+report     sage             5/5     2    4.3k    73%     423   $0.0045   $0.0079    4.6s
            no-attach           5/5     3    6.0k    72%     435   $0.0054   $0.0103    6.9s
            no-short-paths      5/5     2    4.3k    57%     561   $0.0055   $0.0083     12s
            classic             5/5     6    8.5k    60%     545   $0.0076   $0.0145     14s
-ALL        presage           35/35     2    4.8k    65%     955   $0.0084   $0.0131     11s   total $0.699, $0.0200 per solved task
+ALL        sage           35/35     2    4.8k    65%     955   $0.0084   $0.0131     11s   total $0.699, $0.0200 per solved task
            no-attach         35/35     3    9.4k    64%     514   $0.0089   $0.0172    9.7s   total $0.859, $0.0245 per solved task
            no-short-paths    35/35     2    6.1k    58%     827   $0.0086   $0.0127     11s   total $0.735, $0.0210 per solved task
            classic           34/35     6    9.9k    66%     477   $0.0084   $0.0154     14s   total $0.791, $0.0233 per solved task   1 declared done, then failed verification
-presage against classic: turns -67%, input tokens -51%, output tokens +100%, cost -0% (-15% with no cache), time -22%; solved 35/35 against 34/35
+sage against classic: turns -67%, input tokens -51%, output tokens +100%, cost -0% (-15% with no cache), time -22%; solved 35/35 against 34/35
   by task (7): fewer turns on 7, more on 0; cheaper on 4, dearer on 3 (with no cache: 5 and 2)
 no-attach against classic: turns -50%, input tokens -5%, output tokens +8%, cost +5% (+12% with no cache), time -31%; solved 35/35 against 34/35
   by task (7): fewer turns on 7, more on 0; cheaper on 2, dearer on 5 (with no cache: 3 and 4)

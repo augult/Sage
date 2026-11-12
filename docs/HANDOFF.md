@@ -1,8 +1,8 @@
-# Handoff: Presage
+# Handoff: Sage
 
 Read this first. State: 12 November 2026, after the tenth session, which removed the reflex memory
 and the review pass, added `/goal`, made a stored session continuable after a restart, and gave the
-harness three modes: Presage, Default (the conventional loop, `classic` until now) and Prosage.
+harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and Prosage.
 **Prosage is built and tested against a scripted model only. No benchmark of it exists**: Logfare
 answered every chat request with 502 or 503 from 14:12 UTC to the end of the session.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
@@ -13,14 +13,14 @@ Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; resear
 Branch `hoplite/barke-8479543e`, three commits: the removal and `/goal`; the restart (its own
 section follows this one); the modes.
 
-**The owner's brief:** not one harness that is both cheap and good, but three modes. Presage stays
+**The owner's brief:** not one harness that is both cheap and good, but three modes. Ecosage stays
 the cheap one. Default is "the default tool usage like a normal harness", for people who want the
 app. Prosage is for the result, "not even trying to be cheap", without "insanely long thinking
 times". No CI (it would spend Logfare requests on every build). Memory and the review step out,
 `/goal` in.
 
 **Removed:** `lessons.rs`, `scripts/memory-experiment/`, the review pass (`Features.review`, its
-prompt text, `presage+review`). The change report that lived in `review.rs` is `changes.rs` and is
+prompt text, `ecosage+review`). The change report that lived in `review.rs` is `changes.rs` and is
 what the goal check reads. Logs and metas that hold the retired events still open.
 
 **`/goal`:** `goal.rs`, `Agent::before_ending` (`agent.rs`). Where a run would end, by an accepted
@@ -28,18 +28,18 @@ what the goal check reads. Logs and metas that hold the retired events still ope
 goal holds; `NOT MET` sends the model back with the reasons, three times at most per message.
 `before_ending` is where every check on an ending lives: the examiner's is called there first.
 
-**Modes:** `Mode` in `state.rs` (`Presage`, `Plain`, `Prosage`; `Plain` is what users call
+**Modes:** `Mode` in `state.rs` (`Ecosage`, `Plain`, `Prosage`; `Plain` is what users call
 `default`, and `classic` is still read as it). `--mode` in the CLI, `default` and `prosage` as
 bench variants, the Mode picker in the app. A session's snapshot names its mode, so it comes back
 as what it was.
 
 **Why Prosage is what it is.** With no provider to ask, the stored runs were read again
-(`docs/BENCHMARKS.md`, "Where Presage loses"). Presage loses on two tasks, and loses them by
+(`docs/BENCHMARKS.md`, "Where Sage loses"). Sage loses on two tasks, and loses them by
 declaring work finished that its own checks passed and the hidden ones did not. The conventional
-loop loses neither, in the few runs it has on them, by doing what Presage is built to avoid: twice
+loop loses neither, in the few runs it has on them, by doing what Sage is built to avoid: twice
 the replies, most of them spent on trying things. And of five first replies on `confdialect` this
 session, three were cut at the 14,000-token thinking cap and told to stop thinking (the two that
-were not had thought for 12,900 and 13,400 tokens). So Prosage is Presage with:
+were not had thought for 12,900 and 13,400 tokens). So Prosage is Ecosage with:
 
 - `long_thought`: the cap is about 24,000 tokens (`ChatRequest.reasoning_cap`).
 - `unhurried`: no budget line, no tips about saving replies, no half-time notes; passing checks
@@ -57,7 +57,7 @@ All four are in `Features::OPTIONAL`, so each can be measured alone in either di
 
 **Decided without a measurement, and the first things to check:**
 
-- Prosage stands on Presage's loop. The stored runs would as well support standing it on the
+- Prosage stands on Ecosage's loop. The stored runs would as well support standing it on the
   conventional one (`Mode::features` is the one line to change). Run both.
 - The effort starts at `low` in every mode. The ninth session measured `ratchet-high` at twice the
   time for no more tasks solved; Prosage was not part of that.
@@ -67,19 +67,19 @@ All four are in `Features::OPTIONAL`, so each can be measured alone in either di
 **To measure first**, each bench process alone in a Unix account as the ninth session did:
 
 ```sh
-presage bench -p logfare --tasks confdialect,restyle -n 5 -j 1 --max-turns 60 --time-budget 1200 \
-  --variants presage,default,prosage,prosage+no-examiner,default+examiner+long_thought+routing
-presage bench -p logfare --tasks all -n 2 -j 1 --variants presage,prosage     # what Prosage breaks
+sage bench -p logfare --tasks confdialect,restyle -n 5 -j 1 --max-turns 60 --time-budget 1200 \
+  --variants ecosage,default,prosage,prosage+no-examiner,default+examiner+long_thought+routing
+sage bench -p logfare --tasks all -n 2 -j 1 --variants ecosage,prosage     # what Prosage breaks
 ```
 
-About 1,200 and 1,000 requests. What to read off: whether `prosage` beats `presage` on the two
+About 1,200 and 1,000 requests. What to read off: whether `prosage` beats `ecosage` on the two
 tasks and matches it on the other 22; what the examiner alone is worth (`prosage+no-examiner`); how
 often a hold is a real gap and how often the examiner's mistake (the `examiner` notes of a
 session's log say which cases were held and how the run ended); how long a run waits for the
 examiner (`EXAM_WAIT` is 240 s after it was asked).
 
 **Checked:** `cargo test --workspace` (253: core 230, CLI 19, desktop 4); the three modes through
-`presage bench --scripted`; the app under xvfb (mode picker, a Prosage session, the restart flow,
+`sage bench --scripted`; the app under xvfb (mode picker, a Prosage session, the restart flow,
 the goal rows). Two baseline `confdialect` runs finished before the gateway went down, both
 declared done with hidden cases failing: a bad reference in the second item of a list reported on
 the first item's line; `;x #y` not cut at the comment; a backslash on the last line not refused.
@@ -96,10 +96,10 @@ Part of the tenth session, written next to the work on the modes: `agent.rs`, `h
 `state.rs` were edited additively on purpose, so that the two merge.
 
 **What it does:** a session stored by an earlier run of the app or the CLI is continued by sending it a
-message (`Harness::send_with` brings it back) or by `presage resume <id> [message]`. `README.md` has
+message (`Harness::send_with` brings it back) or by `sage resume <id> [message]`. `README.md` has
 the user's side. The engine's side:
 
-- `crates/presage-core/src/resume.rs`: `Snapshot` (what `snapshot.json` holds), `write_atomic`,
+- `crates/sage-core/src/resume.rs`: `Snapshot` (what `snapshot.json` holds), `write_atomic`,
   `read` and `SessionLock` (an OS file lock on `session.lock`, with the pid written in it for the
   message of whoever is turned away; `File::try_lock`, so a killed process leaves nothing behind).
 - `Agent::checkpoint`/`restore`/`keep_snapshots` (`agent.rs`) and `Session::checkpoint`/`restore` (`state.rs`).
@@ -126,7 +126,7 @@ the tools touched it, which cannot be found out afterwards). Shell exports and t
 
 **Desktop:** a `resumable` session has a working follow-up box and is read from its log until a
 message brings it back (`store.resume`); a session that cannot be continued says why in the
-inspector (`Why`). `PRESAGE_UI_REVIVE=<file>` (see `docs/DESKTOP_UI_BRIEF.md`) lets a scripted
+inspector (`Why`). `SAGE_UI_REVIVE=<file>` (see `docs/DESKTOP_UI_BRIEF.md`) lets a scripted
 session be continued with scripted replies, which is how the restart flow was photographed. The
 goal's UI was seen running for the first time: `/goal` and `/goal clear` answer in the open now (they
 were folded into "1 note"), and the Economy block shows the goal checks.
@@ -141,13 +141,13 @@ Branch `hoplite/kos-bee4c2ad`. DeepSeek V4.1 Flash through Logfare, all 24 tasks
 method and the raw results are in `docs/BENCHMARKS.md` and `docs/results/2026-11-12-opencode/`.
 
 **Where it stands:** in the last head-to-head (three runs per task, each run alone in a Unix
-account) Presage solved 67/72 in 5.7 requests and 59 s a run, OpenCode 1.19.5 70/72 in 10.8
+account) Sage solved 67/72 in 5.7 requests and 59 s a run, OpenCode 1.19.5 70/72 in 10.8
 requests and 116 s, at twice the money. Before the changes below the two were level (45/48 against
 44/48, 10.5 requests against 11.0).
 
 **Changed, each on a measurement:**
 
-- *The review pass is opt-in* (`--with review`, `presage+review`, `StartRequest.with`). It cost 30
+- *The review pass is opt-in* (`--with review`, `ecosage+review`, `StartRequest.with`). It cost 30
   to 51% more replies and changed no outcome in 96 runs against 96. This is the question the
   seventh session left to measure, and its own bar ("within one turn of `no-review`") was missed
   by two to four. `Features::OPTIONAL` lists what is off unless asked for.
@@ -166,7 +166,7 @@ requests and 116 s, at twice the money. Before the changes below the two were le
 
 **Still worse than OpenCode, and not fixed:**
 
-- `confdialect`: 7/20 over the day against OpenCode's 5/5. Presage's runs declare it done after 5
+- `confdialect`: 7/20 over the day against OpenCode's 5/5. Sage's runs declare it done after 5
   to 18 replies with one or two of 39 hidden cases wrong; OpenCode works on it for 25 to 30
   requests. The review pass did not rescue it (1/2 and 0/2 with it). One thing was tried and not
   finished: the note "every check passes, so `finish` is accepted now" comes right before the
@@ -180,7 +180,7 @@ requests and 116 s, at twice the money. Before the changes below the two were le
 **Not done:** grading of the answers; GLM-5.3 beyond six tasks; a run of the other adapters
 (mini-swe-agent, aider, qwen, goose, codex, pi) against the new defaults; a comparison with
 classic after the changes. **How the runs were isolated**, for whoever repeats them: an account
-per parallel run (`useradd`), the key stored per account with `presage key logfare`, the
+per parallel run (`useradd`), the key stored per account with `sage key logfare`, the
 repository `chmod 700`, the binary and `scripts/external` copied to a place all accounts can
 read, `BENCH_EXT_HOME` pointing at one installation of the harnesses, and `/tmp/opencode` made
 world-writable with the sticky bit, because OpenCode's first run as root leaves it owned by root.
@@ -206,7 +206,7 @@ of the call as JSON, then its output, verbatim or, where it has a shape, as that
 a unified or split before and after, a web search as its sources). Replies are set as markdown. A card under the result lists the files the run edited. Stop is in the follow-up box.
 
 **Engine:** `step_end` carries a `change` (path, lines added and removed, hunks) for `edit` and
-`write`, made by the new `presage-core/src/diff.rs`.
+`write`, made by the new `sage-core/src/diff.rs`.
 
 **Push:** a session whose folder is a git repository has a Push button ("Push to GitHub" on a
 github.com remote). `git_state` and `git_push` (`desktop/src-tauri/src/git.rs`) run the user's
@@ -260,7 +260,7 @@ xvfb; the reminder against a real window manager's close button (the app's own b
   place during a run, the same square on a quieter fill.
 
 Checked: `cargo test --workspace` (221) and each of the above under xvfb, light and dark. The
-bench test `an_external_harness_is_run_metered_and_verified_like_presage` was unreliable in the
+bench test `an_external_harness_is_run_metered_and_verified_like_sage` was unreliable in the
 sandbox this was made in: it passed in a full run and failed when run on its own, before these
 changes as well (the ninth session found the cause and fixed it). Not checked: the caption buttons' reach to
 the window's edge with the inspector away, which needs a pointer; anything on Windows or macOS.
@@ -276,9 +276,9 @@ runs of the sixth session, on a defect reproduced in a test, or on both; each is
 
 - Output is 69% of the cost, 69% of it reasoning; fresh input is 29%, about half of that from
   provider cache misses (28 in 17 runs) and not from anything the harness sent. Cached input is 3%.
-- Presage sends 1.4 calls per reply (classic 1.3): its fewer turns come from what is in the first
+- Sage sends 1.4 calls per reply (classic 1.3): its fewer turns come from what is in the first
   message, not from scripts. It writes 82% more output per turn than classic and 25% more in total.
-- Every point Presage lost in the graded answers on a solved task was lost the same way: the run
+- Every point Sage lost in the graded answers on a solved task was lost the same way: the run
   reached the turn limit and ended on the harness's "Stopped: the turn limit was reached" instead
   of a report of its own (`confdialect`, `mutants`; `connpool` on GLM-5.3).
 
@@ -348,7 +348,7 @@ lines. Checked under xvfb only (screenshots of the folded, unfolded, running and
 waiting-for-approval states, and a recording of the folds sliding).
 
 **To measure first** with a fresh quota, before anything else is touched: `-n 3` on
-`--tasks skill,hard --variants presage,no-review,classic,ext:mini`, both models. Three things to
+`--tasks skill,hard --variants ecosage,no-review,classic,ext:mini`, both models. Three things to
 look for: runs that end at the turn limit now end `done` with a summary of their own; turns per
 run with the review are within one of `no-review`; `repairs` and edit errors per run do not rise
 (the anchor resolver refuses where it used to guess).
@@ -389,11 +389,11 @@ by Fable 5.2.
   mini-swe-agent and opencode adapters work; mini-swe-agent no longer carries the task on its
   command line (opencode still does, see point 8 below).
 - **Measured** (one run per task and variant; details and caveats in `docs/BENCHMARKS.md`):
-  DeepSeek, 17 tasks: Presage 16/17 in 14.3 turns, classic 15/17 in 20.8, mini-swe-agent 16/17 in
-  13.9; Presage is the fastest. Presage before this session's changes: 22.7 turns on the skill
-  tasks, 20.1 on the hard ones. GLM-5.3, six tasks: Presage 5/6 in 21.0 turns, classic 5/6 in 25.7,
+  DeepSeek, 17 tasks: Sage 16/17 in 14.3 turns, classic 15/17 in 20.8, mini-swe-agent 16/17 in
+  13.9; Sage is the fastest. Sage before this session's changes: 22.7 turns on the skill
+  tasks, 20.1 on the hard ones. GLM-5.3, six tasks: Sage 5/6 in 21.0 turns, classic 5/6 in 25.7,
   mini-swe-agent 5/6 in 27.3. Graded answers (of 8): DeepSeek 7.53 / 7.06 / 7.24, GLM-5.3 7.33 /
-  5.83 / 6.17 for Presage / classic / mini-swe-agent.
+  5.83 / 6.17 for Sage / classic / mini-swe-agent.
 
 ## Not done
 
@@ -410,12 +410,12 @@ by Fable 5.2.
    workspaces and this repository. Five of 17 classic runs on DeepSeek wandered off after
    `find /`; one read a hidden verifier. `docs/results/2026-11-11-session6/wander.py` finds such
    runs afterwards. Until the bench runs each task in a container or a mount namespace: keep
-   `PRESAGE_HOME` and the bench's working directory outside the repository, delete
-   `crates/presage-cli/bench` for the duration of a run (`git checkout -- crates/presage-cli/bench`
+   `SAGE_HOME` and the bench's working directory outside the repository, delete
+   `crates/sage-cli/bench` for the duration of a run (`git checkout -- crates/sage-cli/bench`
    brings it back; the binary embeds the fixtures), and remove old `work/` folders first.
 6. **Classic gets lost** (done in the seventh session: it is told its `cwd` now) because it was
    never told where its workspace is. That is a fault of the
-   baseline, not a strength of Presage: give classic the `cwd` line before comparing again.
+   baseline, not a strength of Sage: give classic the `cwd` line before comparing again.
 7. **Memory**: still undecided, leaning towards removal. No live run; the replay result of the
    fifth session stands (`docs/results/memory/lessons-replay.txt`).
 8. **opencode, aider and the other adapters**: opencode smoke-tested on two easy tasks. It still
@@ -428,9 +428,9 @@ by Fable 5.2.
 
 ## Suggested order
 
-1. `-n 3`, both models, `--tasks skill,hard --variants presage,classic,ext:mini` with the
+1. `-n 3`, both models, `--tasks skill,hard --variants ecosage,classic,ext:mini` with the
    precautions of point 5. About 5,000 requests: half a daily quota.
-2. `no-review`, `no-survey`, `presage+skill`, `presage+effort:max` on the same tasks; then decide
+2. `no-review`, `no-survey`, `ecosage+skill`, `ecosage+effort:max` on the same tasks; then decide
    review, survey and the GLM-5.3 default.
 3. Isolation per run in the bench; `cwd` line for classic.
 4. Revise each skill until `+skill` wins on its tasks.

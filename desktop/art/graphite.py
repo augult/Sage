@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Graphite - background painting for the Presage "Graphite" theme.
+"""Graphite - background painting for the Sage "Graphite" theme.
 
 Monochrome liquid metal: long silver, pewter and charcoal folds that lean and sway from top to
 bottom, warm grey in the lights and cool blue-grey in the darks, with a few crisp fold edges.

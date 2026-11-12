@@ -3,10 +3,10 @@
 //! The desktop shell: one Tauri command per `Harness` operation, the login shell's `PATH`, the
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
-use presage_core::events::Event;
-use presage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, StartRequest};
-use presage_core::provider::mock::{MockProvider, MockTurn};
-use presage_core::skills::SkillInfo;
+use sage_core::events::Event;
+use sage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, StartRequest};
+use sage_core::provider::mock::{MockProvider, MockTurn};
+use sage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -19,30 +19,30 @@ mod git;
 
 type Reply<T> = Result<T, String>;
 
-/// Headless test hooks. Every `PRESAGE_UI_*` variable is read here and nowhere else.
+/// Headless test hooks. Every `SAGE_UI_*` variable is read here and nowhere else.
 #[derive(Clone, Serialize)]
 struct Hooks {
-    /// `PRESAGE_UI_AUTODEMO=1`: start the walkthrough and open it.
+    /// `SAGE_UI_AUTODEMO=1`: start the walkthrough and open it.
     autodemo: bool,
-    /// `PRESAGE_UI_VIEW=settings|new|session`.
+    /// `SAGE_UI_VIEW=settings|new|session`.
     view: Option<String>,
-    /// `PRESAGE_UI_OPEN=<session id>`.
+    /// `SAGE_UI_OPEN=<session id>`.
     open: Option<String>,
-    /// `PRESAGE_UI_SCRIPTED=<file>`: start a session played by a scripted stand-in and open it
+    /// `SAGE_UI_SCRIPTED=<file>`: start a session played by a scripted stand-in and open it
     /// (see `start_scripted`). The only way to reach a live approval request without a provider.
     scripted: Option<String>,
-    /// `PRESAGE_UI_REVIVE=<file>`: sessions a stand-in played (`scripted`) can be continued, played
+    /// `SAGE_UI_REVIVE=<file>`: sessions a stand-in played (`scripted`) can be continued, played
     /// from here on by the replies this file holds (see `Revival`): the restart flow, shown without a
     /// provider. A real session never needs it.
     revive: Option<String>,
-    /// `PRESAGE_UI_SCRIPT`: UI actions to play once the first view is up (grammar in `ui/js/hooks.js`).
+    /// `SAGE_UI_SCRIPT`: UI actions to play once the first view is up (grammar in `ui/js/hooks.js`).
     script: Option<String>,
-    /// `PRESAGE_UI_THEME=<background>`: the painting behind the glass for this launch, by its id
+    /// `SAGE_UI_THEME=<background>`: the painting behind the glass for this launch, by its id
     /// (`ui/js/themes.js`), whatever the user has chosen.
     theme: Option<String>,
-    /// `PRESAGE_UI_SCHEME=light|dark`: the appearance for this launch.
+    /// `SAGE_UI_SCHEME=light|dark`: the appearance for this launch.
     scheme: Option<String>,
-    /// `PRESAGE_UI_SIZE=<width>x<height>`: window size in logical pixels.
+    /// `SAGE_UI_SIZE=<width>x<height>`: window size in logical pixels.
     #[serde(skip)]
     size: Option<(f64, f64)>,
 }
@@ -50,25 +50,25 @@ struct Hooks {
 impl Hooks {
     fn from_env() -> Self {
         let var = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
-        let size = var("PRESAGE_UI_SIZE").and_then(|v| {
+        let size = var("SAGE_UI_SIZE").and_then(|v| {
             let (w, h) = v.split_once('x')?;
             Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
         });
         Self {
-            autodemo: var("PRESAGE_UI_AUTODEMO").as_deref() == Some("1"),
-            view: var("PRESAGE_UI_VIEW"),
-            open: var("PRESAGE_UI_OPEN"),
-            scripted: var("PRESAGE_UI_SCRIPTED"),
-            revive: var("PRESAGE_UI_REVIVE"),
-            script: var("PRESAGE_UI_SCRIPT"),
-            theme: var("PRESAGE_UI_THEME"),
-            scheme: var("PRESAGE_UI_SCHEME"),
+            autodemo: var("SAGE_UI_AUTODEMO").as_deref() == Some("1"),
+            view: var("SAGE_UI_VIEW"),
+            open: var("SAGE_UI_OPEN"),
+            scripted: var("SAGE_UI_SCRIPTED"),
+            revive: var("SAGE_UI_REVIVE"),
+            script: var("SAGE_UI_SCRIPT"),
+            theme: var("SAGE_UI_THEME"),
+            scheme: var("SAGE_UI_SCHEME"),
             size,
         }
     }
 }
 
-/// What `PRESAGE_UI_SCRIPTED` points at: a task and the replies the stand-in gives, in order.
+/// What `SAGE_UI_SCRIPTED` points at: a task and the replies the stand-in gives, in order.
 #[derive(Deserialize)]
 struct Scripted {
     cwd: String,
@@ -80,7 +80,7 @@ struct Scripted {
     /// Skills the session starts with, by name.
     #[serde(default)]
     skills: Vec<String>,
-    /// `presage` (when left out), `default` or `prosage`.
+    /// `sage` (when left out), `default` or `prosage`.
     #[serde(default)]
     mode: Option<String>,
     /// Milliseconds between streamed chunks of a reply.
@@ -89,8 +89,8 @@ struct Scripted {
     turns: Vec<ScriptedTurn>,
 }
 
-/// What `PRESAGE_UI_REVIVE` points at: the replies that play a session from its next message on.
-/// A file written for `PRESAGE_UI_SCRIPTED` does: what is not `turns` and `delay_ms` is left unread.
+/// What `SAGE_UI_REVIVE` points at: the replies that play a session from its next message on.
+/// A file written for `SAGE_UI_SCRIPTED` does: what is not `turns` and `delay_ms` is left unread.
 #[derive(Deserialize)]
 struct Revival {
     #[serde(default)]
@@ -117,7 +117,7 @@ fn adopt_login_shell_path() {
     use std::process::Stdio;
     use std::time::Duration;
 
-    const MARK: &str = "__PRESAGE_PATH__";
+    const MARK: &str = "__SAGE_PATH__";
     // Started from a terminal, the environment already is that shell's, and an interactive child
     // shell would compete with it for the terminal.
     if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() || std::io::stderr().is_terminal() {
@@ -155,11 +155,11 @@ fn stand_in(turns: Vec<ScriptedTurn>, delay_ms: u64) -> MockProvider {
     provider
 }
 
-/// Test hook: starts the session `PRESAGE_UI_SCRIPTED` describes. The path comes from the
+/// Test hook: starts the session `SAGE_UI_SCRIPTED` describes. The path comes from the
 /// environment only, never from the webview, and no provider is contacted.
 #[tauri::command]
 async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) -> Reply<SessionMeta> {
-    let path = hooks.scripted.as_deref().ok_or("PRESAGE_UI_SCRIPTED is not set")?;
+    let path = hooks.scripted.as_deref().ok_or("SAGE_UI_SCRIPTED is not set")?;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
     let provider = stand_in(script.turns, script.delay_ms);
@@ -281,7 +281,7 @@ async fn pick_folder(app: tauri::AppHandle, start: Option<String>) -> Reply<Opti
         let _ = chosen.send(folder);
     });
     let folder = answer.await.map_err(|_| "the folder dialog closed without an answer".to_string())?;
-    Ok(folder.and_then(|folder| folder.into_path().ok()).map(|path| presage_core::util::plain_path(&path.to_string_lossy())))
+    Ok(folder.and_then(|folder| folder.into_path().ok()).map(|path| sage_core::util::plain_path(&path.to_string_lossy())))
 }
 
 /// Asks for files to attach with the system's own dialog, opened at `start` when that is a folder.
@@ -301,7 +301,7 @@ async fn pick_files(app: tauri::AppHandle, start: Option<String>) -> Reply<Vec<S
         let _ = chosen.send(files);
     });
     let files = answer.await.map_err(|_| "the file dialog closed without an answer".to_string())?;
-    Ok(files.unwrap_or_default().into_iter().filter_map(|file| file.into_path().ok()).map(|path| presage_core::util::plain_path(&path.to_string_lossy())).collect())
+    Ok(files.unwrap_or_default().into_iter().filter_map(|file| file.into_path().ok()).map(|path| sage_core::util::plain_path(&path.to_string_lossy())).collect())
 }
 
 /// Built-in and user skills, plus the project's own when `cwd` is given.
@@ -434,9 +434,23 @@ fn close_sessions(harness: &Harness) {
     }
 }
 
+/// The window's saved choices live in a folder named after the app's identifier, which was
+/// `dev.presage.app` before the rename. Moved once, before the webview opens it.
+#[cfg(windows)]
+fn adopt_former_window_data() {
+    let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) else { return };
+    let (dir, former) = (local.join("dev.sage.app"), local.join("dev.presage.app"));
+    if !dir.exists() && former.is_dir() {
+        let _ = std::fs::rename(former, dir);
+    }
+}
+
 fn main() {
     #[cfg(unix)]
     adopt_login_shell_path();
+
+    #[cfg(windows)]
+    adopt_former_window_data();
 
     let hooks = Hooks::from_env();
     let size = hooks.size;
@@ -504,7 +518,7 @@ fn main() {
             subscribe
         ])
         .build(tauri::generate_context!())
-        .expect("error while starting Presage");
+        .expect("error while starting Sage");
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
             close_sessions(handle.state::<Harness>().inner());

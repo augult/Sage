@@ -52,7 +52,7 @@ function session(model, { state, home, skills }) {
     fact('Folder', tilde(cwd, home), true),
     fact('Model', name),
     fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
-    // The engine also reports ablations here, as "presage without <mechanism>".
+    // The engine also reports ablations here, as "ecosage without <mechanism>".
     fact('Mode', modeLabel(mode)),
     fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
     skills.length > 0 && fact('Skills', skills.join(', ')),

@@ -14,7 +14,7 @@ import { skillsButton } from './skills.js';
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
-const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [], files: [] };
+const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'ecosage', autonomy: 'auto', task: '', skills: [], files: [] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
