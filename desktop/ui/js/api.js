@@ -17,16 +17,18 @@ export const api = {
   /** Test hook: the session `PRESAGE_UI_SCRIPTED` describes. */
   startScripted: () => invoke('start_scripted'),
   /**
-   * `skills` are switched on with this message; the ones the session already has are ignored.
+   * `skills` are switched on with this message; the ones the session already has are ignored. `files` are attached to it, by path.
    * `changes` is what else is the session's from this message on: `{ provider, model, effort, autonomy }`, each optional.
    */
-  sendMessage: (id, text, skills = [], changes = {}) => invoke('send_message', { id, text, skills, changes }),
+  sendMessage: (id, text, skills = [], changes = {}, files = []) => invoke('send_message', { id, text, skills, changes, files }),
   stopSession: (id) => invoke('stop_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
   sessionEvents: (id) => invoke('session_events', { id }),
   readOutput: (id, handle) => invoke('read_output', { id, handle }),
   /** The folder chosen in the system's dialog, opened at `start`; null when it was dismissed. */
   pickFolder: (start) => invoke('pick_folder', { start }),
+  /** The files chosen in the system's dialog, opened at `start`; none when it was dismissed. */
+  pickFiles: (start) => invoke('pick_files', { start }),
   /** Built-in and user skills, plus the project's own when `cwd` is given. */
   skills: (cwd) => invoke('list_skills', { cwd }),
   /** A skill's whole file, front matter included: what `saveSkill` takes. */
@@ -40,10 +42,14 @@ export const api = {
   setSystemPrompt: (template) => invoke('set_system_prompt', { template }),
   /** Empty deletes the file. */
   setGlobalInstructions: (text) => invoke('set_global_instructions', { text }),
-  /** Where a session's workspace stands with git: `{ repo, branch, remote, url, github, upstream, ahead, files }`. */
+  /** Where a session's workspace stands with git: `{ repo, branch, remote, url, github, upstream, ahead, files, commits }`. */
   gitState: (id) => invoke('git_state', { id }),
   /** Commits what is uncommitted under `message` and pushes the branch: `{ commit, remote, branch, pushed }`. */
   gitPush: (id, message) => invoke('git_push', { id, message }),
+  /** What a directory of the session's folder holds: `[{ name, path, dir }]`. Paths are from the folder's root. */
+  listDir: (id, path = '') => invoke('list_dir', { id, path }),
+  readFile: (id, path) => invoke('read_file', { id, path }),
+  writeFile: (id, path, text) => invoke('write_file', { id, path, text }),
 
   /** Resolves with the stored events; `onEvent` receives everything emitted after them. */
   subscribe(id, onEvent) {

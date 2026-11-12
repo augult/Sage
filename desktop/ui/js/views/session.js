@@ -1,14 +1,14 @@
-// The session view: header, timeline, follow-up box, and the inspector beside it.
+// The session view: the timeline, the follow-up box, and the pane beside them.
 
 import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
-import { duration, effortLabel, k, tilde } from '../format.js';
+import { duration, k } from '../format.js';
 import * as store from '../store.js';
-import { chatBar, fitBox, onSendKey, outcomeLook, sessionState } from './common.js';
+import { attachments } from './attach.js';
+import { chatBar, fitBox, onSendKey, roundButton, sessionState } from './common.js';
 import { AUTONOMIES, effortOptions, modelPicker, settingPicker } from './controls.js';
-import { renderInspector } from './inspector.js';
+import { mountPanel } from './panel.js';
 import { openOutput } from './output.js';
-import { openPush } from './push.js';
 import { skillsButton } from './skills.js';
 import { createTimeline } from './timeline.js';
 
@@ -18,13 +18,13 @@ const unfolded = new Map();
 
 export function mountSession(main, side, app, meta) {
   const entry = store.open(meta);
-  const head = h('header.session-head', { 'data-tauri-drag-region': 'deep' });
+  const panel = mountPanel(document.getElementById('inspector-tabs'), side, { id: entry.id, title: meta.title });
   const notice = h('div.view-message', { hidden: true });
   const timelineEl = h('div.timeline');
   const scroller = h('div.timeline-scroll', notice, timelineEl);
   const jump = h('button.jump', { type: 'button', hidden: true, onclick: () => follow(true) });
   const foot = h('footer.session-foot');
-  main.append(head, scroller, jump, foot);
+  main.append(scroller, jump, foot);
 
   if (!unfolded.has(entry.id)) unfolded.set(entry.id, new Map());
   const timeline = createTimeline(timelineEl, {
@@ -62,62 +62,6 @@ export function mountSession(main, side, app, meta) {
   const activeSkills = (model) => (Array.isArray(model.meta.skills) ? model.meta.skills : []);
   const skillTitle = (name) => skillList.find((skill) => skill.name === name)?.title ?? name;
 
-  // Where the workspace stands with git, for the Push button: read on arrival and after every run.
-  let git = null;
-  let gitRead = 0;
-  let gone = false;
-  function readGit() {
-    const asked = ++gitRead;
-    api.gitState(entry.id).then(
-      (state) => {
-        if (gone || asked !== gitRead) return;
-        git = state;
-        render();
-      },
-      // Without it there is no button; the session is whole all the same.
-      () => {},
-    );
-  }
-
-  let headShown = '';
-  function renderHead(model) {
-    const state = sessionState(entry.meta, entry);
-    const { title, cwd, model: modelName, provider, effort, mode, autonomy, simulated } = model.meta;
-    const skills = activeSkills(model).map(skillTitle);
-    const waitingToPush = git?.repo ? git.files.length + git.ahead : 0;
-    const shown = [state.phase, state.outcome, state.verified, state.approvals, title, cwd, modelName, provider, effort, mode, autonomy, simulated, git?.repo, git?.github, waitingToPush, ...skills].join('|');
-    if (shown === headShown) return;
-    headShown = shown;
-    // Only for a folder that is a git repository; where the push goes is the dialog's to say.
-    const push =
-      git?.repo &&
-      h(
-        'button.btn',
-        { id: 'push', type: 'button', onclick: () => openPush({ id: entry.id, title }, readGit) },
-        icon(git.github ? 'github' : 'push', 14),
-        git.github ? 'Push to GitHub' : 'Push',
-        waitingToPush > 0 && h('span.btn-count', String(waitingToPush)),
-      );
-    // With what the session runs, as plain words after the folder.
-    const facts = [
-      modelName,
-      `effort ${effortLabel(effort)}`,
-      // The engine also reports ablations here, as "presage without <mechanism>".
-      mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode,
-      skills.length > 0 && `${skills.length > 1 ? 'skills' : 'skill'} ${skills.join(', ')}`,
-      autonomy === 'ask' && 'asks first',
-      simulated && 'simulated',
-    ].filter(Boolean);
-    head.replaceChildren(
-      h('div.session-top', h('h1.session-name', { title }, title), statusPill(state, model), push),
-      h(
-        'div.session-facts',
-        h('span.session-cwd', { title: cwd }, h('bdi', tilde(cwd, app.state.home))),
-        h('span.session-meta', { title: `${provider} · ${facts.join(' · ')}` }, `· ${facts.join(' · ')}`),
-      ),
-    );
-  }
-
   let stopping = false;
   function requestStop() {
     stopping = true;
@@ -138,9 +82,11 @@ export function mountSession(main, side, app, meta) {
     oninput: () => fitBox(box),
     onkeydown: (event) => onSendKey(event, send),
   });
-  const sendButton = h('button.btn.primary', { id: 'send-followup', type: 'button', onclick: send }, 'Send');
+  const sendButton = roundButton('send-followup', 'Send', icon('send', 16), send);
   // While a run is in progress the same place stops it.
-  const stopButton = h('button.btn', { id: 'stop-session', type: 'button', hidden: true, onclick: requestStop });
+  const stopButton = roundButton('stop-session', 'Stop', icon('stop', 12), requestStop);
+  stopButton.hidden = true;
+  const files = attachments({ start: () => entry.meta.cwd });
   const sendError = h('div.form-error', { role: 'alert', hidden: true });
   let sending = false;
   // Between a message being accepted and its `user` event arriving, the run has not visibly started.
@@ -157,9 +103,10 @@ export function mountSession(main, side, app, meta) {
     sendError.hidden = true;
     render();
     try {
-      await api.sendMessage(entry.id, text, picked, changes());
+      await api.sendMessage(entry.id, text, picked, changes(), files.paths());
       box.value = '';
       picked = [];
+      files.clear();
       fitBox(box);
       awaitingRun = before;
       pinned = true;
@@ -235,7 +182,7 @@ export function mountSession(main, side, app, meta) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(chatBar([swapNote, sendError], box, [stopButton, sendButton], pickSlot));
+    if (!foot.firstChild) foot.append(chatBar({ over: [swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;
@@ -244,7 +191,7 @@ export function mountSession(main, side, app, meta) {
     stopButton.disabled = stopping;
     if (stopShown !== String(stopping)) {
       stopShown = String(stopping);
-      stopButton.replaceChildren(icon('stop', 16), stopping ? 'Stopping…' : 'Stop');
+      stopButton.replaceChildren(stopping ? spinner() : icon('stop', 12));
     }
     // Not while a menu or the Skills dialog may be open: a redraw would close the one and strand the other.
     if (!pickSlot.querySelector('[aria-expanded="true"]') && !document.querySelector('dialog.skills')) renderPickers(model);
@@ -255,7 +202,7 @@ export function mountSession(main, side, app, meta) {
     for (const el of main.querySelectorAll('[data-since]')) el.textContent = duration(Math.max(0, now - Number(el.dataset.since)));
   };
 
-  let sideShown = null;
+  let gone = false;
   let placed = false;
   let wasRunning = null;
   function render() {
@@ -267,18 +214,14 @@ export function mountSession(main, side, app, meta) {
       );
       return;
     }
-    // A run that has just ended may have left something to push.
-    if (wasRunning !== model.running) {
-      wasRunning = model.running;
-      if (!model.running) readGit();
-    }
-    renderHead(model);
     timeline.update(model.items);
     renderFoot(model);
-    if (sideShown?.model !== model || sideShown.rev !== model.sideRev) {
-      sideShown = { model, rev: model.sideRev };
-      renderInspector(side, model);
+    // A run that has just ended may have changed the files and left something to push.
+    if (wasRunning !== model.running) {
+      wasRunning = model.running;
+      if (wasRunning === false && placed) panel.runEnded();
     }
+    panel.update(model, { state: sessionState(entry.meta, entry), home: app.state.home, skills: activeSkills(model).map(skillTitle) });
     if (!placed && !pinned) scroller.scrollTop = place.top;
     placed = true;
     follow();
@@ -308,14 +251,7 @@ export function mountSession(main, side, app, meta) {
       clearInterval(ticker);
       cancelAnimationFrame(frame);
       places.set(entry.id, { pinned, top: scroller.scrollTop });
+      panel.unmount();
     },
   };
-}
-
-function statusPill(state, model) {
-  if (state.approvals > 0) return h('span.status-pill', icon('bang'), 'Waiting for your approval');
-  if (state.phase === 'running') return h('span.status-pill', spinner(), 'Running', h('span', { dataset: { since: model.runStartedAt } }));
-  const look = outcomeLook(state.outcome, state.verified);
-  const label = state.outcome ? look.label : state.phase === 'closed' ? 'Ended without a result' : 'Idle';
-  return h('span.status-pill', icon(look.icon), label, state.phase === 'closed' && h('span.muted', '· read-only'));
 }

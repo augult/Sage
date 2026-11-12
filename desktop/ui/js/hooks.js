@@ -6,7 +6,7 @@
 //   PRESAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
 //   PRESAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
 //       click:<selector>          type:<selector>=><text>     key:<selector>=>Enter (or ctrl+Enter)
-//       scroll:<selector>         wait:<milliseconds>
+//       scroll:<selector>         wait:<milliseconds>         attach:#attach=><path>[,<path>]
 //     An action waits for its element to exist, so scripts need no timing of their own.
 //   PRESAGE_UI_SIZE=<width>x<height>        window size (applied by the shell)
 //   PRESAGE_UI_THEME=<background>           the painting behind the glass for this launch, by id:
@@ -29,6 +29,7 @@ const ACTIONS = {
     el.dispatchEvent(new KeyboardEvent('keydown', { key: keys.at(-1), ctrlKey: keys.includes('ctrl'), metaKey: keys.includes('meta'), bubbles: true, cancelable: true }));
   },
   scroll: (el) => el.scrollIntoView({ block: 'start' }),
+  attach: (el, paths) => el.dispatchEvent(new CustomEvent('attach', { detail: paths.split(',') })),
 };
 
 async function element(selector) {

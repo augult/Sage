@@ -13,6 +13,7 @@
 import { stepVerb, summarize } from '../activity.js';
 import { copyButton, h, icon, spinner } from '../dom.js';
 import { duration, firstLine, plural } from '../format.js';
+import { fileChip } from './attach.js';
 import { known, outcomeLook } from './common.js';
 import { prose } from './prose.js';
 import { changesCard, chevron, fold, hasDetail, stepDetail, stepIcon, stepStat, verbatim } from './tools.js';
@@ -157,7 +158,7 @@ function plainView(block, ctx) {
 const PLAIN = {
   /** What was asked: the one thing in the conversation that the user wrote, set to their side. */
   user({ item }) {
-    return h('section.msg.user', { 'aria-label': item.followUp ? 'Follow-up' : 'Task' }, h('div.user-text', item.text), h('div.msg-actions', copyButton(() => item.text)));
+    return h('section.msg.user', { 'aria-label': item.followUp ? 'Follow-up' : 'Task' }, item.files.length > 0 && h('div.user-files', item.files.map((path) => fileChip(path))), h('div.user-text', item.text), h('div.msg-actions', copyButton(() => item.text)));
   },
 
   text({ text, streaming }) {
@@ -332,7 +333,8 @@ function noteRow(note, ctx) {
 
 const ROWS = {
   thought(item, ctx) {
-    const cells = [h('span.row-icon', icon('spark', 14)), h('span.row-verb', item.streaming ? 'Thinking' : 'Thought'), h('span.row-preview', firstLine(item.text))];
+    // At thought, a spark; what it thought, once it has, a bulb.
+    const cells = [h('span.row-icon', icon(item.streaming ? 'spark' : 'thought', 14)), h('span.row-verb', item.streaming ? 'Thinking' : 'Thought'), h('span.row-preview', firstLine(item.text))];
     return row(ctx, item.key, '.is-thought', cells, () => h('div.row-detail', prose(item.text, { caret: item.streaming })));
   },
 

@@ -1,4 +1,4 @@
-/* The folders of the New session view, the pickers and their menus, Settings, the reminder of unsaved text and the Push dialog. */
+/* The folders of the New session view, the pickers and their menus, Settings, and the reminder of unsaved text. */
 
 /* New session: in the middle of the sheet, a little above its centre, the folder the session will
    work in. The chat bar under it is the session's own (styles/session.css). */
@@ -615,11 +615,6 @@ textarea.editor {
   grid-column: 2 / -1;
 }
 
-.push > .form-error {
-  flex: none;
-  margin: 0 16px 12px;
-}
-
 /* The reminder: what was typed and not saved, before it is left behind. */
 
 .unsaved {
@@ -714,103 +709,4 @@ textarea.editor {
   min-height: 0;
   padding: 14px 20px 20px;
   overflow-y: auto;
-}
-
-/* Push: where it goes, what would go, and the one button that sends it. */
-
-.push {
-  width: min(520px, calc(100vw - 48px));
-}
-
-.push-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  padding: 14px 16px;
-  overflow-y: auto;
-}
-
-.push-target {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.push-repo {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.push-branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 0 6px;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  color: var(--soft);
-  font: var(--text-xs)/16px var(--mono);
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.push-target .muted {
-  flex: none;
-  font-size: var(--text-sm);
-}
-
-.push-standing {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-/* Every file the commit would take. */
-.push-files {
-  flex: none;
-  max-height: 216px;
-  padding: 4px 0;
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--fill-1);
-}
-
-.push-file {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 0 10px;
-  font: var(--text-sm)/20px var(--mono);
-  letter-spacing: 0;
-}
-
-.push-kind {
-  flex: none;
-  width: 9ch;
-  color: var(--muted);
-}
-
-.push-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.push-note {
-  min-width: 0;
-  margin-right: auto;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
-.push .dialog-foot {
-  justify-content: flex-end;
 }

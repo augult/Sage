@@ -127,7 +127,7 @@ const HANDLERS = {
   user(s, ev) {
     closeTurn(s);
     const followUp = s.items.some((item) => item.kind === 'user');
-    s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), followUp });
+    s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), files: Array.isArray(ev.files) ? ev.files.map(str) : [], followUp });
     // Skills switched on with this message stay on for the rest of the session.
     if (Array.isArray(ev.skills) && ev.skills.length) s.meta.skills = [...new Set([...(Array.isArray(s.meta.skills) ? s.meta.skills : []), ...ev.skills.map(str)])];
     s.running = true;

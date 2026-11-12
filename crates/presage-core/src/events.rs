@@ -113,6 +113,9 @@ pub enum EventKind {
         /// Skills switched on with this message.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skills: Vec<String>,
+        /// Files attached to this message, by path.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
     },
     /// What changed about the session with the message before this event, as `SessionStart`
     /// names it. Only what changed is there.

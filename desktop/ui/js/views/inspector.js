@@ -1,11 +1,13 @@
-// The right-hand column: Economy, Watches, and Notes and lessons for the open session.
+// The Economy tab of the pane beside the conversation: what the session is and how it stands, then
+// Economy, Watches, and Notes and lessons.
 
 import { h, icon } from '../dom.js';
-import { bytes, duration, k, pct, plural } from '../format.js';
-import { known, tag } from './common.js';
+import { bytes, duration, effortLabel, k, pct, plural, tilde } from '../format.js';
+import { known, outcomeLook, tag } from './common.js';
 
-export function renderInspector(el, model) {
-  el.replaceChildren(economy(model), watches(model), notes(model));
+/** `about` is `{ state, home, skills }`: the session's state now, the home folder, its skills by title. */
+export function renderInspector(el, model, about) {
+  el.replaceChildren(session(model, about), economy(model), watches(model), notes(model));
 }
 
 function section(title, badge, ...content) {
@@ -22,6 +24,36 @@ function bar(part, whole, tone, restTone = 'plain') {
   if (!(whole > 0)) return null;
   const share = Math.max(0, Math.min(100, (part * 100) / whole));
   return h('div.bar', { 'aria-hidden': 'true' }, h(`span.tone-${tone}`, { style: `width:${share}%` }), h(`span.tone-${restTone}`, { style: `width:${100 - share}%` }));
+}
+
+/** How the session stands, in words. */
+export function standing(state) {
+  if (state.approvals > 0) return 'Waiting for your approval';
+  if (state.phase === 'running') return 'Running';
+  const words = state.outcome ? outcomeLook(state.outcome, state.verified).label : state.phase === 'closed' ? 'Ended without a result' : 'Idle';
+  return state.phase === 'closed' ? `${words} · read-only` : words;
+}
+
+/** One line of what the session is: a name, and a value that keeps to its line. A path keeps its end. */
+function fact(label, value, path = false) {
+  return h('div.fact', h('span.fact-label', label), h(`span.fact-value${path ? '.is-path' : ''}`, { title: value }, path ? h('bdi', value) : value));
+}
+
+function session(model, { state, home, skills }) {
+  const { title, cwd, model: name, effort, mode, autonomy } = model.meta;
+  return section(
+    'Session',
+    null,
+    h('div.side-name', title),
+    fact('Status', standing(state)),
+    fact('Folder', tilde(cwd, home), true),
+    fact('Model', name),
+    fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
+    // The engine also reports ablations here, as "presage without <mechanism>".
+    fact('Mode', mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode),
+    fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
+    skills.length > 0 && fact('Skills', skills.join(', ')),
+  );
 }
 
 function economy(model) {

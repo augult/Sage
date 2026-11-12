@@ -34,7 +34,7 @@ asks about unsaved text and then destroys the window.
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
 `interactive = true`; `req.skills` names the skills to start with), `start_demo`,
-`send_message(id, text, skills?, changes?)` (`send_with`: the skills named are switched on with the
+`send_message(id, text, skills?, changes?, files?)` (`send_with`: the skills named are switched on with the
 message; `changes` is `{ provider?, model?, effort?, autonomy? }`, what the session is to run with
 from this message on), `stop_session(id)`,
 `approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`,
@@ -50,11 +50,23 @@ the built-in back), `instructions()` (`{ system, system_default, system_custom, 
 `set_system_prompt(template?)` (nothing resets to the built-in) and `set_global_instructions(text)`
 (empty deletes the file).
 
-For Push: `git_state(id)` (where the session's workspace stands: `{ repo, branch, remote, url,
-github, upstream, ahead, files }`, `github` being `owner/name` when the remote is on github.com) and
+For the GitHub tab: `git_state(id)` (where the session's workspace stands: `{ repo, branch, remote,
+url, github, upstream, ahead, files, commits }`, `github` being `owner/name` when the remote is on
+github.com, `commits` the latest twelve as `{ hash, subject, when }`, of which the first `ahead`
+are unpushed) and
 `git_push(id, message)` (commits what is uncommitted under `message`, then pushes the branch,
 setting its upstream; `{ commit, remote, branch, pushed }`). Both run the user's own `git`, with
 the user's credentials (`src/git.rs`).
+
+For the Code tab (`src/files.rs`): `list_dir(id, path?)` (what a directory of the session's folder
+holds, folders first, without `.git`: `[{ name, path, dir }]`), `read_file(id, path)` (its text; a
+file over 1 MB or not UTF-8 is refused) and `write_file(id, path, text)` (to a file that is there
+already). Paths are from the folder's root, and nothing outside it is reached.
+
+For attachments: `pick_files(start?)` (the system's file dialog; the chosen paths, or none).
+`start_session` takes them as `req.files` and `send_message` as `files`: each must be a file that
+is there. The engine names them in the `user` event and puts their paths in front of the message
+for the model, which reads the ones it needs with its `read` tool.
 
 GUI apps start with a minimal `PATH`. On unix, first thing in `main`, resolve the login shell's
 `PATH` (`$SHELL -ilc 'printf %s "$PATH"'`, 3 s timeout) and adopt it.
@@ -70,7 +82,12 @@ Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pi
 `#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`; a model's option
 is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
 is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. It opens `dialog.skills`,
-where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. In Settings:
+where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. A chat bar has
+`#attach` (a script attaches by path, `attach:#attach=><path>,<path>`: the system's dialog cannot be
+driven), the box `#task` or `#followup`, and `#start`, `#send-followup` or `#stop-session`. The
+inspector's bar is `#tab-economy`, `#tab-code` and `#tab-github`; in Code a row of the tree is
+`[data-path="src/board.js"]`, the text `#code-text` and its button `#code-save`; in GitHub the
+message is `#push-message` and the button `#push-go`. In Settings:
 `#settings-skills`, `#settings-system`, `#settings-instructions`, a skill's row as
 `[data-skill="debug"]`, `#new-skill`, the text areas `#skill-file`, `#system-prompt`,
 `#global-instructions`, `#settings-keys` with a provider's row as `[data-provider="openai"]`,
@@ -89,7 +106,8 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
 - **Shape.** 8px grid. Corners are barely turned: 2px tags and marks, 3px controls and rows, 4px
-  cards, menus, dialogs and the sheet. Nothing is a pill. Every button is 28px tall, and a
+  cards, menus, dialogs and the sheet. Nothing is a pill; only what sends, stops or attaches in a
+  chat bar is round, a glyph on a 28px disc with no word beside it. Every button is 28px tall, and a
   one-line field beside one is as tall; the small buttons inside a line or a header (copy, a
   diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
   darkens when pointed at.
@@ -115,7 +133,10 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   itself reports about a provider (a gateway that logs prompts) is data: it is the `title` of the
   provider's name in Settings, not a line of its own.
 - **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
-  caption buttons where Windows puts them.
+  caption buttons where Windows puts them. A session has no strip over its conversation: the
+  window drags by the sidebar's and the inspector's.
+- **Icons.** Every glyph is drawn (`ui/js/dom.js`, and the caption buttons in `index.html`) with
+  round ends and turned corners: a vertex is a small arc, a shape's corners are quarter circles.
 
 ### Glass (`ui/js/backdrop.js`, `ui/js/dither.js`, `ui/js/themes.js`, `ui/styles/glass.css`)
 
@@ -164,7 +185,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    when it waits for an approval or, in red, when its run failed. A session's row is as wide as
    its folder's, and its title starts as far in from the row's left as its mark ends from the
    right. The sidebar and the inspector are the
-   same width.
+   same width, until the inspector shows Code, which widens it.
 2. **Main**:
    - *New session*: no title and no picture. At the foot of the sheet is the chat bar, built
      by the same function as a session's (`chatBar` in `ui/js/views/common.js`) so that it is
@@ -190,8 +211,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      button is disabled there. With no key configured, the view leads with "Add an API key", and
      Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
      by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
-   - *Session*: header (title, status, and Push when the folder is a git repository; under it one
-     line: cwd, model, effort, mode, active skills, "asks first", "simulated"). The timeline is a
+   - *Session*: no header: what the session is (title, status, folder, model, effort, mode,
+     autonomy, skills) is the first block of the inspector's Economy tab. The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on
      the right), the agent's words as prose (`ui/js/markdown.js`, `ui/js/views/prose.js`:
      headings, lists, tables, fenced code with a copy button; a link is copied, never followed),
@@ -232,14 +253,15 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        outlasts a rate limit. The request is the same one: no message is added to the
        conversation. An error that will not pass (a bad key, a refused request) still ends the
        run. The rows under the bar keep one line for a run of attempts, the latest.
-     - A run the user stopped ends on its summary alone ("Stopped by the user."): the header
-       already says Stopped.
-     - **Push** (`ui/js/views/push.js`): the button reads "Push to GitHub" when the remote is on
-       github.com, and counts what is waiting (changed files plus commits ahead). Its dialog
-       shows the repository, branch and remote, every file a commit would take and a commit
-       message; one button commits what is uncommitted and pushes the branch.
-     - **Stop** is in the follow-up box, in the place of Send while a run is in progress. The
-       box holds the text and that one button; the pickers are under the box.
+     - A run the user stopped ends on its summary alone ("Stopped by the user.").
+     - A row of the model's thought is led by a spark while it is at it ("Thinking") and by a
+       bulb once it has ("Thought").
+     - **The chat bar** (`ui/js/views/common.js`, `attach.js`): in the box, a + that attaches
+       files (the system's file dialog), the text, and one round button: Send, an arrow, or
+       while a run is in progress Stop, a square. Neither has a word on it. Attached files sit
+       in the box over the text, each a chip with its name and a cross that takes it off, so
+       the box grows upwards by their row; they go with the next message and show over it in
+       the conversation. The pickers are under the box.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
@@ -248,10 +270,11 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      with the next message (`send_message` with `skills`). The model, the effort and the autonomy
      show what the session has; another one picked goes with the next message (`send_message`
      with `changes`) and is the session's from then on, which a `settings` event records and the
-     header then shows. The conversation is kept. With another model picked, a line over the box
+     inspector then shows. The conversation is kept. With another model picked, a line over the box
      says that model will read the whole conversation, and how many tokens, none of it cached;
      with another effort, that some providers reread it. Closed
-     sessions are read-only replays from `session_events`, marked "read-only" in the header, with
+     sessions are read-only replays from `session_events`, marked "read-only" after their status
+     in the inspector, with
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
@@ -277,10 +300,24 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **Instructions**: the user's `AGENTS.md` for every project. The engine puts a line of its own ahead of it in the prompt (and ahead of a project's file), not shown here and not editable: that what follows is standing instructions, not a message in the conversation.
 
      Reset and Delete take a second click ("Confirm"). The data folder is the last line.
-3. **Inspector** (empty unless a session is open): the caption buttons, then Economy from `stats` events (turns, steps, surprises, predictions held of made,
-   prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
-   when simulated, context size, model versus tool time, output kept out of context, repairs,
-   retries, cache misses); Watches with current state; Notes and lessons.
+3. **Inspector** (empty unless a session is open): the caption buttons, then a bar of three
+   buttons that says what the pane shows (`ui/js/views/panel.js`; the choice is kept from one
+   session to the next):
+   - **Economy** (`inspector.js`): Session (title, status, folder, model, effort, mode, autonomy,
+     skills), then Economy from `stats` events (turns, steps, surprises, predictions held of made,
+     prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
+     when simulated, context size, model versus tool time, output kept out of context, repairs,
+     retries, cache misses); Watches with current state; Notes and lessons.
+   - **Code** (`code.js`): the folder's files as a tree, read a folder at a time, and the one
+     that is open as text with line numbers, to edit and Save (Ctrl/Cmd+S). Text typed and not
+     saved is marked by a dot after the file's name and is asked about before it is left (another
+     file, another view, closing the window). After a run the tree and an unedited open file are
+     read again. The pane is wider while it shows Code. There is no syntax colouring.
+   - **GitHub** (`github.js`): the repository, branch and remote; every file a commit would take
+     (one that is still there opens in Code) and a commit message; one button that commits what
+     is uncommitted and pushes the branch, "Commit and push" or "Push"; under it the latest
+     commits, the unpushed ones marked. The tab counts what is waiting (changed files plus
+     commits ahead). A folder that is no repository says so.
 
 ## Build and verify
 
@@ -314,7 +351,9 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
 | `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
 | `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:[data-skill="ui"] .skill-use` |
-| `session-push.jpg` | `PRESAGE_UI_SCRIPTED=<file>` whose `cwd` is a git repository with a github.com remote and whose turns edit files, then `wait:7500;;click:#push` |
+| `session-github.jpg` | a session whose folder is a git repository with a github.com remote, uncommitted changes and unpushed commits, then `click:#tab-github` |
+| `session-code.jpg` | the same session, then `click:#tab-code;;click:[data-path="src"];;click:[data-path="src/board.js"]` |
+| `session-attach.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:.project;;attach:#attach=><path>,<path>;;type:#task=>…'` |
 | `session-error.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
 | `settings.jpg` | `PRESAGE_UI_VIEW=settings` |
 | `settings-keys.jpg` | `PRESAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x PRESAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |

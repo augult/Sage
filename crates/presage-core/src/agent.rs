@@ -124,6 +124,8 @@ pub struct Agent {
     offered_job_tool: bool,
     /// What `retune` changed, to be said in the log once the message it came with is in it.
     announce: Vec<EventKind>,
+    /// Files the user attached to the message that comes next, by path.
+    attached: Vec<String>,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -143,7 +145,13 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new() }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new() }
+    }
+
+    /// Files the user attached to the next message. They go to the model by path, in front of the
+    /// message: it reads the ones it needs with the tool it reads everything else with.
+    pub fn attach(&mut self, files: Vec<String>) {
+        self.attached = files;
     }
 
     /// Applies `change` from the next message on. The conversation stays as it is: another model
@@ -337,7 +345,8 @@ impl Agent {
         let elapsed_before = self.stats.elapsed_ms;
         let features = self.cfg.features;
         let task = text.trim().to_string();
-        self.sink.emit(EventKind::User { text: task.clone(), skills: skills.iter().map(|s| s.name.clone()).collect() });
+        let files = std::mem::take(&mut self.attached);
+        self.sink.emit(EventKind::User { text: task.clone(), skills: skills.iter().map(|s| s.name.clone()).collect(), files: files.clone() });
         for change in std::mem::take(&mut self.announce) {
             self.sink.emit(change);
         }
@@ -345,6 +354,9 @@ impl Agent {
         self.sess.evidence.reviewed = false;
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
         let mut composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
+        if !files.is_empty() {
+            composed = format!("<attached_files>\n{}\n</attached_files>\nThe user attached these files to this message. Read the ones you need.\n\n{composed}", files.join("\n"));
+        }
         if !skills.is_empty() {
             composed = format!("{}\n\n{composed}", skills::blocks(skills));
         }
@@ -688,6 +700,17 @@ mod tests {
         assert!(matches!(&ev[at + 1], EventKind::Settings { provider: Some(p), model: Some(m), effort: Some(e), autonomy: Some(a) } if p == "other" && m == "second" && e == "max" && a == "ask"), "{:?}", ev[at + 1]);
         assert_eq!(ev.iter().filter(|e| matches!(e, EventKind::Settings { .. })).count(), 1);
         assert!(matches!(ev.iter().rfind(|e| matches!(e, EventKind::TurnStart { .. })), Some(EventKind::TurnStart { effort, .. }) if effort == "max"));
+
+        // Files attached to a message go with that message alone, by path and in front of it.
+        r.agent.retune(Retune { provider: Some((Provider::Mock(MockProvider::new(vec![fixed(MockTurn::say("read")), fixed(MockTurn::say("again"))])), "other".into(), "third".into())), ..Default::default() });
+        r.agent.attach(vec!["/tmp/notes.txt".into()]);
+        r.agent.run("Three.".into(), &cancel).await;
+        r.agent.run("Four.".into(), &cancel).await;
+        let sent = requests(&r);
+        assert!(sent[0].last().unwrap().content.starts_with("<attached_files>\n/tmp/notes.txt\n</attached_files>") && sent[0].last().unwrap().content.ends_with("Three."), "{:?}", sent[0].last());
+        assert_eq!(sent[1].last().unwrap().content, "Four.");
+        let attached: Vec<Vec<String>> = events(&r).iter().filter_map(|e| if let EventKind::User { files, .. } = e { Some(files.clone()) } else { None }).collect();
+        assert_eq!(attached, vec![vec![], vec![], vec!["/tmp/notes.txt".to_string()], vec![]]);
     }
 
     fn requests(r: &Rig) -> Vec<Vec<Message>> {

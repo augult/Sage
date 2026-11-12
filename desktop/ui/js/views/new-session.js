@@ -1,12 +1,14 @@
 // The New session view. The chat bar sits where a session's does, at the foot of the sheet: the
-// task and Start, and under them the pickers for model, skills, effort, mode and autonomy. In the
+// task, with what attaches a file before it and what starts after it, and under them the pickers
+// for model, skills, effort, mode and autonomy. In the
 // middle of the sheet is the folder the session will work in: the recent ones to pick from, and
 // the way to another. With no key configured the way to add one is offered there too.
 
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
-import { chatBar, fitBox, onSendKey } from './common.js';
+import { attachments } from './attach.js';
+import { chatBar, fitBox, onSendKey, roundButton } from './common.js';
 import { AUTONOMIES, effortOptions, modelOptions, modelPicker, settingPicker } from './controls.js';
 import { skillsButton } from './skills.js';
 
@@ -17,7 +19,7 @@ const MODES = [
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
-const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [] };
+const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [], files: [] };
 
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
@@ -148,7 +150,8 @@ export function mountNewSession(main, app) {
   });
 
   // With no key there is nothing to start: adding one is the view's one primary action.
-  const startButton = h(`button.btn${keyed.length ? '.primary' : ''}`, { id: 'start', type: 'button', onclick: start }, 'Start');
+  const startButton = roundButton('start', 'Start', icon('send', 16), start, keyed.length > 0);
+  const files = attachments({ start: () => draft.cwd, value: draft.files, onChange: (paths) => (draft.files = paths) });
 
   function start() {
     if (!draft.provider) return fail('No API key.');
@@ -156,9 +159,10 @@ export function mountNewSession(main, app) {
     if (!draft.task.trim()) return fail('No task.');
     return guarded(startButton, async () => {
       const { cwd, provider, model, effort, mode, autonomy } = draft;
-      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: mode === 'classic' ? [] : draft.skills });
+      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: mode === 'classic' ? [] : draft.skills, files: draft.files });
       draft.task = '';
       draft.skills = [];
+      draft.files = [];
       await app.opened(meta);
     });
   }
@@ -174,7 +178,7 @@ export function mountNewSession(main, app) {
         start();
       },
     },
-    chatBar(error, task, startButton, pickers),
+    chatBar({ over: error, files, box: task, buttons: startButton, pickers }),
   );
 
   // The way to a key leads while there is none.
