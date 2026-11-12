@@ -199,7 +199,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 observation,
                 violations: vec![format!("did not finish within {timeout}s")],
                 explicit: expect.is_some(),
-                shell: Some(ShellMeta { cmd, ok: false, held_explicit: false, output_tail: String::new(), completed: None }),
+                shell: Some(ShellMeta { cmd, ok: false, held_explicit: false, outcome: format!("no exit after {timeout}s, still running"), completed: None }),
                 ..Default::default()
             }
         }
@@ -207,11 +207,15 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             let verdict = guard::check(expect.as_ref(), exit.code, &ex.text);
             let ok = exit.code == Some(0);
             let dur = fmt_duration(ex.ms);
-            let output_tail = tail(&lines, 30).join("\n");
+            let outcome = match (verdict.explicit, verdict.held) {
+                (false, _) => exit_text(exit, ex.masked),
+                (true, true) => format!("{}, as predicted", exit_text(exit, ex.masked)),
+                (true, false) => format!("{}, not as predicted ({})", exit_text(exit, ex.masked), verdict.violations.join("; ")),
+            };
             let mut out = StepOutput {
                 explicit: verdict.explicit,
                 violations: verdict.violations.clone(),
-                shell: Some(ShellMeta { cmd: cmd.clone(), ok, held_explicit: verdict.explicit && verdict.held, output_tail: output_tail.clone(), completed: None }),
+                shell: Some(ShellMeta { cmd: cmd.clone(), ok, held_explicit: verdict.explicit && verdict.held, outcome, completed: None }),
                 ..Default::default()
             };
 
@@ -257,10 +261,6 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                         obs.push_str("\n--- where (current file content; anchors work in edit) ---\n");
                         obs.push_str(block.trim_end());
                     }
-                }
-                if sess.features.lessons && !ok && let Some(hint) = sess.lessons.hint(&cmd, &output_tail) {
-                    obs.push_str("\nhint: ");
-                    obs.push_str(&hint);
                 }
                 out.status = StepStatus::Surprise;
                 out.stub = format!("{head} ({})", ex.spill);
