@@ -1,3 +1,0 @@
-[ERROR] db: connect: refused: retry in 5s
-[INFO] api: route: GET /health
-[WARN] auth: token expires soon
