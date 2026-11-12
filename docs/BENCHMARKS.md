@@ -75,10 +75,27 @@ Read from the `examiner` notes of the session logs.
   figure is settled.
 - **Prosage's one loss is a verdict it threw away.** On `audit` the work lacked the file the
   task asks for (`findings.json`). All 17 cases of the examiner failed for that reason, and a
-  script more than three in five of whose cases fail is taken to be at fault and set aside. Not
-  changed yet: such a script should go to the referees like any other.
+  script more than three in five of whose cases fail is taken to be at fault and set aside.
+  Changed afterwards: with referees, such a script goes to them like any other.
 - Six examiner replies ran into the output limit before the script ended and counted as "no
   script". Such a reply is now asked for again, shorter; not yet seen in a run.
+
+### Changed after these runs, and not measured
+
+Read from the logs of the third sample, where 14 of a run's 19 replies came after its own checks
+had passed and four runs used 57 to 60 of their 60 replies:
+
+- **A stopping rule** for a run nothing hurries: after 8 replies that end with the work passing
+  everything it is told to finish or to name what is unmet, after 16 its next reply is its last.
+  The runs that solved a task had 1 to 27 such replies, so the rule can cost a task that a long
+  tail would have solved. `confdialect` (27) is the one to watch.
+- **The router picks one skill**, for what the task asks to be delivered. It had added the
+  `tests` skill to 11 of 29 bug fixes, and those runs wrote test suites and mutation loops.
+- An examination that holds nothing is reported once, without the count of cases set aside: one
+  worker went looking for those cases through the session's folders and printed the harness's
+  key file, which `shell`, `read` and `search` now refuse.
+
+A check of these on eight tasks was stopped after four runs (all solved), which says nothing.
 
 ### What limits these numbers
 

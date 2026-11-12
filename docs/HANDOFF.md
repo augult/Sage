@@ -37,10 +37,19 @@ on what the runs showed.
   examiners' cases are run as soon as the worker's own checks pass (`Agent::early_exam`: on two
   tasks the worker never called `finish` in sixty replies); a script cut at the output limit is
   asked for again; examiners' and referees' replies are kept in the session's `exam/` folder.
-- **Open, seen in the runs:** Prosage's one loss (`audit`) had an examiner that was right. The
-  work lacked `findings.json`, all 17 cases failed for it, and a script most of whose cases
-  fail is set aside as faulty (`Tally::mostly_failing`). Send such a script to the referees
-  instead. And Prosage's worker writes its own check scripts into `/tmp`, which runs share.
+- Changed after reading the logs, **unit-tested and not measured** (the owner stopped the check):
+  a stopping rule for an unhurried run (`Agent::settling`: told to finish after 8 replies with
+  nothing left failing, last reply after 16); the router picks one skill (`examiner::routed`);
+  an examination that holds nothing is said once and without the count of cases set aside
+  (`EXAM_STANDS`); the key file is refused to the tools (`script.rs`, `names_key_file`); with
+  referees, a script most of whose cases fail goes to them instead of being set aside, which is
+  what lost `audit`.
+- **First thing to run:** `prosage` on all 24 tasks, `-n 2`, against the 47/48 and 24/24 above.
+  The stopping rule is the change that can cost tasks: look at `confdialect`, `rollup`,
+  `nplusone` and `ttlcache`, and at runs that end `budget` with "was not declared finished".
+- **Open:** Prosage's worker writes its own check scripts into `/tmp`, which runs share.
+- **The Logfare key reached the provider in one request** (the run that printed the key file).
+  Rotate it.
 
 **How the runs were made:** `sage bench -p logfare -m deepseek-v4.1-flash-1017 --variants
 ecosage,prosage,ext:opencode -n 1 -j 1 --max-turns 60 --time-budget 1200`, the 24 tasks split

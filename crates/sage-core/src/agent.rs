@@ -169,6 +169,11 @@ pub struct Agent {
     exam_seen: Option<(u64, bool)>,
     /// The worker has been told that an examination let its work stand.
     exam_said: bool,
+    /// Replies of this message that ended with the work settled: changed, passing its own checks
+    /// and, where it is examined, let stand by the examination.
+    settled_replies: u32,
+    /// Winding down after too many of them: 1 when the next reply is the last, 2 once it is in.
+    wind: u8,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -209,6 +214,11 @@ const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows
 /// What a worker whose work will be examined is told with its task, as it is told of a goal: a
 /// check it knows of is one it can work towards.
 const EXAM_BRIEFING: &str = "When you call `finish`, this work is examined. Engineers who never see it write check cases from the task and the documents it names alone, rule by rule, with the errors and the limits the text states, and their cases are run against it. A failing case that the text bears out holds `finish`. What the work is held to is the text, all of it, and not only the checks you can see.";
+/// Replies that end with the work settled before an unhurried worker is told to finish or to name
+/// what is unmet, and before its next reply is its last. Not measured: the live runs that solved
+/// a task had 1 to 27 such replies, the ones that ran to the limit 55 and more.
+const SETTLED_NUDGE: u32 = 8;
+const SETTLED_LAST: u32 = 16;
 /// What the worker is told when an examination before `finish` holds nothing.
 const EXAM_STANDS: &str = "[examiner] The work as it stands was examined: engineers who have not seen it wrote cases from the task and its documents alone, and nothing in their cases that the text bears out fails. If everything the task asks for is done, call `finish`. It is examined again if you change it.";
 /// How long after it was asked for an examiner's script is still waited for at `finish`. A run
@@ -300,7 +310,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, exam_seen: None, exam_said: false, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
+        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, exam_seen: None, exam_said: false, settled_replies: 0, wind: 0, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -844,7 +854,7 @@ impl Agent {
     /// The reply about to be asked for is the last the budget allows: the turn limit is reached with
     /// it, or the time left would not see another one through. `turns_used` counts those before it.
     fn last_reply(&self, run_started: Instant, turns_used: u32, slowest: Duration) -> bool {
-        if turns_used + 1 >= self.cfg.max_turns {
+        if self.wind > 0 || turns_used + 1 >= self.cfg.max_turns {
             return true;
         }
         let Some(budget) = self.cfg.time_budget.filter(|_| turns_used > 0) else { return false };
@@ -983,6 +993,8 @@ impl Agent {
         }
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
+        self.settled_replies = 0;
+        self.wind = 0;
         self.save_point(true);
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
@@ -993,6 +1005,10 @@ impl Agent {
         let outcome = loop {
             if cancel.is_cancelled() {
                 break Outcome { status: FinishStatus::Stopped, summary: "Stopped by the user.".into(), verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
+            }
+            if self.wind == 2 {
+                let summary = format!("Stopped: the work had passed every check there is for {} replies and was not declared finished.", self.settled_replies);
+                break Outcome { status: FinishStatus::Budget, summary, verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
             }
             let out_of_time = self.cfg.time_budget.is_some_and(|b| run_started.elapsed() >= b);
             if turns_used >= self.cfg.max_turns || out_of_time {
@@ -1174,6 +1190,9 @@ impl Agent {
                 .run(&calls)
                 .await;
             slowest = slowest.max(turn_started.elapsed());
+            if self.wind == 1 && landing {
+                self.wind = 2;
+            }
 
             self.surprise_streak = if result.surprised { self.surprise_streak + 1 } else { 0 };
             let mut footer = result.footer.clone();
@@ -1211,6 +1230,9 @@ impl Agent {
             }
             notes.extend(self.budget_notes(run_started, turns_used, slowest));
             if result.finished.is_none() && result.asked.is_none() && !closing && let Some(said) = self.early_exam(run_started, cancel).await {
+                notes.push(said);
+            }
+            if features.unhurried && result.finished.is_none() && result.asked.is_none() && !closing && let Some(said) = self.settling() {
                 notes.push(said);
             }
             for n in &notes {
@@ -1307,11 +1329,49 @@ impl Agent {
         self.exam_note = None;
         let hold = self.examine(run_started, cancel).await;
         self.exam_seen = Some((self.sess.evidence.epoch, hold.is_none()));
+        // A gap the text bears out: the work is not settled, however long it looked so.
+        if hold.is_some() {
+            self.settled_replies = 0;
+        }
         if hold.is_some() && let EffortPolicy::Ratchet(_) = self.cfg.effort && let Some(next) = self.effort.next() {
             self.sink.emit(EventKind::Effort { turn: self.turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "the examiner's cases found a gap".into() });
             self.effort = next;
         }
         hold
+    }
+
+    /// The work is settled: this message changed something, the worker's own checks pass on it
+    /// and, where examiners have cases for it, their examination let it stand as it is.
+    fn settled(&self) -> bool {
+        let ev = &self.sess.evidence;
+        if ev.epoch <= ev.message_epoch || !ev.fresh() {
+            return false;
+        }
+        let examined = self.cfg.features.examiner && self.exams.iter().any(|exam| !matches!(exam.script, Script::Gone));
+        !examined || self.exam_seen == Some((ev.epoch, true))
+    }
+
+    /// The stopping rule of a run that nothing hurries. Such a run is not told how many replies
+    /// it has, and on the first live runs four of 24 used all sixty: the work passed everything
+    /// after a few replies and its author went on writing cases of its own. So replies that end
+    /// with the work settled are counted. After `SETTLED_NUDGE` of them the worker is told to
+    /// finish or to name what is unmet; after `SETTLED_LAST` its next reply is its last. A case
+    /// of the examiners' that the referees confirm starts the count again.
+    fn settling(&mut self) -> Option<String> {
+        if !self.settled() {
+            return None;
+        }
+        self.settled_replies += 1;
+        match self.settled_replies {
+            SETTLED_NUDGE => Some(format!("The work has passed every check there is for {SETTLED_NUDGE} replies now and has not been declared finished. More cases of your own are unlikely to show what those did not. If something the task asks for is still unmet, name it and fix it; otherwise call `finish`.")),
+            SETTLED_LAST => {
+                self.wind = 1;
+                // The budget's own note for a last reply is not said on top of this one.
+                self.budget_marks = 3;
+                Some(format!("The work has passed every check there is for {SETTLED_LAST} replies. Your next reply is the last one: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands."))
+            }
+            _ => None,
+        }
     }
 
     /// The examination, as soon as there is something to examine: the worker's own checks pass
@@ -2602,6 +2662,45 @@ mod tests {
         let mut r = prosage_rig("agent-route-empty", &["routing"], vec![upper("beta", "BETA")], "NONE", "ui");
         r.agent.run("Fix it.".into(), &CancellationToken::new()).await;
         assert_eq!(requests(&r).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unhurried_run_that_keeps_testing_settled_work_is_told_to_finish_and_then_stopped() {
+        let edit_and_check = || fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"}))]));
+        let look = || fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -c . n.txt", "expect_exit": "0"}))]));
+        let mut turns = vec![edit_and_check()];
+        turns.extend((0..30).map(|_| look()));
+        let mut r = prosage_rig("agent-settled", &["unhurried"], turns, "NONE", "NONE");
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        // Sixteen replies with nothing left failing, one last reply, and the run is ended for it.
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Budget, true, SETTLED_LAST + 1));
+        assert_eq!(out.summary, "Stopped: the work had passed every check there is for 16 replies and was not declared finished.");
+        let sent = turns_sent(&r);
+        let said = |reply: u32| sent[reply as usize].last().unwrap().content.clone();
+        assert!(said(SETTLED_NUDGE).contains("for 8 replies now and has not been declared finished") && !said(SETTLED_NUDGE - 1).contains("has not been declared finished"), "{}", said(SETTLED_NUDGE));
+        assert!(said(SETTLED_LAST).contains("Your next reply is the last one: call `finish` in it") && !said(SETTLED_LAST).contains("the budget allows"), "{}", said(SETTLED_LAST));
+
+        // A `finish` in that last reply is taken, and one before it ends the run as ever.
+        let mut turns = vec![edit_and_check()];
+        turns.extend((0..15).map(|_| look()));
+        turns.push(finish());
+        let mut r = prosage_rig("agent-settled-finish", &["unhurried"], turns, "NONE", "NONE");
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, SETTLED_LAST + 1));
+
+        // A run that is hurried anyway has its budget for this, and work nothing has passed yet is not settled.
+        let mut turns = vec![edit_and_check()];
+        turns.extend((0..20).map(|_| look()));
+        turns.push(finish());
+        let mut r = prosage_rig("agent-settled-hurried", &[], turns, "NONE", "NONE");
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 22));
+        let mut turns: Vec<TurnFn> = (0..20).map(|_| look()).collect();
+        turns.push(fixed(MockTurn::say("It has three lines.")));
+        let mut r = prosage_rig("agent-settled-nothing", &["unhurried"], turns, "NONE", "NONE");
+        r.agent.cfg.interactive = true;
+        let out = r.agent.run("How long is n.txt?".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Yielded, 21));
     }
 
     #[tokio::test]
