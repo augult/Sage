@@ -152,12 +152,15 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 ### Panes
 
 1. **Sidebar**: app mark and name (the strip drags the window), New session, a tab per folder
-   (chevron, the folder's name, how many sessions; the folders stand in the order of their newest
+   (chevron and the folder's name; the folders stand in the order of their newest
    session, each opens onto its sessions and stays shut once shut, kept by the window; a shut
-   folder shows the glyph of a session in it that is running or waiting for an approval; going to
+   folder shows the mark of a session in it that is running or waiting for an approval; going to
    a session opens its folder; the walkthrough's throwaway workspaces share one folder, "demo"),
-   under each its sessions (title, model, status glyph, relative time), and Settings. The sidebar
-   and the inspector are the same width.
+   under each its sessions, and Settings. A session is one line: its title, and after it a mark
+   only while it has something to say, a dot with a ring that swells while it runs, a triangle
+   when it waits for an approval or, in red, when its run failed. A session's row is as wide as
+   its folder's, with the title under the folder's name. The sidebar and the inspector are the
+   same width.
 2. **Main**:
    - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
      it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the

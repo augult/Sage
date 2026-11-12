@@ -1,6 +1,6 @@
 // Small pieces shared by the views.
 
-import { h, icon, spinner } from '../dom.js';
+import { h, icon, pulse } from '../dom.js';
 import { pendingApprovals } from '../model.js';
 import * as prefs from '../prefs.js';
 
@@ -61,12 +61,16 @@ export function sessionState(meta, entry) {
   return { phase, outcome: model.outcome?.status ?? null, verified: model.outcome?.verified === true, approvals: phase === 'running' ? pendingApprovals(model) : 0 };
 }
 
-/** The status glyph for a session, with its meaning as a tooltip and accessible name. */
-export function stateGlyph(state) {
-  if (state.approvals > 0) return glyph(icon('bang'), 'alert', 'Waiting for your approval');
-  if (state.phase === 'running') return glyph(spinner(), 'quiet', 'Running');
-  const look = outcomeLook(state.outcome, state.verified);
-  return glyph(icon(look.icon), look.tone, look.label);
+/**
+ * The mark after a session's title, with its meaning as a tooltip and accessible name: a triangle
+ * when it wants a look (an approval to give, a run that failed), a dot while it runs. A session
+ * at rest has none.
+ */
+export function stateMark(state) {
+  if (state.approvals > 0) return glyph(icon('warn', 14), 'alert', 'Waiting for your approval');
+  if (state.phase === 'running') return glyph(pulse(14), 'quiet', 'Running');
+  if (state.outcome === 'error') return glyph(icon('warn', 14), 'danger', 'Failed');
+  return null;
 }
 
 function glyph(mark, tone, label) {

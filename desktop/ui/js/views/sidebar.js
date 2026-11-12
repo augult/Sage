@@ -1,11 +1,12 @@
 // The session list in the sidebar: a tab per folder, which opens onto that folder's sessions.
 // Folders stand in the order of their newest session, and so do the sessions under each.
+// A session is its title, and after it a mark only while it has something to say.
 
 import { h } from '../dom.js';
-import { ago, plainPath, tilde } from '../format.js';
+import { plainPath, tilde } from '../format.js';
 import * as prefs from '../prefs.js';
 import * as store from '../store.js';
-import { sessionState, stateGlyph } from './common.js';
+import { sessionState, stateMark } from './common.js';
 import { chevron } from './tools.js';
 
 /** The folder a session is listed under. The walkthrough's throwaway workspaces share the one above them. */
@@ -40,7 +41,7 @@ let marked = null;
 export function listSignature(sessions, currentId) {
   const states = sessions.map((meta) => {
     const state = sessionState(meta, store.get(meta.id));
-    return [meta.id, state.phase, state.outcome, state.verified, state.approvals, ago(meta.created)].join(':');
+    return [meta.id, meta.title, state.phase, state.outcome, state.approvals].join(':');
   });
   return `${currentId}|${states.join('|')}`;
 }
@@ -80,12 +81,8 @@ export function renderSessionList(list, sessions, currentId, home, onOpen) {
           h(
             'button.session-item',
             { type: 'button', dataset: { session: meta.id }, 'aria-current': meta.id === currentId ? 'page' : null, onclick: () => onOpen(meta.id) },
-            stateGlyph(states[i]),
-            h(
-              'span.session-text',
-              h('span.session-title', meta.title || 'Untitled session'),
-              h('span.session-sub', h('span.session-model', meta.model), meta.simulated && h('span.sim', { title: 'Simulated' }, 'SIM'), h('span.session-time', ago(meta.created))),
-            ),
+            h('span.session-title', meta.title || 'Untitled session'),
+            stateMark(states[i]),
           ),
         ),
       ),
@@ -112,8 +109,7 @@ export function renderSessionList(list, sessions, currentId, home, onOpen) {
       },
       chevron(),
       h('span.folder-name', names.get(path)),
-      busy && h('span.folder-state', stateGlyph(busy)),
-      h('span.folder-count', String(metas.length)),
+      busy && h('span.folder-state', stateMark(busy)),
     );
     return h('div.side-folder', toggle, body);
   });
