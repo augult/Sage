@@ -32,6 +32,21 @@ export function onSendKey(event, send) {
   }
 }
 
+/**
+ * The chat bar, the same in a new session as in a running one, so that it is where it was once
+ * the first message is sent: what went wrong over it, the box with the text and what sends it,
+ * and under the box the pickers.
+ */
+export function chatBar(error, box, buttons, pickers) {
+  return h('div.chat', error, h('div.composer', box, buttons), h('div.composer-under', pickers));
+}
+
+/** Makes a message box as tall as its text. The stylesheet says how tall it may get. */
+export function fitBox(box) {
+  box.style.height = 'auto';
+  box.style.height = `${box.scrollHeight}px`;
+}
+
 // Tones carry meaning without hue (styles/base.css): `good` held or done, `alert` wants a look,
 // `quiet` is the model's side at work, `danger` failed, `plain` is none of these.
 

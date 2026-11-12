@@ -56,8 +56,7 @@ body {
 }
 
 /* Whole cells, stretched without smoothing: the dots stay square. */
-#backdrop-dither,
-.hero-dither {
+#backdrop-dither {
   image-rendering: pixelated;
 }
 
@@ -81,8 +80,8 @@ body {
   );
 }
 
-/* Dither off: the painting alone, here and in the New session view. */
-:root[data-dither="off"] :is(#backdrop-dither, .hero-dither) {
+/* Dither off: the painting alone. */
+:root[data-dither="off"] #backdrop-dither {
   display: none;
 }
 
@@ -124,21 +123,4 @@ body {
 
 :root[data-theme="none"] #main {
   background: var(--flat-sheet);
-}
-
-/* The paintings, by background. Each is made by its script in desktop/art. */
-:root[data-theme="ember"] {
-  --art: url("../themes/ember/art.webp");
-}
-
-:root[data-theme="orchid"] {
-  --art: url("../themes/orchid/art.webp");
-}
-
-:root[data-theme="tide"] {
-  --art: url("../themes/tide/art.webp");
-}
-
-:root[data-theme="graphite"] {
-  --art: url("../themes/graphite/art.webp");
 }

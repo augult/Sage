@@ -838,20 +838,21 @@ mod tests {
         // Template, the user's instructions, the project's, then the skills in the order asked for.
         let built_in = prompt::system_prompt(&Features::presage());
         let expected = h.system_prompt(&req()).unwrap();
-        assert_eq!(expected, format!("{built_in}\n\n# User instructions\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\nRun make test.\n\n# Skill: {}\n\n{}\n\n# Skill: House rules\n\nNo globals.", skill("security").title, skill("security").body));
+        let (user, project) = (prompt::USER_NOTE, prompt::project_note("AGENTS.md"));
+        assert_eq!(expected, format!("{built_in}\n\n# User instructions\n\n{user}\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\n{project}\n\nRun make test.\n\n# Skill: {}\n\n{}\n\n# Skill: House rules\n\nNo globals.", skill("security").title, skill("security").body));
 
         // A template for one run wins over the user's, which wins over the built-in one.
         let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
         h.set_system_prompt(Some("Mine. {finish}")).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\nUse tabs.");
-        assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), "Be terse.\n\n# User instructions\n\nUse tabs.");
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\n{user}\n\nUse tabs."));
+        assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), format!("Be terse.\n\n# User instructions\n\n{user}\n\nUse tabs."));
         h.set_system_prompt(None).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\nUse tabs."));
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\n{user}\n\nUse tabs."));
 
         // The baseline is the classic prompt and nothing else.
         assert_eq!(h.system_prompt(&StartRequest { mode: Some("classic".into()), system_prompt: Some("Be terse.".into()), ..req() }).unwrap(), prompt::SYSTEM_CLASSIC);
         let no_scripts = h.system_prompt(&StartRequest { without: vec!["scripts".into()], ..bare.clone() }).unwrap();
-        assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
+        assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\n{user}\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
 
         let unknown = StartRequest { skills: vec!["ui".into(), "telepathy".into()], ..req() };
         assert!(h.system_prompt(&unknown).unwrap_err().contains("unknown skill \"telepathy\""));

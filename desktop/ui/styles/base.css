@@ -573,13 +573,6 @@ textarea.input {
   font-weight: 600;
 }
 
-.kbd {
-  flex: none;
-  color: var(--faint);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-
 dialog {
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);

@@ -159,16 +159,21 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    under each its sessions, and Settings. A session is one line: its title, and after it a mark
    only while it has something to say, a dot with a ring that swells while it runs, a triangle
    when it waits for an approval or, in red, when its run failed. A session's row is as wide as
-   its folder's, with the title under the folder's name. The sidebar and the inspector are the
+   its folder's, and its title starts as far in from the row's left as its mark ends from the
+   right. The sidebar and the inspector are the
    same width.
 2. **Main**:
-   - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
-     it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
-     workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
-     then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
+   - *New session*: no title and no picture. At the foot of the sheet is the chat bar, built
+     by the same function as a session's (`chatBar` in `ui/js/views/common.js`) so that it is
+     in the same place once the first message is sent: a box with the task and Start, and under
+     the box the pickers. In the middle of the sheet, a little above its centre, is the folder:
+     the folders of up to five recent sessions by name (the full path is the `title`), the
+     chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
+     `pick_folder`); a folder picked there joins the list. Under the box,
+     pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
      which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
-     (Auto / Ask), and Start (Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
-     other of the two breaks the line, as Shift+Enter always does). The model menu lists models under their provider
+     (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
+     other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
@@ -229,7 +234,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        github.com, and counts what is waiting (changed files plus commits ahead). Its dialog
        shows the repository, branch and remote, every file a commit would take and a commit
        message; one button commits what is uncommitted and pushes the branch.
-     - **Stop** is in the follow-up box, in the place of Send while a run is in progress.
+     - **Stop** is in the follow-up box, in the place of Send while a run is in progress. The
+       box holds the text and that one button; the Skills button is under the box.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
@@ -258,7 +264,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        edited one brings the built-in back, Delete removes a custom one. "New skill" opens a file
        with the front matter (`name`, `title`, `description`) to fill in.
      - **System prompt**: the template in effect, with Reset while it is the user's own.
-     - **Instructions**: the user's `AGENTS.md` for every project.
+     - **Instructions**: the user's `AGENTS.md` for every project. The engine puts a line of its own ahead of it in the prompt (and ahead of a project's file), not shown here and not editable: that what follows is standing instructions, not a message in the conversation.
 
      Reset and Delete take a second click ("Confirm"). The data folder is the last line.
 3. **Inspector** (empty unless a session is open): the caption buttons, then Economy from `stats` events (turns, steps, surprises, predictions held of made,
@@ -293,7 +299,6 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | `new-session.jpg` | `PRESAGE_UI_VIEW=new`, no key |
 | `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
 | `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
-| `new-session-backgrounds.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-theme'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
 | `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
 | `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |

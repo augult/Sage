@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
 import { duration, effortLabel, tilde } from '../format.js';
 import * as store from '../store.js';
-import { onSendKey, outcomeLook, sendKeyLabel, sessionState } from './common.js';
+import { chatBar, fitBox, onSendKey, outcomeLook, sessionState } from './common.js';
 import { skillsPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
@@ -134,7 +134,7 @@ export function mountSession(main, side, app, meta) {
     rows: 1,
     'aria-label': 'Follow-up message',
     placeholder: 'Follow-up',
-    oninput: fitBox,
+    oninput: () => fitBox(box),
     onkeydown: (event) => onSendKey(event, send),
   });
   const sendButton = h('button.btn.primary', { id: 'send-followup', type: 'button', onclick: send }, 'Send');
@@ -148,11 +148,6 @@ export function mountSession(main, side, app, meta) {
   let awaitingRun = null;
   const messages = () => entry.model.items.filter((item) => item.kind === 'user').length;
 
-  function fitBox() {
-    box.style.height = 'auto';
-    box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
-  }
-
   async function send() {
     const text = box.value.trim();
     if (!text || sendButton.disabled || sendButton.hidden) return;
@@ -164,7 +159,7 @@ export function mountSession(main, side, app, meta) {
       await api.sendMessage(entry.id, text, picked);
       box.value = '';
       picked = [];
-      fitBox();
+      fitBox(box);
       awaitingRun = before;
       pinned = true;
     } catch (problem) {
@@ -199,7 +194,7 @@ export function mountSession(main, side, app, meta) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(h('div.composer', sendError, box, h('div.composer-row', skillsSlot, h('span.kbd', sendKeyLabel()), stopButton, sendButton)));
+    if (!foot.firstChild) foot.append(chatBar(sendError, box, [stopButton, sendButton], skillsSlot));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;

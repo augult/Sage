@@ -1,14 +1,12 @@
-// The New session view: one composer. The workspace sits above the task; the model, skills, effort,
-// mode and autonomy are pickers in the bar below it, next to Start. Above the composer the chosen
-// background hangs uncovered, with its dither moving over it and the picker that changes it.
-// With no key configured the view leads with the way to add one.
+// The New session view. The chat bar sits where a session's does, at the foot of the sheet: the
+// task and Start, and under them the pickers for model, skills, effort, mode and autonomy. In the
+// middle of the sheet is the folder the session will work in: the recent ones to pick from, and
+// the way to another. With no key configured the way to add one is offered there too.
 
 import { api } from '../api.js';
-import { createDither } from '../dither.js';
 import { h, icon } from '../dom.js';
-import { plainPath, tilde } from '../format.js';
-import * as themes from '../themes.js';
-import { onSendKey, sendKeyLabel } from './common.js';
+import { folderNames, plainPath, tilde } from '../format.js';
+import { chatBar, fitBox, onSendKey } from './common.js';
 import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
 
 const MODES = [
@@ -24,17 +22,13 @@ const AUTONOMIES = [
 // for every new session.
 const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'presage', autonomy: 'auto', task: '', skills: [] };
 
-// The dots over the painting as it is, unpressed: stronger than behind the panes, on any picture.
-const HERO_INKS = { light: [255, 255, 255, 0.36], dark: [0, 0, 0, 0.26] };
-
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
-  return [...new Set(sessions.filter((meta) => !meta.simulated).map((meta) => plainPath(meta.cwd)))].slice(0, 4);
+  return [...new Set(sessions.filter((meta) => !meta.simulated).map((meta) => plainPath(meta.cwd)))].slice(0, 5);
 }
 
 export function mountNewSession(main, app) {
   const { state } = app;
-  const home = state.home;
   const keyed = state.providers.filter((provider) => provider.has_key);
   const recent = recentWorkspaces(app.sessions);
 
@@ -56,7 +50,7 @@ export function mountNewSession(main, app) {
     error.hidden = false;
   };
 
-  /** Runs `action` with `button` disabled, and shows its failure in the form. */
+  /** Runs `action` with `button` disabled, and shows its failure over the chat bar. */
   async function guarded(button, action) {
     button.disabled = true;
     error.hidden = true;
@@ -68,49 +62,51 @@ export function mountNewSession(main, app) {
     button.disabled = false;
   }
 
-  const openSettings = () => app.show({ name: 'settings' });
-
-  // Workspace
-  const workspace = h('input', {
-    id: 'workspace',
-    type: 'text',
-    value: draft.cwd,
-    placeholder: 'Folder',
-    'aria-label': 'Workspace',
-    spellcheck: 'false',
-    autocomplete: 'off',
-    oninput: () => {
-      draft.cwd = workspace.value;
-      clearTimeout(skillsTimer);
-      skillsTimer = setTimeout(loadSkills, 300);
-    },
-  });
+  // The folder: the recent ones with the chosen one checked, and the way to any other.
+  const projects = h('div.projects', { role: 'group', 'aria-label': 'Folder' });
+  function drawProjects() {
+    const within = projects.contains(document.activeElement);
+    // One picked with the dialog is listed as well, ahead of the recent ones.
+    const paths = draft.cwd && !recent.includes(draft.cwd) ? [draft.cwd, ...recent] : recent;
+    const names = folderNames(paths);
+    const check = () => {
+      const mark = icon('check', 14);
+      mark.classList.add('project-check');
+      return mark;
+    };
+    projects.replaceChildren(
+      ...paths.map((path) =>
+        h(
+          'button.project',
+          { type: 'button', title: tilde(path, state.home), 'aria-pressed': String(path === draft.cwd), onclick: () => setWorkspace(path) },
+          icon('folder', 14),
+          h('span.project-name', names.get(path)),
+          check(),
+        ),
+      ),
+      paths.length > 0 && h('div.projects-rule'),
+      h(
+        'button.project',
+        {
+          id: 'browse-workspace',
+          type: 'button',
+          // The system's own dialog: Explorer, Finder, the desktop's file chooser.
+          onclick: (event) =>
+            guarded(event.currentTarget, async () => {
+              const picked = await api.pickFolder(draft.cwd || null);
+              if (picked) setWorkspace(plainPath(picked));
+            }),
+        },
+        'Choose folder…',
+      ),
+    );
+    if (within) projects.querySelector('[aria-pressed="true"]')?.focus();
+  }
   const setWorkspace = (path) => {
-    workspace.value = path;
     draft.cwd = path;
+    drawProjects();
     loadSkills();
   };
-  const browse = h(
-    'button.btn.quiet',
-    {
-      id: 'browse-workspace',
-      type: 'button',
-      // The system's own dialog: Explorer, Finder, the desktop's file chooser.
-      onclick: (event) =>
-        guarded(event.currentTarget, async () => {
-          const picked = await api.pickFolder(workspacePath() || null);
-          if (picked) setWorkspace(picked);
-        }),
-    },
-    'Browse…',
-  );
-  const recentRow =
-    recent.length > 0 &&
-    h(
-      'div.recent',
-      'Recent',
-      recent.map((path) => h('button', { type: 'button', title: path, onclick: () => setWorkspace(path) }, tilde(path, home))),
-    );
 
   // Provider and model are one choice: a model, listed under the provider that serves it.
   const served = new Map();
@@ -151,9 +147,7 @@ export function mountNewSession(main, app) {
   // Skills sit next to the model. The list follows the folder: a project brings its own.
   const skillsSlot = h('span.pick-slot');
   let skillList = [];
-  let skillsTimer = 0;
   let skillsAsked = 0;
-  const workspacePath = () => draft.cwd.trim().replace(/^~(?=\/|$)/, home);
   function drawSkills() {
     const open = skillsSlot.querySelector('.pick[aria-expanded="true"]');
     // The classic baseline takes no skills.
@@ -162,9 +156,8 @@ export function mountNewSession(main, app) {
     if (open) skillsSlot.querySelector('.pick:not(:disabled)')?.click();
   }
   async function loadSkills() {
-    clearTimeout(skillsTimer);
     const asked = ++skillsAsked;
-    const listed = await api.skills(workspacePath() || null);
+    const listed = await api.skills(draft.cwd || null);
     // A slower answer for an earlier folder must not replace a later one.
     if (asked !== skillsAsked || JSON.stringify(listed) === JSON.stringify(skillList)) return;
     skillList = listed;
@@ -172,16 +165,20 @@ export function mountNewSession(main, app) {
     draft.skills = draft.skills.filter((name) => listed.some((skill) => skill.name === name));
     drawSkills();
   }
+  drawProjects();
   drawSkills();
   loadSkills();
 
   const task = h('textarea', {
     id: 'task',
-    rows: 5,
+    rows: 1,
     value: draft.task,
     placeholder: 'Task',
     'aria-label': 'Task',
-    oninput: () => (draft.task = task.value),
+    oninput: () => {
+      draft.task = task.value;
+      fitBox(task);
+    },
     onkeydown: (event) => onSendKey(event, start),
   });
 
@@ -189,12 +186,11 @@ export function mountNewSession(main, app) {
   const startButton = h(`button.btn${keyed.length ? '.primary' : ''}`, { id: 'start', type: 'button', onclick: start }, 'Start');
 
   function start() {
-    const cwd = workspacePath();
     if (!draft.provider) return fail('No API key.');
-    if (!cwd) return fail('No folder.');
+    if (!draft.cwd) return fail('No folder.');
     if (!draft.task.trim()) return fail('No task.');
     return guarded(startButton, async () => {
-      const { provider, model, effort, mode, autonomy } = draft;
+      const { cwd, provider, model, effort, mode, autonomy } = draft;
       const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: mode === 'classic' ? [] : draft.skills });
       draft.task = '';
       draft.skills = [];
@@ -202,68 +198,30 @@ export function mountNewSession(main, app) {
     });
   }
 
-  const form = h(
-    'div.new-session',
+  const pickers = [modelPicker, skillsSlot, setting('effort', 'Effort', effortOptions(state.effort)), setting('mode', 'Mode', MODES, drawSkills), setting('autonomy', 'Autonomy', AUTONOMIES)];
+  const foot = h(
+    'footer.session-foot',
     {
-      // From any other control of the form. In the task box the key is the user's choice.
+      // From a picker. In the task box the key is the user's choice.
       onkeydown: (event) => {
         if (event.target === task || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
         start();
       },
     },
-    h(
-      'section.composer-card',
-      h('div.composer-top', h('label.workspace-pick', icon('folder', 14), workspace), browse),
-      task,
-      h(
-        'div.composer-bar',
-        modelPicker,
-        skillsSlot,
-        setting('effort', 'Effort', effortOptions(state.effort)),
-        setting('mode', 'Mode', MODES, drawSkills),
-        setting('autonomy', 'Autonomy', AUTONOMIES),
-        startButton,
-      ),
-    ),
-    h('div.composer-foot', recentRow, h('span.kbd', sendKeyLabel())),
-    error,
+    chatBar(error, task, startButton, pickers),
   );
 
   // The way to a key leads while there is none.
-  const lead = keyed.length === 0 && h('button.btn.primary', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key');
+  const lead = keyed.length === 0 && h('button.btn.primary', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings' }) }, icon('key', 14), 'Add an API key');
 
-  // The background, uncovered, and the picker that changes it.
-  const canvas = h('canvas.hero-dither', { 'aria-hidden': 'true' });
-  const dither = createDither(canvas, themes.ditherLook(themes.current(), 3, HERO_INKS));
-  const restyle = (now) => {
-    dither.restyle(themes.ditherLook(now, 3, HERO_INKS));
-    dither.run(now.motion && now.dither);
-  };
-  const forget = themes.onChange(restyle);
-  const backgrounds = picker({
-    id: 'pick-theme',
-    name: 'Background',
-    groups: [{ options: themes.BACKGROUNDS.map((background) => ({ value: background.id, label: background.name })) }],
-    value: themes.chosen().background,
-    align: 'end',
-    onChange: (background) => themes.choose({ background }),
-  });
-  const hero = h('div.hero', h('div.hero-art', canvas), h('div.hero-pick', backgrounds));
-
-  main.append(
-    h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
-    h('div.view-body', h('div.view-column', h('div.view-lead', h('h1.view-title', 'New session'), lead), hero, form)),
-  );
-  restyle(themes.current());
+  main.append(h('header.view-head', { 'data-tauri-drag-region': 'deep' }), h('div.new-body', projects, lead), foot);
+  fitBox(task);
   // Start where the first thing is still missing.
-  (lead || (draft.cwd ? task : workspace)).focus();
+  (lead || (draft.cwd ? task : projects.querySelector('#browse-workspace'))).focus();
   return {
     unmount() {
-      clearTimeout(skillsTimer);
       skillsAsked++;
-      forget();
-      dither.stop();
     },
   };
 }

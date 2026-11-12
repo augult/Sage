@@ -3,7 +3,7 @@
 // A session is its title, and after it a mark only while it has something to say.
 
 import { h } from '../dom.js';
-import { plainPath, tilde } from '../format.js';
+import { folderNames, plainPath, tilde } from '../format.js';
 import * as prefs from '../prefs.js';
 import * as store from '../store.js';
 import { sessionState, stateMark } from './common.js';
@@ -13,14 +13,6 @@ import { chevron } from './tools.js';
 function folderOf(meta) {
   const path = plainPath(meta.cwd).replace(/[\\/]+$/, '');
   return meta.simulated && /[\\/]demo[\\/][^\\/]+$/.test(path) ? path.replace(/[\\/][^\\/]+$/, '') : path;
-}
-
-/** A name per folder: its own, with its parent's in front where two folders share one. */
-function folderNames(paths) {
-  const tail = (path, parts) => path.split(/[\\/]/).filter(Boolean).slice(-parts).join('/') || path || 'No folder';
-  const taken = new Map();
-  for (const path of paths) taken.set(tail(path, 1), (taken.get(tail(path, 1)) ?? 0) + 1);
-  return new Map(paths.map((path) => [path, tail(path, taken.get(tail(path, 1)) > 1 ? 2 : 1)]));
 }
 
 // The folders the user has shut, kept between launches. Every other one is open.
