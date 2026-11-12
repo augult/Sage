@@ -122,7 +122,7 @@ function gather(items, ctx) {
     } else if (item.kind === 'approval' && awaitsAnswer(item, ctx)) {
       blocks.push({ kind: 'approval', key: item.key, sig: item.state, item });
     } else {
-      // The environment snapshot, a note, a lesson, an answered request: rows like any other.
+      // The environment snapshot, a note, what became of the goal, an answered request: rows like any other.
       into(item).rows.push(item);
     }
   }
@@ -320,7 +320,7 @@ function row(ctx, key, classes, cells, detail, attributes = {}) {
 }
 
 /**
- * A quiet row for what happened beside the steps: a watch change, a note, a lesson, a retry.
+ * A quiet row for what happened beside the steps: a watch change, a note, a goal check, a retry.
  * One that is long or runs over several lines shows its first line and unfolds the rest.
  */
 function noteRow(note, ctx) {

@@ -2,7 +2,7 @@
 
 mod bench;
 
-use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, Stats};
+use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, GoalState, Stats};
 use presage_core::harness::{Harness, SessionStatus, StartRequest};
 use presage_core::tools::StepStatus;
 use presage_core::util::{fmt_bytes, fmt_duration};
@@ -14,6 +14,7 @@ presage — an expectation-driven agent harness
 
 USAGE
   presage run [options] <task…>     work on a task in a directory, unattended
+  presage run --goal <condition>    the same, and until a check agrees that the condition holds
   presage demo                      play the scripted walkthrough (no key, no network)
   presage bench [options]           compare harness variants on built-in tasks (presage bench --help)
   presage skills [show <name>]      list skills, or print one
@@ -28,9 +29,13 @@ OPTIONS for run
   -p, --provider <id>      logfare | deepseek | openrouter | … (`presage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
+      --goal <condition>   keep working until a check of its own agrees that the condition holds: `finish`
+                           is refused, with what is missing, while it does not. Without a task, the goal
+                           is the task; a task that reads `/goal <condition>` does the same
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch on a mechanism that is off unless asked for: review (repeatable)
+      --with <name>        switch on a mechanism that is off unless asked for (repeatable; there is
+                           none at present)
       --skill <name>       switch a skill on (repeatable, or comma-separated)
       --system-file <path> system prompt template for this run
       --no-project-instructions
@@ -87,6 +92,21 @@ fn indent(text: &str, prefix: &str, max_lines: usize) -> String {
         out.push(format!("{prefix}… {} more lines", lines.len() - max_lines));
     }
     out.join("\n")
+}
+
+/// What a goal event says, in one line.
+fn goal_line(p: &Paint, goal: &str, state: GoalState, met: bool, reason: &str) -> String {
+    let goal = presage_core::util::one_line(goal, 120);
+    match state {
+        GoalState::Set => format!("{} goal: {goal}", p.cyan("◦")),
+        GoalState::Cleared => format!("{} goal cleared: {goal}", p.cyan("◦")),
+        GoalState::Status if goal.is_empty() => format!("{} no goal is set", p.cyan("◦")),
+        GoalState::Status => format!("{} goal ({}): {goal}", p.cyan("◦"), if met { "met" } else { "open" }),
+        GoalState::Met => format!("{} {}", p.green("◦"), p.green("goal met")),
+        GoalState::NotMet => format!("{} {}", p.yellow("◦"), p.yellow(&format!("goal not met: {reason}"))),
+        GoalState::Unchecked => format!("{} {}", p.yellow("◦"), p.yellow(&format!("goal not checked: {reason}"))),
+        GoalState::Open => format!("{} {}", p.yellow("◦"), p.yellow(&format!("goal still open: {reason}"))),
+    }
 }
 
 struct Printer {
@@ -182,7 +202,7 @@ impl Printer {
                 eprintln!("    {} {line}", p.cyan("◦"));
             }
             EventKind::Note { text, .. } => eprintln!("    {} {}", p.yellow("◦"), p.yellow(text)),
-            EventKind::Lesson { learned, text } => eprintln!("    {} {} {text}", p.cyan("◦"), if *learned { "learned:" } else { "recalled:" }),
+            EventKind::Goal { goal, state, met, reason } => eprintln!("    {}", goal_line(p, goal, *state, *met, reason)),
             EventKind::Effort { from, to, reason, .. } => eprintln!("    {} effort {from} → {to} ({reason})", p.yellow("◦")),
             EventKind::Settings { model, effort, autonomy, .. } => {
                 let changed: Vec<String> = [("model", model), ("effort", effort), ("autonomy", autonomy)].iter().filter_map(|(name, value)| value.as_ref().map(|value| format!("{name} {value}"))).collect();
@@ -230,6 +250,7 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
             "-p" | "--provider" => req.provider = Some(value(a)?),
             "-m" | "--model" => req.model = Some(value(a)?),
             "-e" | "--effort" => req.effort = Some(value(a)?),
+            "--goal" => req.goal = Some(value(a)?),
             "--classic" => req.mode = Some("classic".into()),
             "--without" => req.without.push(value(a)?),
             "--with" => req.with.push(value(a)?),
@@ -250,7 +271,11 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
         }
     }
     req.task = task.join(" ");
-    if !needs_task {
+    if req.goal.as_deref().is_some_and(|goal| goal.trim().is_empty()) {
+        return Err("--goal needs a condition".into());
+    }
+    // A goal with no task is the task: nothing is read from stdin for it.
+    if !needs_task || (req.goal.is_some() && req.task.trim().is_empty()) {
         return Ok(RunArgs { req, verbose, json, events });
     }
     if req.task.trim() == "-" || req.task.trim().is_empty() {
@@ -322,7 +347,11 @@ async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: boo
     eprintln!("{}", f.printer.stats_block(&f.stats, simulated));
     let Some((status, summary, verified, evidence)) = f.result else { return ExitCode::from(2) };
     if json {
-        let out = serde_json::json!({"id": id, "status": status, "verified": verified, "evidence": evidence, "summary": summary, "stats": f.stats, "simulated": simulated});
+        let mut out = serde_json::json!({"id": id, "status": status, "verified": verified, "evidence": evidence, "summary": summary, "stats": f.stats, "simulated": simulated});
+        // Only for a session that has one: `{"text": …, "met": …}`.
+        if let Some(goal) = h.meta(id).ok().and_then(|meta| meta.goal) {
+            out["goal"] = serde_json::json!(goal);
+        }
         println!("{out}");
     }
     let _ = std::io::stdout().flush();
@@ -459,5 +488,38 @@ async fn main() -> ExitCode {
             }
         },
         Some(other) => fail(format!("unknown command {other:?}; try `presage --help`")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn a_goal_is_an_option_of_run_and_can_stand_in_for_the_task() {
+        let run = parse_run(&args(&["--goal", "the tests pass", "-C", "/tmp"]), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str(), run.req.cwd.as_str()), (Some("the tests pass"), "", "/tmp"));
+        let run = parse_run(&args(&["Fix", "the", "pager", "--goal", "the tests pass"]), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str()), (Some("the tests pass"), "Fix the pager"));
+        // `/goal` typed as the task is left for the engine to read, as it is in the desktop app.
+        let run = parse_run(&args(&["/goal the tests pass"]), true).unwrap();
+        assert_eq!((run.req.goal, run.req.task.as_str()), (None, "/goal the tests pass"));
+        assert!(parse_run(&args(&["--goal"]), true).is_err() && parse_run(&args(&["--goal", " ", "x"]), true).is_err());
+        assert!(HELP.contains("--goal <condition>") && !HELP.contains("review"));
+    }
+
+    #[test]
+    fn what_became_of_the_goal_is_printed_in_a_line() {
+        let p = Paint { on: false };
+        assert_eq!(goal_line(&p, "the tests pass", GoalState::Set, false, ""), "◦ goal: the tests pass");
+        assert_eq!(goal_line(&p, "the tests pass", GoalState::NotMet, false, "two fail"), "◦ goal not met: two fail");
+        assert_eq!(goal_line(&p, "the tests pass", GoalState::Met, true, ""), "◦ goal met");
+        assert_eq!(goal_line(&p, "the tests pass", GoalState::Unchecked, false, "the check's request failed"), "◦ goal not checked: the check's request failed");
+        assert_eq!(goal_line(&p, "the tests pass", GoalState::Status, true, ""), "◦ goal (met): the tests pass");
+        assert_eq!(goal_line(&p, "", GoalState::Status, false, ""), "◦ no goal is set");
     }
 }

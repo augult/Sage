@@ -59,8 +59,32 @@ pub struct CallInfo {
     pub arguments: String,
 }
 
+/// What a `Goal` event records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalState {
+    /// A goal was set: with the start of the session, or by `/goal <condition>`.
+    Set,
+    /// It was removed by `/goal clear`.
+    Cleared,
+    /// It was asked about with `/goal`.
+    Status,
+    /// The check at a `finish` found it met.
+    Met,
+    /// The check found it unmet and the `finish` was refused; `reason` says what is missing.
+    NotMet,
+    /// The check could not be made or read and the `finish` was accepted without it; `reason` says why.
+    Unchecked,
+    /// The `finish` was accepted with the goal still open, after refusals that changed nothing.
+    Open,
+}
+
+/// A field a stored log lacks (or has, from a mechanism since retired) does not keep it from loading.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Stats {
+    /// Model requests answered: the replies of the conversation, and the requests that finish
+    /// checks make on the side.
     pub turns: u32,
     pub steps: u32,
     pub skipped: u32,
@@ -83,7 +107,6 @@ pub struct Stats {
     pub retries: u32,
     pub cache_misses: u32,
     pub cache_busts: u32,
-    pub lessons_learned: u32,
     pub elapsed_ms: u64,
     pub model_ms: u64,
     pub tool_ms: u64,
@@ -210,10 +233,16 @@ pub enum EventKind {
         kind: String,
         text: String,
     },
-    Lesson {
-        /// True when just learned, false when recalled from an earlier session.
-        learned: bool,
-        text: String,
+    /// The session's goal: set, asked about, cleared, or checked at a `finish`.
+    Goal {
+        /// The completion condition. Empty where there is none to report.
+        goal: String,
+        state: GoalState,
+        /// Whether the goal is met as of this event.
+        met: bool,
+        /// What is missing, or why the goal was not checked. Empty otherwise.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
     },
     Approval {
         id: u64,
@@ -294,5 +323,18 @@ mod tests {
         assert_eq!(s["type"], "stats");
         assert_eq!(s["stats"]["turns"], 0);
         assert!(EventKind::Delta { turn: 1, channel: Channel::Reasoning, text: "t".into() }.transient());
+
+        let g = serde_json::to_value(EventKind::Goal { goal: "all tests pass".into(), state: GoalState::NotMet, met: false, reason: "two fail".into() }).unwrap();
+        assert_eq!(g, serde_json::json!({"type": "goal", "goal": "all tests pass", "state": "not_met", "met": false, "reason": "two fail"}));
+    }
+
+    #[test]
+    fn what_a_retired_mechanism_wrote_is_not_an_event_and_its_numbers_are_passed_over() {
+        // The memory feature's event has no type any more: whoever reads a log skips the line.
+        assert!(serde_json::from_str::<Event>(r#"{"seq":4,"ts":1,"type":"lesson","learned":true,"text":"`pytest` fails here"}"#).is_err());
+        assert!(serde_json::from_str::<Event>(r#"{"seq":5,"ts":1,"type":"review","text":"one review pass"}"#).is_err());
+        // Its counter in stored statistics is ignored, and a counter the log predates is zero.
+        let old: Event = serde_json::from_str(r#"{"seq":6,"ts":1,"type":"stats","stats":{"turns":3,"lessons_learned":2,"cost":0.5}}"#).unwrap();
+        assert!(matches!(old.kind, EventKind::Stats { stats } if stats.turns == 3 && stats.cost == 0.5 && stats.steps == 0));
     }
 }
