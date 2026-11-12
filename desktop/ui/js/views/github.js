@@ -55,10 +55,8 @@ export function githubView(session, { onState, openFile, onDiscard }) {
     body.replaceChildren(
       h(
         'div.push-target',
-        icon(state.github ? 'github' : 'branch', 16),
-        h('span.push-repo', { title: state.github ?? state.url }, state.github ?? state.url ?? 'No remote'),
-        h('span.push-branch', state.branch ?? 'No branch checked out'),
-        state.remote && state.branch && h('span.muted', `→ ${state.remote}`),
+        h('div.push-line', icon(state.github ? 'github' : 'branch', 16), h('span.push-repo', { title: state.github ?? state.url }, state.github ?? state.url ?? 'No remote')),
+        h('div.push-line', h('span.push-branch', { title: state.branch }, state.branch ?? 'No branch checked out'), state.remote && state.branch && h('span.muted', `→ ${state.remote}`)),
       ),
       h('div.push-standing', standing),
       // Only with something to commit: its files, and the message they go under.

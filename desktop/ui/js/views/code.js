@@ -315,15 +315,15 @@ export function codeView(session) {
     event.preventDefault();
     closeMenu();
     const folder = entry === null ? '' : entry.dir ? entry.path : parentOf(entry.path);
-    const item = (label, act) =>
-      h('button.menu-item', { type: 'button', role: 'menuitem', onclick: () => (closeMenu(), act()) }, h('span.menu-text', label));
+    const item = (label, act, look = '', glyph = null) =>
+      h(`button.menu-item${look}`, { type: 'button', role: 'menuitem', onclick: () => (closeMenu(), act()) }, h('span.menu-text', label), glyph && h('span.menu-glyph', icon(glyph, 14)));
     const items = [
       entry && !entry.dir && item('Open', () => open(entry.path)),
       item('New file', () => startNew(folder, false)),
       item('New folder', () => startNew(folder, true)),
       entry && h('div.menu-rule'),
       entry && item('Rename', () => startRename(entry.path)),
-      entry && item('Delete', () => askDelete(entry)),
+      entry && item('Delete', () => askDelete(entry), '.is-danger', 'backspace'),
       entry && h('div.menu-rule'),
       entry && item('Copy path', () => copyText(entry.path)),
     ];

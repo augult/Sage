@@ -42,6 +42,8 @@ const ICONS = {
   check: 'M3.6 8.5l2.6 2.6a.6.6 0 0 0 .9 0l5.3-6',
   bang: 'M8 3.2v5.6M8 11.9v.2',
   cross: 'M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2',
+  // The backspace key: a cap that points left, with a cross in it. Deletes.
+  backspace: 'M5.2 4.3a1 1 0 0 1 .8-.3h6a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H6a1 1 0 0 1-.8-.3L2.8 8.6a1 1 0 0 1 0-1.2zM8 6.4l3.2 3.2M11.2 6.4L8 9.6',
   dash: 'M4.5 8h7',
   denied: 'M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM4.2 4.2l7.6 7.6',
   clock: 'M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 5.2V8l2 1.4',

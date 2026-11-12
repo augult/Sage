@@ -230,6 +230,36 @@
   min-width: 160px;
 }
 
+/* An icon at the end of a row, where a shortcut would be: the menu's own icon rule hides any other. */
+.context-menu .menu-item {
+  align-items: center;
+  gap: 16px;
+  padding-right: 10px;
+}
+
+.context-menu .menu-text {
+  flex: 1;
+}
+
+.menu-glyph {
+  display: flex;
+  flex: none;
+}
+
+.menu-glyph > .icon {
+  display: block;
+}
+
+/* What cannot be undone reads red, its icon too. */
+.context-menu .menu-item.is-danger {
+  color: var(--danger);
+}
+
+.context-menu .menu-item.is-danger:hover,
+.context-menu .menu-item.is-danger:focus-visible {
+  background: var(--danger-soft);
+}
+
 .menu-rule {
   flex: none;
   height: 1px;
