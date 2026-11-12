@@ -3,7 +3,7 @@
 use crate::provider::openai::Dialect;
 use crate::util::home_dir;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub struct ProviderDef {
@@ -164,6 +164,10 @@ pub struct Config {
     /// Provider id → API key. Environment variables take precedence over these.
     #[serde(default)]
     pub keys: BTreeMap<String, String>,
+    /// Providers whose key was removed in Settings: their environment variable is not used
+    /// either, until a key is given again.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub env_off: BTreeSet<String>,
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
@@ -219,7 +223,8 @@ impl Config {
     }
 
     pub fn key_for(&self, id: &str, key_env: &str) -> Option<String> {
-        std::env::var(key_env).ok().filter(|k| !k.trim().is_empty()).or_else(|| self.keys.get(id).cloned()).map(|k| k.trim().to_string()).filter(|k| !k.is_empty())
+        let env = (!self.env_off.contains(id)).then(|| std::env::var(key_env).ok()).flatten();
+        env.filter(|k| !k.trim().is_empty()).or_else(|| self.keys.get(id).cloned()).map(|k| k.trim().to_string()).filter(|k| !k.is_empty())
     }
 
     pub fn has_key(&self, def: &ProviderDef) -> bool {
@@ -420,5 +425,19 @@ mod tests {
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         assert!(Config::load(Path::new("/nonexistent/config.json")).keys.is_empty());
+    }
+
+    #[test]
+    fn a_removed_key_turns_off_the_environment_s_too() {
+        // A variable no other test or system sets.
+        let var = "PRESAGE_TEST_ENV_OFF_KEY";
+        unsafe { std::env::set_var(var, "from-env") };
+        let mut c = Config::default();
+        assert_eq!(c.key_for("p", var).as_deref(), Some("from-env"));
+        c.env_off.insert("p".into());
+        assert_eq!(c.key_for("p", var), None);
+        c.keys.insert("p".into(), "stored".into());
+        assert_eq!(c.key_for("p", var).as_deref(), Some("stored"));
+        unsafe { std::env::remove_var(var) };
     }
 }

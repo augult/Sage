@@ -12,7 +12,7 @@ import { tilde } from '../format.js';
 import * as prefs from '../prefs.js';
 import * as themes from '../themes.js';
 import { track, watchUnsaved } from '../unsaved.js';
-import { SEND_KEYS, sendKey, sendKeyLabel } from './common.js';
+import { SEND_KEYS, closeButton, openDialog, sendKey, sendKeyLabel } from './common.js';
 import { effortOptions, field, hint, modelOptions, picker, providerOptions, radioChips } from './controls.js';
 
 // What removing a key or a failed save has to say, per provider, once the view is redrawn.
@@ -23,7 +23,6 @@ const drafts = new Map();
 // Keys typed and not handed to the engine yet, by provider: `{ name, value }`.
 const typedKeys = new Map();
 // The provider of the user's own being added: what its form holds, or null while the form is shut.
-let adding = null;
 // The skill whose file is open: its name, NEW, or null.
 let openSkill = null;
 const NEW = '+new';
@@ -74,19 +73,12 @@ export function mountSettings(main, app) {
   // Only these two follow the engine state. The editors below them keep what is being typed.
   function draw() {
     const { state } = app;
-    // Opens the form that adds a provider, or shuts it and lets go of what it held.
-    const toggleForm = () => {
-      adding = adding ? null : { name: '', url: '', models: '', key: '' };
-      draw();
-      live.querySelector('#new-provider-name')?.focus();
-    };
     live.replaceChildren(
       h(
         'section.panel',
         { id: 'settings-keys' },
-        h('div.section-head', h('h2.section-title', 'API keys'), h('button.btn.quiet', { id: 'add-provider', type: 'button', onclick: toggleForm }, icon('plus', 12), 'Add provider')),
+        h('div.section-head', h('h2.section-title', 'API keys'), h('button.btn.quiet', { id: 'add-provider', type: 'button', onclick: () => providerDialog(refresh) }, icon('plus', 12), 'Add provider')),
         state.providers.map((provider) => providerRow(provider, refresh)),
-        adding && providerForm(refresh, toggleForm),
       ),
       defaults(state, refresh),
     );
@@ -255,41 +247,48 @@ function providerRow(provider, refresh) {
 }
 
 /**
- * The form that adds a provider of the user's own: any address that answers as OpenAI's chat
- * completions do. What is typed stays in `adding` across a redraw, until it is added or cancelled.
+ * The dialog that adds a provider of the user's own: any address that answers as OpenAI's chat
+ * completions do. Add (or Enter) adds it and closes; Cancel, the cross or Escape let it go.
  */
-function providerForm(refresh, cancel) {
+function providerDialog(refresh) {
   const error = h('div.form-error', { role: 'alert', hidden: true });
-  const box = (key, label, placeholder, type = 'text') => {
-    const input = h('input.input', { id: `new-provider-${key}`, type, autocomplete: 'off', spellcheck: 'false', value: adding[key], placeholder, 'aria-label': label, oninput: () => (adding[key] = input.value) });
-    return input;
-  };
+  const box = (key, label, placeholder, type = 'text') => h('input.input', { id: `new-provider-${key}`, type, autocomplete: 'off', spellcheck: 'false', placeholder, 'aria-label': label });
+  const [name, url, models, key] = [box('name', 'Provider name', 'My provider'), box('url', 'Provider address', 'https://…/v1'), box('models', 'Models', 'model-a, model-b'), box('key', 'API key', 'Optional', 'password')];
   const add = h('button.btn.primary', { id: 'new-provider-add', type: 'submit' }, 'Add');
 
-  async function submit(event) {
-    event.preventDefault();
-    add.disabled = true;
-    error.hidden = true;
-    try {
-      await track(api.addProvider({ name: adding.name, baseUrl: adding.url, models: adding.models.split(/[,\n]/), key: adding.key }));
-      adding = null;
-      await refresh();
-    } catch (problem) {
-      error.textContent = String(problem);
-      error.hidden = false;
-      add.disabled = false;
+  openDialog('provider-dialog', (close) => {
+    async function submit(event) {
+      event.preventDefault();
+      add.disabled = true;
+      error.hidden = true;
+      try {
+        await track(api.addProvider({ name: name.value, baseUrl: url.value, models: models.value.split(/[,\n]/), key: key.value }));
+        close();
+        await refresh();
+      } catch (problem) {
+        error.textContent = String(problem);
+        error.hidden = false;
+        add.disabled = false;
+      }
     }
-  }
-
-  return h(
-    'form.provider-new',
-    { id: 'new-provider', onsubmit: submit },
-    field('Name', box('name', 'Provider name', null)),
-    field('Address', box('url', 'Provider address', 'https://…/v1')),
-    field('Models', box('models', 'Models', 'model-a, model-b')),
-    field('API key', box('key', 'API key', 'Optional', 'password'), error),
-    h('div.editor-actions', h('button.btn.quiet', { type: 'button', onclick: cancel }, 'Cancel'), add),
-  );
+    return [
+      h('div.dialog-head', h('h2', 'Add provider'), closeButton(close)),
+      h(
+        'form.provider-new',
+        { id: 'new-provider', onsubmit: submit },
+        h(
+          'div.provider-fields',
+          h('p.field-hint', 'Any provider with an OpenAI-compatible chat completions endpoint.'),
+          field('Name', name),
+          field('Address', url),
+          field('Models', models, hint('Separated by commas.')),
+          field('API key', key, error),
+        ),
+        h('div.dialog-foot', h('button.btn', { type: 'button', onclick: close }, 'Cancel'), add),
+      ),
+    ];
+  });
+  name.focus();
 }
 
 function defaults(state, refresh) {

@@ -497,10 +497,13 @@ impl Harness {
         if provider != CUSTOM && !cfg.knows(provider) {
             return Err(format!("unknown provider {provider:?}"));
         }
+        // A key removed is gone from the environment too, for Presage; one given turns it back on.
         if key.trim().is_empty() {
             cfg.keys.remove(provider);
+            cfg.env_off.insert(provider.to_string());
         } else {
             cfg.keys.insert(provider.to_string(), key.trim().to_string());
+            cfg.env_off.remove(provider);
         }
         cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
     }

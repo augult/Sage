@@ -49,7 +49,8 @@ export function githubView(session, { onState, openFile, onDiscard }) {
       return;
     }
     const files = state.files;
-    const standing = files.length ? plural(files.length, 'change') : state.ahead > 0 ? `${plural(state.ahead, 'commit')} to push` : !state.remote || !state.branch || state.upstream ? 'Up to date' : 'Branch not on the remote';
+    // With files to list, it introduces them: "2 changes:".
+    const standing = files.length ? `${plural(files.length, 'change')}:` :state.ahead > 0 ? `${plural(state.ahead, 'commit')} to push` : !state.remote || !state.branch || state.upstream ? 'Up to date' : 'Branch not on the remote';
     // The message keeps what was typed in it and where the caret was, across readings.
     const typing = document.activeElement === message;
     body.replaceChildren(

@@ -327,7 +327,7 @@ export function codeView(session) {
       entry && h('div.menu-rule'),
       entry && item('Copy path', () => copyText(entry.path)),
     ];
-    menu = h('div.menu.context-menu', { role: 'menu', onkeydown: onMenuKey }, items);
+    menu = h('div.menu.context-menu', { role: 'menu', onkeydown: (keyed) => onMenuKey(keyed, entry) }, items);
     document.body.append(menu);
     // Inside the window, by the pointer.
     const { width, height } = menu.getBoundingClientRect();
@@ -338,10 +338,15 @@ export function codeView(session) {
     window.addEventListener('blur', closeMenu);
   }
 
-  function onMenuKey(event) {
+  /** Arrows move, Escape closes, and Backspace (or Delete) is the Delete row's shortcut: it asks to delete `entry`. */
+  function onMenuKey(event, entry) {
     const items = [...menu.querySelectorAll('.menu-item')];
     const at = items.indexOf(document.activeElement);
-    if (event.key === 'Escape') {
+    if ((event.key === 'Backspace' || event.key === 'Delete') && entry) {
+      event.preventDefault();
+      closeMenu();
+      askDelete(entry);
+    } else if (event.key === 'Escape') {
       closeMenu();
       tree.querySelector('[aria-current="true"]')?.focus();
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

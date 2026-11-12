@@ -633,19 +633,19 @@ textarea.editor {
   grid-column: 2 / -1;
 }
 
-/* The form that adds a provider of the user's own, under the last of them. */
-.provider-new {
+/* The dialog that adds a provider of the user's own. */
+.provider-dialog {
+  width: min(480px, calc(100vw - 48px));
+}
+
+.provider-fields {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
+  padding: 4px 16px 8px;
 }
 
-.provider-new > .field:first-child {
-  border-top: 0;
-}
-
-.provider-new > .editor-actions {
-  padding-bottom: 4px;
+.provider-fields > .field-hint {
+  padding: 4px 0 10px;
 }
 
 /* The reminder: what was typed and not saved, before it is left behind. */
