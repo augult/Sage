@@ -6,7 +6,8 @@
 // and `streamRev` counts streamed text, so the view can tell a re-render from a text patch.
 //
 // No event is dropped. One this build does not know, or cannot make sense of, becomes a neutral
-// chip that names its type, and the events after it are applied as usual.
+// chip that names its type, and the events after it are applied as usual. The one exception is what
+// a mechanism since retired wrote into older logs (`RETIRED`): that is passed over.
 
 import { duration, effortLabel, firstLine, k } from './format.js';
 
@@ -31,7 +32,8 @@ function createSession(meta) {
     stats: null,
     watches: new Map(),
     notes: [],
-    lessons: [],
+    /** Messages the engine answered itself, with no run: `/goal` and `/goal clear`. */
+    commands: 0,
     /** Counts changes to anything the inspector shows. */
     sideRev: 0,
   };
@@ -57,9 +59,13 @@ export function apply(s, ev) {
   return true;
 }
 
+/** Event types of mechanisms that are gone (reflex memory, the review pass). Logs still hold them. */
+const RETIRED = new Set(['lesson', 'review']);
+
 function reduce(s, ev) {
   if (ev === null || typeof ev !== 'object') ev = { type: 'unreadable', text: str(ev) };
   if (ev.seq > s.lastSeq) s.lastSeq = ev.seq;
+  if (RETIRED.has(ev.type)) return;
   const handler = Object.hasOwn(HANDLERS, ev.type) ? HANDLERS[ev.type] : unknown;
   try {
     // A handler that cannot use its event returns false, and the event is shown as it came.
@@ -110,10 +116,21 @@ const NO_STATS = {
   retries: 0,
   cache_misses: 0,
   cache_busts: 0,
-  lessons_learned: 0,
   elapsed_ms: 0,
   model_ms: 0,
   tool_ms: 0,
+};
+
+// How each state of a `goal` event reads on the timeline: tone, badge (null: met or open, as the
+// event says), and whether the row's text is the goal or the reason given.
+const GOAL_LOOKS = {
+  set: ['quiet', 'set', 'goal'],
+  status: ['quiet', null, 'goal'],
+  cleared: ['quiet', 'cleared', 'goal'],
+  met: ['good', 'met', 'goal'],
+  not_met: ['alert', 'not met', 'reason'],
+  unchecked: ['alert', 'not checked', 'reason'],
+  open: ['alert', 'left open', 'reason'],
 };
 
 const HANDLERS = {
@@ -250,11 +267,23 @@ const HANDLERS = {
     place(s, ev, chip(s, 'quiet', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
   },
 
-  lesson(s, ev) {
-    const label = ev.learned ? 'learned' : 'recalled';
-    s.lessons.push({ label, text: str(ev.text) });
+  /** The goal: set, asked about, cleared, or checked at a `finish`. `meta.goal` is `{ text, met }` or null. */
+  goal(s, ev) {
+    const state = str(ev.state);
+    const look = Object.hasOwn(GOAL_LOOKS, state) ? GOAL_LOOKS[state] : null;
+    if (!look) return false;
+    const text = str(ev.goal);
+    if (state === 'set') s.meta.goal = { text, met: false };
+    else if (state === 'met') s.meta.goal = { text, met: true };
+    else if (state === 'cleared') s.meta.goal = null;
+    // Answered with no run: the message that asked is not on the timeline, this row is.
+    if (state === 'status' || state === 'cleared') s.commands++;
+    const [tone, badge, says] = look;
+    const none = state === 'status' && !text;
+    const row = chip(s, tone, 'goal', none ? 'None set' : says === 'reason' ? str(ev.reason) || text : text, none ? null : (badge ?? (ev.met === true ? 'met' : 'open')));
+    row.icon = 'flag';
+    place(s, ev, row);
     s.sideRev++;
-    place(s, ev, chip(s, 'good', label, str(ev.text)));
   },
 
   approval(s, ev) {

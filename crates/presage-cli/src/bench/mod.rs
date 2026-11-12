@@ -39,8 +39,8 @@ OPTIONS
   -m, --model <name>       model; repeat or separate with commas to compare several
       --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic);
                            add +skill (each task with its skill), +sys:<file> (system prompt template),
-                           +effort:<level>, +no-<mechanism> or +<mechanism> for one that is off unless
-                           asked for (review), e.g. presage+skill+effort:max, presage+review
+                           +effort:<level>, +no-<mechanism>, or +<mechanism> for one that is off unless
+                           asked for (there is none at present), e.g. presage+skill+effort:max
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
@@ -74,7 +74,7 @@ pub struct Variant {
     pub classic: bool,
     /// Mechanisms switched off, by their `Features` name.
     pub without: Vec<String>,
-    /// Mechanisms switched on that are off unless asked for (`+review`).
+    /// Mechanisms switched on that are off unless asked for (`+<mechanism>`, one of `Features::OPTIONAL`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub with: Vec<String>,
     /// Run each task with the skill it names (`+skill`).
@@ -102,7 +102,10 @@ impl Variant {
             }
             return Ok(Variant { external: Some(harness.to_string()), ..Variant::own(&name.to_ascii_lowercase(), false, vec![]) });
         }
-        let unknown = || format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>, +<mechanism> for {}", Features::NAMES.join(", "), Features::OPTIONAL.join(", "));
+        let unknown = || {
+            let optional = if Features::OPTIONAL.is_empty() { String::new() } else { format!(", +<mechanism> for {}", Features::OPTIONAL.join(", ")) };
+            format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>{optional}", Features::NAMES.join(", "))
+        };
         let mechanism = |m: &str| -> Result<String, String> {
             let mechanism = m.to_ascii_lowercase().strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
             Features::presage().without(&mechanism).ok_or_else(unknown)?;
@@ -477,8 +480,7 @@ fn stand_in(task: &Task) -> MockProvider {
     let mut calls: Vec<(&str, Value)> = task.solution.iter().map(|(path, content)| ("write", json!({"path": path, "content": content, "overwrite": true}))).collect();
     calls.push(("shell", json!({"cmd": task.check, "expect_exit": "0"})));
     calls.push(("finish", json!({"summary": "Applied the reference solution."})));
-    // The second reply answers the review pass, where the variant has one.
-    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls), MockTurn::calls("", vec![("finish", json!({"summary": "Applied the reference solution."}))])])
+    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls)])
 }
 
 struct End {
@@ -1149,9 +1151,13 @@ mod tests {
         let Ok(Command::Run(opt)) = parse(&args("--variants presage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };
         assert_eq!((opt.variants[1].without.as_slice(), opt.variants[2].without.as_slice(), opt.variants[3].without.as_slice()), (&["attach".to_string()][..], &["short_paths".to_string()][..], &["short_paths".to_string()][..]));
         assert!(!opt.variants[1].features().attach && opt.variants[1].features().short_paths && !opt.variants[2].features().short_paths && opt.variants[2].features().attach);
-        // The review is off unless a variant asks for it.
-        let Ok(Command::Run(opt)) = parse(&args("--variants presage,presage+review,no-survey+Review")) else { panic!("should parse") };
-        assert_eq!(opt.variants.iter().map(|v| (v.name.as_str(), v.features().review, v.features().survey)).collect::<Vec<_>>(), [("presage", false, true), ("presage+review", true, true), ("no-survey+review", true, false)]);
+        // Modifiers switch further mechanisms off; none is off unless asked for at present.
+        let Ok(Command::Run(opt)) = parse(&args("--variants presage,presage+no-survey,no-survey+No-Attach")) else { panic!("should parse") };
+        assert_eq!(opt.variants.iter().map(|v| (v.name.as_str(), v.with.len(), v.features().survey, v.features().attach)).collect::<Vec<_>>(), [("presage", 0, true, true), ("presage+no-survey", 0, false, true), ("no-survey+no-attach", 0, false, false)]);
+        // What has been retired is no variant: a run that names it is told so instead of measuring something else.
+        for retired in ["presage+review", "no-review", "no-lessons", "presage+no-lessons"] {
+            assert!(parse(&args(&format!("--variants {retired}"))).is_err_and(|e| e.contains("unknown variant") && !e.contains("+<mechanism> for")), "{retired}");
+        }
 
         assert!(matches!(parse(&args("--list")), Ok(Command::List)));
         assert!(matches!(parse(&args("--check --tasks roman")), Ok(Command::Check(t)) if t.len() == 1));
