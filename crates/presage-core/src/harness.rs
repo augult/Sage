@@ -7,8 +7,8 @@ use crate::agent::{Agent, AgentConfig, EffortPolicy, Retune};
 use crate::config::{CUSTOM, Config, PROVIDERS, Resolved, data_dir};
 use crate::demo;
 use crate::economy::prices_for;
-use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
-use crate::lessons::LessonBook;
+use crate::events::{Event, EventKind, FinishStatus, GoalState, Sink, Stats};
+use crate::goal::{self, Goal};
 use crate::prompt;
 use crate::provider::Provider;
 use crate::provider::mock::MockProvider;
@@ -483,10 +483,6 @@ impl Harness {
         let global = read_text(&self.global_path()).unwrap_or_default();
         let project = if req.project_instructions.unwrap_or(true) { prompt::project_instructions(root) } else { None };
         Ok((prompt::compose(&base, &global, project.as_ref().map(|(file, text)| (*file, text.as_str())), &picked), picked))
-    }
-
-    fn lessons_path(&self, root: &Path) -> PathBuf {
-        self.inner.data_dir.join("projects").join(format!("{:016x}", fnv64(root.as_os_str().as_encoded_bytes()))).join("lessons.jsonl")
     }
 
     /// Starts a session on a real provider and begins working on the task.

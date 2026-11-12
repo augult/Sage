@@ -2,13 +2,15 @@
 
 use crate::attach;
 use crate::bootstrap;
+use crate::changes;
 use crate::context::Context;
 use crate::economy::{peak_multiplier, prices_for};
-use crate::events::{CacheVerdict, CallInfo, Channel, EventKind, FinishStatus, Sink, Stats};
+use crate::events::{CacheVerdict, CallInfo, Channel, EventKind, FinishStatus, GoalState, Sink, Stats};
+use crate::finish::Judge;
+use crate::goal::{self, Goal};
 use crate::prompt;
 use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role};
 use crate::repair;
-use crate::review;
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
@@ -134,6 +136,8 @@ pub struct Agent {
     announce: Vec<EventKind>,
     /// Files the user attached to the message that comes next, by path.
     attached: Vec<String>,
+    /// The message that comes next sets the goal: it goes to the model with the goal in it.
+    goal_set: bool,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -143,6 +147,9 @@ pub struct Retune {
     pub provider: Option<(Provider, String, String)>,
     pub effort: Option<EffortPolicy>,
     pub autonomy: Option<Autonomy>,
+    /// A goal to work towards from the next message on (`/goal <condition>`), or `Some(None)` to
+    /// have none any more (`/goal clear`).
+    pub goal: Option<Option<String>>,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -153,7 +160,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new() }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal_set: false }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -187,6 +194,23 @@ impl Agent {
         if provider.is_some() || effort.is_some() || autonomy.is_some() {
             self.announce.push(EventKind::Settings { provider, model, effort, autonomy });
         }
+        match change.goal {
+            // Said in the log after the message it came with, like any other change.
+            Some(Some(text)) => {
+                let goal = Goal::new(&text);
+                self.announce.push(EventKind::Goal { goal: goal.text.clone(), state: GoalState::Set, met: false, reason: String::new() });
+                self.sess.goal = Some(goal);
+                self.goal_set = true;
+            }
+            // Whoever cleared it has said so already: no message comes with it.
+            Some(None) => (self.sess.goal, self.goal_set) = (None, false),
+            None => {}
+        }
+    }
+
+    /// The goal the session works towards, if it has one, met or not.
+    pub fn goal(&self) -> Option<&Goal> {
+        self.sess.goal.as_ref()
     }
 
     pub fn effort(&self) -> Effort {
@@ -295,19 +319,13 @@ impl Agent {
     /// test command it names). With none of that, it is the working directory and the task.
     async fn opening(&mut self, task: &str, cancel: &CancellationToken) -> String {
         let features = self.cfg.features;
-        // Before anything of the session's own can be in the workspace.
-        if features.review {
-            self.sess.baseline = review::baseline(&self.sess.ws.root).await;
-        }
+        // Before anything of the session's own can be in the workspace: what is uncommitted now is
+        // the user's, and is kept out of what the session is later said to have changed.
+        self.sess.baseline = changes::baseline(&self.sess.ws.root).await;
         let mut parts: Vec<String> = Vec::new();
         if features.bootstrap {
             let env = bootstrap::snapshot(&self.sess).await;
             self.sink.emit(EventKind::Env { text: env.clone() });
-            if features.lessons {
-                for lesson in self.sess.lessons.top(5) {
-                    self.sink.emit(EventKind::Lesson { learned: false, text: lesson.describe() });
-                }
-            }
             parts.push(env);
             // Known from the start, the budget is something to plan with; heard of at half-time, it
             // is only a reason to hurry.
@@ -358,9 +376,12 @@ impl Agent {
         for change in std::mem::take(&mut self.announce) {
             self.sink.emit(change);
         }
-        self.sess.task = task.clone();
-        self.sess.evidence.reviewed = false;
-        self.sess.evidence.message_epoch = self.sess.evidence.epoch;
+        // The timeline keeps the message as it was typed. What the model is sent has the goal in
+        // it: worded as the task where the message was `/goal <condition>`, after the task otherwise.
+        let task = match (std::mem::take(&mut self.goal_set), &self.sess.goal) {
+            (true, Some(goal)) => goal::brief(&task, &goal.text),
+            _ => task,
+        };
         let mut composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
         if !files.is_empty() {
             composed = format!("<attached_files>\n{}\n</attached_files>\nThe user attached these files to this message. Read the ones you need.\n\n{composed}", files.join("\n"));
@@ -542,7 +563,8 @@ impl Agent {
             }
             empties = 0;
 
-            let result = Runner { sess: &mut self.sess, sink: self.sink.as_ref(), cancel, approvals: &self.approvals, stats: &mut self.stats, turn, autonomy: self.cfg.autonomy, interactive: self.cfg.interactive, landing }
+            let judge = Some(Judge { provider: &self.provider, model: &self.cfg.model });
+            let result = Runner { sess: &mut self.sess, sink: self.sink.as_ref(), cancel, approvals: &self.approvals, stats: &mut self.stats, turn, autonomy: self.cfg.autonomy, interactive: self.cfg.interactive, landing, judge }
                 .run(&calls)
                 .await;
             slowest = slowest.max(turn_started.elapsed());
@@ -626,10 +648,8 @@ mod tests {
     }
 
     fn rig(name: &str, cfg: AgentConfig, turns: Vec<TurnFn>) -> Rig {
-        // The review pass has its own test; the others script one reply too few for it.
         let mut cfg = cfg;
-        cfg.features.review = cfg.features.review && name.starts_with("agent-review");
-        // Likewise the survey: these workspaces are small, and the tests say what the first message holds.
+        // The survey has its own test: these workspaces are small, and the tests say what the first message holds.
         cfg.features.survey = cfg.features.survey && name == "agent-survey";
         let sess = test_session(name, cfg.features);
         std::fs::write(sess.ws.root.join("n.txt"), "alpha\nbeta\ngamma\n").unwrap();
@@ -640,46 +660,6 @@ mod tests {
 
     fn fixed(t: MockTurn) -> TurnFn {
         Box::new(move |_| t.clone())
-    }
-
-    #[tokio::test]
-    async fn the_first_finish_after_a_change_gets_one_review_pass() {
-        let change = |old: &str, new: &str| {
-            fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": old, "new": new})), ("shell", json!({"cmd": "grep -c A n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]))
-        };
-        let finish = || fixed(MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]));
-        let reviewed = AgentConfig { features: Features::presage().with("review").unwrap(), ..AgentConfig::new("mock") };
-        let mut r = rig("agent-review", reviewed, vec![change("beta", "BETA"), change("gamma", "GAMMA"), finish()]);
-
-        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
-        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2), "the review is asked for once, even after a further change");
-        let review = requests(&r)[1].last().unwrap().content.clone();
-        assert!(review.contains("[review] Not accepted yet") && review.contains("<task>\nUpper-case the second line of n.txt.\n</task>"), "{review}");
-        assert!(review.contains("<changes>\nFiles you changed with edit or write: n.txt\n</changes>"), "what there is to review comes with it: {review}");
-        assert_eq!(r.agent.stats.surprises, 0, "a review is not a surprise");
-
-        // Nothing changed in answer to the next message, so there is nothing to review.
-        let out = r.agent.run("Is it done?".into(), &CancellationToken::new()).await;
-        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 3));
-    }
-
-    #[tokio::test]
-    async fn in_a_repository_the_review_comes_with_the_diff_of_the_session() {
-        let turns = vec![
-            fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("write", json!({"path": "scratch.txt", "content": "tmp\n"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
-            fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "rm scratch.txt && grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
-        ];
-        let reviewed = AgentConfig { features: Features::presage().with("review").unwrap(), ..AgentConfig::new("mock") };
-        let mut r = rig("agent-review-git", reviewed, turns);
-        let git = |script: &str| assert!(std::process::Command::new("bash").arg("-c").arg(script).current_dir(&r.agent.sess.ws.root).output().unwrap().status.success(), "{script}");
-        git("printf 'mine\\n' > wip.txt && git init -q && git add n.txt && git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base");
-
-        let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
-        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2));
-        let review = requests(&r)[1].last().unwrap().content.clone();
-        // Its own two files and the diff of the tracked one; not the file that lay there before.
-        assert!(review.contains("<changes>\nPaths (`git status --short`):\n M n.txt\n?? scratch.txt\nDiff of the tracked files (`git diff HEAD`):\n"), "{review}");
-        assert!(review.contains("\n-beta\n+BETA\n") && !review.contains("wip.txt"), "{review}");
     }
 
     fn events(r: &Rig) -> Vec<EventKind> {
@@ -698,7 +678,7 @@ mod tests {
         r.agent.retune(Retune::default());
         r.agent.retune(Retune { effort: Some(EffortPolicy::Ratchet(Effort::Low)), autonomy: Some(Autonomy::Auto), ..Default::default() });
         let second = Provider::Mock(MockProvider::new(vec![fixed(MockTurn::say("from the second"))]));
-        r.agent.retune(Retune { provider: Some((second, "other".into(), "second".into())), effort: Some(EffortPolicy::Fixed(Effort::Max)), autonomy: Some(Autonomy::Ask) });
+        r.agent.retune(Retune { provider: Some((second, "other".into(), "second".into())), effort: Some(EffortPolicy::Fixed(Effort::Max)), autonomy: Some(Autonomy::Ask), ..Default::default() });
         assert_eq!(r.agent.run("Two.".into(), &cancel).await.summary, "from the second");
 
         // The second model is sent the whole conversation, and none of it is expected to be cached there.
@@ -872,17 +852,16 @@ mod tests {
             cfg
         };
 
-        // A check that fails in front of it, a review still due: `finish` is heard all the same.
+        // A check that fails in front of it: `finish` is heard all the same.
         let last = fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -qx GAMMA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "beta is done, gamma is not"}))]));
-        let mut r = rig("agent-review-landing", two_replies(), vec![edit(), last]);
+        let mut r = rig("agent-landing", two_replies(), vec![edit(), last]);
         let out = r.agent.run("Upper-case lines two and three of n.txt.".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.verified, out.summary.as_str()), (FinishStatus::Done, false, "beta is done, gamma is not"));
         assert_eq!(out.evidence, "unverified: nothing was checked after the edit of n.txt before the budget ran out");
-        assert!(!r.agent.ctx.messages.iter().any(|m| m.content.contains("[review]")), "no review that nothing could follow");
 
         // Checked work is accepted as verified.
         let last = fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]));
-        let mut r = rig("agent-review-landed", two_replies(), vec![edit(), last]);
+        let mut r = rig("agent-landed", two_replies(), vec![edit(), last]);
         let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.verified, out.evidence.as_str()), (FinishStatus::Done, true, "verified by `grep -qx BETA n.txt`"));
 
