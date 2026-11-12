@@ -8,7 +8,7 @@
 // Each update reads the items into blocks (`gather`) and patches what changed: a block by its key
 // and signature, a bar's rows one by one, and only while the bar is open.
 //
-// ctx: { expanded: Map, canAnswer(): boolean, answer(approvalId, allow): Promise, openOutput(handle) }
+// ctx: { expanded: Map, canAnswer(): boolean, answer(approvalId, allow): Promise, canReply(): boolean, reply(text): Promise, openOutput(handle) }
 
 import { stepVerb, summarize } from '../activity.js';
 import { copyButton, h, icon, spinner } from '../dom.js';
@@ -120,6 +120,9 @@ function gather(items, ctx) {
       // A note that is not for a bar to hold: where the session was brought back, the answer to `/goal`.
       work = null;
       blocks.push({ kind: 'aside', key: item.key, sig: item.rev, item });
+    } else if (item.kind === 'question') {
+      work = null;
+      blocks.push({ kind: 'question', key: item.key, sig: `${item.rev}:${item.answer === null && ctx.canReply()}`, item });
     } else if (item.kind === 'result') {
       work = null;
       blocks.push({ kind: 'result', key: item.key, sig: `${item.rev}:${edits.length}`, item, edits });
@@ -170,6 +173,8 @@ const PLAIN = {
   },
 
   approval: ({ item }, ctx) => approvalCard(item, ctx),
+
+  question: ({ item }, ctx) => questionCard(item, ctx),
 
   /** A note's row on its own in the conversation. Where a session was brought back, a hairline sets it off. */
   aside: ({ item }, ctx) => h(`section.aside${item.label === 'resumed' ? '.is-resumed' : ''}`, noteRow(item, ctx)),
@@ -376,6 +381,66 @@ const ROWS = {
     return noteRow({ key: item.key, label: 'approval', icon: 'bang', badge: verdict, text: item.reason || `${item.tool} ${item.summary}` }, ctx);
   },
 };
+
+/**
+ * What the agent asked: its choices, each with when it is the one to pick, and a box for an answer
+ * of the user's own. Either is sent as the next message. Once answered, the answer is marked.
+ */
+function questionCard(item, ctx) {
+  const open = item.answer === null && ctx.canReply();
+  const error = h('div.form-error', { role: 'alert', hidden: true });
+  const controls = [];
+  const reply = async (text) => {
+    if (!text.trim()) return;
+    for (const control of controls) control.disabled = true;
+    error.hidden = true;
+    try {
+      await ctx.reply(text.trim());
+    } catch (problem) {
+      error.textContent = String(problem);
+      error.hidden = false;
+      for (const control of controls) control.disabled = false;
+    }
+  };
+  const picked = item.answer?.trim().toLowerCase();
+  const choices = item.choices.map((choice) =>
+    h(
+      'button.question-choice',
+      { type: 'button', disabled: !open, 'aria-pressed': picked === choice.label.toLowerCase() ? 'true' : null, onclick: () => reply(choice.label) },
+      h('span.question-label', choice.label),
+      choice.hint && h('span.question-hint', choice.hint),
+    ),
+  );
+  controls.push(...choices);
+  let own = null;
+  if (open) {
+    const field = h('input.input.question-own', {
+      type: 'text',
+      placeholder: item.choices.length ? 'Or answer in your own words' : 'Your answer',
+      'aria-label': 'Your answer',
+      onkeydown: (event) => {
+        if (event.key === 'Enter' && !event.isComposing) {
+          event.preventDefault();
+          reply(field.value);
+        }
+      },
+    });
+    const send = h('button.btn.primary', { type: 'button', onclick: () => reply(field.value) }, 'Send');
+    controls.push(field, send);
+    own = h('div.question-own-row', field, send);
+  }
+  const answeredOwn = item.answer !== null && !item.choices.some((choice) => choice.label.toLowerCase() === picked);
+  return h(
+    'section.question',
+    { dataset: { question: item.key } },
+    h('div.question-title', icon('reply', 14), 'Question'),
+    h('div.question-text', prose(item.question)),
+    choices.length > 0 && h('div.question-choices', choices),
+    own,
+    answeredOwn && h('div.question-answer', h('span.muted', 'Answered: '), item.answer),
+    error,
+  );
+}
 
 /** A request that is waiting for its answer: the one thing in a run that cannot wait inside a fold. */
 function approvalCard(item, ctx) {

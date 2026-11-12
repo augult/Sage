@@ -1,5 +1,6 @@
-//! The tool surface. Eight tools, deliberately: every schema is re-sent (and re-read) on every turn.
+//! The tool surface. Nine tools, deliberately: every schema is re-sent (and re-read) on every turn.
 
+pub mod ask;
 pub mod edit;
 pub mod job;
 pub mod jobs;
@@ -20,6 +21,7 @@ pub enum Tool {
     Write,
     Watch,
     Job,
+    Ask,
     Finish,
 }
 
@@ -33,6 +35,7 @@ impl Tool {
             Tool::Write => "write",
             Tool::Watch => "watch",
             Tool::Job => "job",
+            Tool::Ask => "ask",
             Tool::Finish => "finish",
         }
     }
@@ -51,6 +54,7 @@ impl Tool {
             "write" | "write_file" | "create" | "create_file" | "write_to_file" | "save" => Tool::Write,
             "watch" | "add_watch" => Tool::Watch,
             "job" | "jobs" | "wait" | "bash_output" | "bashoutput" | "job_output" | "kill" | "killshell" => Tool::Job,
+            "ask" | "ask_user" | "ask_question" | "ask_followup_question" | "askuserquestion" | "question" | "clarify" | "request_user_input" => Tool::Ask,
             "finish" | "done" | "complete" | "task_complete" | "submit" | "attempt_completion" | "final_answer" | "end" => Tool::Finish,
             _ => return None,
         })
@@ -159,13 +163,14 @@ mod tests {
 
     #[test]
     fn tool_names_round_trip_and_aliases_resolve() {
-        for t in [Tool::Shell, Tool::Read, Tool::Search, Tool::Edit, Tool::Write, Tool::Watch, Tool::Job, Tool::Finish] {
+        for t in [Tool::Shell, Tool::Read, Tool::Search, Tool::Edit, Tool::Write, Tool::Watch, Tool::Job, Tool::Ask, Tool::Finish] {
             assert_eq!(Tool::from_name(t.name()), Some(t));
         }
         assert_eq!(Tool::from_name("Bash"), Some(Tool::Shell));
         assert_eq!(Tool::from_name("functions.str_replace"), Some(Tool::Edit));
         assert_eq!(Tool::from_name("read-file"), Some(Tool::Read));
         assert_eq!(Tool::from_name("task_complete"), Some(Tool::Finish));
+        assert_eq!(Tool::from_name("AskUserQuestion"), Some(Tool::Ask));
         assert_eq!(Tool::from_name("teleport"), None);
     }
 

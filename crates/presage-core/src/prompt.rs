@@ -123,7 +123,32 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
     json!({"type": "function", "function": {"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required}}})
 }
 
-fn presage_tools(watch: bool, job: bool) -> Value {
+/// `ask`, for a session someone is present in. Its description carries the rule of when to ask, so
+/// that a system prompt of the user's own still has it.
+fn ask_tool() -> Value {
+    tool(
+        "ask",
+        "Ask the user when the request can be read in ways that lead to different work and neither the task nor the workspace settles it. Above all: asked to build something new with no language or stack named (and none in the workspace), ask which, e.g. Rust, C++, Python, TypeScript. Do not ask what you can look up or reasonably decide yourself. The run pauses; the answer is the user's next message.",
+        json!({
+            "question": {"type": "string", "description": "One short question."},
+            "options": {
+                "type": "array",
+                "description": "2-5 likely answers, the one you would pick first. Leave out for an open question; the user can always answer in their own words.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "hint": {"type": "string", "description": "When it is the best pick, e.g. \"Recommended for performance\", \"Recommended to get it done quickly\"."}
+                    },
+                    "required": ["label"]
+                }
+            }
+        }),
+        &["question"],
+    )
+}
+
+fn presage_tools(watch: bool, job: bool, ask: bool) -> Value {
     let mut tools = vec![
         tool(
             "shell",
@@ -199,6 +224,9 @@ fn presage_tools(watch: bool, job: bool) -> Value {
             &["id"],
         ));
     }
+    if ask {
+        tools.push(ask_tool());
+    }
     tools.push(tool(
         "finish",
         "Declare the task complete. Watched tests are re-run first; it is refused unless a check has passed since your last change.",
@@ -211,11 +239,14 @@ fn presage_tools(watch: bool, job: bool) -> Value {
     Value::Array(tools)
 }
 
-/// Indexed by `watch * 2 + job`.
-static TOOLS_PRESAGE: LazyLock<[Value; 4]> = LazyLock::new(|| [presage_tools(false, false), presage_tools(false, true), presage_tools(true, false), presage_tools(true, true)]);
+/// Indexed by `watch * 4 + job * 2 + ask`.
+static TOOLS_PRESAGE: LazyLock<[Value; 8]> = LazyLock::new(|| std::array::from_fn(|i| presage_tools(i & 4 != 0, i & 2 != 0, i & 1 != 0)));
 
-static TOOLS_CLASSIC: LazyLock<Value> = LazyLock::new(|| {
-    json!([
+/// Without `ask`, and with it.
+static TOOLS_CLASSIC: LazyLock<[Value; 2]> = LazyLock::new(|| [classic_tools(false), classic_tools(true)]);
+
+fn classic_tools(ask: bool) -> Value {
+    let mut tools = json!([
         tool(
             "shell",
             "Run a bash command in the workspace and return its output. `cd` and exported variables persist between calls; stdin is closed.",
@@ -262,8 +293,13 @@ static TOOLS_CLASSIC: LazyLock<Value> = LazyLock::new(|| {
             &["id"],
         ),
         tool("finish", "Declare the task complete.", json!({"summary": {"type": "string", "description": "What was done, in a few lines."}}), &["summary"]),
-    ])
-});
+    ]);
+    if ask {
+        let list = tools.as_array_mut().expect("a list");
+        list.insert(list.len() - 1, ask_tool());
+    }
+    tools
+}
 
 /// The built-in system prompt, with nothing of the user's or the project's in it.
 pub fn system_prompt(features: &Features) -> &'static str {
@@ -281,18 +317,19 @@ pub fn system_prompt(features: &Features) -> &'static str {
 /// The tool list for a request. `watch` is offered only where the model has to register its checks
 /// itself, and `job` only once the session has a background job (`jobs`). Lengthening the list
 /// re-buys the whole prompt once, which is cheaper than carrying an unused schema on every turn of
-/// every session. Any tool still runs when called by name, offered or not.
-pub fn tool_schemas(features: &Features, jobs: bool) -> &'static Value {
+/// every session. Any tool still runs when called by name, offered or not. `ask` is offered only
+/// where someone is present to answer (`interactive`).
+pub fn tool_schemas(features: &Features, jobs: bool, interactive: bool) -> &'static Value {
     if !features.scripts {
-        return &TOOLS_CLASSIC;
+        return &TOOLS_CLASSIC[usize::from(interactive)];
     }
     let watch = features.watches && !features.auto_watch;
-    &TOOLS_PRESAGE[usize::from(watch) * 2 + usize::from(jobs)]
+    &TOOLS_PRESAGE[usize::from(watch) * 4 + usize::from(jobs) * 2 + usize::from(interactive)]
 }
 
 /// Rough size in tokens of what every request starts with: system prompt plus tool schemas.
 pub fn prefix_tokens(features: &Features) -> u64 {
-    crate::text::est_tokens(system_prompt(features)) + crate::text::est_tokens(&tool_schemas(features, false).to_string())
+    crate::text::est_tokens(system_prompt(features)) + crate::text::est_tokens(&tool_schemas(features, false, false).to_string())
 }
 
 #[cfg(test)]
@@ -301,14 +338,14 @@ mod tests {
     use crate::tools::Tool;
 
     fn names(features: &Features, jobs: bool) -> Vec<&'static str> {
-        tool_schemas(features, jobs).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect()
+        tool_schemas(features, jobs, false).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect()
     }
 
     #[test]
     fn every_advertised_tool_exists_and_the_prefix_stays_small() {
         let manual = Features::presage().without("auto_watch").unwrap();
         for features in [Features::presage(), manual, Features::classic()] {
-            for t in tool_schemas(&features, true).as_array().unwrap() {
+            for t in tool_schemas(&features, true, true).as_array().unwrap() {
                 let name = t["function"]["name"].as_str().unwrap();
                 assert_eq!(Tool::from_name(name).map(|t| t.name()), Some(name));
                 assert_eq!(t["function"]["parameters"]["type"], "object");
@@ -318,7 +355,7 @@ mod tests {
         let (presage, classic) = (prefix_tokens(&Features::presage()), prefix_tokens(&Features::classic()));
         assert!(presage < 2_300, "the Presage prefix is ~{presage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
-        assert!(!tool_schemas(&Features::classic(), false).to_string().contains("expect"));
+        assert!(!tool_schemas(&Features::classic(), false, false).to_string().contains("expect"));
     }
 
     #[test]
@@ -332,6 +369,10 @@ mod tests {
         // The baseline is a fixed list.
         assert_eq!(names(&Features::classic(), false), names(&Features::classic(), true));
         assert_eq!(names(&Features::classic(), false).len(), 7);
+        // `ask` only where someone can answer, just before `finish`.
+        let asking = |features: &Features| tool_schemas(features, false, true).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
+        assert_eq!(asking(&auto), ["shell", "read", "search", "edit", "write", "ask", "finish"]);
+        assert_eq!(asking(&Features::classic())[6..], ["ask", "finish"]);
     }
 
     #[test]
@@ -403,8 +444,8 @@ mod tests {
 
     #[test]
     fn schemas_serialise_identically_every_time() {
-        let a = tool_schemas(&Features::presage(), false).to_string();
-        let b = tool_schemas(&Features::presage(), false).to_string();
+        let a = tool_schemas(&Features::presage(), false, false).to_string();
+        let b = tool_schemas(&Features::presage(), false, false).to_string();
         assert_eq!(a, b);
         assert!(a.find("\"shell\"").unwrap() < a.find("\"finish\"").unwrap());
     }

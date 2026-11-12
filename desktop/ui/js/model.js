@@ -131,6 +131,12 @@ const HANDLERS = {
 
   user(s, ev) {
     closeTurn(s);
+    // A message after a question is its answer.
+    const asked = s.items.findLast((item) => item.kind === 'question' || item.kind === 'user');
+    if (asked?.kind === 'question' && asked.answer === null) {
+      asked.answer = str(ev.text);
+      asked.rev++;
+    }
     const followUp = s.items.some((item) => item.kind === 'user');
     s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), files: Array.isArray(ev.files) ? ev.files.map(str) : [], followUp });
     // Skills switched on with this message stay on for the rest of the session.
@@ -318,6 +324,13 @@ const HANDLERS = {
     (request.turn ?? request.row).rev++;
   },
 
+  /** The model asked the user something; the run ends, and the next message is the answer. */
+  question(s, ev) {
+    closeTurn(s);
+    const choices = (Array.isArray(ev.choices) ? ev.choices : []).filter((choice) => choice && typeof choice === 'object' && str(choice.label).trim()).map((choice) => ({ label: str(choice.label).trim(), hint: str(choice.hint).trim() }));
+    s.items.push({ kind: 'question', key: key(s, 'question'), rev: 0, question: str(ev.question), choices, answer: null });
+  },
+
   effort(s, ev) {
     place(s, ev, chip(s, 'quiet', 'effort', `${str(ev.from)} → ${str(ev.to)} · ${str(ev.reason)}`));
   },
@@ -337,6 +350,8 @@ const HANDLERS = {
     s.running = false;
     s.outcome = { status: str(ev.status), verified: ev.verified === true };
     const summary = str(ev.summary);
+    // A run that ended on a question has said all it has to say in it.
+    if (s.items.at(-1)?.kind === 'question') return;
     // A run that hands back in prose reports that same prose as its summary.
     const lastTurn = s.items.findLast((item) => item.kind === 'turn');
     const repeatsReply = summary.trim() !== '' && lastTurn?.content.trim() === summary.trim();

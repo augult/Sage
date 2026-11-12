@@ -658,7 +658,7 @@ impl Agent {
             let jobs = self.sess.jobs.any_started();
             let tools_stable = std::mem::replace(&mut self.offered_job_tool, jobs) == jobs;
             let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages)) && tools_stable;
-            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs), effort: self.effort, max_tokens: self.cfg.max_tokens, reasoning_cap: if features.long_thought { LONG_THOUGHT_CHARS } else { 0 } };
+            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs, self.cfg.interactive), effort: self.effort, max_tokens: self.cfg.max_tokens, reasoning_cap: if features.long_thought { LONG_THOUGHT_CHARS } else { 0 } };
             let sink = self.sink.clone();
             let mut on_delta = move |d: Delta| match d {
                 Delta::Reasoning(text) => sink.emit(EventKind::Delta { turn, channel: Channel::Reasoning, text }),
@@ -865,6 +865,11 @@ impl Agent {
             self.emit_stats(run_started, elapsed_before);
             self.save_point(true);
 
+            // A question ends the run: the answer is the user's next message.
+            if let Some(asked) = result.asked {
+                self.sink.emit(EventKind::Question { turn, question: asked.question.clone(), choices: asked.choices });
+                break Outcome { status: FinishStatus::Yielded, summary: asked.question, verified: self.sess.evidence.fresh(), evidence: self.evidence_text() };
+            }
             if let Some(done) = result.finished {
                 let outcome = Outcome { status: FinishStatus::Done, summary: done.summary, verified: done.verified, evidence: done.evidence };
                 match self.before_ending(outcome, landing, &mut end_checks, cancel).await {
@@ -1242,6 +1247,37 @@ mod tests {
         assert_eq!((r.agent.stats.turns, r.agent.stats.surprises, r.agent.stats.skipped), (2, 1, 1));
         let statuses: Vec<StepStatus> = events(&r).iter().filter_map(|e| if let EventKind::StepEnd { status, .. } = e { Some(*status) } else { None }).collect();
         assert_eq!(statuses, vec![StepStatus::Ok, StepStatus::Surprise, StepStatus::Skipped, StepStatus::Ok, StepStatus::Ok, StepStatus::Ok]);
+    }
+
+    #[tokio::test]
+    async fn a_question_ends_the_run_and_the_answer_is_the_next_message() {
+        let ask = json!({"question": "Which language?", "options": [{"label": "Rust", "hint": "Recommended for performance"}, {"label": "Python", "hint": "Recommended to get it done quickly"}]});
+        let turns = vec![
+            // What comes after the question in the same reply is not run.
+            fixed(MockTurn::calls("", vec![("ask", ask.clone()), ("write", json!({"path": "main.rs", "content": "fn main() {}\n"}))])),
+            fixed(MockTurn::calls("", vec![("write", json!({"path": "main.py", "content": "print(1)\n"})), ("finish", json!({"summary": "done", "unverified": "a stub"}))])),
+        ];
+        let mut cfg = AgentConfig::new("mock");
+        cfg.interactive = true;
+        let mut r = rig("agent-ask", cfg, turns);
+        let out = r.agent.run("make me a tool".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.summary.as_str(), r.agent.stats.turns), (FinishStatus::Yielded, "Which language?", 1));
+        let asked = events(&r).into_iter().find_map(|e| match e {
+            EventKind::Question { question, choices, .. } => Some((question, choices)),
+            _ => None,
+        });
+        let (question, choices) = asked.expect("the question is put to the user");
+        assert_eq!((question.as_str(), choices.len(), choices[0].hint.as_str()), ("Which language?", 2, "Recommended for performance"));
+        assert!(!r.agent.sess.ws.root.join("main.rs").exists());
+        let out = r.agent.run("Python".into(), &CancellationToken::new()).await;
+        assert_eq!(out.status, FinishStatus::Done);
+
+        // With nobody there, the model is told to decide, and the run goes on.
+        let turns = vec![fixed(MockTurn::calls("", vec![("ask", ask)])), finish()];
+        let mut r = rig("agent-ask-alone", AgentConfig::new("mock"), turns);
+        let out = r.agent.run("make me a tool".into(), &CancellationToken::new()).await;
+        assert_eq!(out.status, FinishStatus::Done);
+        assert!(!events(&r).iter().any(|e| matches!(e, EventKind::Question { .. })));
     }
 
     #[tokio::test]

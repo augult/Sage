@@ -565,6 +565,88 @@ button.row-line:focus-visible {
   margin-right: auto;
 }
 
+/* What the agent asked: its choices, each with when it is the one to pick, and a box for the user's own answer. */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+}
+
+.question-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.question-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.question-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--sheet);
+  color: var(--ink);
+  text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.question-choice:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--fill-2);
+}
+
+.question-choice:disabled {
+  opacity: 0.55;
+}
+
+/* The answer that was given stays clear among the ones that were not. */
+.question-choice[aria-pressed="true"] {
+  border-color: var(--ink);
+  opacity: 1;
+}
+
+.question-label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.question-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.question-own-row {
+  display: flex;
+  gap: 8px;
+}
+
+.question-own {
+  flex: 1;
+  min-width: 0;
+}
+
+.question-answer {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
 /* A note's row standing in the conversation; where the session was brought back, set off by a hairline. */
 .aside {
   min-width: 0;

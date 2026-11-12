@@ -66,6 +66,8 @@ pub struct ScriptResult {
     pub footer: Vec<String>,
     pub surprised: bool,
     pub finished: Option<Finished>,
+    /// The model asked the user something: the run ends and waits for the answer.
+    pub asked: Option<tools::ask::Question>,
     /// Identity of each step that failed, for stall detection.
     pub failed_steps: Vec<u64>,
     pub edited: Vec<String>,
@@ -167,6 +169,7 @@ fn summarize(call: &Call) -> String {
                 id
             }
         }
+        Some(Tool::Ask) => one_line(&s("question"), 160),
         Some(Tool::Finish) => one_line(&s("summary"), 160),
         None => call.raw_name.clone(),
     }
@@ -226,6 +229,10 @@ impl Runner<'_> {
                         res.failed_steps.push(fnv64(format!("{tool_name}\u{0}{}", call.args).as_bytes()));
                     }
                 }
+            }
+            // Nothing after a question is run: the answer may change it.
+            if halted.is_none() && res.asked.is_some() {
+                halted = Some("the user was asked a question; wait for the answer".to_string());
             }
             if scripts && halted.is_none() && halts(call.tool, out.status) {
                 let how = match out.status {
@@ -313,6 +320,7 @@ impl Runner<'_> {
             Tool::Write => tools::write::run(self.sess, args).await,
             Tool::Job => tools::job::run(self.sess, args, self.cancel).await,
             Tool::Watch => self.watch(args).await,
+            Tool::Ask => self.ask(args, res),
             Tool::Finish => self.finish(args, res).await,
         };
         if tool.is_act() {
@@ -375,6 +383,23 @@ impl Runner<'_> {
         // it never halts the script.
         let observation = format!("{}\nIt now re-runs by itself after every change; you will hear about it only when its result changes.", report.detail);
         StepOutput { stub: one_line(&report.detail, 160), observation, ..Default::default() }
+    }
+
+    /// Puts a question to the user. With nobody there to answer, the model is told to decide.
+    fn ask(&mut self, args: &Value, res: &mut ScriptResult) -> StepOutput {
+        if !self.interactive {
+            return StepOutput::error("nobody is present to answer questions in this session. Make the most reasonable choice yourself, carry on, and say in `finish` what you assumed.");
+        }
+        if res.finished.is_some() {
+            return StepOutput::error("the task was already finished in this reply; nothing was asked.");
+        }
+        match tools::ask::parse(args) {
+            Ok(question) => {
+                res.asked = Some(question);
+                StepOutput::ok("Asked. The user's answer comes as their next message: one of your options, or their own words.")
+            }
+            Err(e) => StepOutput::error(e),
+        }
     }
 
     async fn finish(&mut self, args: &Value, res: &mut ScriptResult) -> StepOutput {

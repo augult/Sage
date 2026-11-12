@@ -31,6 +31,13 @@ export function mountSession(main, side, app, meta) {
     expanded: unfolded.get(entry.id),
     canAnswer: () => entry.live && entry.model.running,
     answer: (approval, allow) => api.approve(entry.id, approval, allow),
+    // A question is answered when no run is in progress; the answer goes as the next message.
+    canReply: () => !entry.model.running,
+    reply: (text) => {
+      box.value = text;
+      fitBox(box);
+      return send();
+    },
     openOutput: (handle) => openOutput(entry.id, handle),
   });
 

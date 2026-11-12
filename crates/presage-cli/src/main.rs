@@ -223,6 +223,13 @@ impl Printer {
             }
             EventKind::Decay { messages, dropped_tokens, reason, .. } => eprintln!("    {} trimmed {messages} old observations (~{} tokens): {reason}", p.yellow("◦"), k(*dropped_tokens)),
             EventKind::Approval { tool, summary, reason, .. } => eprintln!("    {} approval needed for {tool} {summary} ({reason})", p.yellow("?")),
+            EventKind::Question { question, choices, .. } => {
+                eprintln!("    {} {question}", p.cyan("?"));
+                for (at, choice) in choices.iter().enumerate() {
+                    let hint = if choice.hint.is_empty() { String::new() } else { format!(" {}", p.dim(&format!("({})", choice.hint))) };
+                    eprintln!("      {}. {}{hint}", at + 1, choice.label);
+                }
+            }
             EventKind::Error { message } => eprintln!("{} {message}", p.red("error:")),
             EventKind::Finish { status, summary, verified, evidence } => {
                 let head = match status {

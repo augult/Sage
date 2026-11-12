@@ -76,6 +76,15 @@ pub struct CallInfo {
     pub arguments: String,
 }
 
+/// One of the answers an `ask` offers: what it says, and when it is the one to pick.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Choice {
+    pub label: String,
+    /// Such as "Recommended for performance"; empty when it needs no word.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hint: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
     pub turns: u32,
@@ -261,6 +270,14 @@ pub enum EventKind {
     ApprovalResolved {
         id: u64,
         allow: bool,
+    },
+    /// The model asked the user something (`ask`) and the run ends to wait for the answer, which
+    /// comes as the next `User` message: one of the choices, or the user's own words.
+    Question {
+        turn: u32,
+        question: String,
+        #[serde(default)]
+        choices: Vec<Choice>,
     },
     Effort {
         turn: u32,
