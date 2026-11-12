@@ -125,7 +125,9 @@ At start-up, and on every change of background or appearance, `backdrop.js` take
 at 320px, softens it, presses its brightness into a band (14–76 of 255 for dark, 198–248 for
 light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
 much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
-background in `themes.js`), stretched without smoothing so that its dots stay square. The panes
+background in `themes.js`), stretched without smoothing so that its dots stay square. The dither
+shows on the glass of the sidebar and the inspector only: it is cut away where the sheet lies
+(`clip-path` in `glass.css`, from the one pane width in `layout.css`). The panes
 are translucent fills: the veil over everything, and in the middle the sheet, the reading
 surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
 None.
@@ -149,15 +151,24 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
 
-1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
-   heading per day (title, model, status glyph, relative time), and Settings.
+1. **Sidebar**: app mark and name (the strip drags the window), New session, a tab per folder
+   (chevron and the folder's name; the folders stand in the order of their newest
+   session, each opens onto its sessions and stays shut once shut, kept by the window; a shut
+   folder shows the mark of a session in it that is running or waiting for an approval; going to
+   a session opens its folder; the walkthrough's throwaway workspaces share one folder, "demo"),
+   under each its sessions, and Settings. A session is one line: its title, and after it a mark
+   only while it has something to say, a dot with a ring that swells while it runs, a triangle
+   when it waits for an approval or, in red, when its run failed. A session's row is as wide as
+   its folder's, with the title under the folder's name. The sidebar and the inspector are the
+   same width.
 2. **Main**:
    - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
      it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
      workspace field and Browse (the system's own folder dialog, `pick_folder`); then the task;
      then pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
      which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
-     (Auto / Ask), and Start (Ctrl/Cmd+Enter). The model menu lists models under their provider
+     (Auto / Ask), and Start (Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
+     other of the two breaks the line, as Shift+Enter always does). The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
@@ -167,8 +178,9 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      the other menus. The button reads "Skills" with nothing on, then "Skills" and the number on
      (the titles are its `title` attribute), so the bar keeps to one row. A
      new session starts with no skills, whatever the last one had; Classic takes none, so the
-     button is disabled there. With no key configured, the view leads with "Play the walkthrough"
-     (`start_demo`) and "Add an API key", and Start is not the primary button.
+     button is disabled there. With no key configured, the view leads with "Add an API key", and
+     Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
+     by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
    - *Session*: header (title, status, and Push when the folder is a git repository; under it one
      line: cwd, model, effort, mode, active skills, "asks first", "simulated"). The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on
@@ -183,8 +195,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        is the answer. What did not go to plan is appended, because the bar starts shut:
        "1 surprise, 1 skipped". While its last turn runs the bar has a spinner and says what is
        happening now ("Thinking 2.1s", "Running sh check.sh 0.4s").
-     - **The bar opens the rows**: per turn a line of its numbers (turn, duration, tokens with
-       cached share, cache verdict, effort), the reasoning ("Thought", with its first line), a
+     - **The bar opens the rows**: the reasoning ("Thought", with its first line), a
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
        watch changes, harness notes, lessons, effort changes, trims, retries, answered
@@ -222,7 +233,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
-     applies at once). Then **API keys**, a line per provider: a check and the name in full ink
+     applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
+     other one starts a new line; kept by the window). Then **API keys**, a line per provider: a check and the name in full ink
      when it has a key, a ring and grey when it has none; its address; a password field; and
      Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider

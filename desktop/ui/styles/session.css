@@ -303,6 +303,8 @@
    every tool call under it. */
 
 .work {
+  /* How far each level steps in from the one above: rows from the bar, a row's detail from the row. */
+  --nest: 24px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -383,20 +385,15 @@
 .work-rows {
   display: flex;
   flex-direction: column;
+  /* The hairline takes the first 16px of the step, under the chevron. */
   margin-left: 15px;
-  padding: 4px 0 2px 8px;
+  padding: 4px 0 2px calc(var(--nest) - 16px);
   border-left: 1px solid var(--line);
 }
 
-.turn-mark {
-  padding: 8px 8px 2px;
-  color: var(--faint);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.turn-mark:first-child {
-  padding-top: 2px;
+/* A turn that has shown nothing yet. */
+.work-rows:empty {
+  display: none;
 }
 
 .row {

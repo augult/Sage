@@ -3,13 +3,13 @@
    shape: a prediction, an edit as a before and after, a search as its sources. Then the card of
    everything a run edited. All of it grey but an edit: green for added lines, red for removed. */
 
-/* Under its row, in line with the row's words. */
+/* Under its row, one step in from it, and out to the row's right edge. */
 .row-detail {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  padding: 4px 6px 10px 32px;
+  padding: 4px 0 10px var(--nest, 24px);
 }
 
 .row-detail .prose {

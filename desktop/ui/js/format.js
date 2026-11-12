@@ -21,15 +21,6 @@ export function bytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function ago(ts, now = Date.now()) {
-  const minutes = Math.floor((now - ts) / 60_000);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h`;
-  if (minutes < 60 * 24 * 7) return `${Math.floor(minutes / (60 * 24))}d`;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 /** Shortens a path under the home directory to `~/…`. */
 /** A Windows path without the verbatim prefix its system gives it: `\\?\C:\work` as `C:\work`. */
 export function plainPath(path) {

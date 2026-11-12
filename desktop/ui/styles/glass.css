@@ -61,6 +61,26 @@ body {
   image-rendering: pixelated;
 }
 
+/* The dither belongs to the bare glass. Where the sheet lies it is cut away, so nothing drifts
+   behind the reading: the window's rectangle, less the sheet's. */
+#backdrop-dither {
+  --sheet-right: calc(100% - var(--side-w));
+  --sheet-bottom: calc(100% - var(--gap));
+  clip-path: polygon(
+    evenodd,
+    0 0,
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 0,
+    var(--side-w) var(--gap),
+    var(--side-w) var(--sheet-bottom),
+    var(--sheet-right) var(--sheet-bottom),
+    var(--sheet-right) var(--gap),
+    var(--side-w) var(--gap)
+  );
+}
+
 /* Dither off: the painting alone, here and in the New session view. */
 :root[data-dither="off"] :is(#backdrop-dither, .hero-dither) {
   display: none;

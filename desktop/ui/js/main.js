@@ -83,14 +83,13 @@ function drawSessionList() {
   const signature = listSignature(app.sessions, currentId);
   if (signature === listShown) return;
   listShown = signature;
-  renderSessionList(list, app.sessions, currentId, (id) => go({ name: 'session', id }));
+  renderSessionList(list, app.sessions, currentId, app.state.home, (id) => go({ name: 'session', id }));
 }
 
 [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
 newLink.addEventListener('click', () => go({ name: 'new' }));
 settingsLink.addEventListener('click', () => go({ name: 'settings' }));
-// A session changing state changes its glyph; the timer keeps the relative times moving.
+// A session changing state changes its mark.
 let listFrame = 0;
 store.onChange(() => (listFrame ||= requestAnimationFrame(() => ((listFrame = 0), drawSessionList()))));
-setInterval(drawSessionList, 30_000);
 await applyHooks(app);

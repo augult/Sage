@@ -176,13 +176,6 @@
   color: var(--ink);
 }
 
-/* The walkthrough and the way to a key, offered while no provider has one. */
-.lead-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
 /* A picker: the current choice as a quiet button, the others in a menu under it. */
 
 .pick-wrap {

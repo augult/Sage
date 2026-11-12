@@ -9,8 +9,10 @@
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { tilde } from '../format.js';
+import * as prefs from '../prefs.js';
 import * as themes from '../themes.js';
 import { track, watchUnsaved } from '../unsaved.js';
+import { SEND_KEYS, sendKey, sendKeyLabel } from './common.js';
 import { effortOptions, field, hint, modelOptions, picker, providerOptions, radioChips } from './controls.js';
 
 // What removing a key or a failed save has to say, per provider, once the view is redrawn.
@@ -58,7 +60,7 @@ export function mountSettings(main, app) {
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
     h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
-    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
+    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), messagesSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
   );
 
   /** Reloads the engine state and redraws, since a key changes what both sections offer. */
@@ -112,6 +114,19 @@ function appearanceSection() {
     field('Dither', choice('dither', 'Dither', ['on', 'off'], pick.dither)),
     field('Motion', choice('motion', 'Motion', ['on', 'off'], pick.motion)),
   );
+}
+
+/** Which key sends a task or a follow-up; the other one breaks the line. Kept by the window, like the appearance. */
+function messagesSection() {
+  const keys = radioChips({
+    name: 'send',
+    label: 'Send with',
+    segmented: true,
+    options: SEND_KEYS.map((key) => ({ value: key, label: sendKeyLabel(key) })),
+    value: sendKey(),
+    onChange: (key) => prefs.set('send', key),
+  });
+  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys));
 }
 
 /**

@@ -310,6 +310,31 @@ button:disabled {
   }
 }
 
+/* A run in progress, in a list: a dot, and a ring that swells from it and fades. */
+.pulse {
+  flex: none;
+  overflow: visible;
+  fill: currentColor;
+}
+
+.pulse-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: swell 1.8s ease-out infinite;
+}
+
+@keyframes swell {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
 @keyframes blink {
   50% {
     opacity: 0;
@@ -339,6 +364,13 @@ button:disabled {
 
   .spinner {
     animation-duration: 2.4s;
+  }
+
+  /* The ring stays where it is, as a halo. */
+  .pulse-ring {
+    opacity: 0.22;
+    transform: scale(2);
+    animation: none;
   }
 
   .caret {
