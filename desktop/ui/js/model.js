@@ -8,7 +8,7 @@
 // No event is dropped. One this build does not know, or cannot make sense of, becomes a neutral
 // chip that names its type, and the events after it are applied as usual.
 
-import { duration, firstLine, k } from './format.js';
+import { duration, effortLabel, firstLine, k } from './format.js';
 
 function createSession(meta) {
   return {
@@ -127,12 +127,24 @@ const HANDLERS = {
   user(s, ev) {
     closeTurn(s);
     const followUp = s.items.some((item) => item.kind === 'user');
-    s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), followUp });
+    s.items.push({ kind: 'user', key: key(s, 'user'), rev: 0, text: str(ev.text), files: Array.isArray(ev.files) ? ev.files.map(str) : [], followUp });
     // Skills switched on with this message stay on for the rest of the session.
     if (Array.isArray(ev.skills) && ev.skills.length) s.meta.skills = [...new Set([...(Array.isArray(s.meta.skills) ? s.meta.skills : []), ...ev.skills.map(str)])];
     s.running = true;
     s.runStartedAt = num(ev.ts);
     s.outcome = null;
+  },
+
+  /** What the user changed with the message before it: the session's from here on. */
+  settings(s, ev) {
+    for (const field of ['provider', 'model', 'effort', 'autonomy']) {
+      if (ev[field] != null) s.meta[field] = str(ev[field]);
+    }
+    const now = [ev.model != null && `model ${str(ev.model)}`, ev.effort != null && `effort ${effortLabel(str(ev.effort))}`, ev.autonomy != null && (str(ev.autonomy) === 'ask' ? 'asks first' : 'acts without asking')];
+    const row = chip(s, 'quiet', 'now', now.filter(Boolean).join(' · '));
+    row.icon = 'sliders';
+    place(s, ev, row);
+    s.sideRev++;
   },
 
   env(s, ev) {

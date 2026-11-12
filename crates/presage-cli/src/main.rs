@@ -183,6 +183,10 @@ impl Printer {
             EventKind::Note { text, .. } => eprintln!("    {} {}", p.yellow("◦"), p.yellow(text)),
             EventKind::Lesson { learned, text } => eprintln!("    {} {} {text}", p.cyan("◦"), if *learned { "learned:" } else { "recalled:" }),
             EventKind::Effort { from, to, reason, .. } => eprintln!("    {} effort {from} → {to} ({reason})", p.yellow("◦")),
+            EventKind::Settings { model, effort, autonomy, .. } => {
+                let changed: Vec<String> = [("model", model), ("effort", effort), ("autonomy", autonomy)].iter().filter_map(|(name, value)| value.as_ref().map(|value| format!("{name} {value}"))).collect();
+                eprintln!("    {} now {}", p.yellow("◦"), changed.join(", "));
+            }
             EventKind::Decay { messages, dropped_tokens, reason, .. } => eprintln!("    {} trimmed {messages} old observations (~{} tokens): {reason}", p.yellow("◦"), k(*dropped_tokens)),
             EventKind::Approval { tool, summary, reason, .. } => eprintln!("    {} approval needed for {tool} {summary} ({reason})", p.yellow("?")),
             EventKind::Error { message } => eprintln!("{} {message}", p.red("error:")),

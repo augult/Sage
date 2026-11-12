@@ -1,179 +1,95 @@
-/* New session, the pickers and their menus, Settings, the reminder of unsaved text and the Push dialog. */
+/* The folders of the New session view, the pickers and their menus, Settings, and the reminder of unsaved text. */
 
-/* New session: the chosen background hangs uncovered above one composer, which holds the
-   workspace, the task and the run's settings. */
+/* New session: in the middle of the sheet, a little above its centre, the folder the session will
+   work in. The chat bar under it is the session's own (styles/session.css). */
 
-.hero {
-  position: relative;
-}
-
-/* A wide crop of the painting as it is, with the dither moving over it. */
-.hero-art {
-  position: relative;
-  aspect-ratio: 3 / 1;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-3);
-  background-color: var(--fill-2);
-  background-image: var(--art, none);
-  background-position: center;
-  background-size: cover;
-}
-
-.hero-dither {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* The picker that changes it, opaque in its corner so it reads on any picture. */
-.hero-pick {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-}
-
-.hero-pick .pick,
-.hero-pick .pick:hover:not(:disabled),
-.hero-pick .pick[aria-expanded="true"] {
-  background: var(--solid);
-  box-shadow: 0 0 0 1px var(--line-strong);
-}
-
-.new-session {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.composer-card {
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-3);
-  background: var(--well);
-  transition: border-color 120ms ease;
-}
-
-.composer-card:has(textarea:focus-visible) {
-  border-color: var(--ink);
-}
-
-.composer-card textarea {
-  display: block;
-  width: 100%;
-  min-height: 124px;
-  padding: 12px 14px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font-size: var(--text-lg);
-  line-height: 1.55;
-  resize: vertical;
-}
-
-.composer-card textarea::placeholder,
-.workspace-pick input::placeholder {
-  color: var(--faint);
-  font-family: var(--font);
-}
-
-.composer-top,
-.composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px;
-}
-
-.composer-top {
-  border-bottom: 1px solid var(--line);
-}
-
-.composer-bar {
-  flex-wrap: wrap;
-  border-top: 1px solid var(--line);
-}
-
-/* Start sits at the end of the bar, and at the end of its own row when the pickers need the first. */
-.composer-bar > .btn {
-  margin-left: auto;
-}
-
-/* Under the composer: recent workspaces on the left, the shortcut on the right. */
-.composer-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 0 4px;
-}
-
-.composer-foot .kbd {
-  margin-left: auto;
-}
-
-/* The workspace, as a field along the top of the composer. */
-.workspace-pick {
+.new-body {
   display: flex;
   flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+/* Space above and below rather than centring, which would cut off the top of a list too long to fit. */
+.new-body::before,
+.new-body::after {
+  flex: 2;
+  content: "";
+}
+
+.new-body::after {
+  flex: 3;
+}
+
+.projects {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  width: min(100%, 320px);
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+}
+
+.project {
+  display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  height: 28px;
+  width: 100%;
+  height: 30px;
   padding: 0 8px;
-  border-radius: var(--r-2);
-  color: var(--muted);
-  cursor: text;
-}
-
-.workspace-pick:hover {
-  background: var(--fill-1);
-}
-
-.workspace-pick:focus-within {
-  background: var(--fill-1);
-  box-shadow: inset 0 0 0 1px var(--ink);
-}
-
-.workspace-pick input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
   border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--ink);
-  font: var(--text-sm) var(--mono);
-  letter-spacing: 0;
-}
-
-.recent {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-.recent button {
-  max-width: 100%;
-  padding: 0 7px;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
   background: transparent;
   color: var(--soft);
-  font: var(--text-sm)/22px var(--mono);
-  letter-spacing: 0;
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+
+.project:hover,
+.project[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.project:hover {
+  background: var(--fill-2);
+}
+
+.project:focus-visible {
+  outline-offset: -2px;
+}
+
+.project .icon {
+  color: var(--muted);
+}
+
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.recent button:hover {
-  background: var(--fill-2);
+/* The check of the folder that is chosen, at the end of its line. */
+.project .project-check {
+  visibility: hidden;
   color: var(--ink);
+}
+
+.project[aria-pressed="true"] .project-check {
+  visibility: visible;
+}
+
+.projects-rule {
+  height: 1px;
+  margin: 3px 0;
+  background: var(--line);
 }
 
 /* A picker: the current choice as a quiet button, the others in a menu under it. */
@@ -699,11 +615,6 @@ textarea.editor {
   grid-column: 2 / -1;
 }
 
-.push > .form-error {
-  flex: none;
-  margin: 0 16px 12px;
-}
-
 /* The reminder: what was typed and not saved, before it is left behind. */
 
 .unsaved {
@@ -729,101 +640,73 @@ textarea.editor {
   margin-right: auto;
 }
 
-/* Push: where it goes, what would go, and the one button that sends it. */
+/* Skills: what there is to switch on, two to a row, and any one of them read whole. */
 
-.push {
-  width: min(520px, calc(100vw - 48px));
+.skills {
+  width: min(680px, calc(100vw - 48px));
 }
 
-.push-body {
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+
+.skill-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  padding: 14px 16px;
-  overflow-y: auto;
-}
-
-.push-target {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-}
-
-.push-repo {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.push-branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 0 6px;
-  overflow: hidden;
+  padding: 12px 12px 10px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  color: var(--soft);
-  font: var(--text-xs)/16px var(--mono);
-  letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-radius: var(--r-3);
+  transition: border-color 120ms ease;
 }
 
-.push-target .muted {
-  flex: none;
-  font-size: var(--text-sm);
+/* One that is in use. */
+.skill-card:has(.skill-use[aria-pressed="true"]) {
+  border-color: var(--ink);
 }
 
-.push-standing {
+.skill-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.skill-about {
   color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-/* Every file the commit would take. */
-.push-files {
-  flex: none;
-  max-height: 216px;
-  padding: 4px 0;
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--fill-1);
-}
-
-.push-file {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 0 10px;
-  font: var(--text-sm)/20px var(--mono);
-  letter-spacing: 0;
-}
-
-.push-kind {
-  flex: none;
-  width: 9ch;
-  color: var(--muted);
-}
-
-.push-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.push-note {
-  min-width: 0;
-  margin-right: auto;
-  color: var(--muted);
-  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
-.push .dialog-foot {
-  justify-content: flex-end;
+/* At the foot of its card, however long the words above it. */
+.skill-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.skill-acts .act {
+  margin-left: auto;
+}
+
+/* As wide in use as not, so that nothing beside it moves. */
+.skill-use {
+  min-width: 78px;
+}
+
+.skill-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-page {
+  min-height: 0;
+  padding: 14px 20px 20px;
+  overflow-y: auto;
 }

@@ -113,6 +113,21 @@ pub enum EventKind {
         /// Skills switched on with this message.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skills: Vec<String>,
+        /// Files attached to this message, by path.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+    },
+    /// What changed about the session with the message before this event, as `SessionStart`
+    /// names it. Only what changed is there.
+    Settings {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        autonomy: Option<String>,
     },
     /// Environment snapshot that was prepended to the first user message.
     Env {

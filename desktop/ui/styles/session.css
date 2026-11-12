@@ -1,73 +1,5 @@
-/* The session: its header, the conversation, the grey bar a stretch of work folds into with the
-   rows under it, and the box a follow-up is written in. What a row unfolds into is in tools.css. */
-
-.session-head {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  padding: 0 12px 10px 24px;
-  border-bottom: 1px solid var(--line);
-}
-
-.session-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  height: var(--strip);
-}
-
-.session-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--text-md);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-pill {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  color: var(--soft);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.session-facts {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-
-/* A long path keeps its end: the folder's own name. */
-.session-cwd {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-family: var(--mono);
-  letter-spacing: 0;
-  text-align: left;
-  text-overflow: ellipsis;
-  direction: rtl;
-}
-
-.session-cwd bdi {
-  direction: ltr;
-}
-
-.session-meta {
-  flex: none;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* The session: the conversation, the grey bar a stretch of work folds into with the rows under it,
+   and the box a follow-up is written in. What a row unfolds into is in tools.css. */
 
 .timeline-scroll {
   flex: 1;
@@ -675,18 +607,39 @@ button.row-line:focus-visible {
   color: var(--ink);
 }
 
-/* The follow-up box: the text, and under it the row that sends it or stops the run. */
+/* The chat bar, in a session and in the New session view alike, so that it does not move when the
+   first message is sent: the box with the text and what sends it or stops the run, and under the
+   box the pickers. */
 
 .session-foot {
   flex: none;
-  padding: 8px 24px 16px;
+  padding: 8px 24px 10px;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  max-width: 712px;
+  margin: 0 auto;
+}
+
+.chat > .form-error {
+  margin-bottom: 6px;
+}
+
+/* What the next message will cost that the last did not. */
+.chat-note {
+  padding: 0 6px 6px;
+  color: var(--soft);
+  font-size: var(--text-sm);
+  text-align: center;
 }
 
 .composer {
   display: flex;
   flex-direction: column;
-  max-width: 712px;
-  margin: 0 auto;
+  gap: 6px;
+  padding: 5px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
   background: var(--well);
@@ -697,12 +650,130 @@ button.row-line:focus-visible {
   border-color: var(--ink);
 }
 
+/* What attaches a file, the text, and what sends it or stops the run. */
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* The files attached, over the text: the box grows upwards by their row. */
+.attached {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px 3px 0;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  color: var(--soft);
+  font-size: var(--text-sm);
+}
+
+.file-chip .icon {
+  color: var(--muted);
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-remove {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+
+.file-remove:hover {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+/* Over a message that was sent with files. */
+.user-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 84%;
+  margin-bottom: 4px;
+}
+
+/* What sends, stops or attaches is its glyph on a disc: ink for the one that acts on the message,
+   bare for the one that adds to it. */
+.round {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--soft);
+  transition: background-color 120ms ease, transform 120ms var(--ease);
+}
+
+.round:hover:not(:disabled) {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.round.primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.round.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  color: var(--on-primary);
+}
+
+.round:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.round:disabled {
+  opacity: 0.45;
+}
+
+.round .icon {
+  stroke-width: 1.8;
+}
+
+.round.primary .spinner {
+  border-color: color-mix(in srgb, var(--on-primary) 30%, transparent);
+  border-top-color: var(--on-primary);
+}
+
+/* One line is as tall as the button beside it. */
 .composer textarea {
   display: block;
-  width: 100%;
-  min-height: 36px;
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
   max-height: 160px;
-  padding: 10px 12px 4px;
+  padding: 3px 3px 4px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -715,22 +786,17 @@ button.row-line:focus-visible {
   color: var(--faint);
 }
 
-.composer-row {
+/* As tall with no picker in it as with a row of them, so the box stays where it is. */
+.composer-under {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px 6px;
+  gap: 2px 4px;
+  min-height: 32px;
+  padding: 4px 4px 0;
 }
 
-.composer-row .kbd {
-  margin-left: auto;
-}
-
-.composer .pick-slot {
+.composer-under .pick-slot {
   flex: 0 1 auto;
   max-width: 50%;
-}
-
-.composer > .form-error {
-  margin: 6px 6px 0;
 }

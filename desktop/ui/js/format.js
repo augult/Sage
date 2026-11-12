@@ -36,6 +36,14 @@ export function tilde(path, home) {
   return plain.startsWith(base) && /[\\/]/.test(plain[base.length]) ? `~${plain.slice(base.length)}` : plain;
 }
 
+/** A name per folder: its own, with its parent's in front where two folders share one. */
+export function folderNames(paths) {
+  const tail = (path, parts) => path.split(/[\\/]/).filter(Boolean).slice(-parts).join('/') || path || 'No folder';
+  const taken = new Map();
+  for (const path of paths) taken.set(tail(path, 1), (taken.get(tail(path, 1)) ?? 0) + 1);
+  return new Map(paths.map((path) => [path, tail(path, taken.get(tail(path, 1)) > 1 ? 2 : 1)]));
+}
+
 /** An effort as the interface names it. The engine's `ratchet` starts high and steps up when predictions fail: Auto. */
 export function effortLabel(effort) {
   const text = String(effort ?? '');

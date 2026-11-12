@@ -81,22 +81,32 @@ pub fn project_instructions(root: &Path) -> Option<(&'static str, String)> {
     })
 }
 
+/// Said ahead of the user's instructions in every session, and not theirs to edit. Without it a
+/// model reads them as part of the message it is answering.
+pub const USER_NOTE: &str = "What follows is the user's own standing instructions, written ahead of time for all of their sessions. It is not part of any message in this conversation and it is not a request: apply what bears on the task at hand and disregard the rest.";
+
+/// The same, ahead of a project's instructions file.
+pub fn project_note(file: &str) -> String {
+    format!("What follows is this project's instructions file ({file}), the same for every session in this folder. It is not part of any message in this conversation and it is not a request: apply what bears on the task at hand and disregard the rest.")
+}
+
 /// The system prompt of a session: `base`, then the user's instructions, the project's, and the
 /// active skills, each under its own heading. It is the cached prefix of every request, so it is
 /// built once, when the session starts.
 pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: &[SkillInfo]) -> String {
     let mut out = base.trim().to_string();
-    let mut section = |heading: String, text: &str| {
+    let mut section = |heading: String, note: Option<&str>, text: &str| {
         if !text.trim().is_empty() {
-            out.push_str(&format!("\n\n# {heading}\n\n{}", text.trim()));
+            let note = note.map(|n| format!("{n}\n\n")).unwrap_or_default();
+            out.push_str(&format!("\n\n# {heading}\n\n{note}{}", text.trim()));
         }
     };
-    section("User instructions".into(), global);
+    section("User instructions".into(), Some(USER_NOTE), global);
     if let Some((file, text)) = project {
-        section(format!("Project instructions ({file})"), text);
+        section(format!("Project instructions ({file})"), Some(&project_note(file)), text);
     }
     for skill in skills {
-        section(format!("Skill: {}", skill.title), &skill.body);
+        section(format!("Skill: {}", skill.title), None, &skill.body);
     }
     out
 }
@@ -369,11 +379,14 @@ mod tests {
         let skill = |name: &str, title: &str, body: &str| SkillInfo { name: name.into(), title: title.into(), description: String::new(), source: crate::skills::SkillSource::Builtin, overrides_builtin: false, body: body.into() };
         let skills = [skill("security", "Security audit", "Look for injection."), skill("ui", "UI work", "Check it in the app.")];
         let full = compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills);
-        assert_eq!(full, "Base.\n\n# User instructions\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\nRun make test.\n\n# Skill: Security audit\n\nLook for injection.\n\n# Skill: UI work\n\nCheck it in the app.");
+        let (user, project) = (USER_NOTE, project_note("AGENTS.md"));
+        assert_eq!(full, format!("Base.\n\n# User instructions\n\n{user}\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\n{project}\n\nRun make test.\n\n# Skill: Security audit\n\nLook for injection.\n\n# Skill: UI work\n\nCheck it in the app."));
+        // What is said ahead of the instructions is the harness's, not text from either file.
+        assert!(user.contains("not part of any message") && project.contains("AGENTS.md") && !full.contains("Use tabs.\n\nWhat follows"));
         // The same parts give the same bytes: this is the prefix the provider caches.
         assert_eq!(full, compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills));
         assert_eq!(compose("Base.", " \n", None, &[]), "Base.");
-        assert_eq!(compose("Base.", "", Some(("CLAUDE.md", "Hi.")), &skills[1..]), "Base.\n\n# Project instructions (CLAUDE.md)\n\nHi.\n\n# Skill: UI work\n\nCheck it in the app.");
+        assert_eq!(compose("Base.", "", Some(("CLAUDE.md", "Hi.")), &skills[1..]), format!("Base.\n\n# Project instructions (CLAUDE.md)\n\n{}\n\nHi.\n\n# Skill: UI work\n\nCheck it in the app.", project_note("CLAUDE.md")));
     }
 
     #[test]

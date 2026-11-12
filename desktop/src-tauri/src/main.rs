@@ -4,7 +4,7 @@
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
+use presage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
 use presage_core::provider::mock::{MockProvider, MockTurn};
 use presage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use tauri::ipc::Channel;
 use tauri::{Manager, State};
 use tokio::sync::broadcast::error::RecvError;
 
+mod files;
 mod git;
 
 type Reply<T> = Result<T, String>;
@@ -183,10 +184,10 @@ async fn start_demo(harness: State<'_, Harness>) -> Reply<SessionMeta> {
     harness.demo()
 }
 
-/// `skills` are switched on with this message.
+/// `skills` are switched on with this message, and `files` are attached to it.
 #[tauri::command]
-async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>) -> Reply<()> {
-    harness.send_with_skills(&id, &text, &skills.unwrap_or_default())
+async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>, files: Option<Vec<String>>, changes: Option<Changes>) -> Reply<()> {
+    harness.send_with(&id, &text, &skills.unwrap_or_default(), &files.unwrap_or_default(), changes.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -243,6 +244,26 @@ async fn pick_folder(app: tauri::AppHandle, start: Option<String>) -> Reply<Opti
     Ok(folder.and_then(|folder| folder.into_path().ok()).map(|path| presage_core::util::plain_path(&path.to_string_lossy())))
 }
 
+/// Asks for files to attach with the system's own dialog, opened at `start` when that is a folder.
+/// Nothing comes back when the dialog is dismissed.
+#[tauri::command]
+async fn pick_files(app: tauri::AppHandle, start: Option<String>) -> Reply<Vec<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_title("Attach files");
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    if let Some(dir) = start.map(PathBuf::from).filter(|dir| dir.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    dialog.pick_files(move |files| {
+        let _ = chosen.send(files);
+    });
+    let files = answer.await.map_err(|_| "the file dialog closed without an answer".to_string())?;
+    Ok(files.unwrap_or_default().into_iter().filter_map(|file| file.into_path().ok()).map(|path| presage_core::util::plain_path(&path.to_string_lossy())).collect())
+}
+
 /// Built-in and user skills, plus the project's own when `cwd` is given.
 #[tauri::command]
 async fn list_skills(harness: State<'_, Harness>, cwd: Option<String>) -> Reply<Vec<SkillInfo>> {
@@ -295,6 +316,24 @@ async fn git_state(harness: State<'_, Harness>, id: String) -> Reply<git::GitSta
 #[tauri::command]
 async fn git_push(harness: State<'_, Harness>, id: String, message: String) -> Reply<git::Pushed> {
     git::push(&session_cwd(&harness, &id)?, &message).await
+}
+
+/// What a directory of the session's folder holds; `path` is from the folder's root.
+#[tauri::command]
+async fn list_dir(harness: State<'_, Harness>, id: String, path: Option<String>) -> Reply<Vec<files::Entry>> {
+    files::list(&session_cwd(&harness, &id)?, path.as_deref().unwrap_or(""))
+}
+
+/// The text of a file of the session's folder.
+#[tauri::command]
+async fn read_file(harness: State<'_, Harness>, id: String, path: String) -> Reply<String> {
+    files::read(&session_cwd(&harness, &id)?, &path)
+}
+
+/// Writes `text` to a file of the session's folder.
+#[tauri::command]
+async fn write_file(harness: State<'_, Harness>, id: String, path: String, text: String) -> Reply<()> {
+    files::write(&session_cwd(&harness, &id)?, &path, &text)
 }
 
 /// Returns everything stored so far and forwards what follows to `on_event`, with nothing lost or
@@ -379,6 +418,7 @@ fn main() {
             session_events,
             read_output,
             pick_folder,
+            pick_files,
             list_skills,
             skill_file,
             save_skill,
@@ -388,6 +428,9 @@ fn main() {
             set_global_instructions,
             git_state,
             git_push,
+            list_dir,
+            read_file,
+            write_file,
             subscribe
         ])
         .build(tauri::generate_context!())

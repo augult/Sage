@@ -3,8 +3,8 @@
 //! A session is a long-lived task that owns its agent. Events are appended to `events.jsonl`,
 //! kept in memory for late subscribers, and broadcast live.
 
-use crate::agent::{Agent, AgentConfig, EffortPolicy};
-use crate::config::{Config, PROVIDERS, data_dir};
+use crate::agent::{Agent, AgentConfig, EffortPolicy, Retune};
+use crate::config::{Config, PROVIDERS, Resolved, data_dir};
 use crate::demo;
 use crate::economy::prices_for;
 use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
@@ -93,9 +93,40 @@ pub struct StartRequest {
     /// Skills to switch on, by name.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Files attached to the task, by path.
+    #[serde(default)]
+    pub files: Vec<String>,
     /// `false` leaves the project's instruction file (`AGENTS.md`, …) out of the system prompt.
     #[serde(default)]
     pub project_instructions: Option<bool>,
+}
+
+/// What a message may change about the session it is sent to, as `StartRequest` names each.
+/// Left out, a thing stays as it is.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Changes {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub autonomy: Option<String>,
+}
+
+/// The files a message may carry: each one a file that is there, and each once.
+fn attachable(files: &[String]) -> Result<Vec<String>, String> {
+    let mut kept: Vec<String> = Vec::new();
+    for file in files.iter().map(|file| file.trim()).filter(|file| !file.is_empty()) {
+        if !Path::new(file).is_file() {
+            return Err(format!("cannot attach {file}: there is no such file"));
+        }
+        if !kept.iter().any(|each| each == file) {
+            kept.push(file.to_string());
+        }
+    }
+    Ok(kept)
 }
 
 /// What the user can edit of the system prompt.
@@ -154,8 +185,8 @@ struct Live {
     seq: AtomicU64,
     tx: broadcast::Sender<Event>,
     log: Mutex<Option<std::fs::File>>,
-    /// A user message, and the skills to switch on with it.
-    input: mpsc::UnboundedSender<(String, Vec<SkillInfo>)>,
+    /// A user message, the skills to switch on with it, and what else changes with it.
+    input: mpsc::UnboundedSender<(String, Vec<SkillInfo>, Retune, Vec<String>)>,
     cancel: Mutex<CancellationToken>,
     /// Cancelled when the session is closed for good.
     closed: CancellationToken,
@@ -423,11 +454,16 @@ impl Harness {
             return Err("the task is empty".into());
         }
         let resolved = self.inner.config.lock().unwrap().resolve(req.provider.as_deref(), req.model.as_deref())?;
-        let mut client = OpenAiProvider::new(&resolved.base_url, &resolved.key, &resolved.model, resolved.dialect).map_err(|e| e.to_string())?;
-        client.keep_retrying = self.inner.auto_retry.clone();
-        let provider = Provider::OpenAi(client);
+        let provider = self.client(&resolved)?;
         let effort = req.effort.clone().or_else(|| self.inner.config.lock().unwrap().effort.clone());
         self.launch(req, provider, &resolved.id, &resolved.model, effort)
+    }
+
+    /// The way to a model, retrying as the auto-retry setting says.
+    fn client(&self, resolved: &Resolved) -> Result<Provider, String> {
+        let mut client = OpenAiProvider::new(&resolved.base_url, &resolved.key, &resolved.model, resolved.dialect).map_err(|e| e.to_string())?;
+        client.keep_retrying = self.inner.auto_retry.clone();
+        Ok(Provider::OpenAi(client))
     }
 
     /// Starts the scripted walkthrough in a throwaway workspace. No key, no network.
@@ -468,6 +504,7 @@ impl Harness {
             Some("auto") | None => Autonomy::Auto,
             Some(other) => return Err(format!("unknown autonomy {other:?}; use auto or ask")),
         };
+        let files = attachable(&req.files)?;
 
         let id = session_id();
         let dir = self.inner.data_dir.join("sessions").join(&id);
@@ -506,7 +543,7 @@ impl Harness {
             skills: skill_names.clone(),
         };
         let (tx, _) = broadcast::channel(4096);
-        let (input, mut inbox) = mpsc::unbounded_channel::<(String, Vec<SkillInfo>)>();
+        let (input, mut inbox) = mpsc::unbounded_channel::<(String, Vec<SkillInfo>, Retune, Vec<String>)>();
         let approvals = Arc::new(Approvals::default());
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
         let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone() });
@@ -534,16 +571,18 @@ impl Harness {
                     message = inbox.recv() => message,
                     _ = worker.closed.cancelled() => None,
                 };
-                let Some((text, skills)) = message else { break };
+                let Some((text, skills, retune, files)) = message else { break };
                 let cancel = CancellationToken::new();
                 *worker.cancel.lock().unwrap() = cancel.clone();
                 worker.set_status(SessionStatus::Running);
+                agent.retune(retune);
+                agent.attach(files);
                 agent.run_with(text, &skills, &cancel).await;
                 worker.set_status(SessionStatus::Idle);
             }
             agent.sess.jobs.kill_all();
         });
-        live.input.send((req.task, Vec::new())).map_err(|_| "the session ended before it started".to_string())?;
+        live.input.send((req.task, Vec::new(), Retune::default(), files)).map_err(|_| "the session ended before it started".to_string())?;
         Ok(meta)
     }
 
@@ -554,12 +593,40 @@ impl Harness {
     /// Sends a follow-up message to an idle session, switching on the skills named that it does not
     /// have yet. Its system prompt is already sent, so they go in front of this message instead.
     pub fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
+        self.send_with(id, text, skills, &[], Changes::default())
+    }
+
+    /// `send_with_skills`, and with the message whatever else is to change from it onwards: the
+    /// model, the effort, the autonomy. The conversation is kept, so another model is sent all of
+    /// it. The mode cannot change: the system prompt and the tools of a session are sent already.
+    pub fn send_with(&self, id: &str, text: &str, skills: &[String], files: &[String], changes: Changes) -> Result<(), String> {
         let live = self.live(id)?;
         if text.trim().is_empty() {
             return Err("the message is empty".into());
         }
-        let cwd = live.meta.lock().unwrap().cwd.clone();
+        let (cwd, simulated, provider, model) = {
+            let meta = live.meta.lock().unwrap();
+            (meta.cwd.clone(), meta.simulated, meta.provider.clone(), meta.model.clone())
+        };
         let mut added = skills::resolve(&self.inner.data_dir, Some(Path::new(&cwd)), skills)?;
+        let files = attachable(files)?;
+        let mut retune = Retune::default();
+        if changes.provider.as_ref().is_some_and(|wanted| *wanted != provider) || changes.model.as_ref().is_some_and(|wanted| *wanted != model) {
+            if simulated {
+                return Err("this session is played by a stand-in: it has no model to change".into());
+            }
+            let resolved = self.inner.config.lock().unwrap().resolve(Some(changes.provider.as_deref().unwrap_or(&provider)), changes.model.as_deref())?;
+            retune.provider = Some((self.client(&resolved)?, resolved.id, resolved.model));
+        }
+        if let Some(effort) = &changes.effort {
+            retune.effort = Some(EffortPolicy::parse(effort).ok_or_else(|| format!("unknown effort {effort:?}; use low, high, max or ratchet"))?);
+        }
+        retune.autonomy = match changes.autonomy.as_deref() {
+            Some("ask") => Some(Autonomy::Ask),
+            Some("auto") => Some(Autonomy::Auto),
+            Some(other) => return Err(format!("unknown autonomy {other:?}; use auto or ask")),
+            None => None,
+        };
         {
             let mut meta = live.meta.lock().unwrap();
             if meta.status == SessionStatus::Running {
@@ -568,12 +635,19 @@ impl Harness {
             // The classic baseline has no skills.
             added.retain(|s| meta.mode != "classic" && !meta.skills.contains(&s.name));
             meta.skills.extend(added.iter().map(|s| s.name.clone()));
+            if let Some((_, provider, model)) = &retune.provider {
+                meta.provider = provider.clone();
+                meta.model = model.clone();
+            }
+            if let Some(effort) = retune.effort {
+                meta.effort = effort.label();
+            }
             // Mark it running now so a second message cannot slip in before the worker picks this one up.
             meta.status = SessionStatus::Running;
             meta.updated = now_ms();
         }
         live.save_meta();
-        live.input.send((text.to_string(), added)).map_err(|_| "the session has ended".to_string())
+        live.input.send((text.to_string(), added, retune, files)).map_err(|_| "the session has ended".to_string())
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
@@ -838,20 +912,21 @@ mod tests {
         // Template, the user's instructions, the project's, then the skills in the order asked for.
         let built_in = prompt::system_prompt(&Features::presage());
         let expected = h.system_prompt(&req()).unwrap();
-        assert_eq!(expected, format!("{built_in}\n\n# User instructions\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\nRun make test.\n\n# Skill: {}\n\n{}\n\n# Skill: House rules\n\nNo globals.", skill("security").title, skill("security").body));
+        let (user, project) = (prompt::USER_NOTE, prompt::project_note("AGENTS.md"));
+        assert_eq!(expected, format!("{built_in}\n\n# User instructions\n\n{user}\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\n{project}\n\nRun make test.\n\n# Skill: {}\n\n{}\n\n# Skill: House rules\n\nNo globals.", skill("security").title, skill("security").body));
 
         // A template for one run wins over the user's, which wins over the built-in one.
         let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
         h.set_system_prompt(Some("Mine. {finish}")).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), "Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\nUse tabs.");
-        assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), "Be terse.\n\n# User instructions\n\nUse tabs.");
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\n{user}\n\nUse tabs."));
+        assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), format!("Be terse.\n\n# User instructions\n\n{user}\n\nUse tabs."));
         h.set_system_prompt(None).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\nUse tabs."));
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\n{user}\n\nUse tabs."));
 
         // The baseline is the classic prompt and nothing else.
         assert_eq!(h.system_prompt(&StartRequest { mode: Some("classic".into()), system_prompt: Some("Be terse.".into()), ..req() }).unwrap(), prompt::SYSTEM_CLASSIC);
         let no_scripts = h.system_prompt(&StartRequest { without: vec!["scripts".into()], ..bare.clone() }).unwrap();
-        assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
+        assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\n{user}\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
 
         let unknown = StartRequest { skills: vec!["ui".into(), "telepathy".into()], ..req() };
         assert!(h.system_prompt(&unknown).unwrap_err().contains("unknown skill \"telepathy\""));
@@ -892,7 +967,7 @@ mod tests {
 
         let events = h.events(&meta.id).unwrap();
         assert!(matches!(&events[0].kind, EventKind::SessionStart { skills, .. } if *skills == ["security", "house"]));
-        let with_message: Vec<(String, Vec<String>)> = events.iter().filter_map(|e| if let EventKind::User { text, skills } = &e.kind { Some((text.clone(), skills.clone())) } else { None }).collect();
+        let with_message: Vec<(String, Vec<String>)> = events.iter().filter_map(|e| if let EventKind::User { text, skills, .. } = &e.kind { Some((text.clone(), skills.clone())) } else { None }).collect();
         assert_eq!(with_message, [("hello".to_string(), vec![]), ("now the UI".to_string(), vec!["ui".to_string()]), ("again".to_string(), vec![])]);
         assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].skills, ["security", "house", "ui"]);
     }
@@ -910,6 +985,44 @@ mod tests {
         h.send_with_skills(&meta.id, "more", &["security".into()]).unwrap();
         assert!(until_idle(&h, &meta.id).await.skills.is_empty());
         assert!(h.events(&meta.id).unwrap().iter().all(|e| !matches!(&e.kind, EventKind::User { skills, .. } if !skills.is_empty())));
+    }
+
+    #[tokio::test]
+    async fn a_message_can_change_the_effort_and_the_autonomy_of_its_session() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("changes");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "hello".into(), interactive: true, ..Default::default() };
+        let meta = h.start_scripted(req, MockProvider::scripted(vec![MockTurn::say("ok"), MockTurn::say("ok"), MockTurn::say("ok"), MockTurn::say("ok")])).unwrap();
+        assert_eq!(until_idle(&h, &meta.id).await.effort, "ratchet-high");
+
+        // What cannot be done is refused before anything is sent.
+        let change = |changes: Changes| h.send_with(&meta.id, "more", &[], &[], changes);
+        assert!(change(Changes { effort: Some("turbo".into()), ..Default::default() }).unwrap_err().contains("unknown effort"));
+        assert!(change(Changes { autonomy: Some("maybe".into()), ..Default::default() }).unwrap_err().contains("unknown autonomy"));
+        assert!(change(Changes { model: Some("another".into()), ..Default::default() }).unwrap_err().contains("stand-in"));
+        assert_eq!(h.meta(&meta.id).unwrap().status, SessionStatus::Idle);
+
+        change(Changes { effort: Some("max".into()), autonomy: Some("ask".into()), ..Default::default() }).unwrap();
+        assert_eq!(until_idle(&h, &meta.id).await.effort, "max");
+        // Naming what the session has already is no change.
+        change(Changes { provider: Some("scripted".into()), model: Some("scripted stand-in".into()), effort: Some("max".into()), autonomy: Some("ask".into()) }).unwrap();
+        until_idle(&h, &meta.id).await;
+        let events = h.events(&meta.id).unwrap();
+        let settings: Vec<&EventKind> = events.iter().map(|e| &e.kind).filter(|k| matches!(k, EventKind::Settings { .. })).collect();
+        assert!(matches!(settings.as_slice(), [EventKind::Settings { provider: None, model: None, effort: Some(effort), autonomy: Some(autonomy) }] if effort == "max" && autonomy == "ask"), "{settings:?}");
+        // It is kept with the session, for the listing and for a later launch.
+        assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].effort, "max");
+
+        // A file goes with a message when it is there to be read, and is named in the log.
+        let note = ws.join("note.txt");
+        std::fs::write(&note, "remember").unwrap();
+        let note = note.to_string_lossy().into_owned();
+        assert!(h.send_with(&meta.id, "more", &[], &["/no/such/file".into()], Changes::default()).unwrap_err().contains("cannot attach"));
+        h.send_with(&meta.id, "more", &[], &[note.clone(), note.clone()], Changes::default()).unwrap();
+        until_idle(&h, &meta.id).await;
+        assert!(matches!(&h.events(&meta.id).unwrap().iter().rfind(|e| matches!(e.kind, EventKind::User { .. })).unwrap().kind, EventKind::User { files, .. } if *files == [note]));
     }
 
     #[test]

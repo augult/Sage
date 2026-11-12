@@ -36,7 +36,22 @@ pub struct GitState {
     pub ahead: u32,
     /// Uncommitted changes, untracked files included.
     pub files: Vec<ChangedFile>,
+    /// The latest commits of what is checked out, newest first. The first `ahead` are unpushed.
+    pub commits: Vec<Commit>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Commit {
+    /// Short hash.
+    pub hash: String,
+    /// First line of the message.
+    pub subject: String,
+    /// How long ago, as git words it: "3 hours ago".
+    pub when: String,
+}
+
+/// How many commits `state` lists.
+const LISTED_COMMITS: &str = "12";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Pushed {
@@ -148,6 +163,15 @@ pub async fn state(cwd: &Path) -> GitState {
             (None, false) => Err(String::new()),
         };
         let files = git(cwd, &["status", "--porcelain=v1", "-z", "--untracked-files=all"]).await.map(|out| parse_status(&out)).unwrap_or_default();
+        // Nothing yet in a repository without a commit.
+        let log = git(cwd, &["log", "-n", LISTED_COMMITS, "--format=%h%x1f%s%x1f%cr"]).await.unwrap_or_default();
+        let commits = log
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(3, '\u{1f}');
+                Some(Commit { hash: parts.next()?.to_string(), subject: parts.next()?.to_string(), when: parts.next()?.to_string() })
+            })
+            .collect();
         GitState {
             repo: true,
             branch,
@@ -157,6 +181,7 @@ pub async fn state(cwd: &Path) -> GitState {
             upstream,
             ahead: unpushed.ok().and_then(|count| count.trim().parse().ok()).unwrap_or(0),
             files,
+            commits,
         }
     } else {
         GitState::default()
@@ -250,7 +275,10 @@ mod tests {
         std::fs::write(work.join("a.txt"), "two\n").unwrap();
         assert_eq!(state(&work).await.files, [ChangedFile { path: "a.txt".into(), status: "modified" }]);
         git(&work, &["commit", "--quiet", "--all", "--message", "Change a"]).await.unwrap();
-        assert_eq!(state(&work).await.ahead, 1);
+        let found = state(&work).await;
+        assert_eq!(found.ahead, 1);
+        assert_eq!(found.commits.iter().map(|commit| commit.subject.as_str()).collect::<Vec<_>>(), ["Change a", "Add a"]);
+        assert!(found.commits.iter().all(|commit| !commit.hash.is_empty() && commit.when.ends_with("ago")));
         let done = push(&work, "").await.unwrap();
         assert!(done.pushed && done.commit.is_none());
         assert_eq!(git(&origin, &["log", "--format=%s", "main"]).await.unwrap().trim(), "Change a\nAdd a");

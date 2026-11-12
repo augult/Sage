@@ -32,6 +32,26 @@ export function onSendKey(event, send) {
   }
 }
 
+/**
+ * The chat bar, the same in a new session as in a running one, so that it is where it was once
+ * the first message is sent: what went wrong over it; the box, with the attached files over the
+ * text, what attaches one before it and what sends it after; and under the box the pickers.
+ */
+export function chatBar({ over, files, box, buttons, pickers }) {
+  return h('div.chat', over, h('div.composer', files.list, h('div.composer-row', files.button, box, buttons)), h('div.composer-under', pickers));
+}
+
+/** What sends, stops or attaches: a round button that is its glyph. `label` is its name to those who cannot see it. */
+export function roundButton(id, label, glyph, onclick, primary = true) {
+  return h(`button.round${primary ? '.primary' : ''}`, { id, type: 'button', title: label, 'aria-label': label, onclick }, glyph);
+}
+
+/** Makes a message box as tall as its text. The stylesheet says how tall it may get. */
+export function fitBox(box) {
+  box.style.height = 'auto';
+  box.style.height = `${box.scrollHeight}px`;
+}
+
 // Tones carry meaning without hue (styles/base.css): `good` held or done, `alert` wants a look,
 // `quiet` is the model's side at work, `danger` failed, `plain` is none of these.
 
