@@ -123,9 +123,12 @@
   flex: none;
 }
 
+/* The word's box is trimmed to its capitals, cap height to baseline, so that centring it on the
+   mark centres the letters themselves and not a line box with room for descenders below. */
 .brand-name {
   font-size: var(--text-md);
   font-weight: 600;
+  text-box: trim-both cap alphabetic;
 }
 
 .nav-item {
