@@ -1,5 +1,5 @@
 // The Economy tab of the pane beside the conversation: what the session is and how it stands, then
-// Economy, Watches, and Notes and lessons.
+// Economy, Watches, and Notes.
 
 import { h, icon } from '../dom.js';
 import { bytes, duration, effortLabel, k, pct, plural, tilde } from '../format.js';
@@ -41,6 +41,8 @@ function fact(label, value, path = false) {
 
 function session(model, { state, home, skills }) {
   const { title, cwd, model: name, effort, mode, autonomy } = model.meta;
+  // `{ text, met }`, for a session that was given a goal.
+  const goal = model.meta.goal && typeof model.meta.goal === 'object' ? model.meta.goal : null;
   return section(
     'Session',
     null,
@@ -53,6 +55,7 @@ function session(model, { state, home, skills }) {
     fact('Mode', mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode),
     fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
     skills.length > 0 && fact('Skills', skills.join(', ')),
+    goal && fact('Goal', `${goal.met === true ? 'Met' : 'Open'} · ${String(goal.text ?? '')}`),
   );
 }
 
@@ -66,7 +69,7 @@ function economy(model) {
   return section(
     'Economy',
     badge,
-    stat('Turns', s.turns),
+    stat('Turns', s.turns, s.checks > 0 && plural(s.checks, 'finish check')),
     stat('Steps', s.steps, s.skipped > 0 && `${s.skipped} skipped`),
     stat('Surprises', s.surprises, null, s.surprises > 0 && 'alert'),
     stat('Predictions', s.predictions > 0 ? `${s.predictions_held} of ${s.predictions} held` : 'none made'),
@@ -110,10 +113,10 @@ function watches(model) {
 }
 
 function notes(model) {
-  const entries = [...model.lessons, ...model.notes];
-  if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'None'));
+  const entries = model.notes;
+  if (!entries.length) return section('Notes', null, h('p.side-note', 'None'));
   return section(
-    'Notes and lessons',
+    'Notes',
     null,
     entries.map((entry) => h('div.note', h('span.note-label', entry.label), h('div.note-body', entry.text))),
   );
