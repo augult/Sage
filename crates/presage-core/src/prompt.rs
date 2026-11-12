@@ -357,7 +357,7 @@ mod tests {
         let reviewed = system_prompt(&Features::presage().with("review").unwrap());
         assert!(reviewed.contains("comes back once, with your changes and a review") && reviewed.contains("Do not spend a reply on `git diff` first") && !reviewed.contains('{'));
         assert!(!auto.contains("comes back once") && auto.contains("Re-read your changes once (`git diff`"));
-        assert_eq!(system_prompt(&Features::presage().without("review").unwrap()), auto);
+        assert_eq!(system_prompt(&Features::presage()), auto);
         assert_eq!(system_prompt(&Features::presage().without("scripts").unwrap()), SYSTEM_CLASSIC);
     }
 
