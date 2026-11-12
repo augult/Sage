@@ -178,6 +178,9 @@ pub struct Config {
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    /// Keep retrying a provider that is rate limited or unreachable instead of ending the run.
+    #[serde(default)]
+    pub auto_retry: bool,
     #[serde(default)]
     pub custom: Option<CustomProvider>,
 }

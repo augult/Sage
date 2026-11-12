@@ -10,7 +10,8 @@ use crate::text::est_tokens;
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -118,6 +119,10 @@ pub struct OpenAiProvider {
     pub model: String,
     pub dialect: Dialect,
     pub max_retries: u32,
+    /// While set, a failure that can be retried is retried past `max_retries`, for as long as it
+    /// takes: a rate limit ends when the provider says so, not after a count. Shared, so that it
+    /// can be switched while a request is waiting for its next attempt.
+    pub keep_retrying: Arc<AtomicBool>,
     pub idle_timeout: Duration,
     api_key: String,
     client: reqwest::Client,
@@ -140,6 +145,7 @@ impl OpenAiProvider {
             model: model.to_string(),
             dialect,
             max_retries: 8,
+            keep_retrying: Arc::default(),
             idle_timeout: Duration::from_secs(300),
             api_key: api_key.to_string(),
             client,
@@ -294,7 +300,7 @@ impl OpenAiProvider {
                     }
                     return Ok(r);
                 }
-                Err(e) if e.retryable() && attempt <= self.max_retries => {
+                Err(e) if e.retryable() && (attempt <= self.max_retries || self.keep_retrying.load(Ordering::Relaxed)) => {
                     let wait_secs = match &e {
                         ProviderError::Http { retry_after_secs: Some(s), .. } => (*s).clamp(1, MAX_BACKOFF_SECS),
                         _ => (1u64 << attempt.min(6)).min(MAX_BACKOFF_SECS),
@@ -591,6 +597,68 @@ mod tests {
             }
         }
         Ok((acc.finish()?, seen))
+    }
+
+    /// A local endpoint that answers the first `failures` requests with a rate limit, then a reply.
+    async fn rate_limited_endpoint(failures: usize) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut served = 0;
+            while let Ok((mut socket, _)) = listener.accept().await {
+                // The whole request is read before answering, or the answer may be lost with it.
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                    if let Some(head) = text.find("\r\n\r\n") {
+                        let length = text[..head].lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+                        if request.len() >= head + 4 + length {
+                            break;
+                        }
+                    }
+                    match socket.read(&mut chunk).await {
+                        Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                        _ => break,
+                    }
+                }
+                let (status, extra, body) = if served < failures {
+                    ("429 Too Many Requests", "retry-after: 1\r\n", r#"{"error":{"message":"rate limited"}}"#)
+                } else {
+                    ("200 OK", "", r#"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#)
+                };
+                served += 1;
+                let answer = format!("HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let _ = socket.write_all(answer.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://{address}/v1")
+    }
+
+    #[tokio::test]
+    async fn gives_up_at_the_limit_unless_told_to_keep_retrying() {
+        let mut p = OpenAiProvider::new(&rate_limited_endpoint(3).await, "k", "m", Dialect::OpenAi).unwrap();
+        p.max_retries = 0;
+        let messages = [Message::user("hi")];
+        let tools = json!([]);
+        let ask = || ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64 };
+        let cancel = CancellationToken::new();
+
+        let gave_up = p.chat(ask(), &mut |_| {}, &cancel).await.unwrap_err();
+        assert!(matches!(gave_up, ProviderError::Http { status: 429, .. }), "{gave_up}");
+
+        // Two rate limits are left: both are waited out, past a limit of no retries at all.
+        p.keep_retrying.store(true, Ordering::Relaxed);
+        let mut attempts = Vec::new();
+        let mut sink = |d: Delta| {
+            if let Delta::Retry { attempt, .. } = d {
+                attempts.push(attempt);
+            }
+        };
+        let reply = p.chat(ask(), &mut sink, &cancel).await.unwrap();
+        assert_eq!((reply.content.as_str(), reply.retries, attempts.as_slice()), ("done", 2, &[1, 2][..]));
     }
 
     #[test]

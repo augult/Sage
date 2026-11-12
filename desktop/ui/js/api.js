@@ -9,6 +9,8 @@ export const api = {
   setKey: (provider, key) => invoke('set_key', { provider, key }),
   /** Fields left out keep their current value. */
   setDefaults: ({ provider, model, effort }) => invoke('set_defaults', { provider, model, effort }),
+  /** Keep retrying a rate-limited or unreachable provider, in running sessions too. */
+  setAutoRetry: (on) => invoke('set_auto_retry', { on }),
   listSessions: () => invoke('list_sessions'),
   startSession: (req) => invoke('start_session', { req }),
   startDemo: () => invoke('start_demo'),

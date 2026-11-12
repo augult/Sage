@@ -60,7 +60,7 @@ export function mountSettings(main, app) {
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
     h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
-    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), messagesSection(), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
+    h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), messagesSection(app), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
   );
 
   /** Reloads the engine state and redraws, since a key changes what both sections offer. */
@@ -116,8 +116,12 @@ function appearanceSection() {
   );
 }
 
-/** Which key sends a task or a follow-up; the other one breaks the line. Kept by the window, like the appearance. */
-function messagesSection() {
+/**
+ * Which key sends a task or a follow-up (the other one breaks the line; kept by the window, like
+ * the appearance), and whether a request the provider turned away is made again without end
+ * (kept by the engine, and reaching the sessions that are running as well as the ones to come).
+ */
+function messagesSection(app) {
   const keys = radioChips({
     name: 'send',
     label: 'Send with',
@@ -126,7 +130,31 @@ function messagesSection() {
     value: sendKey(),
     onChange: (key) => prefs.set('send', key),
   });
-  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys));
+  const error = h('div.form-error', { role: 'alert', hidden: true });
+  const shown = () => (app.state.auto_retry ? 'on' : 'off');
+  const autoRetry = radioChips({
+    name: 'auto-retry',
+    label: 'Auto-retry',
+    segmented: true,
+    options: [
+      { value: 'on', label: 'On', title: 'When the provider is rate limited, overloaded or unreachable, keep retrying until it answers or you stop the session' },
+      { value: 'off', label: 'Off', title: 'Give up after eight retries, about four minutes' },
+    ],
+    value: shown(),
+    onChange: async (value) => {
+      error.hidden = true;
+      try {
+        await api.setAutoRetry(value === 'on');
+        await app.reloadState();
+      } catch (problem) {
+        error.textContent = String(problem);
+        error.hidden = false;
+        // The choice was not kept: show the one that still holds.
+        autoRetry.querySelector(`input[value="${shown()}"]`).checked = true;
+      }
+    },
+  });
+  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys), field('Auto-retry', autoRetry, error));
 }
 
 /**

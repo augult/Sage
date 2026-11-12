@@ -216,7 +216,13 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **A provider error is said in the open.** While a turn has no reply and the provider has
        answered with an error, a red block under the bar gives the error and the attempt
        ("Provider error · retrying · attempt 2"), and the bar reads "Retrying", not "Thinking":
-       the engine tries up to eight times, and a bar alone can say so for minutes.
+       the engine retries up to eight times, and a bar alone can say so for minutes. With
+       Auto-retry on (Settings) it does not stop at eight: a request turned away for a reason
+       that passes (a rate limit, an overload, a dropped connection) is made again, at most a
+       minute apart, until it is answered or the session is stopped, so a run left overnight
+       outlasts a rate limit. The request is the same one: no message is added to the
+       conversation. An error that will not pass (a bad key, a refused request) still ends the
+       run. The rows under the bar keep one line for a run of attempts, the latest.
      - A run the user stopped ends on its summary alone ("Stopped by the user."): the header
        already says Stopped.
      - **Push** (`ui/js/views/push.js`): the button reads "Push to GitHub" when the remote is on
@@ -234,7 +240,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
-     other one starts a new line; kept by the window). Then **API keys**, a line per provider: a check and the name in full ink
+     other one starts a new line; kept by the window. Auto-retry: On or Off, `set_auto_retry`,
+     kept by the engine in `config.json` and applied at once to running sessions too). Then **API keys**, a line per provider: a check and the name in full ink
      when it has a key, a ring and grey when it has none; its address; a password field; and
      Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider
