@@ -82,7 +82,10 @@ impl MockProvider {
 
         // Simulate a provider with a perfect prefix cache: everything sent last time is a hit now.
         let prompt = est_tokens(&serde_json::to_string(req.messages).unwrap_or_default()) + est_tokens(&req.tools.to_string());
-        let cached = self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt);
+        // A request with no tools is a question on the side (a finish check), not a turn of the
+        // conversation: it hits nothing and leaves what the conversation has cached as it is.
+        let side = req.tools.as_array().is_none_or(|tools| tools.is_empty());
+        let cached = if side { 0 } else { self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt) };
         let reasoning = est_tokens(&turn.reasoning);
         let output = reasoning + est_tokens(&turn.content) + calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum::<u64>();
 
