@@ -36,6 +36,23 @@ pub enum FinishStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalState {
+    /// `/goal <condition>`, or a goal given at the start.
+    Set,
+    /// `/goal clear`.
+    Cleared,
+    /// `/goal` on its own: the goal as it stands, or no goal.
+    Shown,
+    /// The check at the end of a run found the condition to hold.
+    Met,
+    /// The check found it does not, and says why; the model is sent back to work unless it was the last check allowed.
+    NotMet,
+    /// The check could not be made, or its answer could not be read; the goal stays as it was.
+    Unchecked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheVerdict {
     /// First request of the session: nothing could have been cached.
@@ -83,7 +100,9 @@ pub struct Stats {
     pub retries: u32,
     pub cache_misses: u32,
     pub cache_busts: u32,
-    pub lessons_learned: u32,
+    /// Requests made to judge whether the session's goal holds: counted in the figures above too.
+    #[serde(default)]
+    pub goal_checks: u32,
     pub elapsed_ms: u64,
     pub model_ms: u64,
     pub tool_ms: u64,
@@ -210,10 +229,14 @@ pub enum EventKind {
         kind: String,
         text: String,
     },
-    Lesson {
-        /// True when just learned, false when recalled from an earlier session.
-        learned: bool,
+    /// The session's goal (`/goal`): set, cleared, asked after, or checked at the end of a run.
+    Goal {
+        state: GoalState,
+        /// The goal's condition; empty when there is none.
         text: String,
+        /// What the check found, or why it could not; for a report, whether the goal is met.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        detail: String,
     },
     Approval {
         id: u64,

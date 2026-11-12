@@ -240,7 +240,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **The bar opens the rows**: the reasoning ("Thought", with its first line), a
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
-       watch changes, harness notes, lessons, effort changes, trims, retries, answered
+       watch changes, harness notes, goal changes and checks, effort changes, trims, retries, answered
        approvals).
      - **A row is one line about what the tool did** ("Ran sh check.sh", "Edited report.sh",
        "Searched the web for awk printf") **and opens the same way for every tool**
@@ -325,7 +325,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      skills), then Economy from `stats` events (turns, steps, surprises, predictions held of made,
      prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
      when simulated, context size, model versus tool time, output kept out of context, repairs,
-     retries, cache misses); Watches with current state; Notes and lessons.
+     retries, cache misses); Watches with current state; Notes.
    - **Code** (`code.js`): the folder's files as a tree, read a folder at a time, and the one
      that is open as text with line numbers, to edit and Save (Ctrl/Cmd+S). Text typed and not
      saved is marked by a dot after the file's name and is asked about before it is left (another

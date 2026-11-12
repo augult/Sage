@@ -2,7 +2,7 @@
 
 mod bench;
 
-use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, Stats};
+use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, GoalState, Stats};
 use presage_core::harness::{Harness, SessionStatus, StartRequest};
 use presage_core::tools::StepStatus;
 use presage_core::util::{fmt_bytes, fmt_duration};
@@ -30,7 +30,9 @@ OPTIONS for run
   -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch on a mechanism that is off unless asked for: review (repeatable)
+      --with <name>        switch on a mechanism that is off unless asked for (repeatable; none at present)
+      --goal <condition>   keep working until an independent check agrees the condition holds; with
+                           no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)
       --system-file <path> system prompt template for this run
       --no-project-instructions
@@ -80,6 +82,22 @@ fn pct(part: u64, whole: u64) -> String {
     (part * 100 + whole / 2).checked_div(whole).map_or("–".into(), |p| format!("{p}%"))
 }
 
+/// One line for an event about the session's goal.
+fn goal_line(state: GoalState, text: &str, detail: &str) -> String {
+    let said = presage_core::util::one_line(detail, 160);
+    let with = |head: &str| if said.is_empty() { head.to_string() } else { format!("{head}: {said}") };
+    match state {
+        GoalState::Set => format!("goal set: {text}"),
+        GoalState::Cleared if text.is_empty() => "there was no goal to clear".to_string(),
+        GoalState::Cleared => "goal cleared".to_string(),
+        GoalState::Shown if text.is_empty() => "no goal is set".to_string(),
+        GoalState::Shown => format!("goal ({}): {text}", if detail.is_empty() { "not met yet" } else { detail }),
+        GoalState::Met => with("goal met"),
+        GoalState::NotMet => with("goal not met"),
+        GoalState::Unchecked => with("goal could not be checked"),
+    }
+}
+
 fn indent(text: &str, prefix: &str, max_lines: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut out: Vec<String> = lines.iter().take(max_lines).map(|l| format!("{prefix}{l}")).collect();
@@ -107,8 +125,9 @@ impl Printer {
         };
         let preds = if s.predictions > 0 { format!(" · predictions {}/{} held", s.predictions_held, s.predictions) } else { String::new() };
         let skipped = if s.skipped > 0 { format!(" ({} skipped)", s.skipped) } else { String::new() };
+        let checks = if s.goal_checks > 0 { format!(" · goal checks {}", s.goal_checks) } else { String::new() };
         [
-            format!("turns {} · steps {}{skipped} · surprises {}{preds}", s.turns, s.steps, s.surprises),
+            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}", s.turns, s.steps, s.surprises),
             format!("tokens: in {} ({} cached) · out {} ({} thinking) · {cost}", k(s.prompt_tokens), pct(s.cached_tokens, s.prompt_tokens), k(s.output_tokens), k(s.reasoning_tokens)),
             format!(
                 "time {} (model {}, tools {}) · output kept out of context {} · repairs {} · retries {} · cache misses {}",
@@ -182,7 +201,7 @@ impl Printer {
                 eprintln!("    {} {line}", p.cyan("◦"));
             }
             EventKind::Note { text, .. } => eprintln!("    {} {}", p.yellow("◦"), p.yellow(text)),
-            EventKind::Lesson { learned, text } => eprintln!("    {} {} {text}", p.cyan("◦"), if *learned { "learned:" } else { "recalled:" }),
+            EventKind::Goal { state, text, detail } => eprintln!("    {} {}", p.cyan("◎"), goal_line(*state, text, detail)),
             EventKind::Effort { from, to, reason, .. } => eprintln!("    {} effort {from} → {to} ({reason})", p.yellow("◦")),
             EventKind::Settings { model, effort, autonomy, .. } => {
                 let changed: Vec<String> = [("model", model), ("effort", effort), ("autonomy", autonomy)].iter().filter_map(|(name, value)| value.as_ref().map(|value| format!("{name} {value}"))).collect();
@@ -233,6 +252,7 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
             "--classic" => req.mode = Some("classic".into()),
             "--without" => req.without.push(value(a)?),
             "--with" => req.with.push(value(a)?),
+            "--goal" => req.goal = Some(value(a)?),
             "--skill" => req.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
             "--system-file" => {
                 let path = value(a)?;
@@ -250,7 +270,7 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
         }
     }
     req.task = task.join(" ");
-    if !needs_task {
+    if !needs_task || (req.goal.is_some() && req.task.trim().is_empty()) {
         return Ok(RunArgs { req, verbose, json, events });
     }
     if req.task.trim() == "-" || req.task.trim().is_empty() {
@@ -459,5 +479,36 @@ async fn main() -> ExitCode {
             }
         },
         Some(other) => fail(format!("unknown command {other:?}; try `presage --help`")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn a_goal_may_stand_in_for_the_task() {
+        let run = parse_run(&args("--goal done"), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str()), (Some("done"), ""));
+        let run = parse_run(&args("-C /tmp --goal done fix the tests"), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str(), run.req.cwd.as_str()), (Some("done"), "fix the tests", "/tmp"));
+        assert!(parse_run(&args("--goal"), true).is_err());
+        assert_eq!(parse_run(&args("fix the tests"), true).unwrap().req.goal, None);
+    }
+
+    #[test]
+    fn goal_events_read_in_one_line() {
+        assert_eq!(goal_line(GoalState::Set, "tests pass", ""), "goal set: tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "tests pass", "met"), "goal (met): tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "tests pass", ""), "goal (not met yet): tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "", ""), "no goal is set");
+        assert_eq!(goal_line(GoalState::Cleared, "tests pass", ""), "goal cleared");
+        assert_eq!(goal_line(GoalState::NotMet, "g", "gamma is not done\nand more"), "goal not met: gamma is not done");
+        assert_eq!(goal_line(GoalState::Met, "g", ""), "goal met");
+        assert_eq!(goal_line(GoalState::Unchecked, "g", "network error"), "goal could not be checked: network error");
     }
 }

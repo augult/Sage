@@ -123,6 +123,17 @@ export function mountSession(main, side, app, meta) {
   // session's from then on. Of the skills, what the session has is on for good.
   const pickSlot = h('span.contents');
   const swapNote = h('div.chat-note', { role: 'status', hidden: true });
+  // The session's goal, while it has one: what the end of each run is held to. `/goal` sets and clears it.
+  const goalText = h('span.goal-text');
+  const goalNote = h('div.chat-note.goal-note', { role: 'status', hidden: true }, icon('flag', 12), goalText);
+  function drawGoal(model) {
+    const goal = model.meta.goal;
+    goalNote.hidden = !goal?.text;
+    if (!goal?.text) return;
+    const text = `${goal.met ? 'Goal met' : 'Goal'}: ${goal.text}`;
+    goalText.textContent = text;
+    goalNote.title = text;
+  }
   const wanted = { provider: null, model: null, effort: null, autonomy: null };
   // The policy as the pickers name it: the engine's `ratchet-low` is Auto.
   const policy = (effort) => (effort === 'ratchet-low' ? 'ratchet' : effort);
@@ -182,7 +193,8 @@ export function mountSession(main, side, app, meta) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(chatBar({ over: [swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
+    drawGoal(model);
+    if (!foot.firstChild) foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;

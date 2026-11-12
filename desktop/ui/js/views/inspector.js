@@ -1,5 +1,5 @@
 // The Economy tab of the pane beside the conversation: what the session is and how it stands, then
-// Economy, Watches, and Notes and lessons.
+// Economy, Watches, and Notes.
 
 import { h, icon } from '../dom.js';
 import { bytes, duration, effortLabel, k, pct, plural, tilde } from '../format.js';
@@ -110,10 +110,10 @@ function watches(model) {
 }
 
 function notes(model) {
-  const entries = [...model.lessons, ...model.notes];
-  if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'None'));
+  const entries = model.notes;
+  if (!entries.length) return section('Notes', null, h('p.side-note', 'None'));
   return section(
-    'Notes and lessons',
+    'Notes',
     null,
     entries.map((entry) => h('div.note', h('span.note-label', entry.label), h('div.note-body', entry.text))),
   );

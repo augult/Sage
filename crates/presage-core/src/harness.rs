@@ -7,8 +7,8 @@ use crate::agent::{Agent, AgentConfig, EffortPolicy, Retune};
 use crate::config::{CUSTOM, Config, PROVIDERS, Resolved, data_dir};
 use crate::demo;
 use crate::economy::prices_for;
-use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
-use crate::lessons::LessonBook;
+use crate::events::{Event, EventKind, FinishStatus, GoalState, Sink, Stats};
+use crate::goal::{self, Goal};
 use crate::prompt;
 use crate::provider::Provider;
 use crate::provider::mock::MockProvider;
@@ -16,7 +16,7 @@ use crate::provider::openai::OpenAiProvider;
 use crate::script::{Approvals, Autonomy};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
-use crate::util::{civil_date, fnv64, home_dir, now_ms, one_line, rand_hex};
+use crate::util::{civil_date, home_dir, now_ms, one_line, rand_hex};
 use crate::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -58,6 +58,9 @@ pub struct SessionMeta {
     /// Names of the skills switched on, in the order they were.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// The session's goal (`/goal`), and whether a check has found it met.
+    #[serde(default)]
+    pub goal: Option<Goal>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -102,6 +105,10 @@ pub struct StartRequest {
     /// `false` leaves the project's instruction file (`AGENTS.md`, …) out of the system prompt.
     #[serde(default)]
     pub project_instructions: Option<bool>,
+    /// A condition to work until it holds, as `/goal <condition>` sets one. With no task, it is the
+    /// task. A task that itself starts with `/goal` sets the goal, and this one is not used.
+    #[serde(default)]
+    pub goal: Option<String>,
 }
 
 /// What a message may change about the session it is sent to, as `StartRequest` names each.
@@ -192,12 +199,27 @@ struct Live {
     seq: AtomicU64,
     tx: broadcast::Sender<Event>,
     log: Mutex<Option<std::fs::File>>,
-    /// A user message, the skills to switch on with it, and what else changes with it.
-    input: mpsc::UnboundedSender<(String, Vec<SkillInfo>, Retune, Vec<String>)>,
+    input: mpsc::UnboundedSender<Input>,
     cancel: Mutex<CancellationToken>,
     /// Cancelled when the session is closed for good.
     closed: CancellationToken,
     approvals: Arc<Approvals>,
+}
+
+/// What the worker of a session is sent.
+enum Input {
+    /// A user message to work on, the skills to switch on with it, and what else changes with it.
+    Message {
+        /// What the model is sent.
+        text: String,
+        /// What the log shows, where the user typed something else.
+        shown: Option<String>,
+        skills: Vec<SkillInfo>,
+        retune: Retune,
+        files: Vec<String>,
+    },
+    /// `/goal` or `/goal clear`: answered by the session itself, with no request to the model.
+    Goal { shown: String, command: goal::Command, retune: Retune },
 }
 
 impl Live {
@@ -235,6 +257,22 @@ impl Sink for Live {
                     let mut m = self.meta.lock().unwrap();
                     m.outcome = Some(*status);
                     m.verified = Some(*verified);
+                }
+                EventKind::Goal { state: state @ (GoalState::Set | GoalState::Cleared | GoalState::Met), text, .. } => {
+                    {
+                        let mut m = self.meta.lock().unwrap();
+                        match state {
+                            GoalState::Set => m.goal = Some(Goal::new(text)),
+                            GoalState::Cleared => m.goal = None,
+                            _ => {
+                                if let Some(goal) = m.goal.as_mut() {
+                                    goal.met = true;
+                                }
+                            }
+                        }
+                    }
+                    // A goal that has been met is kept as met even if the app is closed in the middle of the run.
+                    self.save_meta();
                 }
                 _ => {}
             }
@@ -279,6 +317,35 @@ fn features_of(req: &StartRequest) -> Result<(Features, bool), String> {
     Ok((features, classic))
 }
 
+/// What the first message of a session comes to.
+struct Opening {
+    /// What the model is sent.
+    task: String,
+    /// What the log shows, where the user typed something else (`/goal <condition>`).
+    shown: Option<String>,
+    goal: Option<String>,
+    title: String,
+}
+
+/// A task that is `/goal <condition>` sets the goal and is worded as a task; a goal given beside a
+/// task is told to the model after it; a goal with no task is the task. A first message cannot be
+/// `/goal` alone or `/goal clear`: there is no goal to report or clear yet.
+fn opening_of(req: &StartRequest) -> Result<Opening, String> {
+    let task = req.task.trim();
+    match goal::parse_command(task) {
+        Some(goal::Command::Set(condition)) => return Ok(Opening { task: goal::task(&condition), shown: Some(task.to_string()), title: one_line(&condition, 72), goal: Some(condition) }),
+        Some(_) => return Err("a session cannot start with `/goal` alone or `/goal clear`: there is no goal yet. Say the condition: /goal <condition>".into()),
+        None => {}
+    }
+    let title = one_line(task, 72);
+    match req.goal.as_deref().map(str::trim) {
+        Some("") => Err("the goal is empty".into()),
+        Some(condition) if task.is_empty() => Ok(Opening { task: goal::task(condition), shown: None, title: one_line(condition, 72), goal: Some(condition.to_string()) }),
+        Some(condition) => Ok(Opening { task: format!("{task}\n\n{}", goal::briefing(condition)), shown: Some(task.to_string()), title, goal: Some(condition.to_string()) }),
+        None => Ok(Opening { task: task.to_string(), shown: None, title, goal: None }),
+    }
+}
+
 fn read_text(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok().filter(|t| !t.trim().is_empty())
 }
@@ -304,7 +371,7 @@ impl Harness {
         Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry }) }
     }
 
-    /// A harness with this one's keys and defaults that keeps its sessions and lessons elsewhere,
+    /// A harness with this one's keys and defaults that keeps its sessions elsewhere,
     /// so that benchmark runs do not mix with the user's own. It never retries without end: a
     /// benchmark has to finish.
     pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
@@ -485,13 +552,9 @@ impl Harness {
         Ok((prompt::compose(&base, &global, project.as_ref().map(|(file, text)| (*file, text.as_str())), &picked), picked))
     }
 
-    fn lessons_path(&self, root: &Path) -> PathBuf {
-        self.inner.data_dir.join("projects").join(format!("{:016x}", fnv64(root.as_os_str().as_encoded_bytes()))).join("lessons.jsonl")
-    }
-
     /// Starts a session on a real provider and begins working on the task.
     pub fn start(&self, req: StartRequest) -> Result<SessionMeta, String> {
-        if req.task.trim().is_empty() {
+        if opening_of(&req)?.task.is_empty() {
             return Err("the task is empty".into());
         }
         let resolved = self.inner.config.lock().unwrap().resolve(req.provider.as_deref(), req.model.as_deref())?;
@@ -513,8 +576,8 @@ impl Harness {
         demo::create_workspace(&root).map_err(|e| format!("could not create the demo workspace: {e}"))?;
         let real = crate::util::canonical(&root).map_err(|e| e.to_string())?;
         let provider = Provider::Mock(demo::provider(real, 22));
-        // The walkthrough is three replies; the review pass would add a fourth that shows nothing new.
-        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["review".into(), "survey".into()], ..Default::default() };
+        // Its stand-in reads only the files it was written for: a survey would put others in front of it.
+        let req = StartRequest { cwd: root.to_string_lossy().into_owned(), task: demo::TASK.into(), interactive: true, without: vec!["survey".into()], ..Default::default() };
         self.launch(req, provider, "demo", "scripted stand-in", Some("high".into()))
     }
 
@@ -548,13 +611,13 @@ impl Harness {
             Some(other) => return Err(format!("unknown autonomy {other:?}; use auto or ask")),
         };
         let files = attachable(&req.files)?;
+        let opening = opening_of(&req)?;
 
         let id = session_id();
         let dir = self.inner.data_dir.join("sessions").join(&id);
-        let lessons = if features.lessons { LessonBook::load(self.lessons_path(&ws.root)) } else { LessonBook::in_memory() };
         let simulated = provider.simulated();
         let cwd = ws.root.to_string_lossy().into_owned();
-        let sess = Session::new(ws, dir.clone(), features, lessons, prices_for(model)).map_err(|e| format!("could not create the session directory: {e}"))?;
+        let sess = Session::new(ws, dir.clone(), features, prices_for(model)).map_err(|e| format!("could not create the session directory: {e}"))?;
 
         let mut cfg = AgentConfig::new(model);
         cfg.features = features;
@@ -570,7 +633,7 @@ impl Harness {
         let now = now_ms();
         let meta = SessionMeta {
             id: id.clone(),
-            title: one_line(&req.task, 72),
+            title: opening.title.clone(),
             cwd: cwd.clone(),
             provider: provider_id.to_string(),
             model: model.to_string(),
@@ -584,9 +647,10 @@ impl Harness {
             verified: None,
             stats: Stats::default(),
             skills: skill_names.clone(),
+            goal: opening.goal.as_deref().map(Goal::new),
         };
         let (tx, _) = broadcast::channel(4096);
-        let (input, mut inbox) = mpsc::unbounded_channel::<(String, Vec<SkillInfo>, Retune, Vec<String>)>();
+        let (input, mut inbox) = mpsc::unbounded_channel::<Input>();
         let approvals = Arc::new(Approvals::default());
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
         let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone() });
@@ -614,18 +678,30 @@ impl Harness {
                     message = inbox.recv() => message,
                     _ = worker.closed.cancelled() => None,
                 };
-                let Some((text, skills, retune, files)) = message else { break };
+                let Some(input) = message else { break };
                 let cancel = CancellationToken::new();
                 *worker.cancel.lock().unwrap() = cancel.clone();
                 worker.set_status(SessionStatus::Running);
-                agent.retune(retune);
-                agent.attach(files);
-                agent.run_with(text, &skills, &cancel).await;
+                match input {
+                    Input::Message { text, shown, skills, retune, files } => {
+                        agent.retune(retune);
+                        agent.attach(files);
+                        if let Some(shown) = shown {
+                            agent.shown_as(shown);
+                        }
+                        agent.run_with(text, &skills, &cancel).await;
+                    }
+                    Input::Goal { shown, command, retune } => {
+                        agent.retune(retune);
+                        agent.goal_command(&shown, command);
+                    }
+                }
                 worker.set_status(SessionStatus::Idle);
             }
             agent.sess.jobs.kill_all();
         });
-        live.input.send((req.task, Vec::new(), Retune::default(), files)).map_err(|_| "the session ended before it started".to_string())?;
+        let retune = Retune { goal: opening.goal, ..Default::default() };
+        live.input.send(Input::Message { text: opening.task, shown: opening.shown, skills: Vec::new(), retune, files }).map_err(|_| "the session ended before it started".to_string())?;
         Ok(meta)
     }
 
@@ -642,17 +718,25 @@ impl Harness {
     /// `send_with_skills`, and with the message whatever else is to change from it onwards: the
     /// model, the effort, the autonomy. The conversation is kept, so another model is sent all of
     /// it. The mode cannot change: the system prompt and the tools of a session are sent already.
+    ///
+    /// A message that starts with `/goal` is a command (see `goal`): `/goal <condition>` sets the
+    /// session's goal and works towards it, `/goal` says what the goal is and `/goal clear` drops
+    /// it, the last two with no request to the model.
     pub fn send_with(&self, id: &str, text: &str, skills: &[String], files: &[String], changes: Changes) -> Result<(), String> {
         let live = self.live(id)?;
         if text.trim().is_empty() {
             return Err("the message is empty".into());
         }
+        let command = goal::parse_command(text);
         let (cwd, simulated, provider, model) = {
             let meta = live.meta.lock().unwrap();
             (meta.cwd.clone(), meta.simulated, meta.provider.clone(), meta.model.clone())
         };
         let mut added = skills::resolve(&self.inner.data_dir, Some(Path::new(&cwd)), skills)?;
         let files = attachable(files)?;
+        if matches!(command, Some(goal::Command::Show | goal::Command::Clear)) && (!added.is_empty() || !files.is_empty()) {
+            return Err("a /goal command carries no skills or files: send them with a message".into());
+        }
         let mut retune = Retune::default();
         if changes.provider.as_ref().is_some_and(|wanted| *wanted != provider) || changes.model.as_ref().is_some_and(|wanted| *wanted != model) {
             if simulated {
@@ -690,7 +774,16 @@ impl Harness {
             meta.updated = now_ms();
         }
         live.save_meta();
-        live.input.send((text.to_string(), added, retune, files)).map_err(|_| "the session has ended".to_string())
+        let typed = text.trim().to_string();
+        let input = match command {
+            Some(goal::Command::Set(condition)) => {
+                retune.goal = Some(condition.clone());
+                Input::Message { text: goal::task(&condition), shown: Some(typed), skills: added, retune, files }
+            }
+            Some(command) => Input::Goal { shown: typed, command, retune },
+            None => Input::Message { text: text.to_string(), shown: None, skills: added, retune, files },
+        };
+        live.input.send(input).map_err(|_| "the session has ended".to_string())
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
@@ -901,9 +994,9 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let cwd = ws.to_string_lossy().into_owned();
         let turns = vec![MockTurn::calls("", vec![("write", json!({"path": "a.txt", "content": "x"})), ("shell", json!({"cmd": "test -f a.txt", "expect_exit": "0"})), ("finish", json!({"summary": "wrote a.txt"}))])];
-        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into(), "review".into()], ..Default::default() };
+        let req = StartRequest { cwd: cwd.clone(), task: "write a.txt".into(), without: vec!["auto-watch".into(), "survey".into()], ..Default::default() };
         let meta = h.start_scripted(req, MockProvider::scripted(turns)).unwrap();
-        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch, review", true));
+        assert_eq!((meta.mode.as_str(), meta.simulated), ("presage without auto-watch, survey", true));
         let done = until_idle(&h, &meta.id).await;
         assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
 
@@ -986,9 +1079,6 @@ mod tests {
         assert_eq!(h.system_prompt(&StartRequest { mode: Some("classic".into()), system_prompt: Some("Be terse.".into()), ..req() }).unwrap(), prompt::SYSTEM_CLASSIC);
         let no_scripts = h.system_prompt(&StartRequest { without: vec!["scripts".into()], ..bare.clone() }).unwrap();
         assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\n{user}\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
-        // The review is described to a session that asks for it, and to no other.
-        let reviewed = h.system_prompt(&StartRequest { with: vec!["review".into()], ..bare.clone() }).unwrap();
-        assert!(reviewed.contains("comes back once, with your changes and a review") && !h.system_prompt(&bare).unwrap().contains("comes back once"));
         assert!(h.system_prompt(&StartRequest { with: vec!["telepathy".into()], ..bare.clone() }).unwrap_err().contains("unknown mechanism"));
 
         let unknown = StartRequest { skills: vec!["ui".into(), "telepathy".into()], ..req() };
@@ -1090,7 +1180,7 @@ mod tests {
 
     #[test]
     fn what_was_stored_before_there_were_skills_still_loads() {
-        let meta = SessionMeta { id: "s".into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: None, verified: None, stats: Stats::default(), skills: vec!["ui".into()] };
+        let meta = SessionMeta { id: "s".into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: None, verified: None, stats: Stats::default(), skills: vec!["ui".into()], goal: None };
         let mut old = serde_json::to_value(&meta).unwrap();
         assert_eq!(old.as_object_mut().unwrap().remove("skills"), Some(serde_json::json!(["ui"])));
         assert!(serde_json::from_value::<SessionMeta>(old).unwrap().skills.is_empty());
@@ -1120,5 +1210,185 @@ mod tests {
         assert!(h.list_dir(Some(root.join("gamma").to_str().unwrap())).unwrap().is_git);
         assert!(h.list_dir(Some(root.join("file.txt").to_str().unwrap())).is_err());
         assert!(h.list_dir(None).is_ok());
+    }
+
+    type Seen = Arc<Mutex<Vec<Vec<crate::provider::Message>>>>;
+
+    /// Scripted replies that keep what each request carried, so that a test can count them.
+    fn recording(seen: &Seen, turns: Vec<crate::provider::mock::MockTurn>) -> MockProvider {
+        use crate::provider::mock::TurnFn;
+        MockProvider::new(
+            turns
+                .into_iter()
+                .map(|turn| {
+                    let seen = seen.clone();
+                    Box::new(move |messages: &[crate::provider::Message]| {
+                        seen.lock().unwrap().push(messages.to_vec());
+                        turn.clone()
+                    }) as TurnFn
+                })
+                .collect(),
+        )
+    }
+
+    fn goals(h: &Harness, id: &str) -> Vec<(GoalState, String, String)> {
+        h.events(id).unwrap().into_iter().filter_map(|e| if let EventKind::Goal { state, text, detail } = e.kind { Some((state, text, detail)) } else { None }).collect()
+    }
+
+    fn user_messages(h: &Harness, id: &str) -> Vec<String> {
+        h.events(id).unwrap().into_iter().filter_map(|e| if let EventKind::User { text, .. } = e.kind { Some(text) } else { None }).collect()
+    }
+
+    #[tokio::test]
+    async fn a_goal_is_set_by_the_task_or_a_message_and_stays_until_it_is_met_or_cleared() {
+        use crate::provider::mock::MockTurn;
+        use serde_json::json;
+        let h = harness("goal");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("n.txt"), "alpha\nbeta\n").unwrap();
+        let upper = |old: &str, new: &str| MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": old, "new": new})), ("shell", json!({"cmd": format!("grep -qx {new} n.txt"), "expect_exit": "0"})), ("finish", json!({"summary": format!("{new} done")}))]);
+        let finish = || MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]);
+        let seen = Seen::default();
+        let turns = vec![
+            // The task is a goal: the model works, and is sent back once.
+            upper("alpha", "ALPHA"),
+            MockTurn::say("NOT MET\nbeta is still lower case"),
+            upper("beta", "BETA"),
+            MockTurn::say("MET\nboth lines are upper case"),
+            // A follow-up sets another goal; its check cannot be read, so it stays.
+            finish(),
+            MockTurn::say("Hard to say."),
+            // The next message is checked against it, and this time it holds.
+            finish(),
+            MockTurn::say("MET\nit holds"),
+            // Met: nothing is asked after this one.
+            finish(),
+        ];
+        let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "/goal both lines of n.txt are upper case".into(), ..Default::default() };
+        let meta = h.start_scripted(req, recording(&seen, turns)).unwrap();
+        assert_eq!(meta.goal, Some(Goal { text: "both lines of n.txt are upper case".into(), met: false }));
+        assert_eq!(meta.title, "both lines of n.txt are upper case");
+        let done = until_idle(&h, &meta.id).await;
+        assert_eq!((done.outcome, done.goal.clone()), (Some(FinishStatus::Done), Some(Goal { text: "both lines of n.txt are upper case".into(), met: true })));
+        assert_eq!(seen.lock().unwrap().len(), 4, "two replies of the model and two checks");
+        // The model is sent the goal as a task; the log shows what the user typed.
+        assert!(seen.lock().unwrap()[0].last().unwrap().content.ends_with("<task>\nWork until this holds: both lines of n.txt are upper case\n</task>"));
+        assert_eq!(user_messages(&h, &meta.id), ["/goal both lines of n.txt are upper case"]);
+        let states: Vec<GoalState> = goals(&h, &meta.id).iter().map(|g| g.0).collect();
+        assert_eq!(states, [GoalState::Set, GoalState::NotMet, GoalState::Met]);
+        // It was met in the stored meta as well, not only in memory.
+        assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].goal, done.goal);
+
+        // `/goal` says what it is and `/goal clear` drops it: neither asks the model anything.
+        h.send_with(&meta.id, "/goal", &[], &[], Changes::default()).unwrap();
+        until_idle(&h, &meta.id).await;
+        h.send_with(&meta.id, " /goal clear ", &[], &[], Changes::default()).unwrap();
+        let cleared = until_idle(&h, &meta.id).await;
+        h.send_with(&meta.id, "/goal", &[], &[], Changes::default()).unwrap();
+        until_idle(&h, &meta.id).await;
+        assert_eq!(seen.lock().unwrap().len(), 4);
+        assert_eq!((cleared.goal, cleared.outcome), (None, Some(FinishStatus::Done)));
+        let said: Vec<(GoalState, String, String)> = goals(&h, &meta.id).split_off(3);
+        assert_eq!(said, [(GoalState::Shown, "both lines of n.txt are upper case".into(), "met".into()), (GoalState::Cleared, "both lines of n.txt are upper case".into(), String::new()), (GoalState::Shown, String::new(), String::new())]);
+        assert_eq!(user_messages(&h, &meta.id)[1..], ["/goal", "/goal clear", "/goal"]);
+        assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].goal, None);
+
+        // A message sets a goal: the model is sent it as a task, and the goal stays while it is unmet.
+        h.send_with(&meta.id, "/goal  n.txt still starts with ALPHA", &[], &[], Changes::default()).unwrap();
+        let unchecked = until_idle(&h, &meta.id).await;
+        assert_eq!(unchecked.goal, Some(Goal { text: "n.txt still starts with ALPHA".into(), met: false }));
+        assert_eq!(seen.lock().unwrap().len(), 6);
+        assert_eq!(seen.lock().unwrap()[4].last().unwrap().content, "Work until this holds: n.txt still starts with ALPHA");
+        assert_eq!(user_messages(&h, &meta.id).last().unwrap(), "/goal  n.txt still starts with ALPHA");
+        let last = goals(&h, &meta.id).pop().unwrap();
+        assert_eq!(last.0, GoalState::Unchecked);
+        // An ordinary message in between is still held to it, and ends it once the check agrees.
+        assert!(matches!(h.events(&meta.id).unwrap().last().map(|e| &e.kind), Some(EventKind::Finish { evidence, .. }) if evidence.contains("goal could not be checked")));
+        h.send_with(&meta.id, "Anything to add?", &[], &[], Changes::default()).unwrap();
+        let met = until_idle(&h, &meta.id).await;
+        assert_eq!(met.goal, Some(Goal { text: "n.txt still starts with ALPHA".into(), met: true }));
+        assert_eq!(seen.lock().unwrap().len(), 8);
+        // A goal that is met no longer gates the messages after it.
+        h.send_with(&meta.id, "And now?", &[], &[], Changes::default()).unwrap();
+        until_idle(&h, &meta.id).await;
+        assert_eq!(seen.lock().unwrap().len(), 9);
+        assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].goal, met.goal);
+    }
+
+    #[tokio::test]
+    async fn a_session_starts_with_a_goal_of_its_own_or_not_at_all_with_a_goal_command_that_has_none() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("goal-start");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let cwd = ws.to_string_lossy().into_owned();
+        let req = |task: &str, goal: Option<&str>| StartRequest { cwd: cwd.clone(), task: task.into(), goal: goal.map(String::from), interactive: true, ..Default::default() };
+        let start = |req: StartRequest, seen: &Seen| h.start_scripted(req, recording(seen, vec![MockTurn::say("ok"), MockTurn::say("MET")]));
+
+        // Nothing to report or clear yet: the first message has to say what the goal is.
+        for task in ["/goal", "/goal clear", "  /goal  "] {
+            let err = start(req(task, None), &Seen::default()).unwrap_err();
+            assert!(err.contains("no goal yet") && err.contains("/goal <condition>"), "{err}");
+        }
+        assert!(start(req("fix it", Some("  ")), &Seen::default()).unwrap_err().contains("goal is empty"));
+        assert!(h.start(StartRequest { cwd: cwd.clone(), task: " ".into(), ..Default::default() }).unwrap_err().contains("empty"));
+        assert!(h.list().iter().all(|m| m.goal.is_none()), "nothing was started with a goal");
+
+        // A goal and no task: the goal is the task.
+        let seen = Seen::default();
+        let meta = start(req("", Some(" the docs name every flag ")), &seen).unwrap();
+        assert_eq!(meta.goal, Some(Goal { text: "the docs name every flag".into(), met: false }));
+        let done = until_idle(&h, &meta.id).await;
+        assert!(seen.lock().unwrap()[0].last().unwrap().content.ends_with("<task>\nWork until this holds: the docs name every flag\n</task>"));
+        assert_eq!(user_messages(&h, &meta.id), ["Work until this holds: the docs name every flag"]);
+        assert!(done.goal.is_some_and(|g| g.met), "a prose answer is checked too");
+
+        // A goal beside a task: the task stays the task, and the model is told of the goal after it.
+        let seen = Seen::default();
+        let meta = start(req("Document the flags.", Some("the docs name every flag")), &seen).unwrap();
+        until_idle(&h, &meta.id).await;
+        let first = seen.lock().unwrap()[0].last().unwrap().content.clone();
+        assert!(first.ends_with("<task>\nDocument the flags.\n\nThe session goal, which an independent check judges when you finish: the docs name every flag\n</task>"), "{first}");
+        assert_eq!((user_messages(&h, &meta.id), meta.title.as_str()), (vec!["Document the flags.".to_string()], "Document the flags."));
+    }
+
+    #[test]
+    fn logs_and_metas_that_hold_what_was_retired_still_open() {
+        let h = harness("retired");
+        let id = "20260101-000000-ab";
+        let dir = h.inner.data_dir.join("sessions").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A stats record as the engine wrote it when it still counted lessons.
+        let mut stats = serde_json::to_value(Stats { turns: 7, ..Stats::default() }).unwrap();
+        stats.as_object_mut().unwrap().remove("goal_checks");
+        stats.as_object_mut().unwrap().insert("lessons_learned".into(), 2.into());
+        let line = |seq: u64, body: serde_json::Value| {
+            let mut event = serde_json::json!({"seq": seq, "ts": 1});
+            event.as_object_mut().unwrap().extend(body.as_object().unwrap().clone());
+            event.to_string()
+        };
+        let log = [
+            line(1, serde_json::json!({"type": "session_start", "id": id, "title": "t", "cwd": "/", "provider": "p", "model": "m", "effort": "high", "mode": "presage", "autonomy": "auto", "simulated": false})),
+            line(2, serde_json::json!({"type": "user", "text": "hi"})),
+            line(3, serde_json::json!({"type": "lesson", "learned": true, "text": "`pytest -q` fails here → `uv run pytest -q` works"})),
+            line(4, serde_json::json!({"type": "note", "turn": 1, "kind": "review", "text": "one review pass"})),
+            line(5, serde_json::json!({"type": "stats", "stats": stats})),
+            line(6, serde_json::json!({"type": "finish", "status": "done", "summary": "ok", "verified": true, "evidence": "e"})),
+        ];
+        std::fs::write(dir.join("events.jsonl"), log.join("\n") + "\n").unwrap();
+        let meta = SessionMeta { id: id.into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: Some(FinishStatus::Done), verified: Some(true), stats: Stats { turns: 7, ..Stats::default() }, skills: vec![], goal: None };
+        let mut old = serde_json::to_value(&meta).unwrap();
+        old.as_object_mut().unwrap().remove("goal");
+        old["stats"] = stats.clone();
+        std::fs::write(dir.join("meta.json"), old.to_string()).unwrap();
+
+        // The retired event is left out; everything round it is there, the old stats included.
+        let events = h.events(id).unwrap();
+        let kinds: Vec<u64> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(kinds, [1, 2, 4, 5, 6]);
+        assert!(events.iter().any(|e| matches!(&e.kind, EventKind::Stats { stats } if stats.turns == 7 && stats.goal_checks == 0)));
+        let listed = h.list();
+        assert_eq!((listed.len(), listed[0].status, listed[0].goal.clone(), listed[0].stats.turns), (1, SessionStatus::Closed, None, 7));
     }
 }

@@ -96,7 +96,6 @@ pub struct ShellMeta {
     pub ok: bool,
     /// The model predicted the outcome and was right: this counts as evidence.
     pub held_explicit: bool,
-    pub output_tail: String,
     /// Present only while watches are in use.
     pub completed: Option<Completed>,
 }

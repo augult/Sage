@@ -635,6 +635,25 @@ button.row-line:focus-visible {
   text-align: center;
 }
 
+/* The session's goal, in the same place. One line; the whole text is its tooltip. */
+.goal-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.goal-note > svg {
+  flex: none;
+}
+
+.goal-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer {
   display: flex;
   flex-direction: column;

@@ -2,8 +2,7 @@
 
 use crate::anchors::History;
 use crate::economy::Prices;
-use crate::lessons::LessonBook;
-use crate::review::Baseline;
+use crate::changes::Baseline;
 use crate::tools::jobs::Jobs;
 use crate::watches::Watches;
 use crate::workspace::{Seen, Workspace, fingerprint};
@@ -30,8 +29,6 @@ pub struct Features {
     pub preflight: bool,
     /// `finish` requires a passing check since the last change.
     pub gate: bool,
-    /// Error→fix pairs are learned per project and recalled.
-    pub lessons: bool,
     /// Lines carry content-hash anchors usable by `edit`.
     pub anchors: bool,
     /// Unchanged file windows are not printed twice.
@@ -44,28 +41,24 @@ pub struct Features {
     pub attach: bool,
     /// Command output is shown without the workspace's absolute path.
     pub short_paths: bool,
-    /// The first `finish` after a change is answered once with a review of the task instead of being accepted.
-    /// Off unless asked for: over 96 benchmark runs it cost a third to a half as many replies again
-    /// and changed no outcome (docs/BENCHMARKS.md).
-    pub review: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
 }
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: false, survey: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, review: false, survey: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false }
     }
 
     /// The mechanisms `without` can switch off and `with` can switch on.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "review", "survey"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["review"];
+    pub const OPTIONAL: &'static [&'static str] = &[];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -86,14 +79,12 @@ impl Features {
             "auto_watch" => &mut self.auto_watch,
             "preflight" => &mut self.preflight,
             "gate" => &mut self.gate,
-            "lessons" => &mut self.lessons,
             "anchors" => &mut self.anchors,
             "dedup" => &mut self.dedup,
             "post_edit_check" => &mut self.post_edit_check,
             "bootstrap" => &mut self.bootstrap,
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
-            "review" => &mut self.review,
             "survey" => &mut self.survey,
             _ => return None,
         };
@@ -157,9 +148,7 @@ pub struct Evidence {
     fingerprint: Option<u64>,
     /// How often `finish` has been refused for lack of a check since the last change.
     pub refusals: u8,
-    /// The review of the task has been asked for since the last user message.
-    pub reviewed: bool,
-    /// The epoch when the last user message arrived: only changes since then are reviewed.
+    /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
 }
 
@@ -218,13 +207,12 @@ pub struct Session {
     pub jobs: Jobs,
     pub watches: Watches,
     pub evidence: Evidence,
-    /// The user message being worked on, quoted back by the review.
+    /// The user message being worked on.
     pub task: String,
-    /// What was already uncommitted when the session began, so the review shows only its own changes.
+    /// What was already uncommitted when the session began, so the report of changes shows only its own.
     pub baseline: Option<Baseline>,
-    /// Files changed through `edit` and `write`, for a review where git cannot say what changed.
+    /// Files changed through `edit` and `write`, for a report where git cannot say what changed.
     pub touched: Vec<String>,
-    pub lessons: LessonBook,
     pub features: Features,
     pub limits: Limits,
     pub prices: Option<Prices>,
@@ -243,7 +231,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(ws: Workspace, dir: PathBuf, features: Features, lessons: LessonBook, prices: Option<Prices>) -> std::io::Result<Self> {
+    pub fn new(ws: Workspace, dir: PathBuf, features: Features, prices: Option<Prices>) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir.join("out"))?;
         Ok(Self {
             ws,
@@ -254,7 +242,6 @@ impl Session {
             task: String::new(),
             baseline: None,
             touched: Vec::new(),
-            lessons,
             features,
             limits: Limits::default(),
             prices,
@@ -338,7 +325,7 @@ pub(crate) fn test_session(name: &str, features: Features) -> Session {
     let root = base.join("ws");
     std::fs::create_dir_all(&root).unwrap();
     let ws = Workspace::new(&root).unwrap();
-    Session::new(ws, base.join("session"), features, LessonBook::in_memory(), None).unwrap()
+    Session::new(ws, base.join("session"), features, None).unwrap()
 }
 
 #[cfg(test)]
@@ -382,7 +369,7 @@ mod tests {
         }
         assert!(!Features::presage().without("attach").unwrap().attach && !Features::presage().without("short-paths").unwrap().short_paths);
         assert_eq!(Features::presage().without("telepathy"), None);
-        assert!(Features::presage().with("review").unwrap().review && !Features::presage().review && Features::presage().with("telepathy").is_none());
+        assert!(Features::presage().with("telepathy").is_none());
     }
 
     #[test]

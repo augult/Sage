@@ -1,15 +1,16 @@
-//! The review that the first `finish` after a change comes back with.
+//! What the session changed in the workspace, as a report for whoever checks the work.
 //!
-//! Told to review its work, a model spends one reply asking for `git diff` and the next one reading
-//! it. The harness can look faster than the model can ask, so the review arrives with what there is
-//! to review: the task as given and what the session changed, as git sees it.
+//! A model asked what it changed spends one reply asking for `git diff` and the next one reading
+//! it. The harness can look faster than the model can ask, so a check arrives with what there is
+//! to look at: the paths and the diff of the session's own changes, as git sees them.
 //!
 //! Only the session's own changes are shown. Work that was already uncommitted when the session
 //! began is the user's: a model shown it under "what changed" could take it for its own and undo it.
+//! `baseline` records that state at the start of the session.
 
 use crate::state::Session;
 use crate::text::bound;
-use crate::util::{fnv64, truncate_chars};
+use crate::util::fnv64;
 use crate::workspace::derived;
 use std::collections::HashMap;
 use std::path::Path;
@@ -92,9 +93,9 @@ pub async fn baseline(root: &Path) -> Option<Baseline> {
     Some(Baseline { dirty })
 }
 
-/// What the session changed in the workspace, for the model to review: the paths, then the diff of
-/// the tracked ones. Falls back to the files changed through `edit` and `write` where git cannot
-/// tell. `None` when there is nothing to show.
+/// What the session changed in the workspace: the paths, then the diff of the tracked ones. Falls
+/// back to the files changed through `edit` and `write` where git cannot tell. `None` when there is
+/// nothing to show.
 pub async fn changes(sess: &Session) -> Option<String> {
     match git_changes(sess).await {
         Some(report) => Some(report),
@@ -154,21 +155,6 @@ async fn git_changes(sess: &Session) -> Option<String> {
     Some(out.trim_end().to_string())
 }
 
-/// What the first `finish` after a change is answered with.
-pub fn text(task: &str, changes: Option<&str>) -> String {
-    let (block, third) = match changes {
-        Some(changes) => (
-            format!("<changes>\n{changes}\n</changes>\n"),
-            "Read the changes above as a reviewer would: a call site or second entry point you missed, leftover debugging, files that should not be there (delete your scratch files), anything changed that the task did not ask for.",
-        ),
-        None => (String::new(), "Re-read what you changed: a call site or second entry point you missed, leftover debugging or scratch files, anything changed that the task did not ask for."),
-    };
-    format!(
-        "[review] Not accepted yet: one review pass first. Passing checks show that the tests you can see hold, not that the task is done.\n<task>\n{}\n</task>\n{block}Before calling `finish` again:\n1. Go through the task above sentence by sentence. Is every separate request done, and every stated constraint respected (names, formats, files to leave alone)?\n2. Go through the README, docstrings or spec of the code you touched. Every rule and edge case the visible tests do not cover (empty input, zero, boundaries, duplicates, invalid input, ordering): run it now unless you already have.\n3. {third}\nFix whatever you find. Then send what is left to check together with `finish`, in one reply: it is reviewed only once.",
-        truncate_chars(task, 6000)
-    )
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -183,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_what_the_session_changed_is_shown() {
-        let mut sess = test_session("review-git", Features::presage());
+        let mut sess = test_session("changes-git", Features::presage());
         let root = sess.ws.root.clone();
         sh(&root, &format!("printf 'a\\nb\\n' > code.py; printf 'x\\n' > wip.py; printf 'k\\n' > both.py; git init -q && git add -A && {COMMIT}"));
         // The user's own work in progress, there before the session.
@@ -204,19 +190,11 @@ mod tests {
 
     #[tokio::test]
     async fn without_git_the_edited_files_are_named() {
-        let mut sess = test_session("review-plain", Features::presage());
+        let mut sess = test_session("changes-plain", Features::presage());
         sess.baseline = baseline(&sess.ws.root).await;
         assert!(sess.baseline.is_none(), "not a repository");
         assert_eq!(changes(&sess).await, None);
         sess.touched = vec!["a.py".into(), "b.py".into()];
         assert_eq!(changes(&sess).await.as_deref(), Some("Files you changed with edit or write: a.py, b.py"));
-    }
-
-    #[test]
-    fn the_review_shows_the_changes_where_there_are_any() {
-        let with = text("Fix it.", Some(" M a.py"));
-        assert!(with.contains("<task>\nFix it.\n</task>\n<changes>\n M a.py\n</changes>\nBefore calling `finish` again:") && with.contains("3. Read the changes above"), "{with}");
-        let without = text("Fix it.", None);
-        assert!(!without.contains("<changes>") && without.contains("3. Re-read what you changed"), "{without}");
     }
 }
