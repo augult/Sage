@@ -34,8 +34,9 @@ asks about unsaved text and then destroys the window.
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
 `interactive = true`; `req.skills` names the skills to start with), `start_demo`,
-`send_message(id, text, skills?)` (`send_with_skills`: the skills named are switched on with the
-message), `stop_session(id)`,
+`send_message(id, text, skills?, changes?)` (`send_with`: the skills named are switched on with the
+message; `changes` is `{ provider?, model?, effort?, autonomy? }`, what the session is to run with
+from this message on), `stop_session(id)`,
 `approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`,
 `pick_folder(start?)` (the system's folder dialog, opened at `start`; the chosen path, or nothing),
 and `subscribe(id, on_event: tauri::ipc::Channel<Event>) -> Vec<Event>`, which returns the backlog
@@ -66,8 +67,10 @@ grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESA
 (the painting behind the glass and the appearance, for that launch only).
 A scripted session's file may name `skills` to start with.
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
-`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`. The Skills button
-is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. In Settings:
+`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`; a model's option
+is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
+is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. It opens `dialog.skills`,
+where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. In Settings:
 `#settings-skills`, `#settings-system`, `#settings-instructions`, a skill's row as
 `[data-skill="debug"]`, `#new-skill`, the text areas `#skill-file`, `#system-prompt`,
 `#global-instructions`, `#settings-keys` with a provider's row as `[data-provider="openai"]`,
@@ -177,10 +180,11 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      from `app_state`, the providers that have a key first; one without a key has its models
      greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
      the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
-     uses the same menu: it lists the skills of the chosen folder (`list_skills`) by title, each
-     with its description as the `title` attribute and a check mark when on; several can be on,
-     the menu stays open while toggling, and arrows, Home/End, Enter/Space and Escape work as in
-     the other menus. The button reads "Skills" with nothing on, then "Skills" and the number on
+     opens a dialog of the skills of the chosen folder (`list_skills`) as cards, two to a row:
+     on each its title, its description, Use (which reads "In use" once on; several can be on),
+     View (the whole skill in place of the cards, with a way back) and a button that copies its
+     text. Nothing is sent by choosing: a skill in use goes with the task, or in a session with
+     the next message. The button reads "Skills" with nothing on, then "Skills" and the number on
      (the titles are its `title` attribute), so the bar keeps to one row. A
      new session starts with no skills, whatever the last one had; Classic takes none, so the
      button is disabled there. With no key configured, the view leads with "Add an API key", and
@@ -235,12 +239,18 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        shows the repository, branch and remote, every file a commit would take and a commit
        message; one button commits what is uncommitted and pushes the branch.
      - **Stop** is in the follow-up box, in the place of Send while a run is in progress. The
-       box holds the text and that one button; the Skills button is under the box.
+       box holds the text and that one button; the pickers are under the box.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
-     a follow-up box with the same Skills button: the session's skills are checked and locked, and
-     any others picked are switched on with the next message (`send_message` with `skills`). Closed
+     a follow-up box with the same pickers under it, less the mode: model, Skills, effort and
+     autonomy. The session's skills are in use and locked, and any others picked are switched on
+     with the next message (`send_message` with `skills`). The model, the effort and the autonomy
+     show what the session has; another one picked goes with the next message (`send_message`
+     with `changes`) and is the session's from then on, which a `settings` event records and the
+     header then shows. The conversation is kept. With another model picked, a line over the box
+     says that model will read the whole conversation, and how many tokens, none of it cached;
+     with another effort, that some providers reread it. Closed
      sessions are read-only replays from `session_events`, marked "read-only" in the header, with
      no follow-up box.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
@@ -298,12 +308,12 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | --- | --- |
 | `new-session.jpg` | `PRESAGE_UI_VIEW=new`, no key |
 | `new-session-model-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='click:#pick-model'` |
-| `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="debug"];;click:#pick-skills-menu [data-value="tests"];;key:#pick-skills-menu=>ArrowDown'` |
+| `new-session-skills-menu.jpg` | `PRESAGE_UI_VIEW=new PRESAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
 | `session.jpg` | `PRESAGE_UI_AUTODEMO=1` |
 | `session-tools.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
 | `session-diff.jpg` | `PRESAGE_UI_AUTODEMO=1 PRESAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
 | `session-sources.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
-| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:#pick-skills-menu [data-value="ui"]` |
+| `session-skills.jpg` | `PRESAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:[data-skill="ui"] .skill-use` |
 | `session-push.jpg` | `PRESAGE_UI_SCRIPTED=<file>` whose `cwd` is a git repository with a github.com remote and whose turns edit files, then `wait:7500;;click:#push` |
 | `session-error.jpg` | `PRESAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
 | `settings.jpg` | `PRESAGE_UI_VIEW=settings` |

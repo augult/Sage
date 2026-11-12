@@ -4,7 +4,7 @@
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
+use presage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
 use presage_core::provider::mock::{MockProvider, MockTurn};
 use presage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
@@ -185,8 +185,8 @@ async fn start_demo(harness: State<'_, Harness>) -> Reply<SessionMeta> {
 
 /// `skills` are switched on with this message.
 #[tauri::command]
-async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>) -> Reply<()> {
-    harness.send_with_skills(&id, &text, &skills.unwrap_or_default())
+async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>, changes: Option<Changes>) -> Reply<()> {
+    harness.send_with(&id, &text, &skills.unwrap_or_default(), changes.unwrap_or_default())
 }
 
 #[tauri::command]

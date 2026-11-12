@@ -16,8 +16,11 @@ export const api = {
   startDemo: () => invoke('start_demo'),
   /** Test hook: the session `PRESAGE_UI_SCRIPTED` describes. */
   startScripted: () => invoke('start_scripted'),
-  /** `skills` are switched on with this message; the ones the session already has are ignored. */
-  sendMessage: (id, text, skills = []) => invoke('send_message', { id, text, skills }),
+  /**
+   * `skills` are switched on with this message; the ones the session already has are ignored.
+   * `changes` is what else is the session's from this message on: `{ provider, model, effort, autonomy }`, each optional.
+   */
+  sendMessage: (id, text, skills = [], changes = {}) => invoke('send_message', { id, text, skills, changes }),
   stopSession: (id) => invoke('stop_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
   sessionEvents: (id) => invoke('session_events', { id }),

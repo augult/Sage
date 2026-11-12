@@ -3,7 +3,7 @@
 use crate::attach;
 use crate::bootstrap;
 use crate::context::Context;
-use crate::economy::peak_multiplier;
+use crate::economy::{peak_multiplier, prices_for};
 use crate::events::{CacheVerdict, CallInfo, Channel, EventKind, FinishStatus, Sink, Stats};
 use crate::prompt;
 use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role};
@@ -122,6 +122,17 @@ pub struct Agent {
     solo_hints: u8,
     /// The `job` tool was in the list sent with the previous request.
     offered_job_tool: bool,
+    /// What `retune` changed, to be said in the log once the message it came with is in it.
+    announce: Vec<EventKind>,
+}
+
+/// What a message may change about the session it is sent to. Left out, a thing stays as it is.
+#[derive(Default)]
+pub struct Retune {
+    /// Another model: what to reach it through, its provider's id and its name.
+    pub provider: Option<(Provider, String, String)>,
+    pub effort: Option<EffortPolicy>,
+    pub autonomy: Option<Autonomy>,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -132,7 +143,34 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new() }
+    }
+
+    /// Applies `change` from the next message on. The conversation stays as it is: another model
+    /// is sent all of it and has none of it cached, so its first request is a first request
+    /// again, not a miss. An effort that changes starts over from where its policy starts.
+    pub fn retune(&mut self, change: Retune) {
+        let (mut provider, mut model, mut effort, mut autonomy) = (None, None, None, None);
+        if let Some((next, id, name)) = change.provider {
+            self.provider = next;
+            self.sess.prices = prices_for(&name);
+            self.cfg.model = name.clone();
+            self.ctx.forget_cache();
+            (provider, model) = (Some(id), Some(name));
+        }
+        if let Some(policy) = change.effort.filter(|policy| *policy != self.cfg.effort) {
+            self.cfg.effort = policy;
+            self.effort = policy.start();
+            self.surprise_streak = 0;
+            effort = Some(policy.label());
+        }
+        if let Some(next) = change.autonomy.filter(|next| *next != self.cfg.autonomy) {
+            self.cfg.autonomy = next;
+            autonomy = Some(if next == Autonomy::Ask { "ask" } else { "auto" }.to_string());
+        }
+        if provider.is_some() || effort.is_some() || autonomy.is_some() {
+            self.announce.push(EventKind::Settings { provider, model, effort, autonomy });
+        }
     }
 
     pub fn effort(&self) -> Effort {
@@ -300,6 +338,9 @@ impl Agent {
         let features = self.cfg.features;
         let task = text.trim().to_string();
         self.sink.emit(EventKind::User { text: task.clone(), skills: skills.iter().map(|s| s.name.clone()).collect() });
+        for change in std::mem::take(&mut self.announce) {
+            self.sink.emit(change);
+        }
         self.sess.task = task.clone();
         self.sess.evidence.reviewed = false;
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
@@ -616,6 +657,37 @@ mod tests {
 
     fn events(r: &Rig) -> Vec<EventKind> {
         r.sink.events.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn the_model_the_effort_and_the_autonomy_can_change_between_two_messages() {
+        let mut cfg = AgentConfig::new("first");
+        cfg.interactive = true;
+        let mut r = rig("agent-retune", cfg, vec![fixed(MockTurn::say("from the first"))]);
+        let cancel = CancellationToken::new();
+        assert_eq!(r.agent.run("One.".into(), &cancel).await.summary, "from the first");
+
+        // What is already so is not a change.
+        r.agent.retune(Retune::default());
+        r.agent.retune(Retune { effort: Some(EffortPolicy::Ratchet(Effort::High)), autonomy: Some(Autonomy::Auto), ..Default::default() });
+        let second = Provider::Mock(MockProvider::new(vec![fixed(MockTurn::say("from the second"))]));
+        r.agent.retune(Retune { provider: Some((second, "other".into(), "second".into())), effort: Some(EffortPolicy::Fixed(Effort::Max)), autonomy: Some(Autonomy::Ask) });
+        assert_eq!(r.agent.run("Two.".into(), &cancel).await.summary, "from the second");
+
+        // The second model is sent the whole conversation, and none of it is expected to be cached there.
+        let sent = requests(&r);
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0][1].content.contains("One.") && sent[0][2].content == "from the first" && sent[0].last().unwrap().content == "Two.", "{:?}", sent[0]);
+        let ev = events(&r);
+        let verdicts: Vec<CacheVerdict> = ev.iter().filter_map(|e| if let EventKind::Cache { verdict, .. } = e { Some(*verdict) } else { None }).collect();
+        assert_eq!(verdicts, vec![CacheVerdict::First, CacheVerdict::First]);
+        assert_eq!(r.agent.stats.cache_misses + r.agent.stats.cache_busts, 0);
+
+        // What changed is said once, after the message it came with, and holds from its first turn.
+        let at = ev.iter().position(|e| matches!(e, EventKind::User { text, .. } if text == "Two.")).unwrap();
+        assert!(matches!(&ev[at + 1], EventKind::Settings { provider: Some(p), model: Some(m), effort: Some(e), autonomy: Some(a) } if p == "other" && m == "second" && e == "max" && a == "ask"), "{:?}", ev[at + 1]);
+        assert_eq!(ev.iter().filter(|e| matches!(e, EventKind::Settings { .. })).count(), 1);
+        assert!(matches!(ev.iter().rfind(|e| matches!(e, EventKind::TurnStart { .. })), Some(EventKind::TurnStart { effort, .. }) if effort == "max"));
     }
 
     fn requests(r: &Rig) -> Vec<Vec<Message>> {

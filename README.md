@@ -54,7 +54,7 @@ State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. 
   other preset (OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek, Groq, Together,
   Fireworks, OpenRouter, Z.ai) follows its vendor's documented contract and is untested.
 - **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
-  and the front end has the session list, the new-session form with a skills picker, the live
+  and the front end has the session list, the new-session form with a skills dialog, the live
   timeline with inspector, and settings for keys, defaults, skills, the system prompt and
   instructions. It builds without warnings and has been driven through scripted UI actions under
   xvfb, with screenshots: nobody has driven it by hand, and no live-model session has been started

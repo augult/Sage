@@ -7,15 +7,12 @@ import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { chatBar, fitBox, onSendKey } from './common.js';
-import { effortOptions, keyedFirst, modelOptions, picker, skillsPicker } from './controls.js';
+import { AUTONOMIES, effortOptions, modelOptions, modelPicker, settingPicker } from './controls.js';
+import { skillsButton } from './skills.js';
 
 const MODES = [
   { value: 'presage', label: 'Presage' },
   { value: 'classic', label: 'Classic' },
-];
-const AUTONOMIES = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'ask', label: 'Ask' },
 ];
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
@@ -108,40 +105,11 @@ export function mountNewSession(main, app) {
     loadSkills();
   };
 
-  // Provider and model are one choice: a model, listed under the provider that serves it.
-  const served = new Map();
-  const modelGroups = keyedFirst(state.providers).map((provider) => {
-    const models = modelOptions(provider, state);
-    // A provider that lists no models still has its own default.
-    const options = (models.length ? models : [{ value: null, label: 'Provider default' }]).map((option) => {
-      const value = `${provider.id}:${option.value ?? ''}`;
-      served.set(value, { provider: provider.id, model: option.value });
-      return { value, label: option.label, disabled: !provider.has_key };
-    });
-    // Without a key its models are listed greyed.
-    return { label: provider.name, options };
-  });
-  const modelPicker = picker({
-    id: 'pick-model',
-    name: 'Model',
-    groups: modelGroups,
-    value: draft.provider ? `${draft.provider}:${draft.model ?? ''}` : null,
-    empty: 'No model yet',
-    onChange: (value) => Object.assign(draft, served.get(value)),
-  });
-
   /** A run setting: its name, the current value, and a menu of the others. */
   const setting = (key, name, options, changed) =>
-    picker({
-      id: `pick-${key}`,
-      name,
-      prefix: name,
-      groups: [{ options }],
-      value: draft[key],
-      onChange: (value) => {
-        draft[key] = value;
-        changed?.();
-      },
+    settingPicker(key, name, options, draft[key], (value) => {
+      draft[key] = value;
+      changed?.();
     });
 
   // Skills sit next to the model. The list follows the folder: a project brings its own.
@@ -149,11 +117,8 @@ export function mountNewSession(main, app) {
   let skillList = [];
   let skillsAsked = 0;
   function drawSkills() {
-    const open = skillsSlot.querySelector('.pick[aria-expanded="true"]');
     // The classic baseline takes no skills.
-    skillsSlot.replaceChildren(skillsPicker({ skills: skillList, value: draft.skills, disabled: draft.mode === 'classic', onChange: (names) => (draft.skills = names) }));
-    // A list that arrives while the menu is open must not shut it.
-    if (open) skillsSlot.querySelector('.pick:not(:disabled)')?.click();
+    skillsSlot.replaceChildren(skillsButton({ skills: skillList, value: draft.skills, disabled: draft.mode === 'classic', onChange: (names) => (draft.skills = names) }));
   }
   async function loadSkills() {
     const asked = ++skillsAsked;
@@ -198,7 +163,7 @@ export function mountNewSession(main, app) {
     });
   }
 
-  const pickers = [modelPicker, skillsSlot, setting('effort', 'Effort', effortOptions(state.effort)), setting('mode', 'Mode', MODES, drawSkills), setting('autonomy', 'Autonomy', AUTONOMIES)];
+  const pickers = [modelPicker(state, draft, (choice) => Object.assign(draft, choice)), skillsSlot, setting('effort', 'Effort', effortOptions(state.effort)), setting('mode', 'Mode', MODES, drawSkills), setting('autonomy', 'Autonomy', AUTONOMIES)];
   const foot = h(
     'footer.session-foot',
     {

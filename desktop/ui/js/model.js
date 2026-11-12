@@ -8,7 +8,7 @@
 // No event is dropped. One this build does not know, or cannot make sense of, becomes a neutral
 // chip that names its type, and the events after it are applied as usual.
 
-import { duration, firstLine, k } from './format.js';
+import { duration, effortLabel, firstLine, k } from './format.js';
 
 function createSession(meta) {
   return {
@@ -133,6 +133,18 @@ const HANDLERS = {
     s.running = true;
     s.runStartedAt = num(ev.ts);
     s.outcome = null;
+  },
+
+  /** What the user changed with the message before it: the session's from here on. */
+  settings(s, ev) {
+    for (const field of ['provider', 'model', 'effort', 'autonomy']) {
+      if (ev[field] != null) s.meta[field] = str(ev[field]);
+    }
+    const now = [ev.model != null && `model ${str(ev.model)}`, ev.effort != null && `effort ${effortLabel(str(ev.effort))}`, ev.autonomy != null && (str(ev.autonomy) === 'ask' ? 'asks first' : 'acts without asking')];
+    const row = chip(s, 'quiet', 'now', now.filter(Boolean).join(' · '));
+    row.icon = 'sliders';
+    place(s, ev, row);
+    s.sideRev++;
   },
 
   env(s, ev) {

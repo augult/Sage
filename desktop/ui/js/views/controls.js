@@ -29,14 +29,10 @@ export function radioChips({ name, label, options, value, onChange, segmented = 
  * `groups` is `[{ label, options: [{ value, label, title, disabled }] }]`; a group's label is
  * optional. `prefix` names the setting in front of the value, `empty` stands in when nothing is
  * chosen. `boxed` draws the button as a field, for a form. `onChange(value)` runs on selection.
- *
- * With `multiple`, `value` is an array, an option toggles and the menu stays open. `locked` values
- * are on and cannot be switched off; `onChange` gets the others that are on.
  */
-export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, multiple = false, locked = [], disabled = false, align, boxed = false }) {
+export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, disabled = false, align, boxed = false }) {
   const options = groups.flatMap((group) => group.options);
-  const chosen = new Set(multiple ? value : value == null ? [] : [value]);
-  const isOn = (wanted) => chosen.has(wanted) || locked.includes(wanted);
+  let chosen = value;
 
   const shown = h('span.pick-value');
   const button = h(
@@ -46,14 +42,14 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
     shown,
     icon('caret', 12),
   );
-  const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, 'aria-multiselectable': multiple && 'true', hidden: true, onkeydown: onKey });
+  const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, hidden: true, onkeydown: onKey });
   for (const group of groups) {
     if (group.label) menu.append(h('div.menu-group', group.label));
     for (const option of group.options) {
       menu.append(
         h(
           'button.menu-item',
-          { type: 'button', role: 'option', title: option.title || null, disabled: option.disabled || locked.includes(option.value), dataset: { value: option.value }, onclick: () => choose(option.value) },
+          { type: 'button', role: 'option', title: option.title || null, disabled: option.disabled, dataset: { value: option.value }, onclick: () => choose(option.value) },
           h('span.menu-text', option.label),
           icon('check', 12),
         ),
@@ -64,14 +60,12 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   const enabled = () => [...menu.querySelectorAll('.menu-item:not(:disabled)')];
 
   function paint() {
-    const on = options.filter((option) => isOn(option.value));
-    // A labelled multi-select shows how many are on: the names would not fit beside its neighbours.
-    const several = multiple && prefix ? String(on.length) : on[0]?.label + (on.length > 1 ? ` +${on.length - 1}` : '');
-    shown.textContent = on.length ? several : empty;
+    const on = options.find((option) => option.value === chosen);
+    shown.textContent = on ? on.label : empty;
     shown.hidden = !shown.textContent;
-    shown.classList.toggle('is-empty', !on.length);
-    button.title = on.length ? `${name}: ${on.map((option) => option.label).join(', ')}` : name;
-    for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(isOn(item.dataset.value)));
+    shown.classList.toggle('is-empty', !on);
+    button.title = on ? `${name}: ${on.label}` : name;
+    for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(chosen != null && item.dataset.value === String(chosen)));
   }
 
   const outside = (event) => {
@@ -96,15 +90,10 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   }
 
   function choose(next) {
-    if (!multiple) {
-      chosen.clear();
-      chosen.add(next);
-      close(true);
-    } else if (!chosen.delete(next)) {
-      chosen.add(next);
-    }
+    chosen = next;
+    close(true);
     paint();
-    onChange(multiple ? options.map((option) => option.value).filter((option) => chosen.has(option)) : next);
+    onChange(next);
   }
 
   function onKey(event) {
@@ -126,13 +115,36 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   return wrap;
 }
 
+export const AUTONOMIES = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'ask', label: 'Ask' },
+];
+
+/** A run setting under a chat bar: its name, the current value, and a menu of the others. */
+export function settingPicker(key, name, options, value, onChange) {
+  return picker({ id: `pick-${key}`, name, prefix: name, groups: [{ options }], value, onChange });
+}
+
 /**
- * The Skills button. `skills` is the engine's list, `value` the names switched on here, `locked`
- * the names the session already has.
+ * The model, as one choice with the provider that serves it: models are listed under their
+ * providers, those that have a key first, the others greyed. `current` is `{ provider, model }`;
+ * `onChange({ provider, model })`.
  */
-export function skillsPicker({ skills, value, locked = [], disabled = false, align, onChange }) {
-  const options = skills.map((skill) => ({ value: skill.name, label: skill.title, title: skill.description }));
-  return picker({ id: 'pick-skills', name: 'Skills', prefix: 'Skills', groups: [{ options }], value, locked, empty: '', multiple: true, disabled, align, onChange });
+export function modelPicker(state, current, onChange) {
+  const served = new Map();
+  const groups = keyedFirst(state.providers).map((provider) => {
+    const models = modelOptions(provider, state);
+    // The one in use is listed even where the provider's own list does not carry it.
+    if (provider.id === current.provider && current.model && !models.some((option) => option.value === current.model)) models.push({ value: current.model, label: current.model });
+    // A provider that lists no models still has its own default.
+    const options = (models.length ? models : [{ value: null, label: 'Provider default' }]).map((option) => {
+      const value = `${provider.id}:${option.value ?? ''}`;
+      served.set(value, { provider: provider.id, model: option.value });
+      return { value, label: option.label, disabled: !provider.has_key };
+    });
+    return { label: provider.name, options };
+  });
+  return picker({ id: 'pick-model', name: 'Model', groups, value: current.provider ? `${current.provider}:${current.model ?? ''}` : null, empty: 'No model yet', onChange: (value) => onChange(served.get(value)) });
 }
 
 /** A form row: label on the left, the control and an optional status line on the right. */

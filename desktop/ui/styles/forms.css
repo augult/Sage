@@ -645,6 +645,77 @@ textarea.editor {
   margin-right: auto;
 }
 
+/* Skills: what there is to switch on, two to a row, and any one of them read whole. */
+
+.skills {
+  width: min(680px, calc(100vw - 48px));
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  transition: border-color 120ms ease;
+}
+
+/* One that is in use. */
+.skill-card:has(.skill-use[aria-pressed="true"]) {
+  border-color: var(--ink);
+}
+
+.skill-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.skill-about {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* At the foot of its card, however long the words above it. */
+.skill-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.skill-acts .act {
+  margin-left: auto;
+}
+
+/* As wide in use as not, so that nothing beside it moves. */
+.skill-use {
+  min-width: 78px;
+}
+
+.skill-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-page {
+  min-height: 0;
+  padding: 14px 20px 20px;
+  overflow-y: auto;
+}
+
 /* Push: where it goes, what would go, and the one button that sends it. */
 
 .push {

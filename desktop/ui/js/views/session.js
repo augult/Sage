@@ -2,13 +2,14 @@
 
 import { api } from '../api.js';
 import { h, icon, spinner } from '../dom.js';
-import { duration, effortLabel, tilde } from '../format.js';
+import { duration, effortLabel, k, tilde } from '../format.js';
 import * as store from '../store.js';
 import { chatBar, fitBox, onSendKey, outcomeLook, sessionState } from './common.js';
-import { skillsPicker } from './controls.js';
+import { AUTONOMIES, effortOptions, modelPicker, settingPicker } from './controls.js';
 import { renderInspector } from './inspector.js';
 import { openOutput } from './output.js';
 import { openPush } from './push.js';
+import { skillsButton } from './skills.js';
 import { createTimeline } from './timeline.js';
 
 // Where each session's timeline was left and what was unfolded in it, so coming back loses neither.
@@ -156,7 +157,7 @@ export function mountSession(main, side, app, meta) {
     sendError.hidden = true;
     render();
     try {
-      await api.sendMessage(entry.id, text, picked);
+      await api.sendMessage(entry.id, text, picked, changes());
       box.value = '';
       picked = [];
       fitBox(box);
@@ -170,23 +171,63 @@ export function mountSession(main, side, app, meta) {
     render();
   }
 
-  // The Skills button of the follow-up box: what the session has is on for good, the rest can be
-  // switched on with the next message.
-  const skillsSlot = h('span.pick-slot');
-  let slotShown = null;
-  function renderSkillsSlot(model) {
+  // Under the box, what the next message goes with. The model, the effort and the autonomy show
+  // what the session has until another is picked: that goes with the next message, and is the
+  // session's from then on. Of the skills, what the session has is on for good.
+  const pickSlot = h('span.contents');
+  const swapNote = h('div.chat-note', { role: 'status', hidden: true });
+  const wanted = { provider: null, model: null, effort: null, autonomy: null };
+  // The policy as the pickers name it: the engine's `ratchet-high` is Auto.
+  const policy = (effort) => (effort === 'ratchet-high' ? 'ratchet' : effort);
+
+  /** What the next message would change: only what differs from what the session has. */
+  function changes() {
+    const { provider, model, effort, autonomy } = entry.model.meta;
+    const next = {};
+    if (wanted.provider !== null && (wanted.provider !== provider || wanted.model !== model)) Object.assign(next, { provider: wanted.provider, model: wanted.model });
+    if (wanted.effort !== null && wanted.effort !== policy(effort)) next.effort = wanted.effort;
+    if (wanted.autonomy !== null && wanted.autonomy !== (autonomy ?? 'auto')) next.autonomy = wanted.autonomy;
+    return next;
+  }
+
+  /** What a change will cost that a message otherwise does not: said over the box, before it is sent. */
+  function drawNote() {
+    const next = changes();
+    // No stats until the first answer has come.
+    const size = entry.model.stats?.context_tokens ?? 0;
+    const whole = `the whole conversation${size > 0 ? `: ${k(size)} tokens` : ''}`;
+    const text = next.provider ? `${next.model ?? 'The new model'} will read ${whole}, none of it cached` : next.effort ? `On some providers a new effort rereads ${whole}` : '';
+    if (swapNote.textContent !== text) swapNote.replaceChildren(...(text ? [icon('bang', 14), text] : []));
+    swapNote.hidden = !text;
+  }
+
+  let pickersShown = null;
+  function renderPickers(model) {
+    const { meta } = model;
     const locked = activeSkills(model);
     // The classic baseline takes no skills.
-    const offered = model.meta.mode === 'classic' ? [] : skillList;
+    const offered = meta.mode === 'classic' ? [] : skillList;
     picked = picked.filter((name) => !locked.includes(name));
-    const signature = () => [offered.length, ...locked, '|', ...picked].join(' ');
-    if (signature() === slotShown) return;
-    slotShown = signature();
-    const choose = (names) => {
-      picked = names;
-      slotShown = signature();
+    const signature = () => [meta.provider, meta.model, meta.effort, meta.autonomy, meta.mode, meta.simulated, offered.length, ...locked, '|', ...picked, '|', ...Object.values(wanted)].join(' ');
+    drawNote();
+    if (signature() === pickersShown) return;
+    pickersShown = signature();
+    // A choice made here is shown by its own picker: no redraw, which would take the focus from it.
+    const choose = (change) => {
+      Object.assign(wanted, change);
+      pickersShown = signature();
+      drawNote();
     };
-    skillsSlot.replaceChildren(...(offered.length ? [skillsPicker({ skills: offered, value: picked, locked, onChange: choose })] : []));
+    const effort = wanted.effort ?? policy(meta.effort);
+    pickSlot.replaceChildren(
+      ...[
+        // A stand-in has no model to change.
+        !meta.simulated && modelPicker(app.state, wanted.provider !== null ? wanted : meta, choose),
+        offered.length > 0 && skillsButton({ skills: offered, value: picked, locked, onChange: (names) => ((picked = names), choose({})) }),
+        settingPicker('effort', 'Effort', effortOptions(effort), effort, (value) => choose({ effort: value })),
+        settingPicker('autonomy', 'Autonomy', AUTONOMIES, wanted.autonomy ?? meta.autonomy ?? 'auto', (value) => choose({ autonomy: value })),
+      ].filter(Boolean),
+    );
   }
 
   let stopShown = '';
@@ -194,7 +235,7 @@ export function mountSession(main, side, app, meta) {
     // A session from an earlier launch cannot be continued: its header says read-only.
     foot.hidden = !entry.live;
     if (!entry.live) return;
-    if (!foot.firstChild) foot.append(chatBar(sendError, box, [stopButton, sendButton], skillsSlot));
+    if (!foot.firstChild) foot.append(chatBar([swapNote, sendError], box, [stopButton, sendButton], pickSlot));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;
@@ -205,8 +246,8 @@ export function mountSession(main, side, app, meta) {
       stopShown = String(stopping);
       stopButton.replaceChildren(icon('stop', 16), stopping ? 'Stopping…' : 'Stop');
     }
-    // Not while its menu may be open: a redraw would close it.
-    if (!skillsSlot.querySelector('[aria-expanded="true"]')) renderSkillsSlot(model);
+    // Not while a menu or the Skills dialog may be open: a redraw would close the one and strand the other.
+    if (!pickSlot.querySelector('[aria-expanded="true"]') && !document.querySelector('dialog.skills')) renderPickers(model);
   }
 
   const tick = () => {

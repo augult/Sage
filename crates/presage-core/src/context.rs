@@ -56,6 +56,13 @@ impl Context {
         stable
     }
 
+    /// Forgets what the last request looked like. For a conversation handed to another model:
+    /// nothing of it is cached there, so its first request is a first request again.
+    pub fn forget_cache(&mut self) {
+        self.prev_wire = None;
+        self.prev_prompt = 0;
+    }
+
     /// Classifies how the provider's cache behaved for the request just answered.
     pub fn audit(&mut self, usage: &Usage, usage_reported: bool, prefix_stable: bool) -> (u64, CacheVerdict) {
         let expected = self.prev_prompt;
