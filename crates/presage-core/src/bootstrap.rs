@@ -153,11 +153,6 @@ pub async fn snapshot(sess: &Session) -> String {
         Some(tree) => out.push_str(&format!("files, with line counts: {tree}\n")),
         None => out.push_str(&format!("files: {}\n", top_level(root))),
     }
-    if sess.features.lessons {
-        for lesson in sess.lessons.top(5) {
-            out.push_str(&format!("known here: {}\n", lesson.describe()));
-        }
-    }
     out.push_str("</env>");
     out
 }
@@ -168,14 +163,12 @@ mod tests {
     use crate::state::{Features, test_session};
 
     #[tokio::test]
-    async fn snapshot_names_the_place_the_tools_the_files_and_the_lessons() {
+    async fn snapshot_names_the_place_the_tools_and_the_files() {
         let mut s = test_session("bootstrap", Features::presage().without("survey").unwrap());
         std::fs::create_dir_all(s.ws.root.join("src")).unwrap();
         std::fs::write(s.ws.root.join("package.json"), r#"{"scripts": {"test": "node --test", "build": "tsc"}}"#).unwrap();
         std::fs::write(s.ws.root.join("Makefile"), "CC=gcc\nall: build\n\nbuild:\n\tcc x.c\n.PHONY: all\ntest: build\n\t./t\n").unwrap();
         std::fs::write(s.ws.root.join("AGENTS.md"), "Always run `make test` before finishing.\n").unwrap();
-        s.lessons.on_shell("pytest -q", false, "bash: pytest: command not found");
-        s.lessons.on_shell("uv run pytest -q", true, "ok");
 
         let env = snapshot(&s).await;
         assert!(env.starts_with("<env>\ncwd: "), "{env}");
@@ -183,7 +176,6 @@ mod tests {
         assert!(env.contains(&format!("os: {} {} · date: 20", std::env::consts::OS, std::env::consts::ARCH)));
         assert!(env.contains("installed: ") && env.contains("git"), "{env}");
         assert!(env.contains("files: src/  AGENTS.md  Makefile (targets: all, build, test)  package.json (scripts: test, build)"), "{env}");
-        assert!(env.contains("known here: `pytest -q` fails here (bash: pytest: command not found) → `uv run pytest -q` works"), "{env}");
         // Project instructions are part of the system prompt, so they are not said a second time here.
         assert!(env.ends_with("</env>") && !env.contains("make test"), "{env}");
 

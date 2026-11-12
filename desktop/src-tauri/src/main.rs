@@ -138,7 +138,7 @@ async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) ->
     let path = hooks.scripted.as_deref().ok_or("PRESAGE_UI_SCRIPTED is not set")?;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
-    let turns = script.turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, finish: None }).collect();
+    let turns = script.turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, ..MockTurn::default() }).collect();
     let mut provider = MockProvider::scripted(turns);
     provider.chunk_delay_ms = script.delay_ms;
     let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, interactive: true, ..Default::default() };
