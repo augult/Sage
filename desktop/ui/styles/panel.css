@@ -82,8 +82,18 @@
 }
 
 /* What the session is: its title, then a name and a value to a line. */
+/* "Session: hi": the name follows the heading on its line, and a long one wraps under itself. */
+.session-title {
+  align-items: baseline;
+  gap: 6px;
+}
+
+.session-title > .label {
+  flex: none;
+}
+
 .side-name {
-  margin-bottom: 6px;
+  min-width: 0;
   font-size: var(--text-md);
   font-weight: 600;
   overflow-wrap: anywhere;

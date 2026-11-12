@@ -42,10 +42,10 @@ function fact(label, value, path = false) {
 
 function session(model, { state, home, skills }) {
   const { title, cwd, model: name, effort, mode, autonomy } = model.meta;
-  return section(
-    'Session',
-    null,
-    h('div.side-name', title),
+  // Its name on the heading's line: "Session: hi".
+  return h(
+    'section.side-section',
+    h('div.side-title.session-title', h('span.label', 'Session:'), h('span.side-name', { title }, title)),
     fact('Status', standing(state)),
     // A session that cannot be continued says why, in a word.
     state.phase === 'closed' && state.why && fact('Why', state.why),
