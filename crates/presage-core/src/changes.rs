@@ -27,7 +27,7 @@ const DIFF_CHARS: usize = 8_000;
 
 /// The paths that were already uncommitted when the session began, each with a hash of its content
 /// then (`None` for one that could not be read, such as a deleted file).
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Baseline {
     dirty: HashMap<String, Option<u64>>,
 }

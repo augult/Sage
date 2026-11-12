@@ -141,6 +141,16 @@ const HANDLERS = {
     s.outcome = null;
   },
 
+  /** The session was brought back after a restart: whatever was in progress before it is over. */
+  resumed(s, ev) {
+    closeTurn(s);
+    s.running = false;
+    const row = chip(s, 'quiet', 'resumed', ev.cut_off === true ? 'after a restart · the run before was cut off' : 'after a restart');
+    row.icon = 'clock';
+    row.aloud = true;
+    s.items.push(row);
+  },
+
   /** What the user changed with the message before it: the session's from here on. */
   settings(s, ev) {
     for (const field of ['provider', 'model', 'effort', 'autonomy']) {
@@ -281,11 +291,16 @@ const HANDLERS = {
       return false;
     }
     row.icon = 'flag';
+    // `/goal` and `/goal clear` are a message and an answer, with no run in between to finish. The
+    // answer is what the message was for: it stands in the conversation, not in a fold.
+    const answer = state === 'shown' || state === 'cleared';
+    if (answer) {
+      closeTurn(s);
+      row.aloud = true;
+    }
     place(s, ev, row);
     s.sideRev++;
-    // `/goal` and `/goal clear` are a message and an answer, with no run in between to finish.
-    if (state === 'shown' || state === 'cleared') {
-      closeTurn(s);
+    if (answer) {
       s.running = false;
       s.outcome = s.settledOutcome;
     }

@@ -35,7 +35,7 @@ export function mountSession(main, side, app, meta) {
   });
 
   // Follow the newest content while the user is at the end; leave the scroll alone once they are not.
-  const place = places.get(entry.id) ?? { pinned: entry.live, top: 0 };
+  const place = places.get(entry.id) ?? { pinned: entry.live || entry.resumable, top: 0 };
   let pinned = place.pinned;
   const atEnd = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 32;
   function follow(force) {
@@ -104,6 +104,8 @@ export function mountSession(main, side, app, meta) {
     render();
     try {
       await api.sendMessage(entry.id, text, picked, changes(), files.paths());
+      // A session from an earlier launch has been brought back by the message: follow it from here.
+      store.resume(entry);
       box.value = '';
       picked = [];
       files.clear();
@@ -190,9 +192,9 @@ export function mountSession(main, side, app, meta) {
 
   let stopShown = '';
   function renderFoot(model) {
-    // A session from an earlier launch cannot be continued: its header says read-only.
-    foot.hidden = !entry.live;
-    if (!entry.live) return;
+    // A session from an earlier launch that cannot be continued is read-only, as the inspector says.
+    foot.hidden = !entry.live && !entry.resumable;
+    if (foot.hidden) return;
     drawGoal(model);
     if (!foot.firstChild) foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;

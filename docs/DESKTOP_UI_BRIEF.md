@@ -80,6 +80,12 @@ scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the
 grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESAGE_UI_SCHEME=light|dark`
 (the painting behind the glass and the appearance, for that launch only).
 A scripted session's file may name `skills` to start with.
+`PRESAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
+sessions a stand-in played as continuable, and a message to one brings it back, played by the
+`turns` (and `delay_ms`) of that file (a scripted file will do; the rest of it is not read).
+Start a scripted session, quit the app (SIGTERM goes through the same door as the window's
+close), start it again with `PRESAGE_UI_OPEN=<id> PRESAGE_UI_REVIVE=<file>`, and type into
+`#followup` with a script. Without the hook such a session is read-only (`simulated`).
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
 `#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`; a model's option
 is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
@@ -285,10 +291,15 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      with `changes`) and is the session's from then on, which a `settings` event records and the
      inspector then shows. The conversation is kept. With another model picked, a line over the box
      says that model will read the whole conversation, and how many tokens, none of it cached;
-     with another effort, that some providers reread it. Closed
-     sessions are read-only replays from `session_events`, marked "read-only" after their status
-     in the inspector, with
-     no follow-up box.
+     with another effort, that some providers reread it. A session from an earlier launch that can
+     be continued (status `resumable` in the listing) is read from its log and has the same
+     follow-up box; sending a message brings it back (`store.resume`: the view subscribes and is
+     rebuilt from the whole log, so nothing shows twice), and a thin "Resumed" row with a hairline
+     marks the place in the conversation. Closed sessions, those that cannot be continued
+     (`older`, `simulated`, `busy`, `gone`, as `why_closed` says), are read-only replays from
+     `session_events`, marked "read-only" after their status in the inspector with a `Why` line
+     under it, and have no follow-up box. A `/goal` or `/goal clear` message is answered in the
+     open, in a note's row, and the Economy block counts the goal checks.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the

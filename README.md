@@ -37,7 +37,7 @@ of tasks. Every claim above can be measured rather than believed.
 State on 12 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
 `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 227 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 238 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
 - **Benchmark**: `presage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
@@ -60,7 +60,7 @@ State on 12 November 2026. What is open and how to continue: `docs/HANDOFF.md`. 
 - **Walkthrough**: `presage demo` plays a three-reply scripted session through the real harness
   (read and reproduce, a wrong fix that is caught and halts the script, the right fix accepted with
   evidence).
-- Not implemented: resuming a session after restarting the app, Windows-specific shell handling,
+- Not implemented: Windows-specific shell handling,
   OS-level sandboxing of commands (there is a tripwire for catastrophic commands, nothing more).
 
 ### What the benchmark shows
@@ -104,6 +104,7 @@ presage run -C path/to/project "Fix the failing tests"
 presage run --classic ...       # baseline loop, for comparison
 presage run --goal "the tests pass and the README names every flag" -C path/to/project
 presage sessions | presage show <id>
+presage resume <id> "and now the other one"   # continue a stored session (see below)
 
 presage bench --check --tasks all   # the tasks fail as shipped and pass with their reference solutions
 presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
@@ -126,6 +127,36 @@ goal is not met, and the goal stays active. A check that cannot be made or read 
 On the last reply the budget allows the check is still made so that the result is recorded, but
 nothing can follow it. The checks are paid for like any request and show in the session's figures
 (`goal_checks`). They work the same with `--classic`.
+
+### Continuing a session
+
+A session can be continued after the program that ran it has ended: the app was quit, the CLI was
+killed, the machine went down. Open it in the desktop app and send a follow-up, or
+`presage resume <id> [message]` (with no message the session is told to continue where it left off;
+`-p`, `-m` and `-e` name another provider, model or effort for the message, as in the app). The model
+sees the conversation it had, then the new message in front of which it is told that the session
+was restored after a restart: background jobs and shell processes from before are gone, and the
+files are as they are on disk now.
+
+Each session keeps a `snapshot.json` beside `meta.json` and `events.jsonl`: the conversation as it
+was sent (system prompt included), and what the agent would otherwise start empty with. That is the
+mode and the mechanism lists, autonomy, limits, the effort policy and the level it had reached, the
+turn counter and the stats, the files touched, what was uncommitted before the session began, the
+standing watches (the checks, not their results: they run again) and the step and `out:N` counters.
+It is rewritten whole (a temporary file, then a rename) after every model reply and when a run ends,
+so a kill loses at most the turn in flight. A reply whose tool calls had no results when the process
+died is made valid again by answering each call as interrupted. What is not kept starts empty: files
+already read are shown again, anchors from before find their lines by content or the model reads
+again, background jobs are gone, and the evidence of checks starts fresh. The goal is in `meta.json`.
+
+The session goes on with the model it had, through the current configuration; where its key is gone,
+the error says so. One process runs a session at a time: `session.lock` is an operating-system file
+lock, so one left by a process that was killed is never in the way. A `resumed` event marks the
+restoration in the log. Sessions stored before snapshots existed are read-only: their log holds no
+system prompt, no composed first message and none of the harness's footers, so a conversation rebuilt
+from it would not be the one the model had. Sessions a stand-in played are read-only too. `presage
+sessions` and the app say which, in a word: `older`, `simulated`, `busy` (open in another process),
+`gone` (its folder is).
 
 Providers built in: `openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `moonshot`, `xai`,
 `groq`, `together`, `logfare`, plus endpoints of your own: any number added in the desktop app's

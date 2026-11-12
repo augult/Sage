@@ -4,8 +4,9 @@ use crate::anchors::History;
 use crate::economy::Prices;
 use crate::changes::Baseline;
 use crate::tools::jobs::Jobs;
-use crate::watches::Watches;
+use crate::watches::{WatchSpec, Watches};
 use crate::workspace::{Seen, Workspace, fingerprint};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -201,6 +202,26 @@ impl Evidence {
     }
 }
 
+/// What a stored session keeps of its `Session` (see `Session::checkpoint`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SessionState {
+    /// Steps taken so far, so that the numbers the model was shown are not given out again.
+    pub step: u32,
+    /// The last `out:N` handle given out.
+    pub spill_seq: u32,
+    /// Where the shell was.
+    pub cwd: String,
+    pub touched: Vec<String>,
+    pub baseline: Option<Baseline>,
+    pub watches: Vec<WatchSpec>,
+    pub dialects: Vec<(String, bool)>,
+}
+
+/// The highest `N` of the `out/N.log` files a session directory holds.
+fn highest_spill(dir: &std::path::Path) -> u32 {
+    std::fs::read_dir(dir.join("out")).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.strip_suffix(".log")?.parse::<u32>().ok()).max().unwrap_or(0)
+}
+
 pub struct Session {
     pub ws: Workspace,
     pub seen: Seen,
@@ -253,6 +274,41 @@ impl Session {
             spill_seq: 0,
             shell_env: non_interactive_env(),
         })
+    }
+
+    /// What a session that is stored keeps of this state. Left out on purpose, so that it starts
+    /// empty when the session is brought back: what was read (`seen`, so files are shown again),
+    /// the anchors' histories (the model's anchors from before find their lines by content, or
+    /// fail and it reads again), background jobs, the evidence (nothing is claimed about changes
+    /// the harness has not seen) and the results of the watches.
+    pub fn checkpoint(&self) -> SessionState {
+        let mut dialects: Vec<(String, bool)> = self.dialects.iter().map(|(path, already)| (path.to_string_lossy().into_owned(), *already)).collect();
+        dialects.sort();
+        SessionState {
+            step: self.step,
+            spill_seq: self.spill_seq,
+            cwd: self.ws.cwd.to_string_lossy().into_owned(),
+            touched: self.touched.clone(),
+            baseline: self.baseline.clone(),
+            watches: self.watches.specs(),
+            dialects,
+        }
+    }
+
+    /// The inverse of `checkpoint`. The shell's directory comes back only where it is still one
+    /// inside the workspace; the step and spill counters carry on so that no step or `out:N` handle
+    /// from before is reused.
+    pub fn restore(&mut self, state: SessionState) {
+        self.step = state.step;
+        self.spill_seq = state.spill_seq.max(highest_spill(&self.dir));
+        let cwd = PathBuf::from(&state.cwd);
+        if cwd.is_dir() && cwd.starts_with(&self.ws.root) {
+            self.ws.cwd = cwd;
+        }
+        self.touched = state.touched;
+        self.baseline = state.baseline;
+        self.watches.restore(state.watches);
+        self.dialects = state.dialects.into_iter().map(|(path, already)| (PathBuf::from(path), already)).collect();
     }
 
     /// Allocates the next `out:N` handle and the file behind it.

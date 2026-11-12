@@ -46,6 +46,8 @@ function session(model, { state, home, skills }) {
     null,
     h('div.side-name', title),
     fact('Status', standing(state)),
+    // A session that cannot be continued says why, in a word.
+    state.phase === 'closed' && state.why && fact('Why', state.why),
     fact('Folder', tilde(cwd, home), true),
     fact('Model', name),
     fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
@@ -67,6 +69,7 @@ function economy(model) {
     'Economy',
     badge,
     stat('Turns', s.turns),
+    s.goal_checks > 0 && stat('Goal checks', s.goal_checks),
     stat('Steps', s.steps, s.skipped > 0 && `${s.skipped} skipped`),
     stat('Surprises', s.surprises, null, s.surprises > 0 && 'alert'),
     stat('Predictions', s.predictions > 0 ? `${s.predictions_held} of ${s.predictions} held` : 'none made'),

@@ -116,6 +116,10 @@ function gather(items, ctx) {
       work = null;
       edits = [];
       blocks.push({ kind: 'user', key: item.key, sig: item.rev, item });
+    } else if (item.kind === 'chip' && item.aloud) {
+      // A note that is not for a bar to hold: where the session was brought back, the answer to `/goal`.
+      work = null;
+      blocks.push({ kind: 'aside', key: item.key, sig: item.rev, item });
     } else if (item.kind === 'result') {
       work = null;
       blocks.push({ kind: 'result', key: item.key, sig: `${item.rev}:${edits.length}`, item, edits });
@@ -166,6 +170,9 @@ const PLAIN = {
   },
 
   approval: ({ item }, ctx) => approvalCard(item, ctx),
+
+  /** A note's row on its own in the conversation. Where a session was brought back, a hairline sets it off. */
+  aside: ({ item }, ctx) => h(`section.aside${item.label === 'resumed' ? '.is-resumed' : ''}`, noteRow(item, ctx)),
 
   /** What the provider answered instead of a reply, and that the request is being made again. */
   retry({ retry, live }) {

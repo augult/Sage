@@ -13,6 +13,7 @@ use crate::prompt;
 use crate::provider::Provider;
 use crate::provider::mock::MockProvider;
 use crate::provider::openai::OpenAiProvider;
+use crate::resume::{self, SessionLock, Setup};
 use crate::script::{Approvals, Autonomy};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
@@ -34,8 +35,11 @@ pub enum SessionStatus {
     Running,
     /// Waiting for the next message; the agent and its context are still alive.
     Idle,
-    /// Loaded from disk: viewable, not resumable.
+    /// Loaded from disk: viewable, not resumable (`SessionMeta::why_closed` says why).
     Closed,
+    /// Stored by a program that has ended and not running in this one: sending it a message
+    /// continues it, from the snapshot it kept. Only `list` and `meta` say this.
+    Resumable,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +65,11 @@ pub struct SessionMeta {
     /// The session's goal (`/goal`), and whether a check has found it met.
     #[serde(default)]
     pub goal: Option<Goal>,
+    /// For a stored session that cannot be continued, in a word why: `older` (stored before
+    /// sessions kept snapshots), `simulated` (played by a stand-in), `busy` (open in another
+    /// process) or `gone` (its folder is). Worked out when listed, never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why_closed: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -204,6 +213,8 @@ struct Live {
     /// Cancelled when the session is closed for good.
     closed: CancellationToken,
     approvals: Arc<Approvals>,
+    /// This process's claim on the session's directory, let go of when the session is closed.
+    lock: Mutex<Option<SessionLock>>,
 }
 
 /// What the worker of a session is sent.
@@ -237,6 +248,13 @@ impl Live {
             m.updated = now_ms();
         }
         self.save_meta();
+    }
+
+    /// Ends the run in progress, if any, and lets another process have the session.
+    fn shut(&self) {
+        self.cancel.lock().unwrap().cancel();
+        self.closed.cancel();
+        self.lock.lock().unwrap().take();
     }
 }
 
@@ -289,6 +307,18 @@ struct Inner {
     /// The auto-retry setting, shared with the provider of every session: switching it reaches
     /// the ones that are running, even one that is waiting between two attempts.
     auto_retry: Arc<AtomicBool>,
+    /// Sessions that a stand-in played are listed as continuable (see `resume_stand_ins`).
+    stand_ins: AtomicBool,
+}
+
+impl Drop for Inner {
+    /// The last handle to a harness going away ends its sessions, and frees them for whoever
+    /// opens the data directory next: a session's worker would otherwise outlive it, lock and all.
+    fn drop(&mut self) {
+        for live in self.sessions.get_mut().map(|sessions| sessions.drain().map(|(_, live)| live).collect::<Vec<_>>()).unwrap_or_default() {
+            live.shut();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -346,6 +376,39 @@ fn opening_of(req: &StartRequest) -> Result<Opening, String> {
     }
 }
 
+/// Runs a session: takes its messages one at a time and works on each until the session is closed.
+fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedReceiver<Input>) {
+    tokio::spawn(async move {
+        loop {
+            let message = tokio::select! {
+                message = inbox.recv() => message,
+                _ = worker.closed.cancelled() => None,
+            };
+            let Some(input) = message else { break };
+            let cancel = CancellationToken::new();
+            *worker.cancel.lock().unwrap() = cancel.clone();
+            worker.set_status(SessionStatus::Running);
+            match input {
+                Input::Message { text, shown, skills, retune, files } => {
+                    agent.retune(retune);
+                    agent.attach(files);
+                    if let Some(shown) = shown {
+                        agent.shown_as(shown);
+                    }
+                    agent.run_with(text, &skills, &cancel).await;
+                }
+                Input::Goal { shown, command, retune } => {
+                    agent.retune(retune);
+                    agent.goal_command(&shown, command);
+                }
+            }
+            worker.set_status(SessionStatus::Idle);
+        }
+        agent.sess.jobs.kill_all();
+        worker.lock.lock().unwrap().take();
+    });
+}
+
 fn read_text(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok().filter(|t| !t.trim().is_empty())
 }
@@ -368,7 +431,7 @@ impl Harness {
     pub fn at(data_dir: PathBuf) -> Self {
         let config = Config::load(&data_dir.join("config.json"));
         let auto_retry = Arc::new(AtomicBool::new(config.auto_retry));
-        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry }) }
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry, stand_ins: AtomicBool::new(false) }) }
     }
 
     /// A harness with this one's keys and defaults that keeps its sessions elsewhere,
@@ -376,7 +439,7 @@ impl Harness {
     /// benchmark has to finish.
     pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
         let config = self.inner.config.lock().unwrap().clone();
-        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry: Arc::default() }) }
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry: Arc::default(), stand_ins: AtomicBool::new(false) }) }
     }
 
     fn config_path(&self) -> PathBuf {
@@ -618,6 +681,7 @@ impl Harness {
         let simulated = provider.simulated();
         let cwd = ws.root.to_string_lossy().into_owned();
         let sess = Session::new(ws, dir.clone(), features, prices_for(model)).map_err(|e| format!("could not create the session directory: {e}"))?;
+        let lock = SessionLock::acquire(&dir).map_err(|e| format!("session {id}: {e}"))?;
 
         let mut cfg = AgentConfig::new(model);
         cfg.features = features;
@@ -648,12 +712,13 @@ impl Harness {
             stats: Stats::default(),
             skills: skill_names.clone(),
             goal: opening.goal.as_deref().map(Goal::new),
+            why_closed: None,
         };
         let (tx, _) = broadcast::channel(4096);
-        let (input, mut inbox) = mpsc::unbounded_channel::<Input>();
+        let (input, inbox) = mpsc::unbounded_channel::<Input>();
         let approvals = Arc::new(Approvals::default());
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("events.jsonl")).ok();
-        let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone() });
+        let live = Arc::new(Live { dir, meta: Mutex::new(meta.clone()), events: Mutex::new(Vec::new()), seq: AtomicU64::new(0), tx, log: Mutex::new(log), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone(), lock: Mutex::new(Some(lock)) });
         live.save_meta();
         live.emit(EventKind::SessionStart {
             id: id.clone(),
@@ -671,35 +736,8 @@ impl Harness {
 
         let sink: Arc<dyn Sink> = live.clone();
         let mut agent = Agent::new(provider, sess, cfg, sink, approvals);
-        let worker = live.clone();
-        tokio::spawn(async move {
-            loop {
-                let message = tokio::select! {
-                    message = inbox.recv() => message,
-                    _ = worker.closed.cancelled() => None,
-                };
-                let Some(input) = message else { break };
-                let cancel = CancellationToken::new();
-                *worker.cancel.lock().unwrap() = cancel.clone();
-                worker.set_status(SessionStatus::Running);
-                match input {
-                    Input::Message { text, shown, skills, retune, files } => {
-                        agent.retune(retune);
-                        agent.attach(files);
-                        if let Some(shown) = shown {
-                            agent.shown_as(shown);
-                        }
-                        agent.run_with(text, &skills, &cancel).await;
-                    }
-                    Input::Goal { shown, command, retune } => {
-                        agent.retune(retune);
-                        agent.goal_command(&shown, command);
-                    }
-                }
-                worker.set_status(SessionStatus::Idle);
-            }
-            agent.sess.jobs.kill_all();
-        });
+        agent.keep_snapshots(live.dir.join(resume::SNAPSHOT), Setup { classic, with: req.with.clone(), without: req.without.clone() });
+        spawn_worker(live.clone(), agent, inbox);
         let retune = Retune { goal: opening.goal, ..Default::default() };
         live.input.send(Input::Message { text: opening.task, shown: opening.shown, skills: Vec::new(), retune, files }).map_err(|_| "the session ended before it started".to_string())?;
         Ok(meta)
@@ -722,8 +760,15 @@ impl Harness {
     /// A message that starts with `/goal` is a command (see `goal`): `/goal <condition>` sets the
     /// session's goal and works towards it, `/goal` says what the goal is and `/goal clear` drops
     /// it, the last two with no request to the model.
+    ///
+    /// A session that is stored and not running in this process is brought back first (see
+    /// `resume`), and the message goes to it as to any other.
     pub fn send_with(&self, id: &str, text: &str, skills: &[String], files: &[String], changes: Changes) -> Result<(), String> {
-        let live = self.live(id)?;
+        let live = match self.live(id) {
+            Ok(live) => live,
+            Err(_) if text.trim().is_empty() => return Err("the message is empty".into()),
+            Err(_) => self.revive(id, None, &changes)?,
+        };
         if text.trim().is_empty() {
             return Err("the message is empty".into());
         }
@@ -786,8 +831,17 @@ impl Harness {
         live.input.send(input).map_err(|_| "the session has ended".to_string())
     }
 
+    /// Stops the run in progress. A session that is only stored has none in this process: that
+    /// is not an error, unless another process is running it, which only that one can stop.
     pub fn stop(&self, id: &str) -> Result<(), String> {
-        self.live(id)?.cancel.lock().unwrap().cancel();
+        match self.live(id) {
+            Ok(live) => live.cancel.lock().unwrap().cancel(),
+            Err(not_live) => match self.stored(id) {
+                Some(meta) if meta.why_closed.as_deref() == Some("busy") => return Err(format!("session {id} is running in another process: stop it there")),
+                Some(_) => {}
+                None => return Err(not_live),
+            },
+        }
         Ok(())
     }
 
@@ -795,18 +849,36 @@ impl Harness {
     /// memory. The log stays on disk and can still be replayed.
     pub fn close(&self, id: &str) -> Result<(), String> {
         let live = self.inner.sessions.lock().unwrap().remove(id).ok_or_else(|| format!("session {id} is not running in this process"))?;
-        live.cancel.lock().unwrap().cancel();
-        live.closed.cancel();
+        live.shut();
         Ok(())
     }
 
-    pub fn approve(&self, id: &str, approval: u64, allow: bool) -> Result<(), String> {
-        if self.live(id)?.approvals.resolve(approval, allow) { Ok(()) } else { Err("that approval request is no longer pending".into()) }
+    /// Closes every session this process runs, as the app does when it quits. What each has
+    /// stored by then is enough to continue it: a run in progress is ended and its snapshot written.
+    pub fn close_all(&self) -> usize {
+        let all: Vec<Arc<Live>> = self.inner.sessions.lock().unwrap().drain().map(|(_, live)| live).collect();
+        for live in &all {
+            live.shut();
+        }
+        all.len()
     }
 
-    /// Everything so far plus a live feed, with no gap between the two.
+    pub fn approve(&self, id: &str, approval: u64, allow: bool) -> Result<(), String> {
+        let Ok(live) = self.live(id) else {
+            // What was waiting for an answer died with the process that asked.
+            return Err(if self.stored(id).is_some() { format!("session {id} is not running: no approval is waiting") } else { format!("no session {id}") });
+        };
+        if live.approvals.resolve(approval, allow) { Ok(()) } else { Err("that approval request is no longer pending".into()) }
+    }
+
+    /// Everything so far plus a live feed, with no gap between the two. A session that is only
+    /// stored has no feed: continue it with `send_with` or `resume` first, or read its log with `events`.
     pub fn subscribe(&self, id: &str) -> Result<(Vec<Event>, broadcast::Receiver<Event>), String> {
-        let live = self.live(id)?;
+        let live = match self.live(id) {
+            Ok(live) => live,
+            Err(not_live) if self.stored(id).is_none() => return Err(not_live),
+            Err(_) => return Err(format!("session {id} is stored, not running: send it a message to continue it, or read its log with `events`")),
+        };
         let backlog = live.events.lock().unwrap();
         Ok((backlog.clone(), live.tx.subscribe()))
     }
@@ -824,11 +896,22 @@ impl Harness {
         Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
     }
 
+    /// A session's meta: its live one, or what a stored session's is as `list` shows it.
     pub fn meta(&self, id: &str) -> Result<SessionMeta, String> {
-        self.live(id).map(|l| l.meta.lock().unwrap().clone())
+        match self.live(id) {
+            Ok(live) => Ok(live.meta.lock().unwrap().clone()),
+            Err(not_live) => self.stored(id).ok_or(not_live),
+        }
     }
 
-    /// All sessions, newest first. Ones from earlier runs of the app are listed as closed.
+    /// Whether this process is running the session: the one place a stored session differs from
+    /// a live one in what can be done with it.
+    pub fn is_live(&self, id: &str) -> bool {
+        self.inner.sessions.lock().unwrap().contains_key(id)
+    }
+
+    /// All sessions, newest first. Ones from earlier runs of the app are listed as `Resumable` where
+    /// they can be continued and as `Closed`, with `why_closed`, where they cannot.
     pub fn list(&self) -> Vec<SessionMeta> {
         let live: HashMap<String, SessionMeta> = self.inner.sessions.lock().unwrap().iter().map(|(id, l)| (id.clone(), l.meta.lock().unwrap().clone())).collect();
         let mut all: Vec<SessionMeta> = live.values().cloned().collect();
@@ -837,9 +920,8 @@ impl Harness {
             if live.contains_key(&name) {
                 continue;
             }
-            if let Some(mut meta) = std::fs::read_to_string(entry.path().join("meta.json")).ok().and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok()) {
-                meta.status = SessionStatus::Closed;
-                all.push(meta);
+            if let Some(meta) = std::fs::read_to_string(entry.path().join("meta.json")).ok().and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok()) {
+                all.push(self.as_stored(meta, &entry.path()));
             }
         }
         all.sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
@@ -879,6 +961,138 @@ impl Harness {
             .collect();
         dirs.sort_by_key(|a| a.name.to_lowercase());
         Ok(DirListing { is_git: dir.join(".git").exists(), parent: dir.parent().map(|p| p.to_string_lossy().into_owned()), path: dir.to_string_lossy().into_owned(), dirs })
+    }
+}
+
+/// Continuing sessions that are stored.
+impl Harness {
+    fn session_dir(&self, id: &str) -> Result<PathBuf, String> {
+        if id.is_empty() || id.contains(['/', '\\', '.']) {
+            return Err("invalid session id".into());
+        }
+        Ok(self.inner.data_dir.join("sessions").join(id))
+    }
+
+    /// A stored session as `list` shows it, or none if there is no such session.
+    fn stored(&self, id: &str) -> Option<SessionMeta> {
+        let dir = self.session_dir(id).ok()?;
+        let meta = std::fs::read_to_string(dir.join("meta.json")).ok().and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok())?;
+        Some(self.as_stored(meta, &dir))
+    }
+
+    /// `meta` as a session that is not running in this process stands: continuable or not, and why not.
+    fn as_stored(&self, mut meta: SessionMeta, dir: &Path) -> SessionMeta {
+        // A session a stand-in played has no model to go on with, unless the one who runs this
+        // harness brings a stand-in of their own.
+        let why = if meta.simulated && !self.inner.stand_ins.load(Ordering::Relaxed) {
+            Some("simulated")
+        } else if !dir.join(resume::SNAPSHOT).is_file() {
+            Some("older")
+        } else if SessionLock::held(dir) {
+            Some("busy")
+        } else if !Path::new(&meta.cwd).is_dir() {
+            Some("gone")
+        } else {
+            None
+        };
+        meta.status = if why.is_some() { SessionStatus::Closed } else { SessionStatus::Resumable };
+        meta.why_closed = why.map(String::from);
+        meta
+    }
+
+    /// Brings a stored session back to life without sending it anything: its conversation and the
+    /// rest of what it kept are restored, the log is reopened for appending and it waits for a
+    /// message, idle. A session already running in this process is returned as it is. It is
+    /// resumed with the model its meta names, through the current configuration: an error says
+    /// so where the key is gone.
+    pub fn resume(&self, id: &str) -> Result<SessionMeta, String> {
+        self.revive(id, None, &Changes::default()).map(|live| live.meta.lock().unwrap().clone())
+    }
+
+    /// Lists the sessions a stand-in played as continuable, for a front end that resumes them with
+    /// `resume_scripted` (tests, the desktop app's headless hooks). Without it they are read-only.
+    pub fn resume_stand_ins(&self, on: bool) {
+        self.inner.stand_ins.store(on, Ordering::Relaxed);
+    }
+
+    /// `resume` for a session that a stand-in played, with a stand-in to play it from here on. For
+    /// tests, and for the desktop app's headless hooks: a real session never needs one.
+    pub fn resume_scripted(&self, id: &str, provider: MockProvider) -> Result<SessionMeta, String> {
+        self.revive(id, Some(provider), &Changes::default()).map(|live| live.meta.lock().unwrap().clone())
+    }
+
+    /// The session, live: as it is if this process runs it, else restored from what it stored.
+    /// `changes` are the message's own, which may name the provider to use in place of the
+    /// stored one: one whose key is gone does not stand in the way of that.
+    fn revive(&self, id: &str, stand_in: Option<MockProvider>, changes: &Changes) -> Result<Arc<Live>, String> {
+        let dir = self.session_dir(id)?;
+        // Held to the end: two messages at once must not both bring the session back.
+        let mut sessions = self.inner.sessions.lock().unwrap();
+        if let Some(live) = sessions.get(id) {
+            return Ok(live.clone());
+        }
+        let cannot = |why: String| format!("session {id} cannot be continued: {why}");
+        let mut meta = std::fs::read_to_string(dir.join("meta.json")).ok().and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok()).ok_or_else(|| format!("no session {id}"))?;
+        if meta.simulated != stand_in.is_some() {
+            return Err(cannot(if meta.simulated { "it was played by a stand-in, which only a test can bring back".into() } else { "it was not played by a stand-in".into() }));
+        }
+        let snapshot = resume::read(&dir).map_err(cannot)?;
+        if !Path::new(&meta.cwd).is_dir() {
+            return Err(cannot(format!("its folder {} is gone", meta.cwd)));
+        }
+        let lock = SessionLock::acquire(&dir).map_err(cannot)?;
+        let provider = match stand_in {
+            Some(stand_in) => Provider::Mock(stand_in),
+            None => {
+                let config = self.inner.config.lock().unwrap();
+                match config.resolve(Some(&meta.provider), Some(&meta.model)) {
+                    Ok(resolved) => self.client(&resolved)?,
+                    // The message names another model: that one is used, and the stored one need not resolve.
+                    Err(_) if changes.provider.is_some() || changes.model.is_some() => {
+                        let resolved = config.resolve(Some(changes.provider.as_deref().unwrap_or(&meta.provider)), changes.model.as_deref())?;
+                        self.client(&resolved)?
+                    }
+                    Err(why) => return Err(cannot(format!("its model {} through {} cannot be reached now: {why}", meta.model, meta.provider))),
+                }
+            }
+        };
+
+        let ws = Workspace::new(Path::new(&meta.cwd)).map_err(|e| cannot(format!("cannot use {:?} as a workspace: {e}", meta.cwd)))?;
+        let (features, classic) = features_of(&StartRequest { mode: snapshot.setup.classic.then(|| "classic".to_string()), with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone(), ..Default::default() }).map_err(cannot)?;
+        let sess = Session::new(ws, dir.clone(), features, prices_for(&meta.model)).map_err(|e| cannot(format!("could not open the session directory: {e}")))?;
+        let mut cfg = AgentConfig::new(&meta.model);
+        cfg.features = features;
+        let setup = Setup { classic, with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone() };
+        let (cut_off, stats) = (snapshot.in_run, snapshot.stats.clone());
+
+        // The log as it was: what a subscriber is shown first, and where the numbering goes on from.
+        let log_path = dir.join("events.jsonl");
+        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let backlog: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let last = backlog.iter().map(|e| e.seq).max().unwrap_or(0);
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| cannot(format!("cannot open its log: {e}")))?;
+        // A write cut short leaves a line with no end: the next event must not join it.
+        if !text.is_empty() && !text.ends_with('\n') {
+            let _ = writeln!(log);
+        }
+
+        meta.status = SessionStatus::Idle;
+        meta.why_closed = None;
+        meta.stats = stats;
+        meta.updated = now_ms();
+        let (tx, _) = broadcast::channel(4096);
+        let (input, inbox) = mpsc::unbounded_channel::<Input>();
+        let approvals = Arc::new(Approvals::default());
+        let live = Arc::new(Live { dir, meta: Mutex::new(meta), events: Mutex::new(backlog), seq: AtomicU64::new(last), tx, log: Mutex::new(Some(log)), input, cancel: Mutex::new(CancellationToken::new()), closed: CancellationToken::new(), approvals: approvals.clone(), lock: Mutex::new(Some(lock)) });
+        let goal = live.meta.lock().unwrap().goal.clone();
+        let sink: Arc<dyn Sink> = live.clone();
+        let (mut agent, answered) = Agent::restore(provider, sess, cfg, sink, approvals, snapshot, goal);
+        agent.keep_snapshots(live.dir.join(resume::SNAPSHOT), setup);
+        live.save_meta();
+        live.emit(EventKind::Resumed { cut_off, answered });
+        spawn_worker(live.clone(), agent, inbox);
+        sessions.insert(id.to_string(), live.clone());
+        Ok(live)
     }
 }
 
@@ -1000,9 +1214,12 @@ mod tests {
         let done = until_idle(&h, &meta.id).await;
         assert_eq!((done.outcome, done.verified), (Some(FinishStatus::Done), Some(true)));
 
-        // Closing frees the session; its log can still be replayed.
+        // Closing frees the session; its log can still be replayed, and it is listed as stored: a
+        // stand-in's cannot be continued.
         h.close(&meta.id).unwrap();
-        assert!(h.meta(&meta.id).is_err() && h.close(&meta.id).is_err());
+        assert!(h.close(&meta.id).is_err() && !h.is_live(&meta.id));
+        let stored = h.meta(&meta.id).unwrap();
+        assert_eq!((stored.status, stored.why_closed.as_deref()), (SessionStatus::Closed, Some("simulated")));
         assert!(h.events(&meta.id).unwrap().iter().any(|e| matches!(e.kind, EventKind::Finish { .. })));
 
         let bad = StartRequest { cwd, task: "x".into(), without: vec!["telepathy".into()], ..Default::default() };
@@ -1180,7 +1397,7 @@ mod tests {
 
     #[test]
     fn what_was_stored_before_there_were_skills_still_loads() {
-        let meta = SessionMeta { id: "s".into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: None, verified: None, stats: Stats::default(), skills: vec!["ui".into()], goal: None };
+        let meta = SessionMeta { id: "s".into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: None, verified: None, stats: Stats::default(), skills: vec!["ui".into()], goal: None, why_closed: None };
         let mut old = serde_json::to_value(&meta).unwrap();
         assert_eq!(old.as_object_mut().unwrap().remove("skills"), Some(serde_json::json!(["ui"])));
         assert!(serde_json::from_value::<SessionMeta>(old).unwrap().skills.is_empty());
@@ -1377,7 +1594,7 @@ mod tests {
             line(6, serde_json::json!({"type": "finish", "status": "done", "summary": "ok", "verified": true, "evidence": "e"})),
         ];
         std::fs::write(dir.join("events.jsonl"), log.join("\n") + "\n").unwrap();
-        let meta = SessionMeta { id: id.into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: Some(FinishStatus::Done), verified: Some(true), stats: Stats { turns: 7, ..Stats::default() }, skills: vec![], goal: None };
+        let meta = SessionMeta { id: id.into(), title: "t".into(), cwd: "/".into(), provider: "p".into(), model: "m".into(), mode: "presage".into(), effort: "high".into(), simulated: false, created: 1, updated: 2, status: SessionStatus::Idle, outcome: Some(FinishStatus::Done), verified: Some(true), stats: Stats { turns: 7, ..Stats::default() }, skills: vec![], goal: None, why_closed: None };
         let mut old = serde_json::to_value(&meta).unwrap();
         old.as_object_mut().unwrap().remove("goal");
         old["stats"] = stats.clone();
@@ -1390,5 +1607,285 @@ mod tests {
         assert!(events.iter().any(|e| matches!(&e.kind, EventKind::Stats { stats } if stats.turns == 7 && stats.goal_checks == 0)));
         let listed = h.list();
         assert_eq!((listed.len(), listed[0].status, listed[0].goal.clone(), listed[0].stats.turns), (1, SessionStatus::Closed, None, 7));
+        assert_eq!(listed[0].why_closed.as_deref(), Some("older"), "stored before snapshots: read-only");
+    }
+
+    // --- continuing a session after the program that ran it has ended ---
+
+    /// The newest session as `list` gives it, once nobody has it. A session's lock is let go of when
+    /// the last copy of the file it was taken on is closed, and a command that is being started at
+    /// that moment holds a copy for an instant.
+    async fn listed_free(h: &Harness) -> SessionMeta {
+        for _ in 0..100 {
+            let meta = h.list().remove(0);
+            if meta.why_closed.as_deref() != Some("busy") {
+                return meta;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the session stayed busy");
+    }
+
+    fn resume_workspace(h: &Harness) -> String {
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("n.txt"), "alpha\nbeta\n").unwrap();
+        ws.to_string_lossy().into_owned()
+    }
+
+    fn session_dir(h: &Harness, id: &str) -> PathBuf {
+        h.inner.data_dir.join("sessions").join(id)
+    }
+
+    /// A first run that edits `n.txt`, is held to a goal that its checks keep finding unmet, and ends
+    /// with the goal still active. Returns the harness, the session and what its requests carried.
+    async fn run_with_a_goal_left_open(name: &str) -> (Harness, String, String, Seen) {
+        use crate::provider::mock::MockTurn;
+        use serde_json::json;
+        let h = harness(name);
+        let cwd = resume_workspace(&h);
+        let upper = MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "alpha", "new": "ALPHA"})), ("shell", json!({"cmd": "grep -qx ALPHA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "ALPHA done"}))]);
+        let finish = || MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]);
+        let seen = Seen::default();
+        let turns = vec![upper, MockTurn::say("NOT MET\nbeta is lower case"), finish(), MockTurn::say("NOT MET\nstill"), finish(), MockTurn::say("NOT MET\nstill")];
+        let req = StartRequest { cwd: cwd.clone(), task: "/goal n.txt is all upper case".into(), without: vec!["survey".into()], ..Default::default() };
+        let meta = h.start_scripted(req, recording(&seen, turns)).unwrap();
+        until_idle(&h, &meta.id).await;
+        (h, meta.id, cwd, seen)
+    }
+
+    #[tokio::test]
+    async fn a_session_is_continued_by_another_harness_with_its_conversation_numbering_and_goal() {
+        use crate::provider::mock::MockTurn;
+        use serde_json::json;
+        let (first, id, _, first_seen) = run_with_a_goal_left_open("resume-a").await;
+        let data = first.inner.data_dir.clone();
+        let ended = first.meta(&id).unwrap();
+        assert_eq!((ended.outcome, ended.goal.clone()), (Some(FinishStatus::Done), Some(Goal::new("n.txt is all upper case"))));
+        let log_before = first.events(&id).unwrap();
+        let last_seq = log_before.last().unwrap().seq;
+        let snapshot = resume::read(&session_dir(&first, &id)).unwrap();
+        assert!(!snapshot.in_run && snapshot.setup.without == ["survey"] && snapshot.turn == ended.stats.turns && snapshot.stats == ended.stats);
+
+        // The session is still run here: another process, or harness, must keep out.
+        let second = Harness::at(data.clone());
+        second.resume_stand_ins(true);
+        assert_eq!(second.list()[0].why_closed.as_deref(), Some("busy"));
+        let busy = second.resume_scripted(&id, MockProvider::scripted(vec![])).unwrap_err();
+        assert!(busy.contains("only one process"), "{busy}");
+        assert!(second.stop(&id).unwrap_err().contains("another process"));
+        drop(first);
+
+        // Now it is stored: listed as one that can be continued, with what it had.
+        let listed = vec![listed_free(&second).await];
+        assert_eq!((listed[0].status, listed[0].why_closed.clone(), listed[0].stats.turns, listed[0].goal.clone()), (SessionStatus::Resumable, None, ended.stats.turns, ended.goal.clone()));
+        assert_eq!(second.meta(&id).unwrap().status, SessionStatus::Resumable);
+        // Nothing is running here to stop or to approve, and no live feed to give; the log can be read.
+        assert!(second.stop(&id).is_ok());
+        assert!(second.approve(&id, 1, true).unwrap_err().contains("not running"));
+        assert!(second.subscribe(&id).unwrap_err().contains("stored, not running"));
+        assert_eq!(second.events(&id).unwrap().len(), log_before.len());
+        assert!(second.subscribe("nothing-like-it").unwrap_err().contains("not running in this process"));
+
+        let seen = Seen::default();
+        second.resume_scripted(&id, recording(&seen, vec![MockTurn::calls("", vec![("finish", json!({"summary": "still upper case"}))]), MockTurn::say("MET\nboth lines are upper case"), MockTurn::say("noted")])).unwrap();
+        second.send_with(&id, "and keep it that way", &[], &[], Changes::default()).unwrap();
+        let after = until_idle(&second, &id).await;
+
+        // The model is sent what it had, then the new message in front of which it is told of the restart.
+        let requests = seen.lock().unwrap().clone();
+        let sent = &requests[0];
+        assert_eq!(sent.len(), snapshot.messages.len() + 1);
+        assert_eq!(sent[..snapshot.messages.len()], snapshot.messages[..]);
+        let last_request_of_the_first_run = first_seen.lock().unwrap().iter().rfind(|m| m.iter().any(|m| m.content.contains("<task>"))).unwrap().clone();
+        assert_eq!(sent[..last_request_of_the_first_run.len()], last_request_of_the_first_run[..], "everything the model saw last time is a prefix of what it sees now");
+        let message = sent.last().unwrap();
+        assert!(message.role == crate::provider::Role::User && message.content.starts_with("[harness] This session was restored after a restart"), "{}", message.content);
+        assert!(message.content.ends_with("and keep it that way") && !message.content.contains("cut off"));
+        assert_eq!(sent[0].role, crate::provider::Role::System);
+        // The note is said once.
+        second.send_with(&id, "thanks", &[], &[], Changes::default()).unwrap();
+        until_idle(&second, &id).await;
+        assert_eq!(seen.lock().unwrap().last().unwrap().last().unwrap().content, "thanks");
+
+        // The log goes on from where it stopped, in order, with the resumption marked.
+        let text = std::fs::read_to_string(session_dir(&second, &id).join("events.jsonl")).unwrap();
+        let log: Vec<Event> = text.lines().map(|l| serde_json::from_str(l).expect("every line is an event")).collect();
+        assert_eq!(log[..log_before.len()].iter().map(|e| e.seq).collect::<Vec<_>>(), log_before.iter().map(|e| e.seq).collect::<Vec<_>>());
+        assert!(log.windows(2).all(|w| w[0].seq < w[1].seq));
+        assert_eq!(log[log_before.len()].seq, last_seq + 1);
+        assert!(matches!(log[log_before.len()].kind, EventKind::Resumed { cut_off: false, answered: 0 }));
+        assert!(matches!(&log[log_before.len() + 1].kind, EventKind::User { text, .. } if text == "and keep it that way"));
+        let turns: Vec<u32> = log.iter().filter_map(|e| if let EventKind::TurnStart { turn, .. } = e.kind { Some(turn) } else { None }).collect();
+        assert!(turns.windows(2).all(|w| w[0] < w[1]) && *turns.last().unwrap() > ended.stats.turns, "{turns:?}");
+
+        // Meta and stats carry on; the goal, still active when the first run ended, was met by the second.
+        assert!(after.stats.turns > ended.stats.turns && after.stats.goal_checks > ended.stats.goal_checks && after.stats.cost >= ended.stats.cost);
+        assert_eq!(after.goal.as_ref().map(|g| (g.text.as_str(), g.met)), Some(("n.txt is all upper case", true)));
+        assert!(goals(&second, &id).iter().any(|(state, ..)| *state == GoalState::Met));
+        assert_eq!(second.list()[0].title, ended.title);
+        let stored: SessionMeta = serde_json::from_str(&std::fs::read_to_string(session_dir(&second, &id).join("meta.json")).unwrap()).unwrap();
+        assert!(stored.why_closed.is_none() && stored.goal.unwrap().met);
+        let later = resume::read(&session_dir(&second, &id)).unwrap();
+        assert!(later.turn > snapshot.turn && later.messages.len() > snapshot.messages.len());
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_cut_off_in_the_middle_of_a_run_is_made_valid_and_the_model_is_told() {
+        use crate::provider::mock::MockTurn;
+        use crate::provider::Role;
+        use serde_json::json;
+        let h = harness("resume-cut");
+        let cwd = resume_workspace(&h);
+        let turns = vec![MockTurn::calls("", vec![("shell", json!({"cmd": "echo one"})), ("shell", json!({"cmd": "echo two"}))]), MockTurn::say("both said hello")];
+        let id = h.start_scripted(StartRequest { cwd, task: "say hello twice".into(), without: vec!["survey".into()], ..Default::default() }, MockProvider::scripted(turns)).unwrap().id;
+        until_idle(&h, &id).await;
+        let dir = session_dir(&h, &id);
+        let mut snapshot = resume::read(&dir).unwrap();
+        // As if the program was killed while the two calls ran: the reply is stored, their results are not.
+        let at = snapshot.messages.iter().rposition(|m| m.role == Role::Assistant && !m.tool_calls.is_empty()).unwrap();
+        snapshot.messages.truncate(at + 1);
+        snapshot.stubs.truncate(at + 1);
+        snapshot.in_run = true;
+        resume::write_atomic(&dir.join(resume::SNAPSHOT), &serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        let calls: Vec<String> = snapshot.messages[at].tool_calls.iter().map(|c| c.id.clone()).collect();
+        assert_eq!(calls.len(), 2);
+        drop(h);
+
+        let second = Harness::at(dir.parent().unwrap().parent().unwrap().to_path_buf());
+        let seen = Seen::default();
+        second.resume_scripted(&id, recording(&seen, vec![MockTurn::say("understood")])).unwrap();
+        second.send_with(&id, "go on", &[], &[], Changes::default()).unwrap();
+        until_idle(&second, &id).await;
+
+        let sent = seen.lock().unwrap()[0].clone();
+        assert_eq!(sent.len(), at + 1 + 2 + 1);
+        for (n, call) in calls.iter().enumerate() {
+            let result = &sent[at + 1 + n];
+            assert!(result.role == Role::Tool && result.tool_call_id.as_deref() == Some(call.as_str()) && result.content.contains("interrupted by a restart"), "{result:?}");
+        }
+        let note = &sent.last().unwrap().content;
+        assert!(note.contains("cut off by the restart: the tool calls it ended on were not finished") && note.ends_with("go on"), "{note}");
+        assert!(second.events(&id).unwrap().iter().any(|e| matches!(e.kind, EventKind::Resumed { cut_off: true, answered: 2 })));
+    }
+
+    #[test]
+    fn dangling_calls_are_answered_where_they_stand() {
+        use crate::provider::{Message, Role, ToolCall};
+        let call = |id: &str| ToolCall { id: id.into(), name: "shell".into(), arguments: "{}".into() };
+        let mut context = crate::context::Context::new("sys");
+        context.push(Message::user("task"));
+        context.push(Message { role: Role::Assistant, content: String::new(), reasoning: None, tool_calls: vec![call("a"), call("b")], tool_call_id: None });
+        context.push_tool("a", "one".into(), "[a]".into());
+        context.push(Message::user("[harness] carry on"));
+        context.push(Message { role: Role::Assistant, content: String::new(), reasoning: None, tool_calls: vec![call("c")], tool_call_id: None });
+        assert_eq!(context.answer_dangling("cut off"), 2);
+        let shape: Vec<(Role, Option<&str>)> = context.messages.iter().map(|m| (m.role, m.tool_call_id.as_deref())).collect();
+        assert_eq!(shape, [(Role::System, None), (Role::User, None), (Role::Assistant, None), (Role::Tool, Some("a")), (Role::Tool, Some("b")), (Role::User, None), (Role::Assistant, None), (Role::Tool, Some("c"))]);
+        assert_eq!(context.stubs().len(), context.messages.len());
+        assert_eq!(context.answer_dangling("cut off"), 0, "a conversation that is whole is left as it is");
+    }
+
+    #[tokio::test]
+    async fn a_session_without_a_snapshot_is_read_only_and_says_why() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("resume-older");
+        let cwd = resume_workspace(&h);
+        let id = h.start_scripted(StartRequest { cwd, task: "say hi".into(), ..Default::default() }, MockProvider::scripted(vec![MockTurn::say("hi")])).unwrap().id;
+        until_idle(&h, &id).await;
+        let data = h.inner.data_dir.clone();
+        drop(h);
+        let second = Harness::at(data);
+        // A stand-in's session is not continued by the app unless it is asked to.
+        assert_eq!(listed_free(&second).await.why_closed.as_deref(), Some("simulated"));
+        second.resume_stand_ins(true);
+        assert_eq!(listed_free(&second).await.status, SessionStatus::Resumable);
+        // Stored before sessions kept snapshots: the log has no system prompt and not what the model
+        // was shown beyond the user's words, so a conversation rebuilt from it would not be the same one.
+        std::fs::remove_file(session_dir(&second, &id).join(resume::SNAPSHOT)).unwrap();
+        let listed = vec![listed_free(&second).await];
+        assert_eq!((listed[0].status, listed[0].why_closed.as_deref()), (SessionStatus::Closed, Some("older")));
+        let refused = second.resume_scripted(&id, MockProvider::scripted(vec![])).unwrap_err();
+        assert!(refused.contains("cannot be continued") && refused.contains("no snapshot"), "{refused}");
+        assert!(second.send_with(&id, "more", &[], &[], Changes::default()).is_err());
+        assert!(second.send_with("no-such-session", "more", &[], &[], Changes::default()).unwrap_err().contains("no session"));
+        assert!(second.send_with("no-such-session", " ", &[], &[], Changes::default()).unwrap_err().contains("empty"));
+        assert!(!second.events(&id).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_real_session_comes_back_through_the_current_configuration() {
+        use crate::provider::mock::MockTurn;
+        let (first, id, _, _) = run_with_a_goal_left_open("resume-real").await;
+        let data = first.inner.data_dir.clone();
+        let dir = session_dir(&first, &id);
+        drop(first);
+        // As if it had been started on a real provider.
+        let edit = |provider: &str| {
+            let mut meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("meta.json")).unwrap()).unwrap();
+            meta["simulated"] = false.into();
+            meta["provider"] = provider.into();
+            meta["model"] = "qwen3".into();
+            std::fs::write(dir.join("meta.json"), meta.to_string()).unwrap();
+        };
+        let h = Harness::at(data);
+        let own = h.add_provider("Local", "http://127.0.0.1:9/v1", &["qwen3".into()], "").unwrap();
+
+        // Its provider is gone: a plain message says so; one that names another model does not need it.
+        edit("a-provider-that-was-removed");
+        assert_eq!(listed_free(&h).await.status, SessionStatus::Resumable);
+        let refused = h.resume(&id).unwrap_err();
+        assert!(refused.contains("cannot be continued") && refused.contains("a-provider-that-was-removed") && refused.contains("cannot be reached"), "{refused}");
+        assert!(h.resume_scripted(&id, MockProvider::scripted(vec![MockTurn::say("x")])).unwrap_err().contains("not played by a stand-in"));
+        let changes = Changes { provider: Some(own.clone()), model: Some("qwen3".into()), ..Default::default() };
+        h.revive(&id, None, &changes).unwrap();
+        assert_eq!((h.meta(&id).unwrap().status, h.is_live(&id)), (SessionStatus::Idle, true));
+        h.close(&id).unwrap();
+
+        // Its provider is there: the session comes back idle, with nothing sent anywhere.
+        edit(&own);
+        let meta = h.resume(&id).unwrap();
+        assert_eq!((meta.status, meta.provider.as_str(), meta.model.as_str()), (SessionStatus::Idle, own.as_str(), "qwen3"));
+        assert_eq!(h.resume(&id).unwrap().id, id, "resuming a session that is live is no error");
+        assert!(h.events(&id).unwrap().iter().any(|e| matches!(e.kind, EventKind::Resumed { .. })));
+        assert!(h.subscribe(&id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_log_that_was_cut_short_does_not_swallow_the_next_event() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("resume-torn");
+        let cwd = resume_workspace(&h);
+        let id = h.start_scripted(StartRequest { cwd, task: "say hi".into(), ..Default::default() }, MockProvider::scripted(vec![MockTurn::say("hi"), MockTurn::say("again")])).unwrap().id;
+        until_idle(&h, &id).await;
+        let data = h.inner.data_dir.clone();
+        let log = session_dir(&h, &id).join("events.jsonl");
+        drop(h);
+        let mut text = std::fs::read_to_string(&log).unwrap();
+        text.push_str("{\"seq\": 99, \"ts\": 1, \"type\": \"fin");
+        std::fs::write(&log, &text).unwrap();
+        let second = Harness::at(data);
+        second.resume_scripted(&id, MockProvider::scripted(vec![MockTurn::say("again")])).unwrap();
+        second.send_with(&id, "once more", &[], &[], Changes::default()).unwrap();
+        until_idle(&second, &id).await;
+        let lines = std::fs::read_to_string(&log).unwrap();
+        let unreadable = lines.lines().filter(|l| serde_json::from_str::<Event>(l).is_err()).count();
+        assert_eq!(unreadable, 1, "only the torn line is lost");
+        assert!(second.events(&id).unwrap().iter().any(|e| matches!(&e.kind, EventKind::User { text, .. } if text == "once more")));
+    }
+
+    #[tokio::test]
+    async fn closing_every_session_leaves_each_one_continuable_and_frees_it() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("resume-quit");
+        h.resume_stand_ins(true);
+        let cwd = resume_workspace(&h);
+        let id = h.start_scripted(StartRequest { cwd, task: "say hi".into(), ..Default::default() }, MockProvider::scripted(vec![MockTurn::say("hi")])).unwrap().id;
+        until_idle(&h, &id).await;
+        assert_eq!(h.close_all(), 1);
+        assert_eq!((h.close_all(), h.is_live(&id)), (0, false));
+        assert_eq!(listed_free(&h).await.status, SessionStatus::Resumable, "the app that quits can be opened again and the session sent a message");
+        h.resume_scripted(&id, MockProvider::scripted(vec![])).unwrap();
+        assert!(h.is_live(&id));
     }
 }

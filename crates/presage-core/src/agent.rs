@@ -10,12 +10,14 @@ use crate::goal::{self, Goal, Verdict};
 use crate::prompt;
 use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role, Usage};
 use crate::repair;
+use crate::resume::{self, Setup, Snapshot};
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
 use crate::util::{now_ms, one_line};
 use crate::watches;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -139,6 +141,11 @@ pub struct Agent {
     goal: Option<Goal>,
     /// What the message that comes next is shown as in the log, where that is not what the model is sent.
     shown: Option<String>,
+    /// Where the conversation and the rest of what continuing needs are stored after each reply
+    /// (`checkpoint`), with how the session was set up.
+    keep: Option<(PathBuf, Setup)>,
+    /// Said in front of the next message: the session was brought back after a restart.
+    restored: Option<String>,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -176,7 +183,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None }
+        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -246,6 +253,7 @@ impl Agent {
             },
         };
         self.sink.emit(event);
+        self.save_point(false);
     }
 
     pub fn effort(&self) -> Effort {
@@ -423,8 +431,12 @@ impl Agent {
         if !skills.is_empty() {
             composed = format!("{}\n\n{composed}", skills::blocks(skills));
         }
+        if let Some(note) = self.restored.take() {
+            composed = format!("{note}\n\n{composed}");
+        }
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
+        self.save_point(true);
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
         // Replies of this run that were nothing but reasoning.
@@ -554,6 +566,8 @@ impl Agent {
                 tool_calls: raw_calls,
                 tool_call_id: None,
             });
+            // The reply is paid for: a run that dies while its calls run keeps it.
+            self.save_point(true);
 
             if calls.is_empty() {
                 // A reply the output limit cut off is not an answer, whatever text it got to.
@@ -655,6 +669,7 @@ impl Agent {
                 self.ctx.append_to_last(&format!("\n--- harness ---\n{}", footer.join("\n")));
             }
             self.emit_stats(run_started, elapsed_before);
+            self.save_point(true);
 
             if let Some(done) = result.finished {
                 let outcome = Outcome { status: FinishStatus::Done, summary: done.summary, verified: done.verified, evidence: done.evidence };
@@ -674,6 +689,7 @@ impl Agent {
         };
 
         self.stats.elapsed_ms = elapsed_before + run_started.elapsed().as_millis() as u64;
+        self.save_point(false);
         self.sink.emit(EventKind::Stats { stats: self.stats.clone() });
         self.sink.emit(EventKind::Finish { status: outcome.status, summary: outcome.summary.clone(), verified: outcome.verified, evidence: outcome.evidence.clone() });
         outcome
@@ -768,6 +784,95 @@ impl Agent {
 
 fn goal_event(state: GoalState, text: String, detail: &str) -> EventKind {
     EventKind::Goal { state, text, detail: detail.to_string() }
+}
+
+/// What a tool call that a restart cut off is answered with.
+const INTERRUPTED: &str = "[interrupted by a restart: this call may not have run, or may have run in part. Check the files before relying on it.]";
+
+/// What the model is told in front of the first message of a session that was brought back.
+fn restored_note(cut_off: bool, answered: u32) -> String {
+    let mut note = "[harness] This session was restored after a restart of the program. Background jobs and shell processes from before are gone, and the files are as they are on disk now, which may differ from what you last saw: read before you rely on what you remember.".to_string();
+    if cut_off {
+        note.push_str(" The run before this message was cut off by the restart");
+        note.push_str(if answered > 0 { ": the tool calls it ended on were not finished, and their results say so." } else { "." });
+    }
+    note
+}
+
+/// Keeping a session so that it can be continued after a restart.
+impl Agent {
+    /// Stores a snapshot of the session at `path` after every reply and at the end of every run.
+    pub fn keep_snapshots(&mut self, path: PathBuf, setup: Setup) {
+        self.keep = Some((path, setup));
+    }
+
+    /// What continuing this session needs that the workspace, `meta.json` and the log do not hold.
+    /// `in_run`: a run is in progress, so that a snapshot that is the last one tells the run was cut off.
+    /// Left out on purpose: the read-dedup state and the anchors' histories (files are shown
+    /// again), the evidence, the turn's streak counters, what is queued for the next message
+    /// (`announce`, `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
+    pub fn checkpoint(&self, in_run: bool, setup: &Setup) -> Snapshot {
+        Snapshot {
+            version: resume::VERSION,
+            saved: now_ms(),
+            in_run,
+            setup: setup.clone(),
+            model: self.cfg.model.clone(),
+            autonomy: if self.cfg.autonomy == Autonomy::Ask { "ask" } else { "auto" }.to_string(),
+            interactive: self.cfg.interactive,
+            max_turns: self.cfg.max_turns,
+            time_budget_secs: self.cfg.time_budget.map(|d| d.as_secs()),
+            effort_policy: self.cfg.effort.label(),
+            effort: self.effort.as_str().to_string(),
+            messages: self.ctx.messages.clone(),
+            stubs: self.ctx.stubs().to_vec(),
+            turn: self.turn,
+            stats: self.stats.clone(),
+            edits: self.edits.iter().map(|(path, n)| (path.clone(), *n)).collect(),
+            chain_hints: self.chain_hints,
+            solo_hints: self.solo_hints,
+            session: self.sess.checkpoint(),
+        }
+    }
+
+    /// Writes the snapshot, if this agent keeps one. A snapshot that cannot be written costs only
+    /// the chance to continue after a restart, never the run.
+    fn save_point(&self, in_run: bool) {
+        let Some((path, setup)) = &self.keep else { return };
+        if let Ok(body) = serde_json::to_vec(&self.checkpoint(in_run, setup)) {
+            let _ = resume::write_atomic(path, &body);
+        }
+    }
+
+    /// An agent as the snapshot left it: the conversation, the turn counter and the stats, the
+    /// policies the session had, the standing checks, and `goal` from `meta.json`. `cfg` has the
+    /// features and the model, which the caller works out; the rest of it is the snapshot's.
+    /// Returns the agent and how many tool calls the conversation ended on with no result, which
+    /// were answered as interrupted so that a provider accepts it. The first message it gets is told
+    /// the session was restored.
+    pub fn restore(provider: Provider, mut sess: Session, mut cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>, snap: Snapshot, goal: Option<Goal>) -> (Self, u32) {
+        cfg.autonomy = if snap.autonomy == "ask" { Autonomy::Ask } else { Autonomy::Auto };
+        cfg.interactive = snap.interactive;
+        cfg.max_turns = snap.max_turns;
+        cfg.time_budget = snap.time_budget_secs.map(Duration::from_secs);
+        if let Some(policy) = EffortPolicy::parse(&snap.effort_policy) {
+            cfg.effort = policy;
+        }
+        sess.restore(snap.session);
+        let mut agent = Self::new(provider, sess, cfg, sink, approvals);
+        agent.ctx = Context::restored(snap.messages, snap.stubs);
+        let answered = agent.ctx.answer_dangling(INTERRUPTED);
+        agent.turn = snap.turn;
+        agent.effort = Effort::parse(&snap.effort).unwrap_or(agent.effort);
+        agent.stats = snap.stats;
+        agent.edits = snap.edits.into_iter().collect();
+        agent.chain_hints = snap.chain_hints;
+        agent.solo_hints = snap.solo_hints;
+        agent.first_message = false;
+        agent.goal = goal;
+        agent.restored = Some(restored_note(snap.in_run, answered));
+        (agent, answered)
+    }
 }
 
 #[cfg(all(test, unix))]

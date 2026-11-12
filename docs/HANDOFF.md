@@ -6,6 +6,51 @@ benchmark.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
 
+## Continuing sessions after a restart (12 November 2026)
+
+Branch `hoplite/barke-8479543e`, written in a worktree next to another that changed the goal and the
+modes: `agent.rs`, `harness.rs` and `state.rs` were edited additively on purpose, so that the two merge.
+
+**What it does:** a session stored by an earlier run of the app or the CLI is continued by sending it a
+message (`Harness::send_with` brings it back) or by `presage resume <id> [message]`. `README.md` has
+the user's side. The engine's side:
+
+- `crates/presage-core/src/resume.rs`: `Snapshot` (what `snapshot.json` holds), `write_atomic`,
+  `read` and `SessionLock` (an OS file lock on `session.lock`, with the pid written in it for the
+  message of whoever is turned away; `File::try_lock`, so a killed process leaves nothing behind).
+- `Agent::checkpoint`/`restore`/`keep_snapshots` (`agent.rs`) and `Session::checkpoint`/`restore` (`state.rs`).
+  The snapshot is written after the user message is in the conversation, after each reply, at the end
+  of a turn and when a run ends (`save_point`). `Context::answer_dangling` answers the tool calls a
+  killed run left open, `Context::restored` takes the stored conversation and its stubs.
+- `Harness::resume`, `resume_scripted` (tests, the app's headless hooks), `resume_stand_ins`, `is_live`,
+  `close_all`; `send_with` revives on demand. `list`/`meta` give stored sessions the status `resumable`
+  or `closed` with `why_closed` (`older`, `simulated`, `busy`, `gone`). `subscribe` on a stored
+  session is an error that says to send a message first (reviving on subscribe would take the lock and
+  need the key just to look at an old session); `stop` is a no-op unless another process runs it;
+  `approve` says nothing is waiting. `Harness` ending (the last handle dropped) ends its sessions
+  and frees their locks, `Live::shut`.
+- `EventKind::Resumed { cut_off, answered }` marks the restoration in the log; the UI draws it as a row.
+
+**Decisions:** a session without a snapshot is *not* rebuilt from its log: the log lacks the system
+prompt, the composed first message (environment, preflight output, attached files) and the harness's
+footers, so the model would not see the conversation it had. `seen` and the anchors' histories start
+empty (files are shown again); the evidence starts fresh; the watch results are not kept; the `reply`
+counter is not (histories are empty); the step and spill counters are, so numbers in the conversation
+are not reused. `dialects` is kept (it records whether a file already failed the syntax check before
+the tools touched it, which cannot be found out afterwards). Shell exports and the directory live in
+`shell.env` and `shell.cwd` in the session directory, which survive: only background jobs are gone.
+
+**Desktop:** a `resumable` session has a working follow-up box and is read from its log until a
+message brings it back (`store.resume`); a session that cannot be continued says why in the
+inspector (`Why`). `PRESAGE_UI_REVIVE=<file>` (see `docs/DESKTOP_UI_BRIEF.md`) lets a scripted
+session be continued with scripted replies, which is how the restart flow was photographed. The
+goal's UI was seen running for the first time: `/goal` and `/goal clear` answer in the open now (they
+were folded into "1 note"), and the Economy block shows the goal checks.
+
+**Not done:** nothing was run against a real provider; a restart with the app and the CLI running one
+session at once was exercised only with two harnesses in one process (the lock is an OS file lock, so it
+holds across processes, but only the tests' same-process case ran).
+
 ## Ninth session: against OpenCode (12 November 2026)
 
 Branch `hoplite/kos-bee4c2ad`. DeepSeek V4.1 Flash through Logfare, all 24 tasks; the tables, the

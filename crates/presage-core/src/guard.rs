@@ -7,14 +7,14 @@
 use regex::RegexBuilder;
 use serde_json::Value;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExitExpect {
     Code(i32),
     Nonzero,
     Any,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Expect {
     /// `None` means the default: exit code 0, or any exit code when only output text is predicted.
     pub exit: Option<ExitExpect>,

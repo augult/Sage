@@ -148,6 +148,16 @@ pub enum EventKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         autonomy: Option<String>,
     },
+    /// The session was brought back after the program that ran it had ended; what follows is a
+    /// new run of it. Older builds do not know this event and skip it.
+    Resumed {
+        /// The run before was cut off: no `finish` ever followed its last message.
+        #[serde(default)]
+        cut_off: bool,
+        /// Tool calls the stored conversation ended on with no result, answered as interrupted.
+        #[serde(default)]
+        answered: u32,
+    },
     /// Environment snapshot that was prepended to the first user message.
     Env {
         text: String,

@@ -1,5 +1,7 @@
 // Sessions the UI has opened. Each keeps its view-model for the life of the window; a session the
 // engine still runs also keeps exactly one subscription, so nothing is missed while it is off screen.
+// A session from an earlier launch is read from its log. One that can be continued (`resumable`) is
+// subscribed to once a message has brought it back: `resume`.
 
 import { api } from './api.js';
 import { apply, replay, seal } from './model.js';
@@ -19,7 +21,8 @@ export const get = (id) => entries.get(id);
 export function open(meta) {
   let entry = entries.get(meta.id);
   if (!entry) {
-    entry = { id: meta.id, meta, live: meta.status !== 'closed', model: null, error: null, subscribed: false, syncing: false, queue: [], lastLive: 0 };
+    const stored = meta.status === 'closed' || meta.status === 'resumable';
+    entry = { id: meta.id, meta, live: !stored, resumable: meta.status === 'resumable', model: null, error: null, subscribed: false, syncing: false, queue: [], lastLive: 0 };
     entries.set(meta.id, entry);
     sync(entry);
   }
@@ -50,6 +53,20 @@ async function sync(entry) {
 }
 
 export const reload = (entry) => sync(entry);
+
+/**
+ * A stored session that was sent a message is the engine's to run from now on: subscribe, and
+ * rebuild the view from its log, which has grown by the resumption and the message. The rebuild
+ * is from the whole log, so nothing shows twice.
+ */
+export function resume(entry) {
+  if (entry.live) return;
+  entry.live = true;
+  entry.resumable = false;
+  entry.meta = { ...entry.meta, status: 'idle', why_closed: null };
+  entry.subscribed = false;
+  sync(entry);
+}
 
 function receive(entry, event) {
   if (entry.syncing) {

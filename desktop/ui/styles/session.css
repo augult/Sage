@@ -563,6 +563,16 @@ button.row-line:focus-visible {
   margin-right: auto;
 }
 
+/* A note's row standing in the conversation; where the session was brought back, set off by a hairline. */
+.aside {
+  min-width: 0;
+}
+
+.aside.is-resumed {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
 /* How the run ended. */
 .result {
   display: flex;

@@ -3,7 +3,7 @@
 mod bench;
 
 use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, GoalState, Stats};
-use presage_core::harness::{Harness, SessionStatus, StartRequest};
+use presage_core::harness::{Changes, Harness, SessionStatus, StartRequest};
 use presage_core::tools::StepStatus;
 use presage_core::util::{fmt_bytes, fmt_duration};
 use std::io::{IsTerminal, Read, Write};
@@ -19,6 +19,7 @@ USAGE
   presage skills [show <name>]      list skills, or print one
   presage prompt [options]          print the system prompt `run` would send with the same options
   presage sessions                  list sessions
+  presage resume <id> [message…]    continue a stored session with a message
   presage show <session-id>         replay a session's log
   presage providers                 list providers and whether a key is set
   presage key <provider>            store an API key (read from stdin)
@@ -42,6 +43,14 @@ OPTIONS for run
   -v, --verbose            also print the model's reasoning and every observation
       --json               print the final result as JSON on stdout
       --events             print every event as a JSON line on stdout
+
+OPTIONS for resume
+  -p, --provider <id>      continue on another provider (the session keeps its conversation)
+  -m, --model <name>       continue on another model
+  -e, --effort <level>     change the effort from here on
+      --skill <name>       switch a skill on with the message (repeatable, or comma-separated)
+  -v, --verbose, --json, --events   as for run
+  With no message, the session is told to continue where it left off; `-` reads the message from stdin.
 
 Keys are read from the environment (LOGFARE_API_KEY, DEEPSEEK_API_KEY, ZAI_API_KEY, OPENROUTER_API_KEY)
 or from ~/.presage/config.json (written by `presage key`).";
@@ -202,6 +211,7 @@ impl Printer {
             }
             EventKind::Note { text, .. } => eprintln!("    {} {}", p.yellow("◦"), p.yellow(text)),
             EventKind::Goal { state, text, detail } => eprintln!("    {} {}", p.cyan("◎"), goal_line(*state, text, detail)),
+            EventKind::Resumed { cut_off, .. } => eprintln!("    {} {}", p.cyan("↻"), p.dim(if *cut_off { "session restored after a restart; the run before was cut off" } else { "session restored after a restart" })),
             EventKind::Effort { from, to, reason, .. } => eprintln!("    {} effort {from} → {to} ({reason})", p.yellow("◦")),
             EventKind::Settings { model, effort, autonomy, .. } => {
                 let changed: Vec<String> = [("model", model), ("effort", effort), ("autonomy", autonomy)].iter().filter_map(|(name, value)| value.as_ref().map(|value| format!("{name} {value}"))).collect();
@@ -286,15 +296,69 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
     Ok(RunArgs { req, verbose, json, events })
 }
 
+/// What `presage resume` is asked: which session, what to tell it, and what changes with the message.
+#[derive(Debug)]
+struct ResumeArgs {
+    id: String,
+    message: String,
+    skills: Vec<String>,
+    changes: Changes,
+    verbose: bool,
+    json: bool,
+    events: bool,
+}
+
+/// Said to a session that is resumed without a message.
+const CONTINUE: &str = "Continue where you left off.";
+
+/// Options and words of `resume <id> [message…]`. `-` as the message is stdin.
+fn parse_resume(args: &[String]) -> Result<ResumeArgs, String> {
+    let mut run = ResumeArgs { id: String::new(), message: String::new(), skills: Vec::new(), changes: Changes::default(), verbose: false, json: false, events: false };
+    let mut words: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+        match a.as_str() {
+            "-p" | "--provider" => run.changes.provider = Some(value(a)?),
+            "-m" | "--model" => run.changes.model = Some(value(a)?),
+            "-e" | "--effort" => run.changes.effort = Some(value(a)?),
+            "--skill" => run.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
+            "-v" | "--verbose" => run.verbose = true,
+            "--json" => run.json = true,
+            "--events" => run.events = true,
+            "--" => words.extend(it.by_ref().cloned()),
+            flag if flag.starts_with('-') && flag.len() > 1 => return Err(format!("unknown option {flag}")),
+            word => words.push(word.to_string()),
+        }
+    }
+    let mut words = words.into_iter();
+    run.id = words.next().ok_or("usage: presage resume <session-id> [message…]   (`presage sessions` lists them)")?;
+    run.message = words.collect::<Vec<_>>().join(" ");
+    if run.message.trim() == "-" {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).map_err(|e| e.to_string())?;
+        run.message = buf;
+    }
+    if run.message.trim().is_empty() {
+        run.message = CONTINUE.into();
+    }
+    Ok(run)
+}
+
 struct Follower {
     printer: Printer,
     events: bool,
+    /// Events up to this sequence number belong to what was there before: not shown, and not the result.
+    after: u64,
     stats: Stats,
     result: Option<(FinishStatus, String, bool, String)>,
 }
 
 impl Follower {
     fn handle(&mut self, ev: &Event) {
+        if ev.seq <= self.after {
+            return;
+        }
         if self.events && !ev.kind.transient() {
             println!("{}", serde_json::to_string(ev).unwrap_or_default());
         }
@@ -308,7 +372,10 @@ impl Follower {
 }
 
 /// Follows a session to the end of its current run. Returns the process exit code.
-async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: bool, events: bool) -> ExitCode {
+///
+/// `after` is the last event of what the session had before this run: a session that was
+/// continued has the ends of its earlier runs in its log, and they are not this run's end.
+async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: bool, events: bool, after: u64) -> ExitCode {
     let (backlog, mut rx) = match h.subscribe(id) {
         Ok(v) => v,
         Err(e) => {
@@ -317,7 +384,7 @@ async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: boo
         }
     };
     let printer = Printer { paint: Paint { on: std::io::stderr().is_terminal() }, verbose, pending: None };
-    let mut f = Follower { printer, events, stats: Stats::default(), result: None };
+    let mut f = Follower { printer, events, after, stats: Stats::default(), result: None };
     for ev in &backlog {
         f.handle(ev);
     }
@@ -420,12 +487,23 @@ async fn main() -> ExitCode {
             Err(e) => fail(e),
             Ok(run) => match h.start(run.req) {
                 Err(e) => fail(e),
-                Ok(meta) => follow(&h, &meta.id, meta.simulated, run.verbose, run.json, run.events).await,
+                Ok(meta) => follow(&h, &meta.id, meta.simulated, run.verbose, run.json, run.events, 0).await,
             },
+        },
+        Some("resume") => match parse_resume(&args[1..]) {
+            Err(e) => fail(e),
+            Ok(run) => {
+                // What the log held before: the new run is what comes after it.
+                let before = h.events(&run.id).ok().and_then(|events| events.last().map(|e| e.seq)).unwrap_or(0);
+                match h.send_with(&run.id, &run.message, &run.skills, &[], run.changes) {
+                    Err(e) => fail(e),
+                    Ok(()) => follow(&h, &run.id, h.meta(&run.id).is_ok_and(|m| m.simulated), run.verbose, run.json, run.events, before).await,
+                }
+            }
         },
         Some("demo") => match h.demo() {
             Err(e) => fail(e),
-            Ok(meta) => follow(&h, &meta.id, true, args.iter().any(|a| a == "-v" || a == "--verbose"), args.iter().any(|a| a == "--json"), false).await,
+            Ok(meta) => follow(&h, &meta.id, true, args.iter().any(|a| a == "-v" || a == "--verbose"), args.iter().any(|a| a == "--json"), false, 0).await,
         },
         Some("bench") => bench::command(&h, &args[1..]).await,
         Some("sessions") => {
@@ -440,7 +518,9 @@ async fn main() -> ExitCode {
                     (_, Some(FinishStatus::Error), _) => "failed",
                     _ => "–",
                 };
-                println!("{}  {:<13} {:>3} turns  {:<26} {}", m.id, state, m.stats.turns, m.model, m.title);
+                // A stored session that cannot be continued says why.
+                let note = m.why_closed.as_deref().map(|why| format!("  [read-only: {why}]")).unwrap_or_default();
+                println!("{}  {:<13} {:>3} turns  {:<26} {}{note}", m.id, state, m.stats.turns, m.model, m.title);
             }
             ExitCode::SUCCESS
         }
@@ -498,6 +578,29 @@ mod tests {
         assert_eq!((run.req.goal.as_deref(), run.req.task.as_str(), run.req.cwd.as_str()), (Some("done"), "fix the tests", "/tmp"));
         assert!(parse_run(&args("--goal"), true).is_err());
         assert_eq!(parse_run(&args("fix the tests"), true).unwrap().req.goal, None);
+    }
+
+    #[test]
+    fn resume_takes_a_session_a_message_and_what_changes_with_it() {
+        let run = parse_resume(&args("20260101-000000-ab -m glm-5.3 --skill ui,debug now the other one")).unwrap();
+        assert_eq!((run.id.as_str(), run.message.as_str(), run.changes.model.as_deref(), run.skills.as_slice()), ("20260101-000000-ab", "now the other one", Some("glm-5.3"), &["ui".to_string(), "debug".to_string()][..]));
+        let run = parse_resume(&args("-e high 20260101-000000-ab")).unwrap();
+        assert_eq!((run.message.as_str(), run.changes.effort.as_deref()), (CONTINUE, Some("high")));
+        assert!(parse_resume(&args("")).unwrap_err().contains("usage"));
+        assert!(parse_resume(&args("id --nope")).unwrap_err().contains("unknown option"));
+        assert!(parse_resume(&args("id -m")).is_err());
+    }
+
+    #[test]
+    fn a_follower_of_a_continued_session_ignores_the_ends_of_the_runs_before() {
+        let finish = |seq: u64, summary: &str| Event { seq, ts: 1, kind: EventKind::Finish { status: FinishStatus::Done, summary: summary.into(), verified: true, evidence: "e".into() } };
+        let mut follower = Follower { printer: Printer { paint: Paint { on: false }, verbose: false, pending: None }, events: false, after: 5, stats: Stats::default(), result: None };
+        for event in [finish(3, "the first run"), finish(5, "the second run"), Event { seq: 6, ts: 1, kind: EventKind::Resumed { cut_off: false, answered: 0 } }] {
+            follower.handle(&event);
+        }
+        assert!(follower.result.is_none(), "what was stored before the resumption is not this run's end");
+        follower.handle(&finish(8, "this run"));
+        assert_eq!(follower.result.map(|r| r.1).as_deref(), Some("this run"));
     }
 
     #[test]

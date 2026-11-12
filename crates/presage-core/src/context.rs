@@ -27,6 +27,44 @@ impl Context {
         Self { messages: vec![Message::system(system)], stubs: vec![None], prev_wire: None, prev_prompt: 0 }
     }
 
+    /// A conversation as it was stored. Nothing has been sent from it yet, so the cache audit
+    /// starts over.
+    pub fn restored(messages: Vec<Message>, mut stubs: Vec<Option<String>>) -> Self {
+        stubs.resize(messages.len(), None);
+        Self { messages, stubs, prev_wire: None, prev_prompt: 0 }
+    }
+
+    /// The stubs, one per message, for storing the conversation.
+    pub fn stubs(&self) -> &[Option<String>] {
+        &self.stubs
+    }
+
+    /// Answers with `text` every tool call that has no result, right after the calls' own
+    /// message: a provider refuses a conversation that has one. Returns how many it answered.
+    pub fn answer_dangling(&mut self, text: &str) -> u32 {
+        let mut answered = 0;
+        let mut at = 0;
+        while at < self.messages.len() {
+            at += 1;
+            let calls: Vec<String> = match &self.messages[at - 1] {
+                m if m.role == Role::Assistant => m.tool_calls.iter().map(|c| c.id.clone()).collect(),
+                _ => continue,
+            };
+            let mut end = at;
+            while end < self.messages.len() && self.messages[end].role == Role::Tool {
+                end += 1;
+            }
+            let missing: Vec<&String> = calls.iter().filter(|id| !self.messages[at..end].iter().any(|m| m.tool_call_id.as_deref() == Some(id.as_str()))).collect();
+            for (n, id) in missing.iter().enumerate() {
+                self.messages.insert(end + n, Message::tool(id.as_str(), text));
+                self.stubs.insert(end + n, Some(text.to_string()));
+            }
+            answered += missing.len() as u32;
+            at = end + missing.len();
+        }
+        answered
+    }
+
     pub fn push(&mut self, message: Message) {
         self.messages.push(message);
         self.stubs.push(None);
