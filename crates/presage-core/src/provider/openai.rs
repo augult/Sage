@@ -292,6 +292,16 @@ impl OpenAiProvider {
         Value::Object(b)
     }
 
+    /// The least thinking this path can be asked for: `Off` where that switches thinking off or
+    /// is sent as the vendor's floor, and `Low` where `Off` would only leave the effort out and
+    /// the vendor's default in place.
+    pub fn lowest_effort(&self) -> Effort {
+        match self.dialect {
+            Dialect::OpenAi | Dialect::OpenAiPlatform | Dialect::Gemini | Dialect::Fireworks | Dialect::Xai => Effort::Low,
+            _ => Effort::Off,
+        }
+    }
+
     pub async fn chat(&self, req: ChatRequest<'_>, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
         let body = serde_json::to_vec(&self.body(&req)).map_err(|e| ProviderError::Protocol(e.to_string()))?;
         let fallback_prompt = est_tokens(std::str::from_utf8(&body).unwrap_or(""));
@@ -835,6 +845,19 @@ mod tests {
         assert!(provider(Dialect::OpenAiPlatform).wire_messages(&said)[0].get("reasoning_content").is_none(), "OpenAI refuses fields it does not know");
         assert_eq!(provider(Dialect::Groq).wire_messages(&said)[0]["reasoning"], json!("r"));
         assert_eq!(provider(Dialect::Moonshot).wire_messages(&said)[0]["reasoning_content"], json!("r"));
+
+        // The least thinking each path takes, as a question on the side is asked with: off where
+        // it can be switched off, and `low` where leaving the effort out would mean the default.
+        let least = |p: OpenAiProvider| {
+            let effort = p.lowest_effort();
+            p.body(&req(effort))
+        };
+        assert_eq!(least(provider(Dialect::DeepSeek))["thinking"], json!({"type": "disabled"}));
+        assert_eq!(least(provider(Dialect::OpenRouter))["reasoning"], json!({"enabled": false}));
+        assert_eq!(least(provider(Dialect::Mistral))["reasoning_effort"], json!("none"));
+        for dialect in [Dialect::OpenAi, Dialect::OpenAiPlatform, Dialect::Gemini, Dialect::Fireworks, Dialect::Xai] {
+            assert_eq!(least(provider(dialect))["reasoning_effort"], json!("low"), "{dialect:?}");
+        }
 
         let p = provider(Dialect::OpenRouter);
         assert_eq!(p.base_url, "https://example.invalid/v1");

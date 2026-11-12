@@ -203,6 +203,14 @@ impl Provider {
         }
     }
 
+    /// The least thinking the model can be asked for on this path, for a question on the side.
+    pub fn lowest_effort(&self) -> Effort {
+        match self {
+            Provider::OpenAi(p) => p.lowest_effort(),
+            Provider::Mock(_) => Effort::Off,
+        }
+    }
+
     /// True for the scripted provider: its numbers are fabricated and must be labelled as such.
     pub fn simulated(&self) -> bool {
         matches!(self, Provider::Mock(_))

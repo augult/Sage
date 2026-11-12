@@ -13,8 +13,9 @@ brief remains the specification. Everything the UI needs is on `presage_core::ha
   `set_global_instructions`; types `SessionMeta`, `SessionStatus`, `StartRequest`, `AppState`,
   `DirListing`, `Instructions`, and `skills::SkillInfo`.
 - `crates/presage-core/src/events.rs`: `Event { seq, ts, type, …fields }` (flattened; `type` is
-  snake_case), `Stats`, `FinishStatus`, `CacheVerdict`. `delta` events are transient streaming text;
-  a `retry` event voids what was streamed for that turn.
+  snake_case), `Stats`, `FinishStatus`, `CacheVerdict`, `GoalState`. `delta` events are transient
+  streaming text; a `retry` event voids what was streamed for that turn. A stored log can hold
+  `lesson` events from the memory feature that was removed: they are passed over.
 - `crates/presage-cli/src/main.rs`: the terminal renderer, a reference for presenting each event.
 - `presage demo` writes a complete session to `$PRESAGE_HOME/sessions/<id>/events.jsonl`.
 
@@ -35,7 +36,9 @@ Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
 `add_provider(name, base_url, models, key?)` (an OpenAI-compatible endpoint of the user's own;
 answers with its id) and `remove_provider(id)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
-`interactive = true`; `req.skills` names the skills to start with), `start_demo`,
+`interactive = true`; `req.skills` names the skills to start with; a `req.task` that reads
+`/goal <condition>`, or a `req.goal`, starts the session with a goal, which `SessionMeta.goal`
+then carries as `{ text, met }`), `start_demo`,
 `send_message(id, text, skills?, changes?, files?)` (`send_with`: the skills named are switched on with the
 message; `changes` is `{ provider?, model?, effort?, autonomy? }`, what the session is to run with
 from this message on), `stop_session(id)`,
@@ -224,7 +227,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
      by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
    - *Session*: no header: what the session is (title, status, folder, model, effort, mode,
-     autonomy, skills) is the first block of the inspector's Economy tab. The timeline is a
+     autonomy, skills, and its goal where it has one) is the first block of the inspector's Economy tab. The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on
      the right), the agent's words as prose (`ui/js/markdown.js`, `ui/js/views/prose.js`:
      headings, lists, tables, fenced code with a copy button; a link is copied, never followed),
@@ -240,7 +243,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **The bar opens the rows**: the reasoning ("Thought", with its first line), a
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
-       watch changes, harness notes, lessons, effort changes, trims, retries, answered
+       watch changes, harness notes, what became of the goal, effort changes, trims, retries, answered
        approvals).
      - **A row is one line about what the tool did** ("Ran sh check.sh", "Edited report.sh",
        "Searched the web for awk printf") **and opens the same way for every tool**
@@ -275,6 +278,18 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        in the box over the text, each a chip with its name and a cross that takes it off, so
        the box grows upwards by their row; they go with the next message and show over it in
        the conversation. The pickers are under the box.
+     - **`/goal`** is typed in either box and read by the engine (`presage-core/src/goal.rs`),
+       not by the window: the text goes to `start_session` or `send_message` as it is.
+       `/goal <condition>` sets the session's goal and starts work on it; the message stays on
+       the timeline as typed, followed by a "Goal · set" row. From then on every `finish` is
+       checked against the goal by a request of its own, and each check leaves a row under the
+       step it judged: "not met" with what is missing (the `finish` is then refused and the run
+       goes on), "met", "not checked" (the check failed or could not be read, and the `finish`
+       was let through), or "left open". `/goal` alone and `/goal clear` start no run and send
+       nothing to the model: they are answered by a row ("Goal · open" or "met" with the
+       condition, "None set", "Goal · cleared"), with no message of the user's above it. All of
+       it comes from the `goal` event; the inspector's Goal line follows the same events. There
+       is no control for the goal other than the text.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
@@ -322,10 +337,10 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    buttons that says what the pane shows (`ui/js/views/panel.js`; the choice is kept from one
    session to the next):
    - **Economy** (`inspector.js`): Session (title, status, folder, model, effort, mode, autonomy,
-     skills), then Economy from `stats` events (turns, steps, surprises, predictions held of made,
+     skills, and for a session with a goal a Goal line, "Open" or "Met" and the condition), then Economy from `stats` events (turns, steps, surprises, predictions held of made,
      prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
      when simulated, context size, model versus tool time, output kept out of context, repairs,
-     retries, cache misses); Watches with current state; Notes and lessons.
+     retries, cache misses); Watches with current state; Notes.
    - **Code** (`code.js`): the folder's files as a tree, read a folder at a time, and the one
      that is open as text with line numbers, to edit and Save (Ctrl/Cmd+S). Text typed and not
      saved is marked by a dot after the file's name and is asked about before it is left (another
