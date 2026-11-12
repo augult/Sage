@@ -46,6 +46,7 @@ const EDGES_INTRO: &str = "You are the second examiner of a coding task that ano
 const EDGES_BRIEF: &str = "- The first examiner goes through the text rule by rule, with a plain case for each. Yours are the cases such a pass leaves out. Every error the text states, in every place it can occur and not only the first, with all the text says about how it is reported: its kind, its message, the position or line it names. The limits of each rule: nothing, exactly one, the first and the last, a value on the boundary, the same thing twice. Two rules meeting in one input, wherever the text says which applies first or which wins. Expected values come from the text alone. Name each case after the clauses it checks (for example `s2_s6_discount_before_rounding`). If the text gives you nothing of this kind to check, reply NONE: do not fall back on plain cases.";
 
 const FORMAT: &str = "\
+- Write the script as you go through the text. Do not work every case out before you begin to write: a reply that is all thought and no script is lost.
 - Where the text leaves a point open or you are not sure what it requires, write no case. A wrong case costs more than a missing one.
 - Cover what the existing tests leave out; do not repeat them.
 - Use only the interface that the task, the documents and the existing code fix: names, signatures, files, commands. Never guess one.
@@ -208,6 +209,9 @@ pub fn excerpt(output: &str) -> String {
 
 const SAME_FORMAT: &str = "Reply in the same format as before, with the whole script.";
 
+/// What an examiner is told when its reply ran into the output limit before the script ended.
+pub const REPAIR_CUT: &str = "Your reply ran into the output limit before the script ended, so there is no script. Write it again so that it fits: a table of cases and one loop that runs them, no helper that is used once, no comments, at most 60 cases, the ones most likely to show a fault first. Reply in the same format as before, with the whole script.";
+
 /// What an examiner is told when its script did not get as far as its count.
 pub fn repair_broken(output: &str) -> String {
     let shown = if output.trim().is_empty() { "(it printed nothing, or ran for too long)".to_string() } else { excerpt(output) };
@@ -326,9 +330,9 @@ pub struct Section<'a> {
     pub set_aside: Vec<&'a str>,
 }
 
-const RULE: &str = "A failing case is either a gap in your work or a mistake of the examiner. Settle each one by the text it cites, not by your code: where the text sides with the case, fix the work; where the text contradicts the case, leave the work as it is. Whatever passes now has to pass afterwards. Then call `finish` again, and name in its summary each case you leave failing with the sentence that shows it wrong.";
+const RULE: &str = "A failing case is either a gap in your work or a mistake of the examiner. Settle each one by the text it cites, not by your code: where the text sides with the case, fix the work; where the text contradicts the case, leave the work as it is. Whatever passes now has to pass afterwards. Then call `finish`, and name in its summary each case you leave failing with the sentence that shows it wrong.";
 
-const RULE_REFEREED: &str = "Each of these is taken to be a gap in your work. Read the quoted sentence and the text around it again, and fix the work where the text requires what the case expects. A case can still be wrong: where the text contradicts it, leave the work as it is, and change nothing only to make a case pass. Whatever passes now has to pass afterwards. Then call `finish` again, and name in its summary each case you leave failing with the sentence that shows it wrong.";
+const RULE_REFEREED: &str = "Each of these is taken to be a gap in your work. Read the quoted sentence and the text around it again, and fix the work where the text requires what the case expects. A case can still be wrong: where the text contradicts it, leave the work as it is, and change nothing only to make a case pass. Whatever passes now has to pass afterwards. Then call `finish`, and name in its summary each case you leave failing with the sentence that shows it wrong.";
 
 /// The cases of a hold are shown up to about this many characters; the script has the rest.
 const HOLD_CHARS: usize = 9_000;
@@ -381,7 +385,7 @@ pub fn hold(nth: u8, examiners: usize, refereed: bool, sections: &[Section]) -> 
     format!("{out}\n\n{}", if refereed { RULE_REFEREED } else { RULE })
 }
 
-pub const ROUTER_SYSTEM: &str = "You route coding tasks to playbooks. You are given a list of playbooks and a task. Name the playbooks whose subject is the main work of the task. Most tasks need none, and a loose association is no reason to pick one. Answer with the names separated by commas, or with NONE. Nothing else.";
+pub const ROUTER_SYSTEM: &str = "You route coding tasks to playbooks. You are given a list of playbooks and a task. Name the one playbook whose subject is what the task asks to be delivered. A playbook about writing tests fits a task that asks for tests, not a fix that has to pass them; one about security fits an audit, not a page that should be made safe to use. Most tasks need none, and a loose association is no reason to pick one. Answer with one name, or with NONE. Nothing else.";
 
 /// The router's request for `task`, with the playbooks as `(name, description)`.
 pub fn route_brief(task: &str, playbooks: &[(&str, &str)]) -> Vec<Message> {
@@ -389,10 +393,12 @@ pub fn route_brief(task: &str, playbooks: &[(&str, &str)]) -> Vec<Message> {
     vec![Message::system(ROUTER_SYSTEM), Message::user(format!("Playbooks:\n{}\n\nTask:\n{task}", list.join("\n")))]
 }
 
-/// The names the router's answer picks out of `known`, at most two, in the order of `known`.
+/// The name the router's answer picks out of `known`: the first one it names. One playbook, not
+/// several: in the first live runs a second one (writing tests, beside debugging) sent fixes off
+/// into test suites and mutation runs nobody had asked for.
 pub fn routed<'a>(answer: &str, known: &[&'a str]) -> Vec<&'a str> {
-    let words: Vec<String> = answer.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(|w| w.to_ascii_lowercase()).collect();
-    known.iter().copied().filter(|name| words.iter().any(|w| w == &name.to_ascii_lowercase())).take(2).collect()
+    let words = answer.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(|w| w.to_ascii_lowercase());
+    words.filter_map(|w| known.iter().copied().find(|name| name.to_ascii_lowercase() == w)).take(1).collect()
 }
 
 #[cfg(test)]
@@ -514,6 +520,7 @@ mod tests {
     fn the_router_picks_known_names_only() {
         assert_eq!(routed("ui", &["ui", "debug"]), ["ui"]);
         assert_eq!(routed("NONE", &["ui", "debug"]), Vec::<&str>::new());
-        assert_eq!(routed("Debug, build-ui, tests.", &["ui", "debug", "tests", "security"]), ["debug", "tests"]);
+        assert_eq!(routed("Debug, build-ui, tests.", &["ui", "debug", "tests", "security"]), ["debug"]);
+        assert_eq!(routed("tests and ui", &["ui", "debug", "tests", "security"]), ["tests"], "the first it names, not the first known");
     }
 }

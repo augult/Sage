@@ -52,9 +52,11 @@ one failure. It is not Ecosage with the effort turned up: the effort is the same
 mode (below), and what Prosage adds is done by the harness around the model. Its six mechanisms
 can each be switched on in Ecosage (`--with <name>`, `ecosage+<name>` in the bench) or off in
 Prosage (`--without <name>`, `prosage+no-<name>`).
-**It has not been measured against a live model yet**: the gateway was down for both sessions
-that built it. `docs/HANDOFF.md` has the runs to make first, `docs/RESEARCH.md` (section 3) what
-the design rests on.
+**Measured once, on 12 November 2026** (DeepSeek V4.1 Flash, 24 tasks, two runs each): Prosage
+47/48, OpenCode 45/48, Ecosage 44/48, with Prosage at three times OpenCode's time and four times
+its cost. The lead is within chance, and the examiners decided almost none of it:
+`docs/BENCHMARKS.md` has the table and what the logs say, `docs/HANDOFF.md` what to run next,
+`docs/RESEARCH.md` (section 3) what the design rests on.
 
 | Mechanism | What it does | Where |
 |---|---|---|
@@ -62,8 +64,14 @@ the design rests on.
 | **Panel** (`panel`) | A second examiner, asked at the same moment and briefed for what a pass rule by rule leaves out: every error the text states and how it is reported, the limits of each rule, two rules meeting in one input. Where the text has nothing of that kind it answers NONE. Needs `examiner`. | `examiner.rs` |
 | **Referee** (`referee`) | A failing case holds nothing by itself: a script written blind is wrong often enough to make a worker break work that was right. Each failing case goes to two referees, separate requests that are shown the text, the script and what the case reported, and not the work. Each works out from the text what the result has to be and rules GAP (quoting the sentence that settles it), CASE or OPEN. Only a case both rule GAP holds the `finish`. It reaches the worker with what they quoted; the other failing cases are named as not to be acted on. A case is ruled on once. Without referees (`prosage+no-referee`) every failing case goes to the worker. Needs `examiner`. | `examiner.rs`, `agent.rs` |
 | **Long thought** (`long_thought`) | A reply may think for about 24,000 tokens before its first word or call, instead of being cut at 14,000 and told to act. On the specification-heavy task Sage loses most, three of five first replies were cut at that mark. | `provider/openai.rs` |
-| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass, the model is told what passing checks leave open instead of that `finish` is accepted now. An examiner still writing is waited for up to 15 minutes instead of 4. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
-| **Routing** (`routing`) | One short request without thinking picks the skills whose subject is the task's main work, and they are switched on before the first word goes to the model. | `agent.rs`, `examiner.rs` |
+| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass, the model is told what passing checks leave open instead of that `finish` is accepted now. An examiner still writing is waited for up to 15 minutes instead of 4. What takes the budget's place is a stopping rule: replies that end with the work settled (changed, passing its own checks and, where it is examined, let stand) are counted; after 8 the worker is told to finish or to name what is unmet, and after 16 its next reply is its last. A case the referees confirm starts the count again. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
+| **Routing** (`routing`) | One short request without thinking picks the one skill whose subject is what the task asks to be delivered, if there is one, and it is switched on before the first word goes to the model. | `agent.rs`, `examiner.rs` |
+
+The examiners' cases are run as soon as there is something to run them against: with the first
+reply whose own checks pass on a change, and again at `finish` if the work has changed since.
+Cases the referees confirm go to the worker then; when all pass it is told so and that it may
+finish. (Without this, a worker in no hurry tested its own work for all its sixty replies on two
+tasks and never called `finish`.)
 
 A held `finish` goes back to the worker, which settles each case by the text: fix the work, or
 leave the case failing and name in its summary the sentence that shows it wrong. A `finish` all of

@@ -116,6 +116,13 @@ fn proves_nothing(cmd: &str) -> bool {
     })
 }
 
+/// Whether a command or a path names the file the harness keeps API keys in: `config.json` in its
+/// data folder, wherever that is, or in the usual `~/.sage`.
+fn names_key_file(text: &str) -> bool {
+    let own = crate::config::data_dir().join("config.json");
+    text.contains(".sage/config.json") || text.contains(".sage\\config.json") || text.contains(own.to_string_lossy().as_ref())
+}
+
 fn summarize(call: &Call) -> String {
     let a = &call.args;
     let s = |k: &str| str_arg(a, k).unwrap_or("").trim().to_string();
@@ -287,6 +294,17 @@ impl Runner<'_> {
 
     /// Asks for approval where the step needs it. Returns what the model is told if it was refused.
     async fn refusal(&mut self, call: &Call, tool: Tool) -> Option<StepOutput> {
+        // Whatever the autonomy: what a tool prints goes to the provider with the next request.
+        // Seen live: a run that went looking for the examiners' cases printed this file.
+        let named = match tool {
+            Tool::Shell => str_arg(&call.args, "cmd"),
+            Tool::Read | Tool::Search => str_arg(&call.args, "path"),
+            _ => None,
+        };
+        if named.is_some_and(names_key_file) {
+            let text = "[denied] refused: that is the harness's own configuration, which holds API keys. Nothing in it bears on the task.".to_string();
+            return Some(StepOutput { status: StepStatus::Denied, stub: text.clone(), observation: text, ..Default::default() });
+        }
         let danger = if tool == Tool::Shell { str_arg(&call.args, "cmd").and_then(tools::shell::danger) } else { None };
         if !tool.is_act() || (self.autonomy == Autonomy::Auto && danger.is_none()) {
             return None;
@@ -496,6 +514,21 @@ mod tests {
         let res = Runner { sess, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Auto, interactive: false, landing }.run(&calls(list)).await;
         let events = sink.events.lock().unwrap().clone();
         (res, stats, events)
+    }
+
+    #[tokio::test]
+    async fn the_file_that_holds_the_keys_is_not_shown_to_the_model() {
+        let mut s = test_session("script-keys", Features::ecosage());
+        let own = crate::config::data_dir().join("config.json");
+        let list: Vec<(&str, Value)> = vec![("shell", json!({"cmd": "cat ~/.sage/config.json 2>/dev/null | head"}))];
+        let (res, _, events) = run(&mut s, &list).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Denied]);
+        assert!(res.observations[0].1.starts_with("[denied] refused: that is the harness's own configuration"), "{}", res.observations[0].1);
+        // By its real place too, and through `read`; a project's own config.json is nobody's secret.
+        let (_, _, events) = run(&mut s, &[("read", json!({"path": own.to_string_lossy()}))]).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Denied]);
+        let (_, _, events) = run(&mut s, &[("shell", json!({"cmd": "cat config.json 2>/dev/null; true"}))]).await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok]);
     }
 
     #[tokio::test]

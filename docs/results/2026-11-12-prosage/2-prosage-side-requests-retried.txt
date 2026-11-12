@@ -1,0 +1,57 @@
+[1/24] deepseek-v4.1-flash-1017 · pager · prosage #1: solved · 3 turns · $0.0100 · 25s
+[2/24] deepseek-v4.1-flash-1017 · inventory · prosage #1: solved · 3 turns · $0.0228 · 54s
+[3/24] deepseek-v4.1-flash-1017 · slug · prosage #1: solved · 2 turns · $0.0102 · 23s
+[4/24] deepseek-v4.1-flash-1017 · ttlcache · prosage #1: solved · 7 turns · $0.0544 · 1m44s
+[5/24] deepseek-v4.1-flash-1017 · textstats · prosage #1: solved · 7 turns · $0.0095 · 21s
+[6/24] deepseek-v4.1-flash-1017 · tariff · prosage #1: solved · 3 turns · $0.0185 · 42s
+[7/24] deepseek-v4.1-flash-1017 · roman · prosage #1: solved · 4 turns · $0.0227 · 1m30s
+[8/24] deepseek-v4.1-flash-1017 · report · prosage #1: solved · 3 turns · $0.0310 · 2m52s
+[9/24] deepseek-v4.1-flash-1017 · shipquote · prosage #1: solved · 3 turns · $0.0429 · 9m47s
+[10/24] deepseek-v4.1-flash-1017 · attempts · prosage #1: solved · 9 turns · $0.0853 · 11m01s
+[11/24] deepseek-v4.1-flash-1017 · connpool · prosage #1: solved · 22 turns · $0.0908 · 7m01s
+[12/24] deepseek-v4.1-flash-1017 · confdialect · prosage #1: solved · 34 turns · $0.1064 · 4m34s
+[13/24] deepseek-v4.1-flash-1017 · jobqueue · prosage #1: solved · 5 turns · $0.0508 · 1m56s
+[14/24] deepseek-v4.1-flash-1017 · rollup · prosage #1: solved · 29 turns · $0.1008 · 4m16s
+[15/24] deepseek-v4.1-flash-1017 · mutants-js · prosage #1: solved · 6 turns · $0.0587 · 2m25s
+[16/24] deepseek-v4.1-flash-1017 · nplusone · prosage #1: solved · 8 turns · $0.0424 · 1m51s
+[17/24] deepseek-v4.1-flash-1017 · heisenbug · prosage #1: solved · 5 turns · $0.0559 · 2m26s
+[18/24] deepseek-v4.1-flash-1017 · slowpath · prosage #1: solved · 34 turns · $0.0613 · 11m12s
+[19/24] deepseek-v4.1-flash-1017 · restyle · prosage #1: solved · 60 turns · $0.0735 · 7m57s
+[20/24] deepseek-v4.1-flash-1017 · deadcode · prosage #1: solved · 19 turns · $0.0571 · 1m45s
+[21/24] deepseek-v4.1-flash-1017 · audit · prosage #1: solved · 27 turns · $0.0399 · 2m34s
+[22/24] deepseek-v4.1-flash-1017 · audit-clean · prosage #1: solved · 16 turns · $0.0511 · 3m36s
+[23/24] deepseek-v4.1-flash-1017 · deadcode-js · prosage #1: solved · 5 turns · $0.0552 · 2m31s
+[24/24] deepseek-v4.1-flash-1017 · mutants · prosage #1: solved · 17 turns · $0.0615 · 2m08s
+sage bench 20261112-214751-91c9 · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: prosage ~1933 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      prosage             1/1     3   22.7k    63%   14.5k   $0.0100   $0.0121     25s
+inventory  prosage             1/1     3   18.4k    64%   36.3k   $0.0228   $0.0245     54s
+slug       prosage             1/1     2   16.7k    45%   14.6k   $0.0102   $0.0113     23s
+tariff     prosage             1/1     3   24.5k    47%   27.6k   $0.0185   $0.0202     42s
+textstats  prosage             1/1     7   33.2k    74%   13.6k   $0.0095   $0.0131     21s
+roman      prosage             1/1     4   15.7k    68%   36.5k   $0.0227   $0.0243   1m30s
+report     prosage             1/1     3   14.8k    72%   50.5k   $0.0310   $0.0325   2m52s
+shipquote  prosage             1/1     3   32.8k     6%   63.7k   $0.0429   $0.0432   9m47s
+attempts   prosage             1/1     9    183k     9%    100k   $0.0853   $0.0877  11m01s
+connpool   prosage             1/1    22    364k    49%    104k   $0.0908   $0.1172   7m01s
+confdialect prosage             1/1    34    755k    74%    125k   $0.1064   $0.1886   4m34s
+rollup     prosage             1/1    29    588k    79%    135k   $0.1008   $0.1695   4m16s
+jobqueue   prosage             1/1     5   72.7k    46%   74.7k   $0.0508   $0.0557   1m56s
+ttlcache   prosage             1/1     7    112k    60%   79.1k   $0.0544   $0.0644   1m44s
+audit      prosage             1/1    27    438k    83%   46.0k   $0.0399   $0.0934   2m34s
+audit-clean prosage             1/1    16    278k    84%   73.0k   $0.0511   $0.0856   3m36s
+deadcode   prosage             1/1    19    367k    74%   70.2k   $0.0571   $0.0972   1m45s
+deadcode-js prosage             1/1     5   91.7k    66%   83.8k   $0.0552   $0.0641   2m31s
+mutants    prosage             1/1    17    304k    84%   89.3k   $0.0615   $0.0992   2m08s
+mutants-js prosage             1/1     6   70.3k    66%   91.6k   $0.0587   $0.0655   2m25s
+slowpath   prosage             1/1    34    460k    87%   84.7k   $0.0613   $0.1199  11m12s
+nplusone   prosage             1/1     8   74.9k    65%   64.0k   $0.0424   $0.0496   1m51s
+heisenbug  prosage             1/1     5   75.1k    56%   84.7k   $0.0559   $0.0620   2m26s
+restyle    prosage             1/1    60   1.89M    94%   85.2k   $0.0735   $0.3348   7m57s
+ALL        prosage           24/24     7   83.4k    57%   73.8k   $0.0527   $0.0642   2m26s   total $1.213, $0.0505 per solved task
+
+results: <bench-home>/.sage/bench/20261112-214751-91c9/results.json
+replay a run: SAGE_HOME=<bench-home>/.sage/bench/20261112-214751-91c9/home sage show <session>

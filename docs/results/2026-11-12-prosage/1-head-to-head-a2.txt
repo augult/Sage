@@ -1,0 +1,92 @@
+[1/36] deepseek-v4.1-flash-1017 · pager · ecosage #1: solved · 2 turns · $0.0011 · 5.1s
+[2/36] deepseek-v4.1-flash-1017 · jobqueue · prosage #1: solved · 8 turns · $0.0465 · 3m25s
+[3/36] deepseek-v4.1-flash-1017 · jobqueue · ext:opencode #1: solved · 7 turns · $0.0094 · 46s
+[4/36] deepseek-v4.1-flash-1017 · audit · ecosage #1: solved · 10 turns · $0.0165 · 1m21s
+[5/36] deepseek-v4.1-flash-1017 · audit · prosage #1: NOT solved (done) · 11 turns · $0.0463 · 3m28s
+[6/36] deepseek-v4.1-flash-1017 · audit · ext:opencode #1: solved · 9 turns · $0.0102 · 1m13s
+[7/36] deepseek-v4.1-flash-1017 · deadcode · ecosage #1: solved · 12 turns · $0.0103 · 30s
+[8/36] deepseek-v4.1-flash-1017 · deadcode · prosage #1: solved · 12 turns · $0.0705 · 2m44s
+[9/36] deepseek-v4.1-flash-1017 · deadcode · ext:opencode #1: solved · 16 turns · $0.0113 · 45s
+[10/36] deepseek-v4.1-flash-1017 · mutants · ecosage #1: solved · 10 turns · $0.0155 · 1m17s
+[11/36] deepseek-v4.1-flash-1017 · mutants · prosage #1: solved · 38 turns · $0.0564 · 2m30s
+[12/36] deepseek-v4.1-flash-1017 · mutants · ext:opencode #1: solved · 11 turns · $0.0145 · 1m03s
+[13/36] deepseek-v4.1-flash-1017 · slowpath · ecosage #1: solved · 4 turns · $0.0029 · 14s
+[14/36] deepseek-v4.1-flash-1017 · slowpath · prosage #1: solved · 6 turns · $0.0490 · 2m37s
+[15/36] deepseek-v4.1-flash-1017 · slowpath · ext:opencode #1: solved · 10 turns · $0.0075 · 35s
+[16/36] deepseek-v4.1-flash-1017 · heisenbug · ecosage #1: solved · 2 turns · $0.0017 · 7.4s
+[17/36] deepseek-v4.1-flash-1017 · heisenbug · prosage #1: solved · 6 turns · $0.0289 · 2m35s
+[18/36] deepseek-v4.1-flash-1017 · heisenbug · ext:opencode #1: solved · 8 turns · $0.0030 · 16s
+[19/36] deepseek-v4.1-flash-1017 · report · ecosage #1: solved · 1 turns · $0.0003 · 1.3s
+[20/36] deepseek-v4.1-flash-1017 · pager · prosage #1: solved · 3 turns · $0.0171 · 1m01s
+[21/36] deepseek-v4.1-flash-1017 · pager · ext:opencode #1: solved · 6 turns · $0.0033 · 11s
+[22/36] deepseek-v4.1-flash-1017 · slug · ecosage #1: solved · 2 turns · $0.0006 · 3.4s
+[23/36] deepseek-v4.1-flash-1017 · slug · prosage #1: solved · 3 turns · $0.0090 · 24s
+[24/36] deepseek-v4.1-flash-1017 · slug · ext:opencode #1: solved · 6 turns · $0.0025 · 12s
+[25/36] deepseek-v4.1-flash-1017 · textstats · ecosage #1: solved · 3 turns · $0.0009 · 5.0s
+[26/36] deepseek-v4.1-flash-1017 · textstats · prosage #1: solved · 3 turns · $0.0235 · 4m14s
+[27/36] deepseek-v4.1-flash-1017 · textstats · ext:opencode #1: solved · 6 turns · $0.0062 · 1m31s
+[28/36] deepseek-v4.1-flash-1017 · attempts · ext:opencode #1: solved · 12 turns · $0.0242 · 3m16s
+[29/36] deepseek-v4.1-flash-1017 · report · prosage #1: solved · 4 turns · $0.0268 · 4m42s
+[30/36] deepseek-v4.1-flash-1017 · report · ext:opencode #1: solved · 6 turns · $0.0050 · 13s
+[31/36] deepseek-v4.1-flash-1017 · attempts · ecosage #1: solved · 6 turns · $0.0167 · 41s
+[32/36] deepseek-v4.1-flash-1017 · attempts · prosage #1: solved · 9 turns · $0.0504 · 3m36s
+[33/36] deepseek-v4.1-flash-1017 · confdialect · prosage #1: solved · 53 turns · $0.2191 · 20m02s
+[34/36] deepseek-v4.1-flash-1017 · confdialect · ecosage #1: NOT solved (done) · 23 turns · $0.0339 · 2m57s
+[35/36] deepseek-v4.1-flash-1017 · confdialect · ext:opencode #1: solved · 7 turns · $0.0298 · 2m43s
+[36/36] deepseek-v4.1-flash-1017 · jobqueue · ecosage #1: solved · 4 turns · $0.0066 · 29s
+sage bench 20261112-212230-f66f · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: ecosage ~1933 tokens, prosage ~1933 tokens
+first prompt with the task, measured: ext:opencode ~7484 tokens
+ext:opencode: 1 request answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      ecosage             1/1     2    7.0k    29%     642   $0.0011   $0.0014    5.1s
+           prosage             1/1     3   16.3k    73%   27.3k   $0.0171   $0.0188   1m01s
+           ext:opencode        1/1     6   42.9k    55%     600   $0.0033   $0.0068     11s
+slug       ecosage             1/1     2    6.6k    77%     570   $0.0006   $0.0013    3.4s
+           prosage             1/1     3   15.8k    65%   13.6k   $0.0090   $0.0105     24s
+           ext:opencode        1/1     6   41.1k    67%     629   $0.0025   $0.0065     12s
+textstats  ecosage             1/1     3   12.0k    78%     828   $0.0009   $0.0023    5.0s
+           prosage             1/1     3   15.4k    68%   37.9k   $0.0235   $0.0251   4m14s
+           ext:opencode        1/1     6   42.4k     8%     544   $0.0062   $0.0067   1m31s
+report     ecosage             1/1     1    2.9k    70%     290   $0.0003   $0.0006    1.3s
+           prosage             1/1     4   19.2k     0%   39.9k   $0.0268   $0.0268   4m42s
+           ext:opencode        1/1     6   40.2k    22%     427   $0.0050   $0.0063     13s
+attempts   ecosage             1/1     6   97.8k    27%    9.9k   $0.0167   $0.0206     41s
+           prosage             1/1     9    191k    54%   61.3k   $0.0504   $0.0655   3m36s
+           ext:opencode        1/1    12    170k    28%    9.3k   $0.0242   $0.0311   3m16s
+confdialect ecosage             0/1    23    353k    90%   46.2k   $0.0339   $0.0808   2m57s   1 declared done, then failed verification
+           prosage             1/1    53   1.75M    94%    329k   $0.2191   $0.4601  20m02s
+           ext:opencode        1/1     7   75.3k    68%   43.3k   $0.0298   $0.0373   2m43s
+jobqueue   ecosage             1/1     4   29.3k    43%    6.7k   $0.0066   $0.0084     29s
+           prosage             1/1     8   74.5k    64%   70.6k   $0.0465   $0.0535   3m25s
+           ext:opencode        1/1     7   68.4k    81%   12.2k   $0.0094   $0.0176     46s
+audit      ecosage             1/1    10    130k    79%   20.3k   $0.0165   $0.0317   1m21s
+           prosage             0/1    11    144k    82%   70.1k   $0.0463   $0.0637   3m28s   1 declared done, then failed verification
+           ext:opencode        1/1     9    112k    85%   12.4k   $0.0102   $0.0242   1m13s
+deadcode   ecosage             1/1    12    186k    80%    6.9k   $0.0103   $0.0322     30s
+           prosage             1/1    12    170k    75%    106k   $0.0705   $0.0893   2m44s
+           ext:opencode        1/1    16    230k    84%    8.7k   $0.0113   $0.0398     45s
+mutants    ecosage             1/1    10    120k    81%   19.7k   $0.0155   $0.0299   1m17s
+           prosage             1/1    38    932k    92%   70.5k   $0.0564   $0.1821   2m30s
+           ext:opencode        1/1    11    154k    89%   19.0k   $0.0145   $0.0346   1m03s
+slowpath   ecosage             1/1     4   20.6k    70%    3.2k   $0.0029   $0.0050     14s
+           prosage             1/1     6   44.1k    70%   78.2k   $0.0490   $0.0535   2m37s
+           ext:opencode        1/1    10   94.3k    79%    7.1k   $0.0075   $0.0184     35s
+heisenbug  ecosage             1/1     2   11.0k    65%    1.8k   $0.0017   $0.0027    7.4s
+           prosage             1/1     6   49.5k    80%   45.5k   $0.0289   $0.0347   2m35s
+           ext:opencode        1/1     8   72.5k    85%    1.9k   $0.0030   $0.0120     16s
+ALL        ecosage           11/12     4   24.9k    54%    5.0k   $0.0047   $0.0067     21s   total $0.107, $0.0097 per solved task   1 declared done, then failed verification
+           prosage           11/12     7   62.0k    71%   65.7k   $0.0464   $0.0535   3m04s   total $0.643, $0.0585 per solved task   1 declared done, then failed verification
+           ext:opencode      12/12   7.5   73.9k    72%    7.9k   $0.0085   $0.0180     46s   total $0.127, $0.0106 per solved task
+ext:opencode against ecosage: turns +88%, input tokens +197%, output tokens +60%, cost +79% (+168% with no cache), time +111%; solved 12/12 against 11/12
+  by task (12): fewer turns on 2, more on 10; cheaper on 3, dearer on 9 (with no cache: 2 and 10)
+
+2 runs without a solution:
+  deepseek-v4.1-flash-1017 · confdialect · ecosage #1 · session 20261112-222844-2836 · done; verification: FAILED (failures=1)
+  deepseek-v4.1-flash-1017 · audit · prosage #1 · session 20261112-212811-06ed · done; verification: score: 0/7
+
+results: <bench-home>/.sage/bench/20261112-212230-f66f/results.json
+replay a run: SAGE_HOME=<bench-home>/.sage/bench/20261112-212230-f66f/home sage show <session>
+output of an external run: <bench-home>/.sage/bench/20261112-212230-f66f/external/<session>/output.log

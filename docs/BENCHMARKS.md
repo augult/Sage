@@ -19,6 +19,92 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
   --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## Prosage, Ecosage and OpenCode, 12 November 2026 (eleventh session)
+
+The first runs of Prosage against a model, made the evening Logfare came back. DeepSeek V4.1
+Flash (`deepseek-v4.1-flash-1017`), all 24 tasks, effort `ratchet`, 60 replies and 20 minutes per
+run, OpenCode 1.19.5 behind the metering proxy. Four Unix accounts, one run at a time in each, the
+three variants alternating; the repository unreadable to all of them. Two runs per task and
+variant. Raw results and `table.py`, which prints the table: `docs/results/2026-11-12-prosage/`.
+
+| 24 tasks, two runs each | Solved | Requests (mean) | Beside the run | Time (mean, median) | Cost |
+|---|---|---:|---:|---:|---:|
+| Ecosage | 44/48 | 6.5 | 0 | 46 s, 25 s | $0.43 |
+| Prosage as merged in PR #20 | 47/48 | 15.1 | 2.6 | 261 s, 180 s | $2.45 |
+| OpenCode 1.19.5 | 45/48 | 10.9 | 0 | 92 s, 44 s | $0.61 |
+
+Two more samples of Prosage alone, one run per task, made while the head-to-head ran and after
+what it showed (below). They ran two at a time in an account of their own, so their times do not
+compare with the rows above:
+
+| 24 tasks, one run each | Solved | Requests (mean) | Beside the run | Time (mean, median) | Cost |
+|---|---|---:|---:|---:|---:|
+| Prosage, side requests retried without thinking | 24/24 | 13.8 | 4.3 | 215 s, 146 s | $1.21 |
+| Prosage, examined as soon as its own checks pass | 24/24 | 19.3 | 4.8 | 183 s, 121 s | $1.32 |
+
+- **Prosage lost one run in 96**; Ecosage four in 48 and OpenCode three in 48. Against OpenCode
+  that is a lead and not a finding: one run against three in 48 is within chance, and so is the
+  95/96 over all three samples.
+- **Ecosage solved one run fewer than OpenCode** in half the time, at 60% of the requests and
+  70% of the money. Its four losses are the two tasks it always loses: `confdialect` twice and
+  `restyle` twice, each time declared done.
+- **Prosage solved those two tasks every time** (4/4 each over the three samples). OpenCode lost
+  `restyle` once, and `audit` and `audit-clean` once each to a signal that killed it, as in the
+  ninth session.
+- **Prosage costs four times OpenCode's money and three times its time.** That is its brief.
+
+### What solved the tasks, and what did not
+
+Read from the `examiner` notes of the session logs.
+
+- **The examiners and referees decided almost nothing.** In the 48 runs of the last two samples
+  the referees were asked about failing cases 73 times and confirmed a case once. The cases they
+  set aside were wrong where they were looked at (`ttlcache`: a case that expected a value at the
+  very moment the text says the entry has expired; both referees quoted the sentence). So the
+  referees did what they are for, and what Prosage gains on `confdialect` and `restyle` comes
+  from the rest: nothing hurries the run, a reply may think longer, and the `ui` skill is
+  switched on for `restyle`. `prosage+no-examiner` is the run that would say so in numbers.
+- **In the first sample a third of the examiners were lost** (7 of the 20 runs looked at): the
+  reply thought for its whole allowance and wrote no script. Asked again one level lower it did
+  the same every time, so the retry is now made with thinking off. After that, none was lost
+  that way.
+- **On `confdialect` and `connpool` the worker never called `finish`**: it wrote and ran cases
+  of its own for all sixty replies (15 and 12 minutes), so the examiners' cases were never run.
+  They are now run with the first reply whose own checks pass. In the third sample the mean time
+  fell from 215 s to 183 s and the requests rose from 13.8 to 19.3; one run each, so neither
+  figure is settled.
+- **Prosage's one loss is a verdict it threw away.** On `audit` the work lacked the file the
+  task asks for (`findings.json`). All 17 cases of the examiner failed for that reason, and a
+  script more than three in five of whose cases fail is taken to be at fault and set aside.
+  Changed afterwards: with referees, such a script goes to them like any other.
+- Six examiner replies ran into the output limit before the script ended and counted as "no
+  script". Such a reply is now asked for again, shorter; not yet seen in a run.
+
+### Changed after these runs, and not measured
+
+Read from the logs of the third sample, where 14 of a run's 19 replies came after its own checks
+had passed and four runs used 57 to 60 of their 60 replies:
+
+- **A stopping rule** for a run nothing hurries: after 8 replies that end with the work passing
+  everything it is told to finish or to name what is unmet, after 16 its next reply is its last.
+  The runs that solved a task had 1 to 27 such replies, so the rule can cost a task that a long
+  tail would have solved. `confdialect` (27) is the one to watch.
+- **The router picks one skill**, for what the task asks to be delivered. It had added the
+  `tests` skill to 11 of 29 bug fixes, and those runs wrote test suites and mutation loops.
+- An examination that holds nothing is reported once, without the count of cases set aside: one
+  worker went looking for those cases through the session's folders and printed the harness's
+  key file, which `shell`, `read` and `search` now refuse.
+
+A check of these on eight tasks was stopped after four runs (all solved), which says nothing.
+
+### What limits these numbers
+
+- Two runs per task in the head-to-head, one in each later sample, one model.
+- The three Prosage rows are three versions of the code on the same day.
+- Times are from a 2-core sandbox with four to six accounts busy, and Prosage's requests beside
+  the run share the gateway's limit of 12 in flight with everything else.
+- Not graded: solved means the held-out verification passed.
+
 ## Where Sage loses, read from the stored runs, 12 November 2026 (tenth session)
 
 No run was made for this: the gateway was down. It is every results file under `docs/results/`
@@ -50,7 +136,7 @@ OpenCode, mini-swe-agent):
 
 Prosage (`README.md`, "Modes") is built on this reading, was reworked in the eleventh session on
 what others have measured about checks written by a second model (`docs/RESEARCH.md`, section 3),
-and has not been run against a model.
+and was first run against a model that evening (the section above).
 
 ## Against OpenCode, 12 November 2026 (ninth session)
 
