@@ -207,7 +207,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
      `pick_folder`); a folder picked there joins the list. Under the box,
      pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
-     which starts high and steps up when predictions fail), mode (Presage / Classic) and autonomy
+     which starts low and steps up when predictions fail), mode (Presage / Classic) and autonomy
      (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
      other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models

@@ -162,10 +162,18 @@ impl Proxy {
         (format!("http://127.0.0.1:{}/r/{run}/v1", self.port), meter)
     }
 
-    /// Stops serving the run and returns what it used.
-    pub fn close(&self, run: &str) -> Metered {
-        let meter = self.inner.runs.lock().unwrap().remove(run);
-        meter.map(|m| m.state.lock().unwrap().0.clone()).unwrap_or_default()
+    /// Stops serving the run and returns what it used. A harness can exit the moment it has read
+    /// an answer, before that answer is counted here: a request still in flight is waited for,
+    /// briefly, so that a provider's failure is not taken for the harness's.
+    pub async fn close(&self, run: &str) -> Metered {
+        let Some(meter) = self.inner.runs.lock().unwrap().remove(run) else { return Metered::default() };
+        for _ in 0..80 {
+            if meter.state.lock().unwrap().1 == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        meter.state.lock().unwrap().0.clone()
     }
 }
 
@@ -627,7 +635,7 @@ mod tests {
         let listing = client().get(format!("{base}/models?limit=5")).send().await.unwrap();
         assert_eq!(listing.status().as_u16(), 200);
 
-        let m = proxy.close("run-a");
+        let m = proxy.close("run-a").await;
         assert_eq!((m.turns, m.unmetered, m.usage_injected, m.failed, m.refused, m.other_requests), (3, 0, 1, 0, 0, 1));
         assert_eq!((m.prompt_tokens, m.cached_tokens, m.output_tokens, m.reasoning_tokens), (1200 + 900 + 900, 1000 + 800 + 800, 50 + 30 + 30, 20));
         assert_eq!((m.first_prompt_tokens, m.context_tokens), (1200, 900));
@@ -662,7 +670,7 @@ mod tests {
         assert!(text.contains("bench_turn_limit") && text.contains("used its 2 model requests"), "{text}");
         tokio::time::timeout(Duration::from_secs(1), meter.capped.notified()).await.expect("the runner is told");
 
-        let (a, b) = (proxy.close("a"), proxy.close("b"));
+        let (a, b) = (proxy.close("a").await, proxy.close("b").await);
         assert_eq!((a.turns, a.refused, a.prompt_tokens), (2, 1, 2400));
         assert_eq!((b.turns, b.refused, b.prompt_tokens), (1, 0, 1200));
         assert_eq!(seen.lock().unwrap().len(), 3, "a refused request never reaches the provider");
@@ -678,14 +686,14 @@ mod tests {
         let (base, _) = proxy.open("r", 5);
         let (status, text) = post(&base, "chat/completions", json!({"model": "broken", "messages": []})).await;
         assert_eq!((status, text.contains("overloaded")), (503, true));
-        let m = proxy.close("r");
+        let m = proxy.close("r").await;
         assert_eq!((m.turns, m.failed, m.last_status, m.calls[0].status), (0, 1, 503, 503));
         assert!(m.last_error.as_deref().is_some_and(|e| e.starts_with("provider returned HTTP 503") && e.contains("overloaded")), "{m:?}");
 
         let unreachable = Proxy::start("http://127.0.0.1:1/v1", "k").await.unwrap();
         let (base, _) = unreachable.open("r", 5);
         assert_eq!(post(&base, "chat/completions", json!({"model": "glm-5.3"})).await.0, 502);
-        let m = unreachable.close("r");
+        let m = unreachable.close("r").await;
         assert_eq!((m.turns, m.failed, m.last_status), (0, 1, 0));
         assert!(m.last_error.unwrap().starts_with("network error"));
     }

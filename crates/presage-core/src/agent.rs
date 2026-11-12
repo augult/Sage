@@ -34,7 +34,7 @@ impl EffortPolicy {
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim().to_ascii_lowercase();
         match s.as_str() {
-            "ratchet" | "auto" | "adaptive" => Some(EffortPolicy::Ratchet(Effort::High)),
+            "ratchet" | "auto" | "adaptive" => Some(EffortPolicy::Ratchet(Effort::Low)),
             _ => match s.strip_prefix("ratchet-").or_else(|| s.strip_prefix("ratchet:")) {
                 Some(start) => Effort::parse(start).map(EffortPolicy::Ratchet),
                 None => Effort::parse(&s).map(EffortPolicy::Fixed),
@@ -54,6 +54,14 @@ impl EffortPolicy {
             EffortPolicy::Ratchet(e) => format!("ratchet-{}", e.as_str()),
         }
     }
+}
+
+/// The effort to go on with after a reply that was nothing but reasoning, the `nth` of its run:
+/// one level lower. Thinking is switched off only at the second such reply. A model that thinks
+/// too long at `low` is on a task that needs thought, and has just been told to act: without any
+/// thinking it runs through its budget instead.
+fn less_thinking(effort: Effort, nth: u32) -> Option<Effort> {
+    effort.lower().filter(|lower| *lower != Effort::Off || nth > 1)
 }
 
 #[derive(Clone, Debug)]
@@ -79,7 +87,7 @@ impl AgentConfig {
     pub fn new(model: &str) -> Self {
         Self {
             features: Features::presage(),
-            effort: EffortPolicy::Ratchet(Effort::High),
+            effort: EffortPolicy::Ratchet(Effort::Low),
             model: model.to_string(),
             max_turns: 80,
             max_tokens: 32_000,
@@ -364,6 +372,8 @@ impl Agent {
         self.budget_marks = 0;
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) = (0u32, 0u32, 1u32, 1u32, 3u32);
+        // Replies of this run that were nothing but reasoning.
+        let mut only_reasoned = 0u32;
         let mut slowest = Duration::ZERO;
         let outcome = loop {
             if cancel.is_cancelled() {
@@ -419,7 +429,8 @@ impl Agent {
                     }
                     let msg = format!("Your last reply was cut off after about {tokens} tokens of thinking with no tool call. Do not work the whole task out in your head: send the first tool calls now and think between steps, with their results in front of you.");
                     self.note("overthinking", &msg);
-                    if let Some(lower) = self.effort.lower() {
+                    only_reasoned += 1;
+                    if let Some(lower) = less_thinking(self.effort, only_reasoned) {
                         self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
                         self.effort = lower;
                     }
@@ -500,7 +511,9 @@ impl Agent {
                     }
                     let msg = if cut_off {
                         // Thinking that fills the whole reply will do so again unless it is given less room.
-                        if let Some(lower) = self.effort.lower().filter(|_| resp.usage.reasoning * 10 >= resp.usage.output * 9) {
+                        let reasoned = resp.usage.reasoning * 10 >= resp.usage.output * 9;
+                        only_reasoned += u32::from(reasoned);
+                        if let Some(lower) = less_thinking(self.effort, only_reasoned).filter(|_| reasoned) {
                             self.sink.emit(EventKind::Effort { turn, from: self.effort.as_str().into(), to: lower.as_str().into(), reason: "a reply that only reasoned".into() });
                             self.effort = lower;
                         }
@@ -635,7 +648,8 @@ mod tests {
             fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": old, "new": new})), ("shell", json!({"cmd": "grep -c A n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))]))
         };
         let finish = || fixed(MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]));
-        let mut r = rig("agent-review", AgentConfig::new("mock"), vec![change("beta", "BETA"), change("gamma", "GAMMA"), finish()]);
+        let reviewed = AgentConfig { features: Features::presage().with("review").unwrap(), ..AgentConfig::new("mock") };
+        let mut r = rig("agent-review", reviewed, vec![change("beta", "BETA"), change("gamma", "GAMMA"), finish()]);
 
         let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2), "the review is asked for once, even after a further change");
@@ -655,7 +669,8 @@ mod tests {
             fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("write", json!({"path": "scratch.txt", "content": "tmp\n"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
             fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "rm scratch.txt && grep -qx BETA n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "done"}))])),
         ];
-        let mut r = rig("agent-review-git", AgentConfig::new("mock"), turns);
+        let reviewed = AgentConfig { features: Features::presage().with("review").unwrap(), ..AgentConfig::new("mock") };
+        let mut r = rig("agent-review-git", reviewed, turns);
         let git = |script: &str| assert!(std::process::Command::new("bash").arg("-c").arg(script).current_dir(&r.agent.sess.ws.root).output().unwrap().status.success(), "{script}");
         git("printf 'mine\\n' > wip.txt && git init -q && git add n.txt && git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base");
 
@@ -681,7 +696,7 @@ mod tests {
 
         // What is already so is not a change.
         r.agent.retune(Retune::default());
-        r.agent.retune(Retune { effort: Some(EffortPolicy::Ratchet(Effort::High)), autonomy: Some(Autonomy::Auto), ..Default::default() });
+        r.agent.retune(Retune { effort: Some(EffortPolicy::Ratchet(Effort::Low)), autonomy: Some(Autonomy::Auto), ..Default::default() });
         let second = Provider::Mock(MockProvider::new(vec![fixed(MockTurn::say("from the second"))]));
         r.agent.retune(Retune { provider: Some((second, "other".into(), "second".into())), effort: Some(EffortPolicy::Fixed(Effort::Max)), autonomy: Some(Autonomy::Ask) });
         assert_eq!(r.agent.run("Two.".into(), &cancel).await.summary, "from the second");
@@ -881,11 +896,11 @@ mod tests {
     async fn repeated_failures_draw_a_note_and_three_surprises_raise_the_effort() {
         let fail = || fixed(MockTurn::calls("", vec![("shell", json!({"cmd": "grep -q nope n.txt", "expect": {"exit": "0"}}))]));
         let mut r = rig("agent-stall", AgentConfig::new("mock"), vec![fail(), fail(), fail(), fixed(MockTurn::say("giving up"))]);
-        assert_eq!(r.agent.effort(), Effort::High);
+        assert_eq!(r.agent.effort(), Effort::Low);
         r.agent.run("x".into(), &CancellationToken::new()).await;
-        assert_eq!(r.agent.effort(), Effort::Max);
+        assert_eq!(r.agent.effort(), Effort::High);
         let ev = events(&r);
-        assert!(ev.iter().any(|e| matches!(e, EventKind::Effort { from, to, .. } if from == "high" && to == "max")));
+        assert!(ev.iter().any(|e| matches!(e, EventKind::Effort { from, to, .. } if from == "low" && to == "high")));
         let notes: Vec<&str> = ev.iter().filter_map(|e| if let EventKind::Note { text, .. } = e { Some(text.as_str()) } else { None }).collect();
         assert!(notes.iter().any(|n| n.starts_with("The same step has now failed twice")), "{notes:?}");
         assert!(notes.iter().any(|n| n.starts_with("Three replies in a row")));
@@ -1060,10 +1075,17 @@ mod tests {
 
     #[test]
     fn effort_policy_parses() {
-        assert_eq!(EffortPolicy::parse("ratchet"), Some(EffortPolicy::Ratchet(Effort::High)));
-        assert_eq!(EffortPolicy::parse("ratchet-low"), Some(EffortPolicy::Ratchet(Effort::Low)));
+        assert_eq!(EffortPolicy::parse("ratchet"), Some(EffortPolicy::Ratchet(Effort::Low)));
+        assert_eq!(EffortPolicy::parse("ratchet-high"), Some(EffortPolicy::Ratchet(Effort::High)));
         assert_eq!(EffortPolicy::parse("MAX"), Some(EffortPolicy::Fixed(Effort::Max)));
         assert_eq!(EffortPolicy::parse("fast"), None);
         assert_eq!(EffortPolicy::Ratchet(Effort::Low).label(), "ratchet-low");
+    }
+
+    #[test]
+    fn a_reply_that_only_reasoned_costs_a_level_but_thinking_is_not_switched_off_at_the_first() {
+        assert_eq!((less_thinking(Effort::Max, 1), less_thinking(Effort::High, 1), less_thinking(Effort::High, 2)), (Some(Effort::High), Some(Effort::Low), Some(Effort::Low)));
+        // Where the ratchet starts, the first one changes nothing; the second switches thinking off.
+        assert_eq!((less_thinking(Effort::Low, 1), less_thinking(Effort::Low, 2), less_thinking(Effort::Off, 3)), (None, Some(Effort::Off), None));
     }
 }

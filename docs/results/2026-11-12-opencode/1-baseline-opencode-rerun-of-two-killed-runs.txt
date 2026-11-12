@@ -1,0 +1,14 @@
+[1/2] deepseek-v4.1-flash-1017 · audit · ext:opencode #1: solved · 6 turns · $0.0074 · 32s
+[2/2] deepseek-v4.1-flash-1017 · audit-clean · ext:opencode #1: solved · 12 turns · $0.0260 · 2m31s
+presage bench 20261112-042521-f4c2 · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7501 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+audit      ext:opencode        1/1     6   60.5k    66%    6.9k   $0.0074   $0.0132     32s
+audit-clean ext:opencode        1/1    12    153k    77%   33.8k   $0.0260   $0.0433   2m31s
+ALL        ext:opencode        2/2     9    106k    74%   20.4k   $0.0167   $0.0283   1m32s   total $0.033, $0.0167 per solved task
+
+results: /home/bencho/live/bench/20261112-042521-f4c2/results.json
+output of an external run: /home/bencho/live/bench/20261112-042521-f4c2/external/<session>/output.log
+exit=0

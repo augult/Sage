@@ -87,6 +87,9 @@ pub struct StartRequest {
     /// Mechanisms to switch off, for ablation runs (see `Features::NAMES`).
     #[serde(default)]
     pub without: Vec<String>,
+    /// Mechanisms to switch on that are off unless asked for (see `Features::OPTIONAL`).
+    #[serde(default)]
+    pub with: Vec<String>,
     /// A system prompt template for this run alone, in place of the user's or the built-in one.
     #[serde(default)]
     pub system_prompt: Option<String>,
@@ -266,8 +269,12 @@ fn session_id() -> String {
 fn features_of(req: &StartRequest) -> Result<(Features, bool), String> {
     let classic = matches!(req.mode.as_deref(), Some("classic"));
     let mut features = if classic { Features::classic() } else { Features::presage() };
+    let unknown = |name: &String| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", "));
+    for name in &req.with {
+        features = features.with(name).ok_or_else(|| unknown(name))?;
+    }
     for name in &req.without {
-        features = features.without(name).ok_or_else(|| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", ")))?;
+        features = features.without(name).ok_or_else(|| unknown(name))?;
     }
     Ok((features, classic))
 }
@@ -524,14 +531,16 @@ impl Harness {
         // Read once, here: the system prompt is the cached prefix of every request of the session.
         let (system, picked) = self.compose_prompt(&req, &ws.root, &features, classic)?;
         let skill_names: Vec<String> = picked.into_iter().map(|s| s.name).collect();
-        let mode = match (classic, req.without.is_empty()) {
-            (true, _) => "classic".to_string(),
-            (false, true) => "presage".to_string(),
-            (false, false) => format!("presage without {}", req.without.join(", ")),
+        let mode = if classic {
+            "classic".to_string()
+        } else {
+            let with = (!req.with.is_empty()).then(|| format!(" with {}", req.with.join(", ")));
+            let without = (!req.without.is_empty()).then(|| format!(" without {}", req.without.join(", ")));
+            format!("presage{}{}", with.unwrap_or_default(), without.unwrap_or_default())
         };
         let effort = match effort.as_deref() {
             Some(e) => EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?,
-            None => EffortPolicy::Ratchet(crate::provider::Effort::High),
+            None => EffortPolicy::Ratchet(crate::provider::Effort::Low),
         };
         let autonomy = match req.autonomy.as_deref() {
             Some("ask") => Autonomy::Ask,
@@ -968,7 +977,7 @@ mod tests {
         // A template for one run wins over the user's, which wins over the built-in one.
         let bare = StartRequest { skills: vec![], project_instructions: Some(false), ..req() };
         h.set_system_prompt(Some("Mine. {finish}")).unwrap();
-        assert_eq!(h.system_prompt(&bare).unwrap(), format!("Mine. Watched tests are re-run first and it is refused if they fail. The first `finish` after a change comes back once, with your changes and a review to carry out.\n\n# User instructions\n\n{user}\n\nUse tabs."));
+        assert_eq!(h.system_prompt(&bare).unwrap(), format!("Mine. Watched tests are re-run first and it is refused if they fail.\n\n# User instructions\n\n{user}\n\nUse tabs."));
         assert_eq!(h.system_prompt(&StartRequest { system_prompt: Some("Be terse.\n".into()), ..bare.clone() }).unwrap(), format!("Be terse.\n\n# User instructions\n\n{user}\n\nUse tabs."));
         h.set_system_prompt(None).unwrap();
         assert_eq!(h.system_prompt(&bare).unwrap(), format!("{built_in}\n\n# User instructions\n\n{user}\n\nUse tabs."));
@@ -977,6 +986,10 @@ mod tests {
         assert_eq!(h.system_prompt(&StartRequest { mode: Some("classic".into()), system_prompt: Some("Be terse.".into()), ..req() }).unwrap(), prompt::SYSTEM_CLASSIC);
         let no_scripts = h.system_prompt(&StartRequest { without: vec!["scripts".into()], ..bare.clone() }).unwrap();
         assert_eq!(no_scripts, format!("{}\n\n# User instructions\n\n{user}\n\nUse tabs.", prompt::SYSTEM_CLASSIC));
+        // The review is described to a session that asks for it, and to no other.
+        let reviewed = h.system_prompt(&StartRequest { with: vec!["review".into()], ..bare.clone() }).unwrap();
+        assert!(reviewed.contains("comes back once, with your changes and a review") && !h.system_prompt(&bare).unwrap().contains("comes back once"));
+        assert!(h.system_prompt(&StartRequest { with: vec!["telepathy".into()], ..bare.clone() }).unwrap_err().contains("unknown mechanism"));
 
         let unknown = StartRequest { skills: vec!["ui".into(), "telepathy".into()], ..req() };
         assert!(h.system_prompt(&unknown).unwrap_err().contains("unknown skill \"telepathy\""));
@@ -1045,7 +1058,7 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "hello".into(), interactive: true, ..Default::default() };
         let meta = h.start_scripted(req, MockProvider::scripted(vec![MockTurn::say("ok"), MockTurn::say("ok"), MockTurn::say("ok"), MockTurn::say("ok")])).unwrap();
-        assert_eq!(until_idle(&h, &meta.id).await.effort, "ratchet-high");
+        assert_eq!(until_idle(&h, &meta.id).await.effort, "ratchet-low");
 
         // What cannot be done is refused before anything is sent.
         let change = |changes: Changes| h.send_with(&meta.id, "more", &[], &[], changes);

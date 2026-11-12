@@ -3,7 +3,7 @@
 use super::edit::broken_by_change;
 use super::{StepOutput, StepStatus, bool_arg, str_arg};
 use crate::state::Session;
-use crate::util::fmt_bytes;
+use crate::util::{fmt_bytes, fnv64};
 use serde_json::Value;
 
 pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
@@ -27,8 +27,10 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
         if old.as_slice() == content.as_bytes() {
             return StepOutput::ok(format!("[ok] {shown}: no change — the file already has this content"));
         }
-        // Overwriting by accident destroys work the model may never have read.
-        if !old.is_empty() && !bool_arg(args, "overwrite") {
+        // Overwriting by accident destroys work the model may never have read. A file it has been
+        // shown whole, as it now stands, is replaced on purpose: refusing that costs a reply and
+        // the whole text a second time.
+        if !old.is_empty() && !bool_arg(args, "overwrite") && !shown_whole(sess, &abs, old) {
             let lines = old.iter().filter(|b| **b == b'\n').count();
             return StepOutput::error(format!("{shown} already exists ({lines} lines). Use edit to change it, or pass overwrite:true to replace the whole file."));
         }
@@ -59,6 +61,22 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     out
 }
 
+/// Whether every line of the file, as it is on disk now, is on record as shown to the model.
+fn shown_whole(sess: &Session, path: &std::path::Path, content: &[u8]) -> bool {
+    let total = String::from_utf8_lossy(content).lines().count();
+    let mut windows = sess.seen.windows(path, fnv64(content));
+    windows.sort_unstable();
+    // The windows of several reads together, as long as they leave no gap.
+    let mut reached = 0;
+    for (from, to) in windows {
+        if from > reached + 1 {
+            break;
+        }
+        reached = reached.max(to);
+    }
+    total > 0 && reached >= total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +100,25 @@ mod tests {
         assert!(forced.observation.starts_with("[ok] replaced pkg/sub/notes.md"));
         let same = run(&mut s, &json!({"path": "pkg/sub/notes.md", "content": "new\n"})).await;
         assert!(same.observation.contains("no change") && !same.changed_files);
+    }
+
+    #[tokio::test]
+    async fn a_file_that_was_shown_whole_is_replaced_without_being_asked_twice() {
+        let mut s = test_session("write-seen", Features::presage());
+        let text: String = (1..=40).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(s.ws.root.join("long.txt"), &text).unwrap();
+
+        // Half of it is not all of it.
+        super::super::read::run(&mut s, &json!({"path": "long.txt", "lines": "1-20"}));
+        assert!(run(&mut s, &json!({"path": "long.txt", "content": "x\n"})).await.observation.contains("already exists (40 lines)"));
+        // Two reads that meet cover it.
+        super::super::read::run(&mut s, &json!({"path": "long.txt", "lines": "21-40"}));
+        let replaced = run(&mut s, &json!({"path": "long.txt", "content": "x\n"})).await;
+        assert!(replaced.observation.starts_with("[ok] replaced long.txt") && replaced.changed_files, "{}", replaced.observation);
+
+        // What is there now was never shown: it changed since.
+        std::fs::write(s.ws.root.join("long.txt"), "someone else's work\n").unwrap();
+        assert_eq!(run(&mut s, &json!({"path": "long.txt", "content": "y\n"})).await.status, StepStatus::Error);
     }
 
     #[tokio::test]

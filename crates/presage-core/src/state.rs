@@ -45,6 +45,8 @@ pub struct Features {
     /// Command output is shown without the workspace's absolute path.
     pub short_paths: bool,
     /// The first `finish` after a change is answered once with a review of the task instead of being accepted.
+    /// Off unless asked for: over 96 benchmark runs it cost a third to a half as many replies again
+    /// and changed no outcome (docs/BENCHMARKS.md).
     pub review: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
@@ -52,18 +54,30 @@ pub struct Features {
 
 impl Features {
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: true, survey: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, lessons: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, review: false, survey: true }
     }
 
     pub fn classic() -> Self {
         Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, lessons: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, review: false, survey: false }
     }
 
-    /// The mechanisms `without` can switch off.
+    /// The mechanisms `without` can switch off and `with` can switch on.
     pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "lessons", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "review", "survey"];
 
+    /// The ones that are off unless a run asks for them with `with`.
+    pub const OPTIONAL: &'static [&'static str] = &["review"];
+
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
-    pub fn without(mut self, name: &str) -> Option<Self> {
+    pub fn without(self, name: &str) -> Option<Self> {
+        self.set(name, false)
+    }
+
+    /// Switches one mechanism on by name: what a run needs to get one of the `OPTIONAL` ones.
+    pub fn with(self, name: &str) -> Option<Self> {
+        self.set(name, true)
+    }
+
+    fn set(mut self, name: &str, on: bool) -> Option<Self> {
         let slot = match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
             "scripts" => &mut self.scripts,
             "receipts" => &mut self.receipts,
@@ -83,7 +97,7 @@ impl Features {
             "survey" => &mut self.survey,
             _ => return None,
         };
-        *slot = false;
+        *slot = on;
         Some(self)
     }
 }
@@ -358,12 +372,17 @@ mod tests {
     fn every_mechanism_can_be_switched_off_by_name() {
         for name in Features::NAMES {
             let without = Features::presage().without(name).unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
-            assert_ne!(without, Features::presage(), "{name}");
+            // One that is off unless asked for is switched on by name instead.
+            let optional = Features::OPTIONAL.contains(name);
+            assert_eq!(without == Features::presage(), optional, "{name}");
+            assert_eq!(Features::presage().with(name).unwrap() == Features::presage(), !optional, "{name}");
+            assert_eq!(Features::presage().with(name).unwrap().without(name), Some(without), "{name}, on and off again");
             assert_eq!(Features::presage().without(&name.replace('_', "-")), Some(without), "{name}, spelled with dashes");
             assert_eq!(Features::classic().without(name), Some(Features::classic()), "{name} is off in the baseline");
         }
         assert!(!Features::presage().without("attach").unwrap().attach && !Features::presage().without("short-paths").unwrap().short_paths);
         assert_eq!(Features::presage().without("telepathy"), None);
+        assert!(Features::presage().with("review").unwrap().review && !Features::presage().review && Features::presage().with("telepathy").is_none());
     }
 
     #[test]

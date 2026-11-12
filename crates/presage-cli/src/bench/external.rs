@@ -132,7 +132,7 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
     let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
-            let usage = proxy.close(job.id);
+            let usage = proxy.close(job.id).await;
             let failure = Some(format!("could not start {}: {e}", job.script.display()));
             return Ran { outcome: "error", failure, error: None, elapsed_ms: 0, detail: Detail { exit_code: None, log: log.to_string_lossy().into_owned(), usage } };
         }
@@ -154,7 +154,7 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
         None => child.wait().await.ok(),
     };
     let exit = status.and_then(|s| s.code());
-    let usage = proxy.close(job.id);
+    let usage = proxy.close(job.id).await;
     let said = last_lines(&log, 12);
     let (outcome, failure, error) = classify(exit, timed_out, job, &usage, &said);
     if !job.keep {
