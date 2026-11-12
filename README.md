@@ -35,21 +35,20 @@ of tasks. Every claim above can be measured rather than believed.
 
 ## Status
 
-State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
+State on 12 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
 `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 205 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 223 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
-- **Not yet measured**: the changes of the seventh session (the last reply of the budget, the
-  review that carries the diff, anchors carried through edits, the tool fixes listed in
-  `docs/HANDOFF.md`) were made without a benchmark run. The numbers below are from before them.
 - **Benchmark**: `presage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
-  On the skill and hard sets with DeepSeek V4.1 Flash (17 tasks, one run each): Presage 16/17 in
-  14.3 turns and 128 s, classic 15/17 in 20.8 turns and 139 s, mini-swe-agent 16/17 in 13.9 turns
-  and 165 s. GLM-5.3 was measured on six tasks only. See `docs/BENCHMARKS.md` for what limits these
-  numbers.
+  Against OpenCode 1.19.5 with DeepSeek V4.1 Flash on 12 November 2026 (24 tasks, three runs
+  each): Presage solved 67/72 in 5.7 requests and 59 s a run for $1.12, OpenCode 70/72 in 10.8
+  requests and 116 s for $2.23. Presage loses two tasks that OpenCode solves every time
+  (`restyle`, `confdialect`) and is the steadier on the other 22. The comparisons with classic and
+  mini-swe-agent are older, from before the changes of the seventh and ninth sessions. See
+  `docs/BENCHMARKS.md` for all of it and for what limits these numbers.
 - **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. Every
   other preset (OpenAI, Anthropic, Google AI, DeepSeek, OpenRouter, Moonshot Kimi, xAI, Groq,
   Together AI) follows its vendor's documented contract and is untested.

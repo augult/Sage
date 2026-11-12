@@ -19,10 +19,78 @@ LOGFARE_API_KEY=... PRESAGE_HOME=/tmp/presage-live target/debug/presage bench -p
   --variants presage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
-> **These numbers are from before the seventh session.** The last reply of the budget, the review
-> that carries the diff, the anchor resolver and the tool fixes described in `docs/HANDOFF.md` were
-> made without a benchmark run, and classic is now told its working directory. Re-run before
-> comparing anything with the tables below.
+## Against OpenCode, 12 November 2026 (ninth session)
+
+Presage against OpenCode 1.19.5 (`ext:opencode`, its default `build` agent behind the metering
+proxy), DeepSeek V4.1 Flash through Logfare, all 24 tasks, 30 replies and 15 minutes per run. Raw
+results, the CLI's tables and the scripts that made the figures are in
+`docs/results/2026-11-12-opencode/`.
+
+The session began with a baseline of both harnesses as they stood, changed Presage where its own
+logs showed waste, and ended with a second head-to-head in one time window. In that last one every
+run had a Unix account to itself (three accounts per harness, one run at a time in each), so no run
+could see or signal another, and the repository with its fixtures and reference solutions was
+unreadable to all of them.
+
+### Result
+
+| 24 tasks | Solved | Requests (mean, median) | Time (mean, median) | Cost | Tokens per run, in / out |
+|---|---|---:|---:|---:|---:|
+| Presage as it is now, three runs per task | 67/72 | 5.7, 4 | 59 s, 39 s | $1.12 | 59k / 9.4k |
+| OpenCode 1.19.5, three runs, same window | 70/72 | 10.8, 8 | 116 s, 50 s | $2.23 | 143k / 17.1k |
+| Presage as it was that morning, two runs | 45/48 | 10.5, 10 | 107 s, 60 s | $1.22 | 148k / 17.1k |
+| OpenCode that morning, two runs, same window | 44/48 | 11.0, 9 | 129 s, 48 s | $1.12 | 132k / 17.0k |
+
+- **Presage now takes about half of what OpenCode takes**: 47% fewer requests, half the time and
+  half the money, in each of the three repeats. That morning the two were level.
+- **OpenCode solved three runs more of 72**, which by itself is within chance (p = 0.44), but the
+  five runs Presage lost are on two tasks: `restyle` three times out of three and `confdialect`
+  twice out of three, both solved by OpenCode every time. Over every DeepSeek run of the day,
+  whatever the variant: `confdialect` 7/20 for Presage against 5/5 for OpenCode (p = 0.015),
+  `restyle` 8/20 against 4/5 (p = 0.16), and the other 22 tasks 439/440 against 107/112.
+  `confdialect` is failed on one or two of 39 hidden cases of a ten-section specification, after
+  5 to 18 replies where OpenCode spends 25 to 30 requests and 13 to 15 minutes on it; `restyle` on
+  the hidden check's spacing and type scale (15 to 20 spacing values where 8 are allowed). Neither
+  is fixed.
+- OpenCode's two failures: `nplusone` declared done and wrong, and `audit` killed by a signal after
+  its shell tool timed out on a server the model had started in the background. That morning the
+  same took two runs at once, while two OpenCode runs shared an account; run again alone, both
+  solved, which would make the morning 46/48. Three of the morning's OpenCode runs also met a
+  temporary directory they could not write to, left by the installation. Neither happened in the
+  head-to-head of the first two rows.
+- Cost is at list price and includes DeepSeek's doubling between 01:00 and 04:00 and between 06:00
+  and 10:00 UTC, so it compares within one window only. OpenCode's requests include one title
+  request per run.
+
+### What was changed, and what each change is worth
+
+Read off Presage's own session logs of the baseline (`review_cost.py`, `turns.py`), then measured.
+
+| Change | Measured |
+|---|---|
+| **The review pass is off unless asked for** (`--with review`, `presage+review`). | Different windows: 45/48 with it at 10.5 replies, 45/48 without at 6.9. Same window, runs alternating: 46/48 at 9.5 replies and 77 s with it, 46/48 at 7.2 and 60 s without. The same tasks failed either way. No run of either kind left a scratch file behind; the review removed five `__pycache__` directories in 48 runs. |
+| **`write` replaces a file the model has been shown in full** without `overwrite:true`. | Refused writes: 16 and 11 per 48 runs before, 1 to 4 after. Each refusal had also skipped the steps behind it in the same reply (36 in the baseline) and made the model send the whole file a second time. |
+| **The watch stays on the test command the task names**, and a throwaway script (outside the workspace, or written on the spot with a here-document) never becomes the watch. | The watch was moved to another command 14 to 40 times per 48 runs before, never after. It had followed `node /tmp/verify-queue.mjs` and a mutation-testing loop in `/tmp` that is meant to fail, and `finish` was refused for it. |
+| **The effort ratchet starts at `low`**, not `high`. | DeepSeek, same window: 46/48 at 7.7 replies, 77 s and 14.5k output tokens from `high`; 46/48 at 5.9 replies, 38 s and 8.3k from `low`. In the last head-to-head: 23/24 at 6.5 replies from `high`, 67/72 at 5.7 from `low`. GLM-5.3, six tasks, one run: 6/6 both, 15.5 replies and $1.04 from `high`, 7.3 and $0.36 from `low`. A fixed `low` with no ratchet solved 47/48 in one window and 43/48 in the next, and was not adopted. |
+| **Thinking is not switched off at the first reply that only reasoned.** | Starting at `low`, the cut at 14,000 tokens of thinking took the effort to `off` for the rest of the run. The three `confdialect` runs it happened to used 29 to 30 replies and two failed. Now the first such reply leaves `low` as it is and the second switches thinking off. |
+| **The metering proxy waits for a request in flight** before it closes a run. | A test of the bench failed in this sandbox whenever the adapter exited before its answer was counted; it passes now. No effect on results. |
+
+### What limits these numbers
+
+- Two or three runs per task. A difference of two or three solved runs in 72 is not a finding by
+  itself; `confdialect` is, because it repeats.
+- One model for the head-to-head. GLM-5.3 was run on six tasks, for the effort change only.
+- The steps were measured one after another on the same day against the same gateway, whose speed
+  varies: only rows of one window compare on time and cost.
+- `restyle` was solved six times out of six in one 48-minute window (all three variants of that
+  experiment) and twice out of 14 in the rest of the day. Nothing in the sessions explains it.
+- The answers were not graded: solved means the held-out verification passed.
+- About 5,600 of the gateway's 10,000 daily requests were used. The session logs of the runs
+  were lost with the sandbox they were made in; the result files were saved first.
+
+> **The tables below are from before the seventh session**, and so from before everything above:
+> the last reply of the budget, the review that carries the diff, the anchor resolver and the tool
+> fixes described in `docs/HANDOFF.md`, and classic being told its working directory.
 
 ## Skill and hard task sets, against other harnesses, 11 November 2026 (sixth session)
 
