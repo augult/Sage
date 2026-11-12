@@ -25,7 +25,8 @@ pub const VERSION: u32 = 1;
 /// How a session was set up, as far as `Features` cannot say: the mechanism lists it started with.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Setup {
-    pub classic: bool,
+    /// The mode, by its name (`Mode::as_str`).
+    pub mode: String,
     #[serde(default)]
     pub with: Vec<String>,
     #[serde(default)]

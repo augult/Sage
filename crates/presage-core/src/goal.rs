@@ -195,7 +195,7 @@ pub struct Answer {
 pub async fn ask(provider: &Provider, m: &Material<'_>, cancel: &CancellationToken) -> Result<Answer, ProviderError> {
     let messages = messages(m);
     let tools = json!([]);
-    let request = ChatRequest { messages: &messages, tools: &tools, effort: Effort::Off, max_tokens: MAX_TOKENS };
+    let request = ChatRequest { messages: &messages, tools: &tools, effort: Effort::Off, max_tokens: MAX_TOKENS, reasoning_cap: 0 };
     let reply = provider.chat(request, &mut |_| {}, cancel).await?;
     Ok(Answer { verdict: parse_verdict(&reply.content), usage: reply.usage, retries: reply.retries })
 }

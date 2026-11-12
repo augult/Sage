@@ -19,6 +19,37 @@ LOGFARE_API_KEY=... PRESAGE_HOME=/tmp/presage-live target/debug/presage bench -p
   --variants presage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## Where Presage loses, read from the stored runs, 12 November 2026 (tenth session)
+
+No run was made for this: the gateway was down. It is every results file under `docs/results/`
+read again, runs lost to provider errors left out (`docs/results/2026-11-12-modes/overall.py` and
+`by_variant.py` print the tables). DeepSeek V4.1 Flash:
+
+| Variant | Solved | Lost after declaring the work done | Lost on |
+|---|---|---|---|
+| `presage` | 297/310 | 12 | `restyle` 8, `confdialect` 5 |
+| `no-review` | 97/103 | 5 | `confdialect` 4, `restyle` 2 |
+| `classic` (now `default`) | 92/94 | 0 | `deadcode-js` 1, `rollup` 1 |
+| `ext:opencode` | 116/122 | 2 | `audit` 2, `audit-clean` 2, `restyle` 1, `nplusone` 1 |
+
+On the two tasks alone, all of Presage's variants against the conventional loops (`classic`,
+OpenCode, mini-swe-agent):
+
+| Task | Presage's variants | Conventional loops |
+|---|---|---|
+| `confdialect` | 9/23, median 6 to 18 replies where it declared done | 8/8, 26 to 30 replies |
+| `restyle` | 8/21 | 5/7 |
+
+- Presage's losses are of one kind: work declared finished and verified that fails checks the
+  model never ran. The conventional loop has none of that kind in 94 runs.
+- The conventional loop's runs on these two tasks are few (`classic` 2 and 1), and most of its 94
+  are on the easy set. It is a lead to follow, not a result.
+- This session's five first replies on `confdialect` thought for 12,900 to 14,100 tokens; three
+  hit the 14,000-token cap and were cut. Whether the cut costs the task is not known: of the two
+  runs that finished, one had been cut and one had not, and both failed.
+
+Prosage (`README.md`, "Modes") is built on this reading and has not been run against a model.
+
 ## Against OpenCode, 12 November 2026 (ninth session)
 
 Presage against OpenCode 1.19.5 (`ext:opencode`, its default `build` agent behind the metering

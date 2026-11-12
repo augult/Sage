@@ -107,7 +107,7 @@ static VOLATILE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Digest of the output with timings, addresses and temp paths masked, so two runs that differ only
 /// in how long they took count as the same result.
-fn digest(text: &str) -> u64 {
+pub(crate) fn digest(text: &str) -> u64 {
     fnv64(VOLATILE.replace_all(text, "~").as_bytes())
 }
 

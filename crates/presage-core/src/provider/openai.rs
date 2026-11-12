@@ -298,7 +298,7 @@ impl OpenAiProvider {
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            match self.attempt(&body, on_delta, cancel).await {
+            match self.attempt(&body, req.reasoning_cap, on_delta, cancel).await {
                 Ok(mut r) => {
                     r.retries = attempt - 1;
                     if !r.usage_reported {
@@ -325,7 +325,7 @@ impl OpenAiProvider {
         }
     }
 
-    async fn attempt(&self, body: &[u8], on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
+    async fn attempt(&self, body: &[u8], reasoning_cap: usize, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
         let send = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -347,7 +347,7 @@ impl OpenAiProvider {
 
         let mut stream = resp.bytes_stream();
         let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-        let mut acc = Accum::default();
+        let mut acc = Accum { reasoning_cap, ..Accum::default() };
         'read: loop {
             let next = tokio::select! {
                 n = tokio::time::timeout(self.idle_timeout, stream.next()) => n,
@@ -431,6 +431,8 @@ pub(crate) struct Accum {
     saw_event: bool,
     raw: String,
     unchecked: usize,
+    /// Characters of reasoning allowed before anything else has come; 0 stands for `REASONING_CAP`.
+    reasoning_cap: usize,
 }
 
 const LOOP_CHECK_EVERY: usize = 600;
@@ -500,7 +502,8 @@ impl Accum {
             if is_looping(&self.reasoning) || is_looping(&self.content) {
                 return Err(ProviderError::Degenerate);
             }
-            if self.reasoning.len() > REASONING_CAP && self.content.is_empty() && self.calls.is_empty() {
+            let cap = if self.reasoning_cap == 0 { REASONING_CAP } else { self.reasoning_cap };
+            if self.reasoning.len() > cap && self.content.is_empty() && self.calls.is_empty() {
                 return Err(ProviderError::Overthinking(self.reasoning.len()));
             }
         }
@@ -649,7 +652,7 @@ mod tests {
         p.max_retries = 0;
         let messages = [Message::user("hi")];
         let tools = json!([]);
-        let ask = || ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64 };
+        let ask = || ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64, reasoning_cap: 0 };
         let cancel = CancellationToken::new();
 
         let gave_up = p.chat(ask(), &mut |_| {}, &cancel).await.unwrap_err();
@@ -730,6 +733,11 @@ mod tests {
         let thought: String = (0..700).map(|i| format!("Step {i}: consider case {i}. ")).collect();
         let chunk = format!(r#"data: {{"choices":[{{"delta":{{"reasoning":"{thought}"}}}}]}}"#);
         assert!(matches!(feed(&[chunk.as_str(); 4]).unwrap_err(), ProviderError::Overthinking(n) if n > REASONING_CAP));
+        // Where long thought is allowed, the same reply is let through.
+        let mut patient = Accum { reasoning_cap: 8 * REASONING_CAP, ..Accum::default() };
+        for _ in 0..4 {
+            assert!(matches!(patient.feed_line(chunk.as_bytes(), &mut |_| {}), Ok(false)));
+        }
         let answer = r#"data: {"choices":[{"delta":{"content":"Here is the answer."}}]}"#;
         assert!(feed(&[answer, chunk.as_str(), chunk.as_str(), chunk.as_str(), chunk.as_str(), "data: [DONE]"]).is_ok());
     }
@@ -791,7 +799,7 @@ mod tests {
     fn dialects_spell_reasoning_their_own_way() {
         let tools = json!([]);
         let msgs = [Message::user("x")];
-        let req = |effort| ChatRequest { messages: &msgs, tools: &tools, effort, max_tokens: 100 };
+        let req = |effort| ChatRequest { messages: &msgs, tools: &tools, effort, max_tokens: 100, reasoning_cap: 0 };
 
         let b = provider(Dialect::OpenRouter).body(&req(Effort::High));
         assert_eq!(b["reasoning"], json!({"effort": "high"}));

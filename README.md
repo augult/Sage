@@ -28,16 +28,49 @@ and the model's attention is spent only where reality diverged.**
 | **Effort ratchet** | Reasoning effort starts at `low` and rises one level after three surprises in a row (`low`, `high`, `max`). It falls only when a reply is nothing but reasoning: such a reply is cut at about 14,000 tokens of thinking (or at the output limit) and asked for again one level lower, though thinking is switched off only at the second such reply of a run. Starting at `high` (`-e ratchet-high`, the default until 12 November 2026) solved as many tasks and took about 30% more replies and twice the time on DeepSeek V4.1 Flash, and twice the replies on six tasks with GLM-5.3. | `agent.rs`, `provider/openai.rs` |
 | **Robust plumbing** | Tool-call repair (malformed JSON, foreign argument names, calls written as text), thinking-loop watchdog, retries honouring `Retry-After` (without end while auto-retry is on, so a run outlasts a rate limit), commands that outlive their timeout become background jobs instead of being killed, noise-stripped output with the raw bytes kept on disk (`out:N`), command output shown with paths relative to the workspace. | `repair.rs`, `provider/`, `tools/jobs.rs`, `text.rs`, `workspace.rs` |
 
-A `--classic` mode switches all of this off and runs a conventional tool loop with the same model
-and tools, and `presage bench` runs both, or Presage with any one mechanism switched off, over a set
-of tasks. Every claim above can be measured rather than believed.
+`presage bench` runs any of the modes below, or one of them with a single mechanism switched on
+or off, over a set of tasks. Every claim above can be measured rather than believed.
+
+## Modes
+
+A session runs in one of three modes (`--mode`, the Mode picker of the app). The mode is fixed when
+the session starts: its system prompt and its tools are sent with the first request.
+
+| Mode | What it is for | What it does |
+|---|---|---|
+| **Presage** (the one a session gets unless told otherwise) | Few requests and little money, at a little cost to the result. | Everything in the table above. |
+| **Default** (`--mode default`; `classic` in earlier results) | The loop every other harness runs, for those who want the app and not Presage's ways. | One tool call after another: no scripts, predictions, watches, finish gate or first-message survey. |
+| **Prosage** (`--mode prosage`) | The result, with requests and time spent freely. | Presage, without what it does to stay cheap, and with a second reader. See below. |
+
+### What Prosage changes
+
+Over the stored benchmark runs (`docs/results/`), twelve of the thirteen runs Presage lost on
+DeepSeek V4.1 Flash it had declared finished and verified: the work passed the checks the model
+chose to run and failed ones it never thought of. The conventional loop did not make that mistake
+in any of its 94 runs, at twice the requests (`docs/BENCHMARKS.md`). Prosage is built against that
+one failure, with four mechanisms that can each be switched on in Presage (`--with <name>`,
+`presage+<name>` in the bench) or off in Prosage (`--without <name>`, `prosage+no-<name>`).
+**It has not been measured against a live model yet**: the gateway was down for the rest of the
+session that built it (`docs/HANDOFF.md` has the runs to make first).
+
+| Mechanism | What it does | Where |
+|---|---|---|
+| **Examiner** (`examiner`) | A second reader. When the session starts, a separate request with a fresh context is given the task and the files the worker was shown, never the work, and writes one check script from the text alone: a case for every rule, example and error the task and its documents state. It is written beside the run, so it costs a request and no waiting. When `finish` is accepted the script is run against the work. Failing cases hold the `finish` and go back to the worker, which settles each by the text it cites: fix the work, or leave the case failing and say why. A `finish` whose failing cases the worker has already been shown stands. A script that does not run to its end, or fails more than three cases in five against work whose own checks pass, is set aside. In a session whose steps wait for approval (`ask`) there is no examiner: its script would be a command run unasked. | `examiner.rs`, `agent.rs` |
+| **Long thought** (`long_thought`) | A reply may think for about 24,000 tokens before its first word or call, instead of being cut at 14,000 and told to act. On the specification-heavy task Presage loses most, three of five first replies were cut at that mark. | `provider/openai.rs` |
+| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass, the model is told what passing checks leave open instead of that `finish` is accepted now. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
+| **Routing** (`routing`) | One short request without thinking picks the skills whose subject is the task's main work, and they are switched on before the first word goes to the model. | `agent.rs`, `examiner.rs` |
+
+The effort starts where Presage's does, at `low`: starting at `high` took twice the time and
+solved no more tasks when it was measured on 12 November 2026. What Prosage adds is a second
+reason for it to rise: a `finish` the examiner holds raises it one level. Requests made beside the
+conversation (examiner, router) are counted in the session's tokens, cost and `side_requests`.
 
 ## Status
 
 State on 12 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
 `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 238 tests (unit tests per module plus
+- **Engine and CLI**: implemented; `cargo test` runs 253 tests (unit tests per module plus
   end-to-end agent runs against a scripted model).
 - **Benchmark**: `presage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
@@ -101,13 +134,13 @@ cargo build --release           # builds target/release/presage
 presage demo                    # scripted walkthrough, no key needed
 presage key logfare             # store an API key (read from stdin), or export LOGFARE_API_KEY
 presage run -C path/to/project "Fix the failing tests"
-presage run --classic ...       # baseline loop, for comparison
+presage run --mode default ...  # the conventional loop; --mode prosage for the result at any price
 presage run --goal "the tests pass and the README names every flag" -C path/to/project
 presage sessions | presage show <id>
 presage resume <id> "and now the other one"   # continue a stored session (see below)
 
 presage bench --check --tasks all   # the tasks fail as shipped and pass with their reference solutions
-presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
+presage bench -p logfare -m glm-5.3 --variants presage,no-attach,default,prosage -n 5 -j 3
 ```
 
 ### The session goal
@@ -126,7 +159,7 @@ the model back with its reasons; after the third the run ends as usual, says in 
 goal is not met, and the goal stays active. A check that cannot be made or read never fails the run.
 On the last reply the budget allows the check is still made so that the result is recorded, but
 nothing can follow it. The checks are paid for like any request and show in the session's figures
-(`goal_checks`). They work the same with `--classic`.
+(`goal_checks`). They work the same in every mode.
 
 ### Continuing a session
 

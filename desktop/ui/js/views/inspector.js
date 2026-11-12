@@ -4,6 +4,7 @@
 import { h, icon } from '../dom.js';
 import { bytes, duration, effortLabel, k, pct, plural, tilde } from '../format.js';
 import { known, outcomeLook, tag } from './common.js';
+import { modeLabel } from './controls.js';
 
 /** `about` is `{ state, home, skills }`: the session's state now, the home folder, its skills by title. */
 export function renderInspector(el, model, about) {
@@ -52,7 +53,7 @@ function session(model, { state, home, skills }) {
     fact('Model', name),
     fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
     // The engine also reports ablations here, as "presage without <mechanism>".
-    fact('Mode', mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode),
+    fact('Mode', modeLabel(mode)),
     fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
     skills.length > 0 && fact('Skills', skills.join(', ')),
   );

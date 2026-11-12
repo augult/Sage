@@ -79,7 +79,7 @@ Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the
 scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
 grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESAGE_UI_SCHEME=light|dark`
 (the painting behind the glass and the appearance, for that launch only).
-A scripted session's file may name `skills` to start with.
+A scripted session's file may name `skills` to start with and a `mode`.
 `PRESAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
 sessions a stand-in played as continuable, and a message to one brings it back, played by the
 `turns` (and `delay_ms`) of that file (a scripted file will do; the rest of it is not read).
@@ -87,7 +87,7 @@ Start a scripted session, quit the app (SIGTERM goes through the same door as th
 close), start it again with `PRESAGE_UI_OPEN=<id> PRESAGE_UI_REVIVE=<file>`, and type into
 `#followup` with a script. Without the hook such a session is read-only (`simulated`).
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
-`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`; a model's option
+`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
 is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
 is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. It opens `dialog.skills`,
 where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. A chat bar has
@@ -213,7 +213,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
      `pick_folder`); a folder picked there joins the list. Under the box,
      pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
-     which starts low and steps up when predictions fail), mode (Presage / Classic) and autonomy
+     which starts low and steps up when predictions fail), mode (Presage / Default / Prosage, each with what it is for as its `title`; README, "Modes") and autonomy
      (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
      other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
@@ -225,7 +225,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      text. Nothing is sent by choosing: a skill in use goes with the task, or in a session with
      the next message. The button reads "Skills" with nothing on, then "Skills" and the number on
      (the titles are its `title` attribute), so the bar keeps to one row. A
-     new session starts with no skills, whatever the last one had; Classic takes none, so the
+     new session starts with no skills, whatever the last one had; Default takes none, so the
      button is disabled there. With no key configured, the view leads with "Add an API key", and
      Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
      by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.

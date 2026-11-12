@@ -44,22 +44,83 @@ pub struct Features {
     pub short_paths: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
+    /// A reply may reason for much longer before its first word or call is due.
+    pub long_thought: bool,
+    /// Nothing the harness says counts replies or asks for an early `finish`; passing checks are
+    /// answered with what they do not cover.
+    pub unhurried: bool,
+    /// A second reader writes checks from the task alone, beside the run; `finish` answers to them.
+    pub examiner: bool,
+    /// A skill that fits the task is switched on without being asked for.
+    pub routing: bool,
+}
+
+/// What a session is run for.
+///
+/// `Presage` spends as few requests and tokens as it can and gives up a little of the result for
+/// it. `Plain` is the loop every other harness runs, one tool call after another with nothing of
+/// Presage's around it; users know it as `default`. `Prosage` is run for the result alone: the
+/// model thinks for as long as it needs, nothing hurries it, a second reader examines the work,
+/// and a skill that fits is switched on unasked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    #[default]
+    Presage,
+    #[serde(rename = "default")]
+    Plain,
+    Prosage,
+}
+
+impl Mode {
+    pub const NAMES: &'static [&'static str] = &["presage", "default", "prosage"];
+
+    /// A mode by its name. `classic` is what `default` was called before.
+    pub fn parse(name: &str) -> Option<Mode> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "presage" => Some(Mode::Presage),
+            "default" | "classic" => Some(Mode::Plain),
+            "prosage" => Some(Mode::Prosage),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Presage => "presage",
+            Mode::Plain => "default",
+            Mode::Prosage => "prosage",
+        }
+    }
+
+    pub fn features(self) -> Features {
+        match self {
+            Mode::Presage => Features::presage(),
+            Mode::Plain => Features::classic(),
+            Mode::Prosage => Features::prosage(),
+        }
+    }
 }
 
 impl Features {
+    /// Presage and what `Features::OPTIONAL` holds back from it.
+    pub fn prosage() -> Self {
+        Self { long_thought: true, unhurried: true, examiner: true, routing: true, ..Self::presage() }
+    }
+
     pub fn presage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, routing: false }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, routing: false }
     }
 
     /// The mechanisms `without` can switch off and `with` can switch on.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "routing"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &[];
+    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "routing"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -87,6 +148,10 @@ impl Features {
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
+            "long_thought" => &mut self.long_thought,
+            "unhurried" => &mut self.unhurried,
+            "examiner" => &mut self.examiner,
+            "routing" => &mut self.routing,
             _ => return None,
         };
         *slot = on;
@@ -194,6 +259,12 @@ impl Evidence {
             self.last_change = format!("`{}`", crate::util::one_line(cmd, 80));
         }
         changed
+    }
+
+    /// Takes the workspace as it is now for the state already judged: for a command the harness ran
+    /// itself that may leave caches behind but is no change to the work.
+    pub fn resync(&mut self, ws: &Workspace) {
+        self.fingerprint = Some(fingerprint(&ws.root, FINGERPRINT_BUDGET));
     }
 
     /// A check passed against the workspace as it is right now.

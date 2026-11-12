@@ -6,14 +6,16 @@ use crate::changes;
 use crate::context::Context;
 use crate::economy::{peak_multiplier, prices_for};
 use crate::events::{CacheVerdict, CallInfo, Channel, EventKind, FinishStatus, GoalState, Sink, Stats};
+use crate::examiner;
 use crate::goal::{self, Goal, Verdict};
 use crate::prompt;
-use crate::provider::{ChatRequest, Delta, Effort, Message, Provider, ProviderError, Role, Usage};
+use crate::provider::{ChatRequest, ChatResponse, Delta, Effort, Message, Provider, ProviderError, Role, Usage};
 use crate::repair;
 use crate::resume::{self, Setup, Snapshot};
 use crate::script::{Approvals, Autonomy, Runner, ScriptResult};
 use crate::skills::{self, SkillInfo};
 use crate::state::{Features, Session};
+use crate::tools::shell::{ExecEnd, StateKind, exec};
 use crate::util::{now_ms, one_line};
 use crate::watches;
 use std::collections::HashMap;
@@ -84,6 +86,8 @@ pub struct AgentConfig {
     pub context_limit: u64,
     /// The system prompt, where the session has its own; otherwise the built-in one for `features`.
     pub system: Option<String>,
+    /// Skills the session may switch on by itself, where it routes tasks to skills.
+    pub routable: Vec<SkillInfo>,
 }
 
 impl AgentConfig {
@@ -99,6 +103,7 @@ impl AgentConfig {
             interactive: false,
             context_limit: 150_000,
             system: None,
+            routable: Vec::new(),
         }
     }
 }
@@ -112,7 +117,7 @@ pub struct Outcome {
 }
 
 pub struct Agent {
-    provider: Provider,
+    provider: Arc<Provider>,
     pub sess: Session,
     pub ctx: Context,
     cfg: AgentConfig,
@@ -146,6 +151,10 @@ pub struct Agent {
     keep: Option<(PathBuf, Setup)>,
     /// Said in front of the next message: the session was brought back after a restart.
     restored: Option<String>,
+    /// The examiner's checks: asked for, or written and ready to run.
+    exam: ExamState,
+    /// What became of them, for the outcome.
+    exam_note: Option<String>,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -177,13 +186,48 @@ struct EndChecks {
 
 const KEEP_RECENT_MESSAGES: usize = 12;
 const MIN_DECAY_TOKENS: u64 = 6_000;
+/// Reasoning a reply may spend before its first word or call where long thought is allowed: about
+/// 24,000 tokens, which still leaves room for the answer under the output cap.
+const LONG_THOUGHT_CHARS: usize = 96_000;
+const COVERAGE_NOTE: &str = "The checks pass. They show only what they exercise, and the work is held to everything the task and the documents it names say. Before `finish`, go through those texts rule by rule and, for every rule the checks do not exercise, run a case of your own whose expected result you take from the text, not from your code.";
 const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows. Start nothing new: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands.";
+/// How long after it was asked for the examiner's script is still waited for at `finish`.
+const EXAM_WAIT: Duration = Duration::from_secs(240);
+const EXAM_RUN: Duration = Duration::from_secs(120);
+/// How often the examiner's cases may hold one message's `finish`.
+const EXAM_HOLDS: u8 = 3;
+const ROUTE_WAIT: Duration = Duration::from_secs(30);
+
+type SideReply = (Result<ChatResponse, ProviderError>, Duration);
+
+enum ExamState {
+    None,
+    /// Asked for at `asked`, being written beside the run.
+    Pending { reply: tokio::task::JoinHandle<SideReply>, asked: Instant, stop: CancellationToken },
+    Ready(Exam),
+}
+
+struct Exam {
+    cmd: String,
+    path: String,
+    holds: u8,
+    /// Digest of the failing output the worker was last shown.
+    shown: Option<u64>,
+}
+
+/// One request beside the conversation: no tools, nothing streamed to anyone.
+async fn side_request(provider: Arc<Provider>, messages: Vec<Message>, effort: Effort, max_tokens: u32, reasoning_cap: usize, cancel: CancellationToken) -> SideReply {
+    let tools = serde_json::json!([]);
+    let asked = Instant::now();
+    let reply = provider.chat(ChatRequest { messages: &messages, tools: &tools, effort, max_tokens, reasoning_cap }, &mut |_| {}, &cancel).await;
+    (reply, asked.elapsed())
+}
 
 impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
+        Self { provider: Arc::new(provider), exam: ExamState::None, exam_note: None, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -198,7 +242,7 @@ impl Agent {
     pub fn retune(&mut self, change: Retune) {
         let (mut provider, mut model, mut effort, mut autonomy) = (None, None, None, None);
         if let Some((next, id, name)) = change.provider {
-            self.provider = next;
+            self.provider = Arc::new(next);
             self.sess.prices = prices_for(&name);
             self.cfg.model = name.clone();
             self.ctx.forget_cache();
@@ -262,6 +306,136 @@ impl Agent {
 
     fn note(&self, kind: &str, text: &str) {
         self.sink.emit(EventKind::Note { turn: self.turn, kind: kind.to_string(), text: text.to_string() });
+    }
+
+    /// Books a request made beside the conversation like any other: its tokens, cost and time.
+    fn count_side_request(&mut self, usage: &Usage, took: Duration) {
+        self.stats.side_requests += 1;
+        self.stats.prompt_tokens += usage.prompt;
+        self.stats.cached_tokens += usage.cached;
+        self.stats.output_tokens += usage.output;
+        self.stats.reasoning_tokens += usage.reasoning;
+        self.stats.model_ms += took.as_millis() as u64;
+        if let Some(p) = self.sess.prices {
+            self.stats.cost += p.cost(usage) * peak_multiplier(&self.cfg.model, now_ms() / 1000);
+            self.stats.priced = true;
+        }
+    }
+
+    /// Asks which of the skills the session may switch on by itself fit `task`. One short request
+    /// without thinking; with no answer in time, none.
+    async fn route(&mut self, task: &str, cancel: &CancellationToken) -> Vec<SkillInfo> {
+        let known = self.cfg.routable.clone();
+        if known.is_empty() {
+            return Vec::new();
+        }
+        let playbooks: Vec<(&str, &str)> = known.iter().map(|s| (s.name.as_str(), s.description.as_str())).collect();
+        let request = side_request(self.provider.clone(), examiner::route_brief(task, &playbooks), Effort::Off, 400, 0, cancel.child_token());
+        let Ok((Ok(resp), took)) = tokio::time::timeout(ROUTE_WAIT, request).await else {
+            self.note("routing", "no skill was chosen: the router did not answer");
+            return Vec::new();
+        };
+        self.count_side_request(&resp.usage, took);
+        let names: Vec<&str> = known.iter().map(|s| s.name.as_str()).collect();
+        let picked = examiner::routed(&resp.content, &names);
+        if !picked.is_empty() {
+            self.note("routing", &format!("skill switched on for this task: {}", picked.join(", ")));
+        }
+        known.iter().filter(|s| picked.contains(&s.name.as_str())).cloned().collect()
+    }
+
+    /// Asks the examiner for its script. It is written while the run goes on, with as long to
+    /// think as a reply is ever given: reading a specification closely is all it has to do.
+    fn start_exam(&mut self, opening: &str, cancel: &CancellationToken) {
+        let stop = cancel.child_token();
+        let reply = tokio::spawn(side_request(self.provider.clone(), examiner::brief(opening), Effort::High, self.cfg.max_tokens, LONG_THOUGHT_CHARS, stop.clone()));
+        self.exam = ExamState::Pending { reply, asked: Instant::now(), stop };
+    }
+
+    /// Runs the examiner's script against the work `finish` was just accepted for, waiting for the
+    /// script first if it is still being written. Returns what the worker is told where `finish`
+    /// is held; `None` lets it stand.
+    async fn examine(&mut self, cancel: &CancellationToken) -> Option<String> {
+        if let ExamState::Pending { .. } = self.exam {
+            let ExamState::Pending { mut reply, asked, stop } = std::mem::replace(&mut self.exam, ExamState::None) else { return None };
+            if !reply.is_finished() {
+                self.note("examiner", "waiting for the examiner's checks");
+            }
+            let joined = tokio::select! {
+                joined = tokio::time::timeout(EXAM_WAIT.saturating_sub(asked.elapsed()), &mut reply) => joined.ok().and_then(Result::ok),
+                _ = cancel.cancelled() => None,
+            };
+            let Some((answer, took)) = joined else {
+                stop.cancel();
+                self.note("examiner", "the examiner did not answer in time: finished without its checks");
+                return None;
+            };
+            let resp = match answer {
+                Ok(resp) => resp,
+                Err(e) => {
+                    self.note("examiner", &format!("the examiner's request failed ({e}): finished without its checks"));
+                    return None;
+                }
+            };
+            self.count_side_request(&resp.usage, took);
+            let Some(script) = examiner::parse(&resp.content) else {
+                self.note("examiner", "the examiner wrote no script for this task");
+                return None;
+            };
+            let dir = self.sess.dir.join("exam");
+            let path = dir.join(format!("exam_checks.{}", script.ext));
+            if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &script.body)).is_err() {
+                return None;
+            }
+            let path = path.to_string_lossy().into_owned();
+            let cmd = script.command.replace("{file}", &format!("'{}'", path.replace('\'', "'\\''")));
+            self.exam = ExamState::Ready(Exam { cmd, path, holds: 0, shown: None });
+        }
+        let ExamState::Ready(exam) = &self.exam else { return None };
+        let (cmd, path, holds, shown) = (exam.cmd.clone(), exam.path.clone(), exam.holds, exam.shown);
+        let root = self.sess.ws.root.clone();
+        self.sess.evidence.before_command(&self.sess.ws);
+        let run = exec(&mut self.sess, &cmd, &root, StateKind::ReadOnly, EXAM_RUN, cancel).await;
+        // Whatever the script left behind (caches) is not a change to the work.
+        self.sess.evidence.resync(&self.sess.ws);
+        let output = match run {
+            Ok(ex) if matches!(ex.end, ExecEnd::Exited(_)) => ex.text,
+            Ok(ex) => {
+                if let ExecEnd::TimedOut(running) = ex.end {
+                    crate::tools::jobs::kill_group(running.pid);
+                }
+                String::new()
+            }
+            Err(_) => String::new(),
+        };
+        let Some(tally) = examiner::tally(&output) else {
+            self.exam = ExamState::None;
+            self.note("examiner", &format!("the examiner's script did not run to its end and is set aside ({path})"));
+            return None;
+        };
+        if tally.failed == 0 {
+            self.exam_note = Some(format!("all {} of the examiner's cases pass", tally.passed));
+            self.note("examiner", &format!("all {} of the examiner's cases pass", tally.passed));
+            return None;
+        }
+        if holds == 0 && tally.mostly_failing() {
+            self.exam = ExamState::None;
+            self.note("examiner", &format!("{} of the examiner's {} cases fail against work whose own checks pass: the script is taken to be wrong and set aside ({path})", tally.failed, tally.total()));
+            return None;
+        }
+        let digest = watches::digest(&output);
+        if shown == Some(digest) || holds >= EXAM_HOLDS {
+            let left = format!("{} of the examiner's {} cases left failing, as the worker ruled", tally.failed, tally.total());
+            self.note("examiner", &left);
+            self.exam_note = Some(left);
+            return None;
+        }
+        if let ExamState::Ready(exam) = &mut self.exam {
+            exam.holds += 1;
+            exam.shown = Some(digest);
+        }
+        self.note("examiner", &format!("finish held: {} of the examiner's {} cases fail", tally.failed, tally.total()));
+        Some(examiner::hold(holds + 1, tally, &path, &cmd, &output))
     }
 
     fn evidence_text(&self) -> String {
@@ -335,6 +509,10 @@ impl Agent {
             return vec![LAST_REPLY_NOTE.to_string()];
         }
         let mut notes = Vec::new();
+        // The limit is a safety net there, not something to work towards.
+        if self.cfg.features.unhurried {
+            return notes;
+        }
         let used = match self.cfg.time_budget {
             Some(budget) if !budget.is_zero() => run_started.elapsed().as_secs_f64() / budget.as_secs_f64(),
             _ => 0.0,
@@ -374,7 +552,7 @@ impl Agent {
             parts.push(env);
             // Known from the start, the budget is something to plan with; heard of at half-time, it
             // is only a reason to hurry.
-            if features.scripts && !self.cfg.interactive {
+            if features.scripts && !features.unhurried && !self.cfg.interactive {
                 let time = self.cfg.time_budget.map(|b| format!(" and {} minutes", (b.as_secs() / 60).max(1))).unwrap_or_default();
                 parts.push(format!(
                     "Budget: {} replies{time}. It counts replies, not tool calls: read everything you need in one reply, and send the edits, their check and `finish` together.",
@@ -424,7 +602,22 @@ impl Agent {
         }
         self.sess.task = task.clone();
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
-        let mut composed = if std::mem::take(&mut self.first_message) { self.opening(&task, cancel).await } else { task };
+        let first = std::mem::take(&mut self.first_message);
+        // The examiner read the task the session began with: a later message is not held to it.
+        if !first {
+            self.exam = ExamState::None;
+            self.exam_note = None;
+        }
+        // A skill the task calls for is switched on before the first word is sent to the model.
+        let beside = self.provider.answers_beside();
+        let routed = if first && features.routing && beside { self.route(&task, cancel).await } else { Vec::new() };
+        let skills: Vec<SkillInfo> = skills.iter().cloned().chain(routed).collect();
+        let skills = skills.as_slice();
+        let mut composed = if first { self.opening(&task, cancel).await } else { task };
+        // Its script is a command nobody approved, so it is for sessions whose commands run unasked.
+        if first && features.examiner && beside && self.cfg.autonomy == Autonomy::Auto {
+            self.start_exam(&composed, cancel);
+        }
         if !files.is_empty() {
             composed = format!("<attached_files>\n{}\n</attached_files>\nThe user attached these files to this message. Read the ones you need.\n\n{composed}", files.join("\n"));
         }
@@ -465,7 +658,7 @@ impl Agent {
             let jobs = self.sess.jobs.any_started();
             let tools_stable = std::mem::replace(&mut self.offered_job_tool, jobs) == jobs;
             let prefix_stable = self.ctx.check_prefix(self.provider.wire_messages(&self.ctx.messages)) && tools_stable;
-            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs), effort: self.effort, max_tokens: self.cfg.max_tokens };
+            let request = ChatRequest { messages: &self.ctx.messages, tools: prompt::tool_schemas(&features, jobs), effort: self.effort, max_tokens: self.cfg.max_tokens, reasoning_cap: if features.long_thought { LONG_THOUGHT_CHARS } else { 0 } };
             let sink = self.sink.clone();
             let mut on_delta = move |d: Delta| match d {
                 Delta::Reasoning(text) => sink.emit(EventKind::Delta { turn, channel: Channel::Reasoning, text }),
@@ -637,19 +830,20 @@ impl Agent {
                 let only_changes = !tools.is_empty() && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
                 let checked = self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
                 let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
-                    Some("Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails.")
-                } else if only_changes && self.sess.watches.items.is_empty() {
+                    Some(if features.unhurried { COVERAGE_NOTE } else { "Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails." })
+                } else if only_changes && self.sess.watches.items.is_empty() && !features.unhurried {
                     Some("Tip: send the check (shell with expect_exit) and `finish` together in your next reply: if the check fails, `finish` is skipped automatically. They can ride along with the edits just the same.")
                 } else {
                     None
                 };
                 if let Some(h) = hint {
-                    self.chain_hints -= 1;
+                    // What passing checks leave open is said once.
+                    self.chain_hints = if features.unhurried { 0 } else { self.chain_hints - 1 };
                     notes.push(h.to_string());
                 }
             }
             self.solo_streak = if calls.len() == 1 && result.finished.is_none() { self.solo_streak + 1 } else { 0 };
-            if features.scripts && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised && !closing {
+            if features.scripts && !features.unhurried && self.solo_hints > 0 && self.solo_streak >= 4 && !result.surprised && !closing {
                 self.solo_hints -= 1;
                 self.solo_streak = 0;
                 notes.push(format!(
@@ -688,6 +882,11 @@ impl Agent {
             }
         };
 
+        // An examiner nobody will wait for any more is not left running.
+        if let ExamState::Pending { stop, .. } = &self.exam {
+            stop.cancel();
+            self.exam = ExamState::None;
+        }
         self.stats.elapsed_ms = elapsed_before + run_started.elapsed().as_millis() as u64;
         self.save_point(false);
         self.sink.emit(EventKind::Stats { stats: self.stats.clone() });
@@ -706,10 +905,36 @@ impl Agent {
     /// Another check is a method like `goal_check`, with what it needs counted in `EndChecks`, and
     /// a call here after the goal's, made only while nothing has sent the run back yet.
     async fn before_ending(&mut self, mut outcome: Outcome, landing: bool, checks: &mut EndChecks, cancel: &CancellationToken) -> Ending {
+        if let Some(message) = self.exam_check(&mut outcome, landing, cancel).await {
+            return Ending::Carry(message);
+        }
         if let Some(message) = self.goal_check(&mut outcome, landing, checks, cancel).await {
             return Ending::Carry(message);
         }
         Ending::End(outcome)
+    }
+
+    /// The examiner's check on a run about to end: its script is run against the work. Returns
+    /// what the worker is told where cases fail that it has not ruled on yet; otherwise says on
+    /// the outcome how the examination went. Only where the message changed something: an answer
+    /// to a question is nobody's work to examine. Not on the last reply: nothing could follow.
+    async fn exam_check(&mut self, outcome: &mut Outcome, landing: bool, cancel: &CancellationToken) -> Option<String> {
+        let ev = &self.sess.evidence;
+        let worked = ev.epoch > ev.message_epoch;
+        if !self.cfg.features.examiner || landing || !worked || self.cfg.autonomy != Autonomy::Auto {
+            return None;
+        }
+        let hold = self.examine(cancel).await;
+        if hold.is_none() && let Some(note) = &self.exam_note {
+            outcome.evidence = format!("{}; {note}", outcome.evidence);
+        }
+        // Work its author took for finished has a gap its own checks did not show: the next
+        // stretch is worth more thought than the last.
+        if hold.is_some() && let EffortPolicy::Ratchet(_) = self.cfg.effort && let Some(next) = self.effort.next() {
+            self.sink.emit(EventKind::Effort { turn: self.turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "the examiner's cases found a gap".into() });
+            self.effort = next;
+        }
+        hold
     }
 
     /// Sends the model back to work with `message`, as the harness speaking.
@@ -952,7 +1177,7 @@ mod tests {
     }
 
     fn requests(r: &Rig) -> Vec<Vec<Message>> {
-        match &r.agent.provider {
+        match &*r.agent.provider {
             Provider::Mock(m) => m.requests.lock().unwrap().clone(),
             _ => unreachable!(),
         }
@@ -978,7 +1203,7 @@ mod tests {
                 )
             }),
         ];
-        r.agent.provider = Provider::Mock(MockProvider::new(turns));
+        r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(turns)));
 
         let out = r.agent.run("Upper-case the second line of n.txt.".into(), &CancellationToken::new()).await;
         assert_eq!(out.status, FinishStatus::Done);
@@ -1312,7 +1537,7 @@ mod tests {
     }
 
     fn shapes(r: &Rig) -> Vec<crate::provider::mock::Shape> {
-        match &r.agent.provider {
+        match &*r.agent.provider {
             Provider::Mock(m) => m.shapes.lock().unwrap().clone(),
             _ => unreachable!(),
         }
@@ -1371,7 +1596,7 @@ mod tests {
         assert!(r.agent.stats.output_tokens > replied, "{} against {replied}", r.agent.stats.output_tokens);
 
         // A goal that is met no longer gates what comes after it.
-        r.agent.provider = Provider::Mock(MockProvider::new(vec![finish()]));
+        r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(vec![finish()])));
         let out = r.agent.run("Is it done?".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, r.agent.stats.goal_checks, requests(&r).len()), (FinishStatus::Done, 2, 1));
     }
@@ -1548,5 +1773,143 @@ mod tests {
         let out = r.agent.run("fix".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, r.agent.stats.goal_checks, requests(&r).len()), (FinishStatus::Done, 2, 4));
         assert!(requests(&r)[1][1].content.contains("not tracked in classic mode") && out.evidence.ends_with("; goal met"), "{}", out.evidence);
+    }
+
+    /// Three cases about n.txt, the third of which wants line two in capitals.
+    const EXAM: &str = "COMMAND: sh {file}\n```sh\np=0; f=0\ncheck() { if eval \"$2\"; then p=$((p+1)); else f=$((f+1)); echo \"case $1 failed\"; fi; }\ncheck line1_alpha 'sed -n 1p n.txt | grep -qx alpha'\ncheck line3_gamma 'sed -n 3p n.txt | grep -qx gamma'\ncheck line2_capitals 'sed -n 2p n.txt | grep -qx BETA'\necho \"EXAM: $p passed, $f failed\"\n[ \"$f\" -eq 0 ]\n```";
+
+    /// A rig whose model also plays the examiner (answering `exam`) and the skill router (`route`).
+    fn prosage_rig(name: &str, with: &[&str], turns: Vec<TurnFn>, exam: &'static str, route: &'static str) -> Rig {
+        let mut cfg = AgentConfig::new("mock");
+        cfg.features = with.iter().fold(Features::presage(), |f, name| f.with(name).unwrap());
+        let mut r = rig(name, cfg, vec![]);
+        let aside: crate::provider::mock::AsideFn = Box::new(move |messages| match messages.first().map(|m| m.content.as_str()) {
+            Some(examiner::SYSTEM) => Some(MockTurn::say(exam)),
+            Some(examiner::ROUTER_SYSTEM) => Some(MockTurn::say(route)),
+            _ => None,
+        });
+        r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(turns).with_aside(aside)));
+        r
+    }
+
+    fn notes(r: &Rig, kind: &str) -> Vec<String> {
+        events(r).into_iter().filter_map(|e| if let EventKind::Note { kind: k, text, .. } = e { (k == kind).then_some(text) } else { None }).collect()
+    }
+
+    /// The requests of the conversation itself, without the ones made beside it.
+    fn turns_sent(r: &Rig) -> Vec<Vec<Message>> {
+        requests(r).into_iter().filter(|m| m[0].content != examiner::SYSTEM && m[0].content != examiner::ROUTER_SYSTEM).collect()
+    }
+
+    #[tokio::test]
+    async fn the_examiner_holds_a_finish_until_its_cases_pass() {
+        let mut r = prosage_rig("agent-exam", &["examiner"], vec![upper("beta", "Beta"), upper("Beta", "BETA")], EXAM, "NONE");
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns, r.agent.stats.side_requests), (FinishStatus::Done, true, 2, 1));
+        assert!(out.evidence.ends_with("; all 3 of the examiner's cases pass"), "{}", out.evidence);
+        assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBETA\ngamma\n");
+
+        // The examiner was shown what the worker was shown at the start, and none of the work.
+        let exam = requests(&r).into_iter().find(|m| m[0].content == examiner::SYSTEM).unwrap();
+        assert!(exam[1].content.contains("<task>\nPut line two of n.txt in capitals.\n</task>") && exam[1].content.ends_with("Write the check script for this task now."), "{}", exam[1].content);
+        // The worker is sent back with the failing case and the rule for settling it.
+        let sent = turns_sent(&r);
+        let held = &sent[1].last().unwrap().content;
+        assert!(held.starts_with("[harness] [examiner] The work is not accepted yet.") && held.contains("2 pass, 1 fail") && held.contains("case line2_capitals failed") && held.contains("Settle each one by the text it cites"), "{held}");
+        assert_eq!(notes(&r, "examiner"), ["finish held: 1 of the examiner's 3 cases fail", "all 3 of the examiner's cases pass"]);
+        // A gap the worker's own checks did not show is a reason to think harder about the rest.
+        assert_eq!(r.agent.effort(), Effort::High);
+        assert!(events(&r).iter().any(|e| matches!(e, EventKind::Effort { from, to, reason, .. } if from == "low" && to == "high" && reason.contains("examiner"))));
+        // The script is kept with the session, outside the workspace.
+        assert!(r.agent.sess.dir.join("exam/exam_checks.sh").exists() && !r.agent.sess.ws.root.join("exam").exists());
+    }
+
+    #[tokio::test]
+    async fn an_answer_in_prose_is_examined_only_after_changes() {
+        let edit = fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "Beta"}))]));
+        let mut cfg = AgentConfig::new("mock");
+        cfg.interactive = true;
+        let turns = vec![edit, fixed(MockTurn::say("Line two is capitalised.")), upper("Beta", "BETA")];
+        let mut r = prosage_rig("agent-exam-prose", &["examiner"], turns, EXAM, "NONE");
+        r.agent.cfg.interactive = cfg.interactive;
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 3));
+        assert!(turns_sent(&r)[2].last().unwrap().content.contains("case line2_capitals failed"));
+
+        // A question answered without touching anything is nobody's work to examine.
+        let mut r = prosage_rig("agent-exam-question", &["examiner"], vec![fixed(MockTurn::say("It has three lines."))], EXAM, "NONE");
+        r.agent.cfg.interactive = true;
+        let out = r.agent.run("How long is n.txt?".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.summary.as_str(), r.agent.stats.turns), (FinishStatus::Yielded, "It has three lines.", 1));
+        assert!(notes(&r, "examiner").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_case_the_worker_rules_wrong_does_not_hold_the_finish_twice() {
+        let mut r = prosage_rig("agent-exam-ruling", &["examiner"], vec![upper("beta", "Beta"), finish()], EXAM, "NONE");
+        let out = r.agent.run("Capitalise line two of n.txt.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2));
+        assert!(out.evidence.ends_with("; 1 of the examiner's 3 cases left failing, as the worker ruled"), "{}", out.evidence);
+        assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBeta\ngamma\n");
+    }
+
+    #[tokio::test]
+    async fn an_examiner_with_nothing_usable_never_stands_in_the_way() {
+        // Nothing a script could check; a script that does not run to its end; one that fails nearly every case.
+        let broken = "COMMAND: sh {file}\n```sh\necho 'cannot import the module'; exit 2\n```";
+        let hostile = "COMMAND: sh {file}\n```sh\necho 'EXAM: 1 passed, 4 failed'; exit 1\n```";
+        for (name, exam, said) in [("none", "NONE", "wrote no script"), ("broken", broken, "did not run to its end"), ("hostile", hostile, "taken to be wrong")] {
+            let mut r = prosage_rig(&format!("agent-exam-{name}"), &["examiner"], vec![upper("beta", "BETA")], exam, "NONE");
+            let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+            assert_eq!((out.status, out.verified, r.agent.stats.turns, out.evidence.as_str()), (FinishStatus::Done, true, 1, "verified by `grep -qx BETA n.txt`"), "{name}");
+            assert!(notes(&r, "examiner").iter().any(|n| n.contains(said)), "{name}: {:?}", notes(&r, "examiner"));
+        }
+        // Without the mechanism nobody is asked.
+        let mut r = prosage_rig("agent-exam-off", &[], vec![upper("beta", "BETA")], EXAM, "NONE");
+        r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((requests(&r).len(), r.agent.stats.side_requests), (1, 0));
+        // Nor where every step waits for the user's word: the script would be a command run unasked.
+        let mut r = prosage_rig("agent-exam-ask", &["examiner"], vec![finish()], EXAM, "NONE");
+        r.agent.retune(Retune { autonomy: Some(Autonomy::Ask), ..Default::default() });
+        r.agent.run("How long is n.txt?".into(), &CancellationToken::new()).await;
+        assert_eq!((requests(&r).len(), r.agent.stats.side_requests), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn a_skill_that_fits_the_task_is_switched_on_unasked() {
+        let skill = |name: &str, about: &str| skills::parse(name, &format!("---\nname: {name}\ntitle: The {name} playbook\ndescription: {about}\n---\nBody of {name}."), skills::SkillSource::Builtin).unwrap();
+        let mut r = prosage_rig("agent-route", &["routing"], vec![upper("beta", "BETA")], "NONE", "ui");
+        r.agent.cfg.routable = vec![skill("ui", "Build or polish a UI."), skill("debug", "Find the cause of a bug.")];
+        r.agent.run("Make the page look consistent.".into(), &CancellationToken::new()).await;
+        let asked = requests(&r).into_iter().find(|m| m[0].content == examiner::ROUTER_SYSTEM).unwrap();
+        assert!(asked[1].content.contains("- ui: Build or polish a UI.\n- debug: Find the cause of a bug.") && asked[1].content.ends_with("Task:\nMake the page look consistent."), "{}", asked[1].content);
+        let first = &turns_sent(&r)[0][1].content;
+        assert!(first.contains("Body of ui.") && !first.contains("Body of debug."), "{first}");
+        assert_eq!(notes(&r, "routing"), ["skill switched on for this task: ui"]);
+
+        // An answer that names none switches none on, and so does a session with nothing to choose from.
+        let mut r = prosage_rig("agent-route-none", &["routing"], vec![upper("beta", "BETA")], "NONE", "NONE");
+        r.agent.cfg.routable = vec![skill("ui", "Build or polish a UI.")];
+        r.agent.run("Fix the off-by-one in pager.".into(), &CancellationToken::new()).await;
+        assert!(!turns_sent(&r)[0][1].content.contains("Body of ui.") && notes(&r, "routing").is_empty());
+        let mut r = prosage_rig("agent-route-empty", &["routing"], vec![upper("beta", "BETA")], "NONE", "ui");
+        r.agent.run("Fix it.".into(), &CancellationToken::new()).await;
+        assert_eq!(requests(&r).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unhurried_run_hears_of_no_budget_and_of_what_passing_checks_leave_open() {
+        let edit_and_check = || fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("shell", json!({"cmd": "grep -qx BETA n.txt", "expect_exit": "0"}))]));
+        let mut r = prosage_rig("agent-unhurried", &["unhurried"], vec![edit_and_check(), finish()], "NONE", "NONE");
+        r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        let sent = turns_sent(&r);
+        assert!(!sent[0][1].content.contains("Budget:"), "{}", sent[0][1].content);
+        let after_check = &sent[1].last().unwrap().content;
+        assert!(after_check.contains("The checks pass. They show only what they exercise") && !after_check.contains("`finish` is accepted now"), "{after_check}");
+
+        let mut r = prosage_rig("agent-hurried", &[], vec![edit_and_check(), finish()], "NONE", "NONE");
+        r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        let sent = turns_sent(&r);
+        assert!(sent[0][1].content.contains("Budget: 80 replies") && sent[1].last().unwrap().content.contains("`finish` is accepted now"));
     }
 }

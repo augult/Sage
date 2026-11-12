@@ -15,6 +15,7 @@ pub mod demo;
 pub mod diff;
 pub mod economy;
 pub mod events;
+pub mod examiner;
 pub mod goal;
 pub mod guard;
 pub mod harness;

@@ -6,7 +6,7 @@ import { duration, k } from '../format.js';
 import * as store from '../store.js';
 import { attachments } from './attach.js';
 import { barButton, chatBar, fitBox, onSendKey, sessionState } from './common.js';
-import { AUTONOMIES, effortOptions, modelPicker, settingPicker } from './controls.js';
+import { AUTONOMIES, effortOptions, modelPicker, plainMode, settingPicker } from './controls.js';
 import { mountPanel } from './panel.js';
 import { openOutput } from './output.js';
 import { skillsButton } from './skills.js';
@@ -165,8 +165,8 @@ export function mountSession(main, side, app, meta) {
   function renderPickers(model) {
     const { meta } = model;
     const locked = activeSkills(model);
-    // The classic baseline takes no skills.
-    const offered = meta.mode === 'classic' ? [] : skillList;
+    // The conventional loop takes no skills.
+    const offered = plainMode(meta.mode) ? [] : skillList;
     picked = picked.filter((name) => !locked.includes(name));
     const signature = () => [meta.provider, meta.model, meta.effort, meta.autonomy, meta.mode, meta.simulated, offered.length, ...locked, '|', ...picked, '|', ...Object.values(wanted)].join(' ');
     drawNote();

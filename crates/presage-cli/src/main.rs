@@ -29,7 +29,10 @@ OPTIONS for run
   -p, --provider <id>      logfare | deepseek | openrouter | … (`presage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
-      --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
+      --mode <name>        presage (default): few requests, at a little cost to the result
+                           default: the conventional loop of other harnesses, nothing of Presage's
+                           prosage: for the result alone, with longer thinking, an examiner beside
+                           the run and skills switched on unasked; costs more requests
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
       --with <name>        switch on a mechanism that is off unless asked for (repeatable; none at present)
       --goal <condition>   keep working until an independent check agrees the condition holds; with
@@ -135,8 +138,9 @@ impl Printer {
         let preds = if s.predictions > 0 { format!(" · predictions {}/{} held", s.predictions_held, s.predictions) } else { String::new() };
         let skipped = if s.skipped > 0 { format!(" ({} skipped)", s.skipped) } else { String::new() };
         let checks = if s.goal_checks > 0 { format!(" · goal checks {}", s.goal_checks) } else { String::new() };
+        let beside = if s.side_requests > 0 { format!(" · requests beside the conversation {}", s.side_requests) } else { String::new() };
         [
-            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}", s.turns, s.steps, s.surprises),
+            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}{beside}", s.turns, s.steps, s.surprises),
             format!("tokens: in {} ({} cached) · out {} ({} thinking) · {cost}", k(s.prompt_tokens), pct(s.cached_tokens, s.prompt_tokens), k(s.output_tokens), k(s.reasoning_tokens)),
             format!(
                 "time {} (model {}, tools {}) · output kept out of context {} · repairs {} · retries {} · cache misses {}",
@@ -259,7 +263,8 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
             "-p" | "--provider" => req.provider = Some(value(a)?),
             "-m" | "--model" => req.model = Some(value(a)?),
             "-e" | "--effort" => req.effort = Some(value(a)?),
-            "--classic" => req.mode = Some("classic".into()),
+            "--mode" => req.mode = Some(value(a)?),
+            "--classic" => req.mode = Some("default".into()),
             "--without" => req.without.push(value(a)?),
             "--with" => req.with.push(value(a)?),
             "--goal" => req.goal = Some(value(a)?),

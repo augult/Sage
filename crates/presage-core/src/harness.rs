@@ -16,7 +16,7 @@ use crate::provider::openai::OpenAiProvider;
 use crate::resume::{self, SessionLock, Setup};
 use crate::script::{Approvals, Autonomy};
 use crate::skills::{self, SkillInfo};
-use crate::state::{Features, Session};
+use crate::state::{Features, Mode, Session};
 use crate::util::{civil_date, home_dir, now_ms, one_line, rand_hex};
 use crate::workspace::Workspace;
 use serde::{Deserialize, Serialize};
@@ -333,10 +333,13 @@ fn session_id() -> String {
     format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{}", t / 3600, (t % 3600) / 60, t % 60, rand_hex(2))
 }
 
-/// The mechanisms a request switches on, and whether it asks for the classic baseline.
-fn features_of(req: &StartRequest) -> Result<(Features, bool), String> {
-    let classic = matches!(req.mode.as_deref(), Some("classic"));
-    let mut features = if classic { Features::classic() } else { Features::presage() };
+/// The mode a request asks for and the mechanisms it switches on.
+fn features_of(req: &StartRequest) -> Result<(Features, Mode), String> {
+    let mode = match req.mode.as_deref() {
+        Some(name) => Mode::parse(name).ok_or_else(|| format!("unknown mode {name:?}; use {}", Mode::NAMES.join(", ")))?,
+        None => Mode::default(),
+    };
+    let mut features = mode.features();
     let unknown = |name: &String| format!("unknown mechanism {name:?}; known: {}", Features::NAMES.join(", "));
     for name in &req.with {
         features = features.with(name).ok_or_else(|| unknown(name))?;
@@ -344,7 +347,7 @@ fn features_of(req: &StartRequest) -> Result<(Features, bool), String> {
     for name in &req.without {
         features = features.without(name).ok_or_else(|| unknown(name))?;
     }
-    Ok((features, classic))
+    Ok((features, mode))
 }
 
 /// What the first message of a session comes to.
@@ -593,8 +596,8 @@ impl Harness {
     /// The system prompt a session started with `req` would be given.
     pub fn system_prompt(&self, req: &StartRequest) -> Result<String, String> {
         let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
-        let (features, classic) = features_of(req)?;
-        self.compose_prompt(req, &ws.root, &features, classic).map(|(system, _)| system)
+        let (features, mode) = features_of(req)?;
+        self.compose_prompt(req, &ws.root, &features, mode == Mode::Plain).map(|(system, _)| system)
     }
 
     /// The system prompt and the skills of a session. The classic baseline has only its own prompt.
@@ -653,16 +656,16 @@ impl Harness {
 
     fn launch(&self, req: StartRequest, provider: Provider, provider_id: &str, model: &str, effort: Option<String>) -> Result<SessionMeta, String> {
         let ws = Workspace::new(Path::new(req.cwd.trim())).map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
-        let (features, classic) = features_of(&req)?;
+        let (features, mode) = features_of(&req)?;
         // Read once, here: the system prompt is the cached prefix of every request of the session.
-        let (system, picked) = self.compose_prompt(&req, &ws.root, &features, classic)?;
+        let (system, picked) = self.compose_prompt(&req, &ws.root, &features, mode == Mode::Plain)?;
         let skill_names: Vec<String> = picked.into_iter().map(|s| s.name).collect();
-        let mode = if classic {
-            "classic".to_string()
+        let mode_label = if mode == Mode::Plain {
+            mode.as_str().to_string()
         } else {
             let with = (!req.with.is_empty()).then(|| format!(" with {}", req.with.join(", ")));
             let without = (!req.without.is_empty()).then(|| format!(" without {}", req.without.join(", ")));
-            format!("presage{}{}", with.unwrap_or_default(), without.unwrap_or_default())
+            format!("{}{}{}", mode.as_str(), with.unwrap_or_default(), without.unwrap_or_default())
         };
         let effort = match effort.as_deref() {
             Some(e) => EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?,
@@ -693,6 +696,9 @@ impl Harness {
             cfg.max_turns = n.max(1);
         }
         cfg.time_budget = req.time_budget_secs.filter(|s| *s > 0).map(Duration::from_secs);
+        if features.routing {
+            cfg.routable = skills::list(&self.inner.data_dir, Some(Path::new(&cwd))).into_iter().filter(|s| !skill_names.contains(&s.name)).collect();
+        }
 
         let now = now_ms();
         let meta = SessionMeta {
@@ -701,7 +707,7 @@ impl Harness {
             cwd: cwd.clone(),
             provider: provider_id.to_string(),
             model: model.to_string(),
-            mode,
+            mode: mode_label,
             effort: effort.label(),
             simulated,
             created: now,
@@ -736,7 +742,7 @@ impl Harness {
 
         let sink: Arc<dyn Sink> = live.clone();
         let mut agent = Agent::new(provider, sess, cfg, sink, approvals);
-        agent.keep_snapshots(live.dir.join(resume::SNAPSHOT), Setup { classic, with: req.with.clone(), without: req.without.clone() });
+        agent.keep_snapshots(live.dir.join(resume::SNAPSHOT), Setup { mode: mode.as_str().to_string(), with: req.with.clone(), without: req.without.clone() });
         spawn_worker(live.clone(), agent, inbox);
         let retune = Retune { goal: opening.goal, ..Default::default() };
         live.input.send(Input::Message { text: opening.task, shown: opening.shown, skills: Vec::new(), retune, files }).map_err(|_| "the session ended before it started".to_string())?;
@@ -805,7 +811,7 @@ impl Harness {
                 return Err("the session is still working; stop it first or wait".into());
             }
             // The classic baseline has no skills.
-            added.retain(|s| meta.mode != "classic" && !meta.skills.contains(&s.name));
+            added.retain(|s| Mode::parse(&meta.mode) != Some(Mode::Plain) && !meta.skills.contains(&s.name));
             meta.skills.extend(added.iter().map(|s| s.name.clone()));
             if let Some((_, provider, model)) = &retune.provider {
                 meta.provider = provider.clone();
@@ -1058,11 +1064,11 @@ impl Harness {
         };
 
         let ws = Workspace::new(Path::new(&meta.cwd)).map_err(|e| cannot(format!("cannot use {:?} as a workspace: {e}", meta.cwd)))?;
-        let (features, classic) = features_of(&StartRequest { mode: snapshot.setup.classic.then(|| "classic".to_string()), with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone(), ..Default::default() }).map_err(cannot)?;
+        let (features, mode) = features_of(&StartRequest { mode: Some(snapshot.setup.mode.clone()), with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone(), ..Default::default() }).map_err(cannot)?;
         let sess = Session::new(ws, dir.clone(), features, prices_for(&meta.model)).map_err(|e| cannot(format!("could not open the session directory: {e}")))?;
         let mut cfg = AgentConfig::new(&meta.model);
         cfg.features = features;
-        let setup = Setup { classic, with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone() };
+        let setup = Setup { mode: mode.as_str().to_string(), with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone() };
         let (cut_off, stats) = (snapshot.in_run, snapshot.stats.clone());
 
         // The log as it was: what a subscriber is shown first, and where the numbering goes on from.
@@ -1340,6 +1346,37 @@ mod tests {
         let with_message: Vec<(String, Vec<String>)> = events.iter().filter_map(|e| if let EventKind::User { text, skills, .. } = &e.kind { Some((text.clone(), skills.clone())) } else { None }).collect();
         assert_eq!(with_message, [("hello".to_string(), vec![]), ("now the UI".to_string(), vec!["ui".to_string()]), ("again".to_string(), vec![])]);
         assert_eq!(Harness::at(h.inner.data_dir.clone()).list()[0].skills, ["security", "house", "ui"]);
+    }
+
+    #[tokio::test]
+    async fn a_session_runs_in_one_of_three_modes() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("modes");
+        let ws = h.inner.data_dir.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let req = |mode: Option<&str>| StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "hello".into(), mode: mode.map(str::to_string), interactive: true, ..Default::default() };
+        // What each is called in the session's record. No mode chooses the effort for the user.
+        for (asked, mode, effort) in [(None, "presage", "ratchet-low"), (Some("presage"), "presage", "ratchet-low"), (Some("default"), "default", "ratchet-low"), (Some("classic"), "default", "ratchet-low"), (Some("Prosage"), "prosage", "ratchet-low")] {
+            let meta = h.start_scripted(req(asked), MockProvider::scripted(vec![MockTurn::say("ok")])).unwrap();
+            assert_eq!((meta.mode.as_str(), meta.effort.as_str()), (mode, effort), "{asked:?}");
+            until_idle(&h, &meta.id).await;
+        }
+        assert_eq!(h.start_scripted(req(Some("turbo")), MockProvider::scripted(vec![])).unwrap_err(), "unknown mode \"turbo\"; use presage, default, prosage");
+        // An effort that was chosen stands, and Prosage can be run without a part of itself.
+        let meta = h.start_scripted(StartRequest { effort: Some("low".into()), without: vec!["examiner".into()], ..req(Some("prosage")) }, MockProvider::scripted(vec![MockTurn::say("ok")])).unwrap();
+        assert_eq!((meta.mode.as_str(), meta.effort.as_str()), ("prosage without examiner", "low"));
+        // What is stored for a restart names the mode, so the session comes back as what it was.
+        until_idle(&h, &meta.id).await;
+        let setup = resume::read(&session_dir(&h, &meta.id)).unwrap().setup;
+        assert_eq!((setup.mode.as_str(), setup.without.as_slice()), ("prosage", &["examiner".to_string()][..]));
+        let back = features_of(&StartRequest { mode: Some(setup.mode), without: setup.without, ..Default::default() }).unwrap();
+        assert_eq!(back, (Features::prosage().without("examiner").unwrap(), Mode::Prosage));
+
+        // Prosage is Presage and what Presage leaves out to stay cheap; the conventional loop has none of either.
+        let (pro, plain) = (Mode::Prosage.features(), Mode::Plain.features());
+        assert!(pro.long_thought && pro.unhurried && pro.examiner && pro.routing && pro.scripts && pro.gate);
+        assert!(!plain.scripts && !plain.examiner && !plain.routing && Mode::Presage.features() == Features::presage());
+        assert_eq!(Features::OPTIONAL.iter().fold(Features::presage(), |f, name| f.with(name).unwrap()), pro);
     }
 
     #[tokio::test]

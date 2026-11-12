@@ -80,6 +80,9 @@ struct Scripted {
     /// Skills the session starts with, by name.
     #[serde(default)]
     skills: Vec<String>,
+    /// `presage` (when left out), `default` or `prosage`.
+    #[serde(default)]
+    mode: Option<String>,
     /// Milliseconds between streamed chunks of a reply.
     #[serde(default)]
     delay_ms: u64,
@@ -160,7 +163,7 @@ async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) ->
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
     let provider = stand_in(script.turns, script.delay_ms);
-    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, interactive: true, ..Default::default() };
+    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, mode: script.mode, interactive: true, ..Default::default() };
     harness.start_scripted(req, provider)
 }
 
