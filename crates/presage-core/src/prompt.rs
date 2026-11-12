@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// The built-in Presage prompt, as a template. `{chain}`, `{watch}`, `{finish}` and `{review}` are
-/// filled in according to whether test runs are watched automatically and `finish` is reviewed.
+/// The built-in Presage prompt, as a template. `{chain}`, `{watch}` and `{finish}` are filled in
+/// according to whether test runs are watched automatically; `{review}` is the same everywhere.
 const SYSTEM_PRESAGE: &str = include_str!("../prompts/system.md");
 
 /// A project's instruction file is cut to this many characters.
@@ -28,7 +28,7 @@ pub fn default_template() -> &'static str {
 }
 
 /// A template that lacks a placeholder simply gets nothing put in for it.
-fn fill(template: &str, auto_watch: bool, preflight: bool, review: bool) -> String {
+fn fill(template: &str, auto_watch: bool, preflight: bool) -> String {
     let (chain, watch, gate) = if auto_watch {
         (
             "read + read + search + shell (run the tests); then edit + edit + shell (try what the tests do not cover)",
@@ -46,26 +46,16 @@ fn fill(template: &str, auto_watch: bool, preflight: bool, review: bool) -> Stri
             "Put it right after a check, in the same reply.",
         )
     };
-    // Where the harness hands the diff back with the first `finish`, a reply spent on fetching it
-    // beforehand is a reply wasted.
-    let (finish, review) = if review {
-        (
-            format!("{gate} The first `finish` after a change comes back once, with your changes and a review to carry out."),
-            "Before `finish`, return to your list from step 1 and tick off every item against what you actually did. Do not spend a reply on `git diff` first: the first `finish` after a change comes back once with what you changed. Read that as a reviewer would, looking for a missed part of the request, a broken neighbour, leftover debugging or scratch files, a violated constraint.",
-        )
-    } else {
-        (
-            gate.to_string(),
-            "Before `finish`, return to your list from step 1 and tick off every item against what you actually did. Re-read your changes once (`git diff`, or the edited regions) looking for a missed part of the request, a broken neighbour, leftover debugging, a violated constraint.",
-        )
-    };
-    template.trim().replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", &finish).replace("{review}", review)
+    // The model's own look over its work before `finish`. The same for every session; still a
+    // placeholder, because the templates users keep have it.
+    let review = "Before `finish`, return to your list from step 1 and tick off every item against what you actually did. Re-read your changes once (`git diff`, or the edited regions) looking for a missed part of the request, a broken neighbour, leftover debugging, a violated constraint.";
+    template.trim().replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", gate).replace("{review}", review)
 }
 
 /// A Presage template with its placeholders filled in for the mechanisms that are switched on.
 pub fn render(template: &str, features: &Features) -> String {
     let auto_watch = features.watches && features.auto_watch;
-    fill(template, auto_watch, features.preflight, features.review)
+    fill(template, auto_watch, features.preflight)
 }
 
 /// The project's instruction file, if it has one: its name and its text, cut to `MAX_PROJECT_CHARS`.
@@ -111,10 +101,9 @@ pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: 
     out
 }
 
-/// The built-in prompt for each combination of mechanisms it describes, indexed by
-/// `watching * 2 + review`, where `watching` is 0 for watches the model registers itself, 1 for
-/// automatic ones and 2 for automatic ones with a preflight run.
-static PRESAGE: LazyLock<[String; 6]> = LazyLock::new(|| std::array::from_fn(|i| fill(default_template(), i / 2 > 0, i / 2 == 2, i % 2 == 1)));
+/// The built-in prompt for each way of watching it describes: 0 for watches the model registers
+/// itself, 1 for automatic ones and 2 for automatic ones with a preflight run.
+static PRESAGE: LazyLock<[String; 3]> = LazyLock::new(|| std::array::from_fn(|i| fill(default_template(), i > 0, i == 2)));
 
 pub const SYSTEM_CLASSIC: &str = "\
 You are a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
@@ -283,7 +272,7 @@ pub fn system_prompt(features: &Features) -> &'static str {
         (true, false) => 1,
         (true, true) => 2,
     };
-    PRESAGE[watching * 2 + usize::from(features.review)].as_str()
+    PRESAGE[watching].as_str()
 }
 
 /// The tool list for a request. `watch` is offered only where the model has to register its checks
@@ -353,11 +342,8 @@ mod tests {
         for prompt in [auto, promoted, manual] {
             assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
         }
-        // The review is described only where `finish` is answered with one, which a run has to ask for.
-        let reviewed = system_prompt(&Features::presage().with("review").unwrap());
-        assert!(reviewed.contains("comes back once, with your changes and a review") && reviewed.contains("Do not spend a reply on `git diff` first") && !reviewed.contains('{'));
+        // Looking over its own changes is the model's step: nothing comes back from `finish` to do it for it.
         assert!(!auto.contains("comes back once") && auto.contains("Re-read your changes once (`git diff`"));
-        assert_eq!(system_prompt(&Features::presage().without("review").unwrap()), auto);
         assert_eq!(system_prompt(&Features::presage().without("scripts").unwrap()), SYSTEM_CLASSIC);
     }
 
@@ -368,7 +354,7 @@ mod tests {
         for placeholder in ["{chain}", "{watch}", "{finish}", "{review}"] {
             assert!(default_template().contains(placeholder), "the built-in template lost {placeholder}");
         }
-        for features in [auto, manual, Features::presage().without("preflight").unwrap(), auto.without("review").unwrap(), manual.without("review").unwrap()] {
+        for features in [auto, manual, Features::presage().without("preflight").unwrap()] {
             assert_eq!(render(default_template(), &features), system_prompt(&features));
         }
         assert_eq!(render("Be terse.\n", &auto), "Be terse.");

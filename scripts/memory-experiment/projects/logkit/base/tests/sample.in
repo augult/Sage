@@ -1,8 +1,0 @@
-2024-05-01T11:58:10Z INFO api: started on port 8080
-2024-05-01T11:59:02Z DEBUG db: pool size 4
-2024-05-01T12:00:03Z WARN api: slow request /orders 2.4s
-2024-05-01T12:00:41Z ERROR db: query timed out
-2024-05-01T12:01:15Z INFO auth: login ok user=ana
-2024-05-01T12:02:00Z ERROR api: upstream returned 502
-2024-05-01T12:03:30Z FATAL db: disk full
-2024-05-01T12:04:00Z INFO api: shutting down
