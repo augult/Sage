@@ -8,7 +8,7 @@ import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { attachments } from './attach.js';
-import { chatBar, fitBox, onSendKey, roundButton } from './common.js';
+import { barButton, chatBar, fitBox, onSendKey } from './common.js';
 import { AUTONOMIES, effortOptions, modelOptions, modelPicker, settingPicker } from './controls.js';
 import { skillsButton } from './skills.js';
 
@@ -150,7 +150,7 @@ export function mountNewSession(main, app) {
   });
 
   // With no key there is nothing to start: adding one is the view's one primary action.
-  const startButton = roundButton('start', 'Start', icon('send', 16), start, keyed.length > 0);
+  const startButton = barButton('start', 'Start', icon('send', 16), start, keyed.length > 0 ? 'primary' : 'bare');
   const files = attachments({ start: () => draft.cwd, value: draft.files, onChange: (paths) => (draft.files = paths) });
 
   function start() {

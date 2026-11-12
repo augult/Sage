@@ -72,11 +72,11 @@ body {
     100% 100%,
     0 100%,
     0 0,
-    var(--side-w) var(--gap),
-    var(--side-w) var(--sheet-bottom),
+    var(--left-w) var(--gap),
+    var(--left-w) var(--sheet-bottom),
     var(--sheet-right) var(--sheet-bottom),
     var(--sheet-right) var(--gap),
-    var(--side-w) var(--gap)
+    var(--left-w) var(--gap)
   );
 }
 
@@ -96,15 +96,20 @@ body {
   box-shadow: var(--sheet-lift);
 }
 
-/* On the bare glass the secondary inks step up, so they hold their contrast over any picture. */
-:root[data-scheme="light"] :is(#sidebar, #inspector) {
+/* On the bare glass the secondary inks step up, so they hold their contrast over any picture. So
+   do the buttons that lie over a pane's strip, while the pane is there. */
+:root[data-scheme="light"] :is(#sidebar, #inspector),
+:root[data-scheme="light"]:not([data-sidebar="off"]) #toggle-sidebar,
+:root[data-scheme="light"]:not([data-inspector="off"]) :is(#toggle-inspector, .window-controls) {
   --soft: #2a2c30;
   --muted: #43464b;
   --faint: #5f6368;
   --line: rgba(17, 18, 20, 0.12);
 }
 
-:root[data-scheme="dark"] :is(#sidebar, #inspector) {
+:root[data-scheme="dark"] :is(#sidebar, #inspector),
+:root[data-scheme="dark"]:not([data-sidebar="off"]) #toggle-sidebar,
+:root[data-scheme="dark"]:not([data-inspector="off"]) :is(#toggle-inspector, .window-controls) {
   --soft: #dcdde0;
   --muted: #c4c6ca;
   --faint: #a2a5aa;

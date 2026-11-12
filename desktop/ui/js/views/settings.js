@@ -22,6 +22,8 @@ const notices = new Map();
 const drafts = new Map();
 // Keys typed and not handed to the engine yet, by provider: `{ name, value }`.
 const typedKeys = new Map();
+// The provider of the user's own being added: what its form holds, or null while the form is shut.
+let adding = null;
 // The skill whose file is open: its name, NEW, or null.
 let openSkill = null;
 const NEW = '+new';
@@ -72,12 +74,19 @@ export function mountSettings(main, app) {
   // Only these two follow the engine state. The editors below them keep what is being typed.
   function draw() {
     const { state } = app;
+    // Opens the form that adds a provider, or shuts it and lets go of what it held.
+    const toggleForm = () => {
+      adding = adding ? null : { name: '', url: '', models: '', key: '' };
+      draw();
+      live.querySelector('#new-provider-name')?.focus();
+    };
     live.replaceChildren(
       h(
         'section.panel',
         { id: 'settings-keys' },
-        h('h2.section-title', 'API keys'),
+        h('div.section-head', h('h2.section-title', 'API keys'), h('button.btn.quiet', { id: 'add-provider', type: 'button', onclick: toggleForm }, icon('plus', 12), 'Add provider')),
         state.providers.map((provider) => providerRow(provider, refresh)),
+        adding && providerForm(refresh, toggleForm),
       ),
       defaults(state, refresh),
     );
@@ -159,10 +168,11 @@ function messagesSection(app) {
 
 /**
  * A provider and its key, on one line. One that has a key is marked and in full ink; one that has
- * none is greyed. The key is kept when its field is left or Enter is pressed.
+ * none is greyed. The key is kept when its field is left or Enter is pressed. One of the user's own
+ * asks for no key, and in place of its key's removal has its own, on a second click.
  */
 function providerRow(provider, refresh) {
-  const custom = provider.id === 'custom';
+  const { custom } = provider;
   const keyed = provider.has_key;
   let storing = false;
 
@@ -175,6 +185,16 @@ function providerRow(provider, refresh) {
     try {
       await api.setKey(provider.id, key);
       if (!key.trim()) notices.set(provider.id, { removed: true });
+    } catch (problem) {
+      notices.set(provider.id, { error: String(problem) });
+    }
+    await refresh();
+  }
+
+  async function drop() {
+    typedKeys.delete(provider.id);
+    try {
+      await api.removeProvider(provider.id);
     } catch (problem) {
       notices.set(provider.id, { error: String(problem) });
     }
@@ -194,7 +214,25 @@ function providerRow(provider, refresh) {
       if (event.key === 'Enter' && input.value.trim()) store(input.value);
     },
   });
-  const remove = h('button.btn.danger.remove-key', { type: 'button', hidden: !keyed, onclick: () => store('') }, 'Remove');
+  let armed = false;
+  const remove = custom
+    ? h(
+        'button.btn.danger.remove-provider',
+        {
+          type: 'button',
+          onblur: () => {
+            armed = false;
+            remove.textContent = 'Delete';
+          },
+          onclick: () => {
+            if (armed) return track(drop());
+            armed = true;
+            remove.textContent = 'Confirm';
+          },
+        },
+        'Delete',
+      )
+    : h('button.btn.danger.remove-key', { type: 'button', hidden: !keyed, onclick: () => store('') }, 'Remove');
 
   const notice = notices.get(provider.id);
   notices.delete(provider.id);
@@ -203,16 +241,54 @@ function providerRow(provider, refresh) {
     ? h('div.form-error', { role: 'alert' }, notice.error)
     : notice?.removed && keyed && !custom && hint({ role: 'status' }, 'Removed from Presage. A key from your system environment is still in use.');
 
-  const mark = keyed ? 'Key set' : 'No key';
+  const mark = custom ? 'Your own' : keyed ? 'Key set' : 'No key';
   return h(
     `div.provider${keyed ? '' : '.is-unset'}`,
     { dataset: { provider: provider.id } },
     h('span.provider-mark', { title: mark, role: 'img', 'aria-label': mark }, keyed && icon('check', 14)),
-    h('span.provider-name', { title: provider.note || null }, provider.name),
+    h('span.provider-who', { title: provider.note || null }, h('span.provider-name', provider.name), provider.serves ? h('span.provider-serves', provider.serves) : null),
     h('span.provider-url', { title: provider.base_url }, provider.base_url),
     input,
     remove,
     said,
+  );
+}
+
+/**
+ * The form that adds a provider of the user's own: any address that answers as OpenAI's chat
+ * completions do. What is typed stays in `adding` across a redraw, until it is added or cancelled.
+ */
+function providerForm(refresh, cancel) {
+  const error = h('div.form-error', { role: 'alert', hidden: true });
+  const box = (key, label, placeholder, type = 'text') => {
+    const input = h('input.input', { id: `new-provider-${key}`, type, autocomplete: 'off', spellcheck: 'false', value: adding[key], placeholder, 'aria-label': label, oninput: () => (adding[key] = input.value) });
+    return input;
+  };
+  const add = h('button.btn.primary', { id: 'new-provider-add', type: 'submit' }, 'Add');
+
+  async function submit(event) {
+    event.preventDefault();
+    add.disabled = true;
+    error.hidden = true;
+    try {
+      await track(api.addProvider({ name: adding.name, baseUrl: adding.url, models: adding.models.split(/[,\n]/), key: adding.key }));
+      adding = null;
+      await refresh();
+    } catch (problem) {
+      error.textContent = String(problem);
+      error.hidden = false;
+      add.disabled = false;
+    }
+  }
+
+  return h(
+    'form.provider-new',
+    { id: 'new-provider', onsubmit: submit },
+    field('Name', box('name', 'Provider name', null)),
+    field('Address', box('url', 'Provider address', 'https://…/v1')),
+    field('Models', box('models', 'Models', 'model-a, model-b')),
+    field('API key', box('key', 'API key', 'Optional', 'password'), error),
+    h('div.editor-actions', h('button.btn.quiet', { type: 'button', onclick: cancel }, 'Cancel'), add),
   );
 }
 

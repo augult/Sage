@@ -5,6 +5,7 @@ import { startBackdrop } from './backdrop.js';
 import { mountWindowControls } from './chrome.js';
 import { h, icon } from './dom.js';
 import { applyHooks } from './hooks.js';
+import { mountPaneToggles } from './panes.js';
 import * as store from './store.js';
 import { settleUnsaved } from './unsaved.js';
 import { mountNewSession } from './views/new-session.js';
@@ -20,6 +21,7 @@ const settingsLink = document.getElementById('open-settings');
 
 // The title bar and the glass belong to the window, not to the engine: neither waits for it.
 mountWindowControls();
+mountPaneToggles();
 startBackdrop();
 newLink.prepend(icon('plus'));
 settingsLink.prepend(icon('sliders'));

@@ -5,7 +5,7 @@ import { h, icon, spinner } from '../dom.js';
 import { duration, k } from '../format.js';
 import * as store from '../store.js';
 import { attachments } from './attach.js';
-import { chatBar, fitBox, onSendKey, roundButton, sessionState } from './common.js';
+import { barButton, chatBar, fitBox, onSendKey, sessionState } from './common.js';
 import { AUTONOMIES, effortOptions, modelPicker, settingPicker } from './controls.js';
 import { mountPanel } from './panel.js';
 import { openOutput } from './output.js';
@@ -82,9 +82,9 @@ export function mountSession(main, side, app, meta) {
     oninput: () => fitBox(box),
     onkeydown: (event) => onSendKey(event, send),
   });
-  const sendButton = roundButton('send-followup', 'Send', icon('send', 16), send);
+  const sendButton = barButton('send-followup', 'Send', icon('send', 16), send);
   // While a run is in progress the same place stops it.
-  const stopButton = roundButton('stop-session', 'Stop', icon('stop', 12), requestStop);
+  const stopButton = barButton('stop-session', 'Stop', icon('stop', 12), requestStop, 'soft');
   stopButton.hidden = true;
   const files = attachments({ start: () => entry.meta.cwd });
   const sendError = h('div.form-error', { role: 'alert', hidden: true });

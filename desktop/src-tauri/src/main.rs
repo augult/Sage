@@ -156,6 +156,17 @@ async fn set_key(harness: State<'_, Harness>, provider: String, key: String) -> 
     harness.set_key(&provider, &key)
 }
 
+/// Adds an OpenAI-compatible endpoint of the user's own and answers with the id it goes by.
+#[tauri::command]
+async fn add_provider(harness: State<'_, Harness>, name: String, base_url: String, models: Vec<String>, key: Option<String>) -> Reply<String> {
+    harness.add_provider(&name, &base_url, &models, key.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
+async fn remove_provider(harness: State<'_, Harness>, id: String) -> Reply<()> {
+    harness.remove_provider(&id)
+}
+
 #[tauri::command]
 async fn set_defaults(harness: State<'_, Harness>, provider: Option<String>, model: Option<String>, effort: Option<String>) -> Reply<()> {
     harness.set_defaults(provider, model, effort)
@@ -406,6 +417,8 @@ fn main() {
             ui_hooks,
             app_state,
             set_key,
+            add_provider,
+            remove_provider,
             set_defaults,
             set_auto_retry,
             list_sessions,

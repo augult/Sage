@@ -50,6 +50,9 @@ pub enum Dialect {
     Together,
     /// api.fireworks.ai: efforts up to `high`, reasoning as `reasoning_content`.
     Fireworks,
+    /// api.moonshot.ai: `max_completion_tokens`, and Kimi K3 models that always think, at `low`,
+    /// `high` or `max`, and take their `reasoning_content` back.
+    Moonshot,
 }
 
 impl Dialect {
@@ -68,6 +71,7 @@ impl Dialect {
             "groq" => Some(Dialect::Groq),
             "together" => Some(Dialect::Together),
             "fireworks" => Some(Dialect::Fireworks),
+            "moonshot" | "kimi" => Some(Dialect::Moonshot),
             _ => None,
         }
     }
@@ -77,7 +81,7 @@ impl Dialect {
     fn reasoning_key(&self) -> Option<&'static str> {
         match self {
             Dialect::OpenRouter | Dialect::Logfare | Dialect::Groq | Dialect::Together => Some("reasoning"),
-            Dialect::DeepSeek | Dialect::Zai | Dialect::OpenAi | Dialect::Xai | Dialect::Fireworks => Some("reasoning_content"),
+            Dialect::DeepSeek | Dialect::Zai | Dialect::OpenAi | Dialect::Xai | Dialect::Fireworks | Dialect::Moonshot => Some("reasoning_content"),
             Dialect::OpenAiPlatform | Dialect::Anthropic | Dialect::Gemini | Dialect::Mistral => None,
         }
     }
@@ -222,7 +226,7 @@ impl OpenAiProvider {
         if self.dialect != Dialect::Mistral {
             b.insert("stream_options".into(), json!({"include_usage": true}));
         }
-        let limit = if matches!(self.dialect, Dialect::OpenAiPlatform | Dialect::Groq) { "max_completion_tokens" } else { "max_tokens" };
+        let limit = if matches!(self.dialect, Dialect::OpenAiPlatform | Dialect::Groq | Dialect::Moonshot) { "max_completion_tokens" } else { "max_tokens" };
         b.insert(limit.into(), json!(req.max_tokens));
         let effort = req.effort;
         match self.dialect {
@@ -267,7 +271,7 @@ impl OpenAiProvider {
                     b.insert("reasoning_effort".into(), json!(effort.as_str()));
                 }
             }
-            Dialect::Anthropic | Dialect::Gemini | Dialect::Xai | Dialect::Mistral | Dialect::Groq | Dialect::Together | Dialect::Fireworks => {
+            Dialect::Anthropic | Dialect::Gemini | Dialect::Xai | Dialect::Mistral | Dialect::Groq | Dialect::Together | Dialect::Fireworks | Dialect::Moonshot => {
                 let model = self.model.as_str();
                 let word = match self.dialect {
                     Dialect::Gemini | Dialect::Fireworks => effort_word(effort, None, "high"),
@@ -276,6 +280,8 @@ impl OpenAiProvider {
                     // Efforts are per model there: gpt-oss always thinks, Qwen can stop, Llama takes none.
                     Dialect::Groq if model.starts_with("qwen/") => effort_word(effort, Some("none"), "high"),
                     Dialect::Groq | Dialect::Together if model.contains("gpt-oss") => effort_word(effort, Some("low"), "high"),
+                    // K3 cannot stop thinking; the K2 models before it take no effort at all.
+                    Dialect::Moonshot if model.starts_with("kimi-k3") => effort_word(effort, Some("low"), "max"),
                     _ => None,
                 };
                 if let Some(word) = word {
@@ -821,10 +827,14 @@ mod tests {
         assert_eq!(groq("llama-3.3-70b-versatile", Effort::High)["max_completion_tokens"], json!(100));
         assert!(provider(Dialect::Together).body(&req(Effort::High)).get("reasoning_effort").is_none());
         assert_eq!(provider(Dialect::Fireworks).body(&req(Effort::Max))["reasoning_effort"], json!("high"));
+        let kimi = |model: &str, effort| OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Moonshot).unwrap().body(&req(effort));
+        assert_eq!((&kimi("kimi-k3.1-pro", Effort::Max)["reasoning_effort"], &kimi("kimi-k3", Effort::Off)["reasoning_effort"]), (&json!("max"), &json!("low")));
+        assert_eq!((kimi("kimi-k2.6", Effort::High).get("reasoning_effort"), &kimi("kimi-k3", Effort::High)["max_completion_tokens"]), (None, &json!(100)));
 
         let said = [Message { role: Role::Assistant, content: "".into(), reasoning: Some("r".into()), tool_calls: vec![], tool_call_id: None }];
         assert!(provider(Dialect::OpenAiPlatform).wire_messages(&said)[0].get("reasoning_content").is_none(), "OpenAI refuses fields it does not know");
         assert_eq!(provider(Dialect::Groq).wire_messages(&said)[0]["reasoning"], json!("r"));
+        assert_eq!(provider(Dialect::Moonshot).wire_messages(&said)[0]["reasoning_content"], json!("r"));
 
         let p = provider(Dialect::OpenRouter);
         assert_eq!(p.base_url, "https://example.invalid/v1");

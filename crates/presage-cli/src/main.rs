@@ -25,7 +25,7 @@ USAGE
 
 OPTIONS for run
   -C, --cwd <dir>          workspace (default: current directory)
-  -p, --provider <id>      logfare | deepseek | zai | zai-coding | openrouter | custom
+  -p, --provider <id>      logfare | deepseek | openrouter | … (`presage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts high, rises on repeated surprises)
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)

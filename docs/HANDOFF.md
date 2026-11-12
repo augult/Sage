@@ -63,6 +63,28 @@ its screenshot is of a step added to a log by hand); the app driven by hand, on 
 Not checked: any of this on Windows or macOS; the folder dialog beyond seeing GTK's open under
 xvfb; the reminder against a real window manager's close button (the app's own button was used).
 
+**Panes, providers and the chat bar's buttons** (12 November, branch `hoplite/kos-bee4c2ad`):
+
+- *Panes.* The sidebar and the inspector each have a button that puts them away and brings them
+  back at once, with no movement (`ui/js/panes.js`, kept by the window). The caption buttons are
+  the window's now, not the inspector's: with it away they sit in the sheet's corner.
+- *Providers.* Ten built in, in this order: OpenAI, Anthropic, Google AI, DeepSeek, OpenRouter,
+  Moonshot Kimi, xAI, Groq, Together AI, Logfare. Mistral, Fireworks and both Z.ai endpoints are
+  gone from the list (their dialects remain, for an endpoint in `config.json` that names one); a
+  default saved for one of them gives way to the first provider that has a key. Moonshot is new,
+  with a dialect written from its documentation and, like the rest, **never called**. Settings
+  can add any number of OpenAI-compatible endpoints of the user's own and delete them again
+  (`added` in `config.json`, ids `custom-<name>`).
+- *Chat bar.* Send is the Return key's arrow on a square with a control's corners; Stop takes its
+  place during a run, the same square on a quieter fill.
+
+Checked: `cargo test --workspace` (221) and each of the above under xvfb, light and dark. The
+bench test `an_external_harness_is_run_metered_and_verified_like_presage` is unreliable in the
+sandbox this was made in: it passed in a full run and failed when run on its own, before these
+changes as well. Not checked: the caption buttons' reach to
+the window's edge with the inspector away, which needs a pointer; anything on Windows or macOS.
+`docs/screenshots/` predates all three.
+
 ## Seventh session: changes made without a benchmark (11 November 2026)
 
 The Logfare key was at its limit, so nothing below is measured. Each change rests on the recorded

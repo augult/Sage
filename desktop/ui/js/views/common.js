@@ -41,9 +41,13 @@ export function chatBar({ over, files, box, buttons, pickers }) {
   return h('div.chat', over, h('div.composer', files.list, h('div.composer-row', files.button, box, buttons)), h('div.composer-under', pickers));
 }
 
-/** What sends, stops or attaches: a round button that is its glyph. `label` is its name to those who cannot see it. */
-export function roundButton(id, label, glyph, onclick, primary = true) {
-  return h(`button.round${primary ? '.primary' : ''}`, { id, type: 'button', title: label, 'aria-label': label, onclick }, glyph);
+/**
+ * What sends, stops or attaches: a square button that is its glyph. `look` is `primary` for the
+ * one that sends, `soft` for the one that stops and `bare` for the one that adds to the message.
+ * `label` is its name to those who cannot see it.
+ */
+export function barButton(id, label, glyph, onclick, look = 'primary') {
+  return h(`button.bar-btn.${look}`, { id, type: 'button', title: label, 'aria-label': label, onclick }, glyph);
 }
 
 /** Makes a message box as tall as its text. The stylesheet says how tall it may get. */

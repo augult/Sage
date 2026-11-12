@@ -10,8 +10,7 @@
 
 :root {
   /* Shape. Corners are barely turned, and no more on a card than on a button: 2 for tags and
-     marks, 3 for controls and rows, 4 for cards, menus, dialogs and the sheet. Nothing is a pill;
-     only what sends, stops or attaches in a chat bar is round. */
+     marks, 3 for controls and rows, 4 for cards, menus, dialogs and the sheet. Nothing is a pill. */
   --r-1: 2px;
   --r-2: 3px;
   --r-3: 4px;
