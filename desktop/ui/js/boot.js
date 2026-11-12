@@ -4,7 +4,7 @@
 (() => {
   const read = (key) => {
     try {
-      return localStorage.getItem(`sage.${key}`) ?? localStorage.getItem(`presage.${key}`);
+      return localStorage.getItem(`sage.${key}`);
     } catch {
       return null;
     }

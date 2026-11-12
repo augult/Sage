@@ -44,8 +44,6 @@ $places = @(
     (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')
 )
 foreach ($place in $places) {
-    # The app was called Presage before: its shortcut goes, so the two do not sit side by side.
-    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $place 'Presage.lnk')
     $path = Join-Path $place 'Sage.lnk'
     # With -NoShortcuts none is made, but those already there still get the current icon.
     if ($NoShortcuts -and -not (Test-Path $path)) { continue }
@@ -57,7 +55,6 @@ foreach ($place in $places) {
     $link.Save()
     Write-Host "Shortcut: $path" -ForegroundColor Green
 }
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:LOCALAPPDATA 'Programs\Presage')
 Get-ChildItem $dest -Filter 'Sage-*.ico' | Where-Object { $_.FullName -ne $icon } | Remove-Item -Force
 # Ask Explorer to draw icons again.
 & (Join-Path $env:WINDIR 'System32\ie4uinit.exe') -show 2>$null

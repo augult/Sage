@@ -23,9 +23,8 @@ const SELF_CHECK: &str = "Before `finish`, return to your list from step 1 and t
 
 /// A project's instruction file is cut to this many characters.
 pub const MAX_PROJECT_CHARS: usize = 12_000;
-/// Where a project keeps its instructions; the first of these that has any is used. The
-/// `.presage` ones are from before the rename.
-const PROJECT_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".sage/AGENTS.md", ".sage.md", ".presage/AGENTS.md", ".presage.md"];
+/// Where a project keeps its instructions; the first of these that has any is used.
+const PROJECT_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".sage/AGENTS.md", ".sage.md"];
 
 pub fn default_template() -> &'static str {
     SYSTEM_SAGE.trim_end()

@@ -29,13 +29,13 @@
     "ttlcache"
   ],
   "variants": [
-    "presage",
+    "ecosage",
     "classic",
     "ext:mini"
   ],
   "prefix_tokens": [
     {
-      "variant": "presage",
+      "variant": "ecosage",
       "tokens": 1945
     },
     {
@@ -55,7 +55,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "audit",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -118,7 +118,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "audit-clean",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -181,7 +181,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "deadcode",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -244,7 +244,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "deadcode-js",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -307,7 +307,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "mutants",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -370,7 +370,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "mutants-js",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -433,7 +433,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "slowpath",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -496,7 +496,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "nplusone",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -559,7 +559,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "heisenbug",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -622,7 +622,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "restyle",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 0,
@@ -685,7 +685,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "shipquote",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -748,7 +748,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "attempts",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -811,7 +811,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "connpool",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -874,7 +874,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "confdialect",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -937,7 +937,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "rollup",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -1000,7 +1000,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "jobqueue",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -1063,7 +1063,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "ttlcache",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -1126,7 +1126,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "ALL",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 17,
       "errors": 0,
       "solved": 16,
@@ -1191,7 +1191,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "audit",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-050300-271b",
       "outcome": "done",
@@ -1550,7 +1550,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "audit-clean",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-050645-5b33",
       "outcome": "done",
@@ -1813,7 +1813,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "deadcode",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-051014-be31",
       "outcome": "done",
@@ -2112,7 +2112,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "deadcode-js",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-051139-fce3",
       "outcome": "done",
@@ -2411,7 +2411,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "mutants",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-051235-0159",
       "outcome": "budget",
@@ -2662,7 +2662,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "mutants-js",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-051650-6a4d",
       "outcome": "done",
@@ -2901,7 +2901,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "slowpath",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-051932-749e",
       "outcome": "done",
@@ -3164,7 +3164,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "nplusone",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-052024-6113",
       "outcome": "done",
@@ -3415,7 +3415,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "heisenbug",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-052152-f990",
       "outcome": "done",
@@ -3642,7 +3642,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "restyle",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-050300-30af",
       "outcome": "done",
@@ -3965,7 +3965,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "shipquote",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-053821-b1e9",
       "outcome": "done",
@@ -4240,7 +4240,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "attempts",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-053605-d37c",
       "outcome": "done",
@@ -4515,7 +4515,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "connpool",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-054017-67f7",
       "outcome": "done",
@@ -4850,7 +4850,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "confdialect",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-052224-bc4d",
       "outcome": "budget",
@@ -5353,7 +5353,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "rollup",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-052634-7555",
       "outcome": "done",
@@ -5856,7 +5856,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "jobqueue",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-053026-e772",
       "outcome": "done",
@@ -6143,7 +6143,7 @@
     {
       "model": "deepseek-v4.1-flash-1017",
       "task": "ttlcache",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261111-053323-2ebf",
       "outcome": "done",

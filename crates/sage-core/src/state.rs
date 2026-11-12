@@ -75,10 +75,10 @@ pub enum Mode {
 impl Mode {
     pub const NAMES: &'static [&'static str] = &["ecosage", "default", "prosage"];
 
-    /// A mode by its name. `classic` is what `default` was called before, and `presage` what `ecosage` was.
+    /// A mode by its name. `classic` is what `default` was called before.
     pub fn parse(name: &str) -> Option<Mode> {
         match name.trim().to_ascii_lowercase().as_str() {
-            "ecosage" | "presage" => Some(Mode::Ecosage),
+            "ecosage" => Some(Mode::Ecosage),
             "default" | "classic" => Some(Mode::Plain),
             "prosage" => Some(Mode::Prosage),
             _ => None,

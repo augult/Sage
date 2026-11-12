@@ -434,23 +434,9 @@ fn close_sessions(harness: &Harness) {
     }
 }
 
-/// The window's saved choices live in a folder named after the app's identifier, which was
-/// `dev.presage.app` before the rename. Moved once, before the webview opens it.
-#[cfg(windows)]
-fn adopt_former_window_data() {
-    let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) else { return };
-    let (dir, former) = (local.join("dev.sage.app"), local.join("dev.presage.app"));
-    if !dir.exists() && former.is_dir() {
-        let _ = std::fs::rename(former, dir);
-    }
-}
-
 fn main() {
     #[cfg(unix)]
     adopt_login_shell_path();
-
-    #[cfg(windows)]
-    adopt_former_window_data();
 
     let hooks = Hooks::from_env();
     let size = hooks.size;

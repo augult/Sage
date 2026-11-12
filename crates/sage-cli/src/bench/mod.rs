@@ -113,7 +113,7 @@ impl Variant {
         let base = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut v = match base.as_str() {
             // `classic` is what `default` was called, and what earlier results name it.
-            "ecosage" | "presage" | "default" | "classic" | "prosage" => Variant { mode: Mode::parse(&base).unwrap_or_default(), ..Variant::default() },
+            "ecosage" | "default" | "classic" | "prosage" => Variant { mode: Mode::parse(&base).unwrap_or_default(), ..Variant::default() },
             other => Variant { without: vec![mechanism(other)?], ..Variant::default() },
         };
         for m in parts {

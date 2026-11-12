@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compact trace of a Presage session: trace.py <events.jsonl> [max_arg_chars] [first_turn] [last_turn]"""
+"""Compact trace of a Sage session: trace.py <events.jsonl> [max_arg_chars] [first_turn] [last_turn]"""
 import json, sys
 
 path = sys.argv[1]

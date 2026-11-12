@@ -42,7 +42,7 @@
   {
    "model": "glm-5.3",
    "task": "audit",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-053602-2ec1",
    "outcome": "done",
@@ -59,7 +59,7 @@
   {
    "model": "glm-5.3",
    "task": "deadcode",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-053603-e2fd",
    "outcome": "done",
@@ -76,7 +76,7 @@
   {
    "model": "glm-5.3",
    "task": "audit-clean",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-054114-26a1",
    "outcome": "done",
@@ -127,7 +127,7 @@
   {
    "model": "glm-5.3",
    "task": "deadcode",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-054626-323d",
    "outcome": "done",
@@ -144,7 +144,7 @@
   {
    "model": "glm-5.3",
    "task": "audit",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-054046-4a01",
    "outcome": "done",
@@ -161,7 +161,7 @@
   {
    "model": "glm-5.3",
    "task": "audit-clean",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-054540-2eef",
    "outcome": "done",
@@ -212,7 +212,7 @@
   {
    "model": "glm-5.3",
    "task": "shipquote",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-055017-7bd5",
    "outcome": "done",
@@ -280,7 +280,7 @@
   {
    "model": "glm-5.3",
    "task": "shipquote",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-055454-ba74",
    "outcome": "done",
@@ -297,7 +297,7 @@
   {
    "model": "glm-5.3",
    "task": "attempts",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-055810-ea32",
    "outcome": "done",
@@ -314,7 +314,7 @@
   {
    "model": "glm-5.3",
    "task": "attempts",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-060139-be07",
    "outcome": "done",
@@ -348,7 +348,7 @@
   {
    "model": "glm-5.3",
    "task": "connpool",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-060255-71f5",
    "outcome": "budget",
@@ -399,7 +399,7 @@
   {
    "model": "glm-5.3",
    "task": "connpool",
-   "variant": "presage+effort:max",
+   "variant": "ecosage+effort:max",
    "repeat": 1,
    "session": "20261111-060712-4246",
    "outcome": "done",
@@ -416,7 +416,7 @@
   {
    "model": "glm-5.3",
    "task": "confdialect",
-   "variant": "presage",
+   "variant": "ecosage",
    "repeat": 1,
    "session": "20261111-061014-7c80",
    "outcome": "done",

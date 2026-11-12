@@ -22,7 +22,7 @@
 [22/24] deepseek-v4.1-flash-1017 · attempts · ext:opencode #1: solved · 14 turns · $0.0313 · 1m22s
 [23/24] deepseek-v4.1-flash-1017 · confdialect · ext:opencode #1: solved · 30 turns · $0.1918 · 13m33s
 [24/24] deepseek-v4.1-flash-1017 · rollup · ext:opencode #1: solved · 18 turns · $0.0519 · 5m21s
-presage bench 20261112-061839-00ee · logfare · effort ratchet · 1 run per task and variant
+sage bench 20261112-061839-00ee · logfare · effort ratchet · 1 run per task and variant
 first prompt with the task, measured: ext:opencode ~7492 tokens
 ext:opencode: 5 requests answered without a usage report; its tokens and cost are understated
 
