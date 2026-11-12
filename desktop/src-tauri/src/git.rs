@@ -248,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn commits_what_changed_and_pushes_it_to_the_remote() {
-        let base = std::env::temp_dir().join(format!("presage-git-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("sage-git-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (origin, work) = (base.join("origin.git"), base.join("work"));
         std::fs::create_dir_all(&work).unwrap();

@@ -18,7 +18,7 @@ export const api = {
   listSessions: () => invoke('list_sessions'),
   startSession: (req) => invoke('start_session', { req }),
   startDemo: () => invoke('start_demo'),
-  /** Test hook: the session `PRESAGE_UI_SCRIPTED` describes. */
+  /** Test hook: the session `SAGE_UI_SCRIPTED` describes. */
   startScripted: () => invoke('start_scripted'),
   /**
    * `skills` are switched on with this message; the ones the session already has are ignored. `files` are attached to it, by path.

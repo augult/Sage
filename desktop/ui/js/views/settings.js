@@ -231,7 +231,7 @@ function providerRow(provider, refresh) {
   // Still keyed after a removal: the system's environment is supplying one.
   const said = notice?.error
     ? h('div.form-error', { role: 'alert' }, notice.error)
-    : notice?.removed && keyed && !custom && hint({ role: 'status' }, 'Removed from Presage. A key from your system environment is still in use.');
+    : notice?.removed && keyed && !custom && hint({ role: 'status' }, 'Removed from Sage. A key from your system environment is still in use.');
 
   const mark = custom ? 'Your own' : keyed ? 'Key set' : 'No key';
   return h(

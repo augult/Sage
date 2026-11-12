@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tide - background painting for the Presage "Tide" theme.
+"""Tide - background painting for the Sage "Tide" theme.
 
 Cool marbled ink: long, slightly tilted wave ribbons of ink navy, petrol, teal and
 sea-glass under a foam-light band, with one thin apricot seam along the tide line.

@@ -46,7 +46,7 @@ pub fn read(root: &Path, path: &str) -> Result<String, String> {
     let (_, file) = within(root, path)?;
     let size = std::fs::metadata(&file).map_err(|e| format!("cannot read {path}: {e}"))?.len();
     if size > MAX_BYTES {
-        return Err(format!("{path} is too large to edit here ({})", presage_core::util::fmt_bytes(size)));
+        return Err(format!("{path} is too large to edit here ({})", sage_core::util::fmt_bytes(size)));
     }
     String::from_utf8(std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?).map_err(|_| format!("{path} is not text"))
 }
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn a_folder_is_listed_read_and_written_and_nothing_outside_it_is() {
-        let base = std::env::temp_dir().join(format!("presage-files-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("sage-files-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let root = base.join("work");
         std::fs::create_dir_all(root.join("src/deep")).unwrap();

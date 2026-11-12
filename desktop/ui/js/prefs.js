@@ -1,10 +1,12 @@
 // Choices the window remembers between launches, in localStorage. Nothing here reaches the engine.
 
-const PREFIX = 'presage.';
+const PREFIX = 'sage.';
+// Choices saved before the rename are still read, until they are next changed.
+const FORMER_PREFIX = 'presage.';
 
 export function get(key, fallback = null) {
   try {
-    return localStorage.getItem(PREFIX + key) ?? fallback;
+    return localStorage.getItem(PREFIX + key) ?? localStorage.getItem(FORMER_PREFIX + key) ?? fallback;
   } catch {
     return fallback;
   }

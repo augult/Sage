@@ -4,7 +4,7 @@
 # Needs uv (Python harnesses), npm (Node harnesses) and curl. Safe to run again.
 set -euo pipefail
 
-EXT_HOME="${BENCH_EXT_HOME:-$HOME/.local/share/presage-external}"
+EXT_HOME="${BENCH_EXT_HOME:-$HOME/.local/share/sage-external}"
 
 MINI_VERSION=2.4.6
 AIDER_VERSION=0.86.2

@@ -1,20 +1,20 @@
 [package]
-name = "presage-desktop"
-description = "Presage desktop app (Tauri shell around presage-core)."
+name = "sage-desktop"
+description = "Sage desktop app (Tauri shell around sage-core)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "presage-desktop"
+name = "sage-desktop"
 path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-presage-core.workspace = true
+sage-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }

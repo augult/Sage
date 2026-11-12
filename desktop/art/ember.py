@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ember - background painting for the Presage "Ember" theme.
+"""Ember - background painting for the Sage "Ember" theme.
 
 Molten orange, vermilion and rust ribbons smeared from the lower left to the upper right
 out of a lilac-cream haze, with one deep teal vein in an S-curve just right of centre.

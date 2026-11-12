@@ -6,7 +6,7 @@ set -euo pipefail
 : "${BENCH_PROMPT:?}" "${BENCH_MODEL:?}" "${BENCH_BASE_URL:?}" "${BENCH_API_KEY:?}" "${BENCH_SCRATCH:?}"
 : "${BENCH_MAX_TURNS:=30}" "${BENCH_TIME_BUDGET:=600}"
 
-EXT_HOME="${BENCH_EXT_HOME:-$HOME/.local/share/presage-external}"
+EXT_HOME="${BENCH_EXT_HOME:-$HOME/.local/share/sage-external}"
 
 # A home of its own for the harness: no config, history or cache of the user's, none left behind.
 export HOME="$BENCH_SCRATCH/home"
