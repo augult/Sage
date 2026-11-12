@@ -261,27 +261,28 @@ fn assistant(content: String) -> Message {
 
 /// One request beside the conversation: no tools, nothing streamed to anyone.
 ///
-/// A reply that did nothing but reason is asked for again one level lower, as long as there is a
-/// level left that thinks: nobody is there to tell it to come to the point, and an examiner lost
-/// this way would be lost on just the tasks whose text takes the most reading. What the cut
-/// reply had thought is counted with the one that follows.
+/// A reply that did nothing but reason is asked for once more with thinking switched off: nobody
+/// is there to tell it to come to the point, and an examiner lost this way would be lost on just
+/// the tasks whose text takes the most reading. Not one level lower: measured on DeepSeek V4.1
+/// Flash, an examiner that thought its allowance away at `high` did the same at `low` every time.
+/// What the cut reply had thought is counted with the one that follows.
 async fn side_request(provider: Arc<Provider>, messages: Vec<Message>, effort: Effort, max_tokens: u32, reasoning_cap: usize, cancel: CancellationToken) -> SideReply {
     let tools = serde_json::json!([]);
     let asked = Instant::now();
     let (mut effort, mut wasted) = (effort, 0u64);
     loop {
         let reply = provider.chat(ChatRequest { messages: &messages, tools: &tools, effort, max_tokens, reasoning_cap }, &mut |_| {}, &cancel).await;
-        match (reply, effort.lower().filter(|lower| *lower != Effort::Off)) {
-            (Err(ProviderError::Overthinking(chars)), Some(lower)) => {
+        match reply {
+            Err(ProviderError::Overthinking(chars)) if effort != Effort::Off => {
                 wasted += chars as u64 / 4;
-                effort = lower;
+                effort = Effort::Off;
             }
-            (Ok(mut resp), _) => {
+            Ok(mut resp) => {
                 resp.usage.output += wasted;
                 resp.usage.reasoning += wasted;
                 return (Ok(resp), asked.elapsed());
             }
-            (reply, _) => return (reply, asked.elapsed()),
+            reply => return (reply, asked.elapsed()),
         }
     }
 }
@@ -473,11 +474,15 @@ impl Agent {
     /// Stores the script a reply of examiner `i` holds with the session, outside the workspace.
     /// False where the reply holds none.
     fn adopt(&mut self, i: usize, reply: &str) -> bool {
+        let dir = self.sess.dir.join("exam");
+        // The reply as it came, for whoever asks afterwards why no script came of it.
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let _ = std::fs::write(dir.join(format!("exam_{}.reply-{}.txt", self.exams[i].angle.label(), self.exams[i].repairs)), reply);
+        }
         let Some(script) = examiner::parse(reply) else {
             self.exams[i].script = Script::Gone;
             return false;
         };
-        let dir = self.sess.dir.join("exam");
         let path = dir.join(format!("exam_{}.{}", self.exams[i].angle.label(), script.ext));
         if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &script.body)).is_err() {
             self.exams[i].script = Script::Gone;
@@ -655,7 +660,7 @@ impl Agent {
         self.note("examiner", "the referees are asked about the failing cases");
         let until = Instant::now() + wait;
         let mut votes: HashMap<(usize, String), Vec<Option<String>>> = HashMap::new();
-        for (exam, names, mut reply) in asked {
+        for (nth, (exam, names, mut reply)) in asked.into_iter().enumerate() {
             let joined = tokio::select! {
                 joined = tokio::time::timeout(until.saturating_duration_since(Instant::now()), &mut reply) => joined.ok().and_then(Result::ok),
                 _ = cancel.cancelled() => None,
@@ -663,6 +668,8 @@ impl Agent {
             let ruled = match joined {
                 Some((Ok(resp), took)) => {
                     self.count_side_request(&resp.usage, took);
+                    // Kept with the scripts, for whoever asks afterwards how a case was ruled on.
+                    let _ = std::fs::write(self.sess.dir.join("exam").join(format!("referee_{}_{}-{nth}.txt", self.exams[exam].angle.label(), self.exam_holds)), &resp.content);
                     examiner::rulings(&resp.content, &names)
                 }
                 _ => {
@@ -2455,14 +2462,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_examiner_that_only_reasons_is_asked_again_with_less_room() {
+    async fn an_examiner_that_only_reasons_is_asked_again_without_thinking() {
         let efforts_asked = |r: &Rig| -> Vec<Effort> { requests(r).iter().zip(shapes(r)).filter(|(m, _)| m[0].content == examiner::system(examiner::Angle::Rules)).map(|(_, s)| s.effort).collect() };
         let beside = Beside { rules: EXAM, edges: "NONE", route: "NONE", overthinks: 1, ..Default::default() };
         let mut r = beside_rig("agent-exam-overthinks", &["examiner"], vec![upper("beta", "BETA")], beside);
         let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
         // Its checks are not lost with the reply that was cut, and what that reply thought is paid for.
         assert!(out.evidence.ends_with("; all 3 of the examiner's cases pass"), "{}", out.evidence);
-        assert_eq!(efforts_asked(&r), [Effort::High, Effort::Low]);
+        assert_eq!(efforts_asked(&r), [Effort::High, Effort::Off]);
         assert!(r.agent.stats.side_requests == 1 && r.agent.stats.reasoning_tokens >= 30_000, "{:?}", r.agent.stats);
 
         // A session set to `max` has its examiners think at `max` too.

@@ -46,6 +46,7 @@ const EDGES_INTRO: &str = "You are the second examiner of a coding task that ano
 const EDGES_BRIEF: &str = "- The first examiner goes through the text rule by rule, with a plain case for each. Yours are the cases such a pass leaves out. Every error the text states, in every place it can occur and not only the first, with all the text says about how it is reported: its kind, its message, the position or line it names. The limits of each rule: nothing, exactly one, the first and the last, a value on the boundary, the same thing twice. Two rules meeting in one input, wherever the text says which applies first or which wins. Expected values come from the text alone. Name each case after the clauses it checks (for example `s2_s6_discount_before_rounding`). If the text gives you nothing of this kind to check, reply NONE: do not fall back on plain cases.";
 
 const FORMAT: &str = "\
+- Write the script as you go through the text. Do not work every case out before you begin to write: a reply that is all thought and no script is lost.
 - Where the text leaves a point open or you are not sure what it requires, write no case. A wrong case costs more than a missing one.
 - Cover what the existing tests leave out; do not repeat them.
 - Use only the interface that the task, the documents and the existing code fix: names, signatures, files, commands. Never guess one.
