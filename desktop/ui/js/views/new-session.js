@@ -1,7 +1,7 @@
 // The New session view: one composer. The workspace sits above the task; the model, skills, effort,
 // mode and autonomy are pickers in the bar below it, next to Start. Above the composer the chosen
 // background hangs uncovered, with its dither moving over it and the picker that changes it.
-// With no key configured the view leads with the walkthrough and the way to add a key.
+// With no key configured the view leads with the way to add one.
 
 import { api } from '../api.js';
 import { createDither } from '../dither.js';
@@ -68,7 +68,6 @@ export function mountNewSession(main, app) {
     button.disabled = false;
   }
 
-  const playDemo = (event) => guarded(event.currentTarget, () => app.playDemo());
   const openSettings = () => app.show({ name: 'settings' });
 
   // Workspace
@@ -186,7 +185,7 @@ export function mountNewSession(main, app) {
     onkeydown: (event) => onSendKey(event, start),
   });
 
-  // With no key there is nothing to start: the walkthrough is the view's one primary action.
+  // With no key there is nothing to start: adding one is the view's one primary action.
   const startButton = h(`button.btn${keyed.length ? '.primary' : ''}`, { id: 'start', type: 'button', onclick: start }, 'Start');
 
   function start() {
@@ -231,12 +230,8 @@ export function mountNewSession(main, app) {
     error,
   );
 
-  // The walkthrough leads while there is no key, and steps back once there is one.
-  const lead = h(
-    'div.lead-actions',
-    h(`button.btn${keyed.length ? '' : '.primary'}`, { id: 'play-demo', type: 'button', onclick: playDemo }, icon('play', 12), 'Play the walkthrough'),
-    keyed.length === 0 && h('button.btn', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key'),
-  );
+  // The way to a key leads while there is none.
+  const lead = keyed.length === 0 && h('button.btn.primary', { id: 'add-key', type: 'button', onclick: openSettings }, icon('key', 14), 'Add an API key');
 
   // The background, uncovered, and the picker that changes it.
   const canvas = h('canvas.hero-dither', { 'aria-hidden': 'true' });
@@ -262,7 +257,7 @@ export function mountNewSession(main, app) {
   );
   restyle(themes.current());
   // Start where the first thing is still missing.
-  (keyed.length === 0 ? main.querySelector('#play-demo') : draft.cwd ? task : workspace).focus();
+  (lead || (draft.cwd ? task : workspace)).focus();
   return {
     unmount() {
       clearTimeout(skillsTimer);

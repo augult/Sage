@@ -127,7 +127,7 @@ light) and draws it once, with a little grain, to a canvas behind the panes. Ove
 much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
 background in `themes.js`), stretched without smoothing so that its dots stay square. The dither
 shows on the glass of the sidebar and the inspector only: it is cut away where the sheet lies
-(`clip-path` in `glass.css`, from the pane widths in `layout.css`). The panes
+(`clip-path` in `glass.css`, from the one pane width in `layout.css`). The panes
 are translucent fills: the veil over everything, and in the middle the sheet, the reading
 surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
 None.
@@ -151,8 +151,13 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
 
-1. **Sidebar**: app mark and name (the strip drags the window), New session, the sessions under a
-   heading per day (title, model, status glyph, relative time), and Settings.
+1. **Sidebar**: app mark and name (the strip drags the window), New session, a tab per folder
+   (chevron, the folder's name, how many sessions; the folders stand in the order of their newest
+   session, each opens onto its sessions and stays shut once shut, kept by the window; a shut
+   folder shows the glyph of a session in it that is running or waiting for an approval; going to
+   a session opens its folder; the walkthrough's throwaway workspaces share one folder, "demo"),
+   under each its sessions (title, model, status glyph, relative time), and Settings. The sidebar
+   and the inspector are the same width.
 2. **Main**:
    - *New session*: the chosen background, uncovered, in a 3:1 band with its dither moving over
      it and the Background picker in its corner (`#pick-theme`); under it one composer. Along its top the
@@ -170,8 +175,9 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      the other menus. The button reads "Skills" with nothing on, then "Skills" and the number on
      (the titles are its `title` attribute), so the bar keeps to one row. A
      new session starts with no skills, whatever the last one had; Classic takes none, so the
-     button is disabled there. With no key configured, the view leads with "Play the walkthrough"
-     (`start_demo`) and "Add an API key", and Start is not the primary button.
+     button is disabled there. With no key configured, the view leads with "Add an API key", and
+     Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
+     by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
    - *Session*: header (title, status, and Push when the folder is a git repository; under it one
      line: cwd, model, effort, mode, active skills, "asks first", "simulated"). The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on

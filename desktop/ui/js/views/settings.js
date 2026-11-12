@@ -118,22 +118,15 @@ function appearanceSection() {
 
 /** Which key sends a task or a follow-up; the other one breaks the line. Kept by the window, like the appearance. */
 function messagesSection() {
-  const other = (key) => SEND_KEYS.find((each) => each !== key);
-  const note = hint();
-  const say = (key) => (note.textContent = `${sendKeyLabel(other(key))} starts a new line, and so does Shift+Enter.`);
-  say(sendKey());
   const keys = radioChips({
     name: 'send',
     label: 'Send with',
     segmented: true,
     options: SEND_KEYS.map((key) => ({ value: key, label: sendKeyLabel(key) })),
     value: sendKey(),
-    onChange: (key) => {
-      prefs.set('send', key);
-      say(key);
-    },
+    onChange: (key) => prefs.set('send', key),
   });
-  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys, note));
+  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys));
 }
 
 /**

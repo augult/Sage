@@ -64,7 +64,7 @@ body {
 /* The dither belongs to the bare glass. Where the sheet lies it is cut away, so nothing drifts
    behind the reading: the window's rectangle, less the sheet's. */
 #backdrop-dither {
-  --sheet-right: calc(100% - var(--inspector-w));
+  --sheet-right: calc(100% - var(--side-w));
   --sheet-bottom: calc(100% - var(--gap));
   clip-path: polygon(
     evenodd,
@@ -73,11 +73,11 @@ body {
     100% 100%,
     0 100%,
     0 0,
-    var(--sidebar-w) var(--gap),
-    var(--sidebar-w) var(--sheet-bottom),
+    var(--side-w) var(--gap),
+    var(--side-w) var(--sheet-bottom),
     var(--sheet-right) var(--sheet-bottom),
     var(--sheet-right) var(--gap),
-    var(--sidebar-w) var(--gap)
+    var(--side-w) var(--gap)
   );
 }
 

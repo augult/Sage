@@ -83,7 +83,7 @@ function drawSessionList() {
   const signature = listSignature(app.sessions, currentId);
   if (signature === listShown) return;
   listShown = signature;
-  renderSessionList(list, app.sessions, currentId, (id) => go({ name: 'session', id }));
+  renderSessionList(list, app.sessions, currentId, app.state.home, (id) => go({ name: 'session', id }));
 }
 
 [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
