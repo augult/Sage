@@ -6,7 +6,7 @@ import { duration, k } from '../format.js';
 import * as store from '../store.js';
 import { attachments } from './attach.js';
 import { barButton, chatBar, fitBox, onSendKey, sessionState } from './common.js';
-import { AUTONOMIES, effortOptions, modelPicker, settingPicker } from './controls.js';
+import { AUTONOMIES, effortOptions, modelPicker, plainMode, settingPicker } from './controls.js';
 import { mountPanel } from './panel.js';
 import { openOutput } from './output.js';
 import { skillsButton } from './skills.js';
@@ -35,7 +35,7 @@ export function mountSession(main, side, app, meta) {
   });
 
   // Follow the newest content while the user is at the end; leave the scroll alone once they are not.
-  const place = places.get(entry.id) ?? { pinned: entry.live, top: 0 };
+  const place = places.get(entry.id) ?? { pinned: entry.live || entry.resumable, top: 0 };
   let pinned = place.pinned;
   const atEnd = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 32;
   function follow(force) {
@@ -104,6 +104,8 @@ export function mountSession(main, side, app, meta) {
     render();
     try {
       await api.sendMessage(entry.id, text, picked, changes(), files.paths());
+      // A session from an earlier launch has been brought back by the message: follow it from here.
+      store.resume(entry);
       box.value = '';
       picked = [];
       files.clear();
@@ -123,6 +125,17 @@ export function mountSession(main, side, app, meta) {
   // session's from then on. Of the skills, what the session has is on for good.
   const pickSlot = h('span.contents');
   const swapNote = h('div.chat-note', { role: 'status', hidden: true });
+  // The session's goal, while it has one: what the end of each run is held to. `/goal` sets and clears it.
+  const goalText = h('span.goal-text');
+  const goalNote = h('div.chat-note.goal-note', { role: 'status', hidden: true }, icon('flag', 12), goalText);
+  function drawGoal(model) {
+    const goal = model.meta.goal;
+    goalNote.hidden = !goal?.text;
+    if (!goal?.text) return;
+    const text = `${goal.met ? 'Goal met' : 'Goal'}: ${goal.text}`;
+    goalText.textContent = text;
+    goalNote.title = text;
+  }
   const wanted = { provider: null, model: null, effort: null, autonomy: null };
   // The policy as the pickers name it: the engine's `ratchet-low` is Auto.
   const policy = (effort) => (effort === 'ratchet-low' ? 'ratchet' : effort);
@@ -152,8 +165,8 @@ export function mountSession(main, side, app, meta) {
   function renderPickers(model) {
     const { meta } = model;
     const locked = activeSkills(model);
-    // The classic baseline takes no skills.
-    const offered = meta.mode === 'classic' ? [] : skillList;
+    // The conventional loop takes no skills.
+    const offered = plainMode(meta.mode) ? [] : skillList;
     picked = picked.filter((name) => !locked.includes(name));
     const signature = () => [meta.provider, meta.model, meta.effort, meta.autonomy, meta.mode, meta.simulated, offered.length, ...locked, '|', ...picked, '|', ...Object.values(wanted)].join(' ');
     drawNote();
@@ -179,10 +192,11 @@ export function mountSession(main, side, app, meta) {
 
   let stopShown = '';
   function renderFoot(model) {
-    // A session from an earlier launch cannot be continued: its header says read-only.
-    foot.hidden = !entry.live;
-    if (!entry.live) return;
-    if (!foot.firstChild) foot.append(chatBar({ over: [swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
+    // A session from an earlier launch that cannot be continued is read-only, as the inspector says.
+    foot.hidden = !entry.live && !entry.resumable;
+    if (foot.hidden) return;
+    drawGoal(model);
+    if (!foot.firstChild) foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;

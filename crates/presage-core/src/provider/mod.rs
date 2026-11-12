@@ -129,6 +129,9 @@ pub struct ChatRequest<'a> {
     pub tools: &'a Value,
     pub effort: Effort,
     pub max_tokens: u32,
+    /// Characters of reasoning the reply may spend before its first word or call. Past that it
+    /// is cut off as overthinking. 0 leaves the provider's own cap.
+    pub reasoning_cap: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -200,6 +203,16 @@ impl Provider {
         match self {
             Provider::OpenAi(p) => p.chat(req, on_delta, cancel).await,
             Provider::Mock(p) => p.chat(req, on_delta, cancel).await,
+        }
+    }
+
+    /// Whether a request beside the conversation gets an answer of its own. A scripted stand-in
+    /// has one only where its script provides for it; otherwise such a request would take a turn
+    /// of the conversation.
+    pub fn answers_beside(&self) -> bool {
+        match self {
+            Provider::OpenAi(_) => true,
+            Provider::Mock(p) => p.has_aside(),
         }
     }
 

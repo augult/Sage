@@ -77,12 +77,21 @@ export function outcomeLook(status, verified) {
   }
 }
 
-/** What a session is doing now: from its view-model once it is loaded, else from the listing. */
+// Why a stored session cannot be continued, in a word (the engine's `why_closed`).
+const WHY_CLOSED = { older: 'older', simulated: 'simulated', busy: 'in use', gone: 'folder gone' };
+
+/**
+ * What a session is doing now: from its view-model once it is loaded, else from the listing. A
+ * stored session that can be continued is idle, like one that is running and waiting; one that
+ * cannot is `closed`, and says why.
+ */
 export function sessionState(meta, entry) {
   const model = entry?.model;
-  if (!model) return { phase: meta.status, outcome: meta.outcome ?? null, verified: meta.verified === true, approvals: 0 };
-  const phase = !entry.live ? 'closed' : model.running ? 'running' : 'idle';
-  return { phase, outcome: model.outcome?.status ?? null, verified: model.outcome?.verified === true, approvals: phase === 'running' ? pendingApprovals(model) : 0 };
+  const closed = entry ? !entry.live && !entry.resumable : meta.status === 'closed';
+  const why = closed ? known(WHY_CLOSED, (entry?.meta ?? meta).why_closed) ?? null : null;
+  if (!model) return { phase: closed ? 'closed' : meta.status === 'running' ? 'running' : 'idle', outcome: meta.outcome ?? null, verified: meta.verified === true, approvals: 0, why };
+  const phase = closed ? 'closed' : model.running ? 'running' : 'idle';
+  return { phase, outcome: model.outcome?.status ?? null, verified: model.outcome?.verified === true, approvals: phase === 'running' ? pendingApprovals(model) : 0, why };
 }
 
 /**

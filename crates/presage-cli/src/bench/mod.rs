@@ -12,7 +12,7 @@ use presage_core::events::{Event, EventKind, FinishStatus, Stats};
 use presage_core::harness::{Harness, StartRequest};
 use presage_core::prompt::prefix_tokens;
 use presage_core::provider::mock::{MockProvider, MockTurn};
-use presage_core::state::Features;
+use presage_core::state::{Features, Mode};
 use presage_core::util::{civil_date, fmt_duration, now_ms, one_line, rand_hex};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -37,10 +37,10 @@ USAGE
 OPTIONS
   -p, --provider <id>      provider (default: the configured one)
   -m, --model <name>       model; repeat or separate with commas to compare several
-      --variants <list>    presage, classic, no-<mechanism>, e.g. no-auto-watch (default: presage,classic);
+      --variants <list>    presage, default, prosage, no-<mechanism>, e.g. no-auto-watch (default: presage,default);
                            add +skill (each task with its skill), +sys:<file> (system prompt template),
-                           +effort:<level>, +no-<mechanism> or +<mechanism> for one that is off unless
-                           asked for (review), e.g. presage+skill+effort:max, presage+review
+                           +effort:<level>, +no-<mechanism>, or +<mechanism> for one that is off unless
+                           asked for (`presage run --help` lists them), e.g. presage+skill+effort:max
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
@@ -71,10 +71,10 @@ pub const ALL: &str = "ALL";
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Variant {
     pub name: String,
-    pub classic: bool,
+    pub mode: Mode,
     /// Mechanisms switched off, by their `Features` name.
     pub without: Vec<String>,
-    /// Mechanisms switched on that are off unless asked for (`+review`).
+    /// Mechanisms switched on that are off unless asked for (`+<mechanism>`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub with: Vec<String>,
     /// Run each task with the skill it names (`+skill`).
@@ -90,8 +90,8 @@ pub struct Variant {
 }
 
 impl Variant {
-    fn own(name: &str, classic: bool, without: Vec<String>) -> Variant {
-        Variant { name: name.to_string(), classic, without, ..Variant::default() }
+    fn own(name: &str, mode: Mode, without: Vec<String>) -> Variant {
+        Variant { name: name.to_string(), mode, without, ..Variant::default() }
     }
 
     pub fn parse(s: &str) -> Result<Variant, String> {
@@ -100,9 +100,10 @@ impl Variant {
             if harness.is_empty() || !harness.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
                 return Err(format!("{s:?} does not name an external harness: use ext:<name>, with letters, digits, - and _"));
             }
-            return Ok(Variant { external: Some(harness.to_string()), ..Variant::own(&name.to_ascii_lowercase(), false, vec![]) });
+            return Ok(Variant { external: Some(harness.to_string()), ..Variant::own(&name.to_ascii_lowercase(), Mode::Presage, vec![]) });
         }
-        let unknown = || format!("unknown variant {s:?}: use presage, classic, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>, +<mechanism> for {}", Features::NAMES.join(", "), Features::OPTIONAL.join(", "));
+        let optional = if Features::OPTIONAL.is_empty() { String::new() } else { format!(", +<mechanism> for {}", Features::OPTIONAL.join(", ")) };
+        let unknown = || format!("unknown variant {s:?}: use presage, default, prosage, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>{optional}", Features::NAMES.join(", "));
         let mechanism = |m: &str| -> Result<String, String> {
             let mechanism = m.to_ascii_lowercase().strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
             Features::presage().without(&mechanism).ok_or_else(unknown)?;
@@ -111,8 +112,8 @@ impl Variant {
         let mut parts = name.split('+');
         let base = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut v = match base.as_str() {
-            "presage" => Variant::default(),
-            "classic" => Variant { classic: true, ..Variant::default() },
+            // `classic` is what `default` was called, and what earlier results name it.
+            "presage" | "default" | "classic" | "prosage" => Variant { mode: Mode::parse(&base).unwrap_or_default(), ..Variant::default() },
             other => Variant { without: vec![mechanism(other)?], ..Variant::default() },
         };
         for m in parts {
@@ -133,7 +134,7 @@ impl Variant {
     }
 
     fn features(&self) -> Features {
-        let base = if self.classic { Features::classic() } else { Features::presage() };
+        let base = self.mode.features();
         let base = self.with.iter().fold(base, |f, name| f.with(name).unwrap_or(f));
         self.without.iter().fold(base, |f, name| f.without(name).unwrap_or(f))
     }
@@ -163,7 +164,7 @@ impl Default for Options {
         Self {
             provider: None,
             models: Vec::new(),
-            variants: vec![Variant::own("presage", false, vec![]), Variant::own("classic", true, vec![])],
+            variants: vec![Variant::own("presage", Mode::Presage, vec![]), Variant::own("default", Mode::Plain, vec![])],
             tasks: TASKS.iter().collect(),
             repeats: 3,
             effort: None,
@@ -477,8 +478,7 @@ fn stand_in(task: &Task) -> MockProvider {
     let mut calls: Vec<(&str, Value)> = task.solution.iter().map(|(path, content)| ("write", json!({"path": path, "content": content, "overwrite": true}))).collect();
     calls.push(("shell", json!({"cmd": task.check, "expect_exit": "0"})));
     calls.push(("finish", json!({"summary": "Applied the reference solution."})));
-    // The second reply answers the review pass, where the variant has one.
-    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls), MockTurn::calls("", vec![("finish", json!({"summary": "Applied the reference solution."}))])])
+    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls)])
 }
 
 struct End {
@@ -590,7 +590,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         provider: shared.provider.clone(),
         model: (!shared.scripted).then(|| job.model.clone()),
         effort: job.variant.effort.clone().or_else(|| shared.effort.clone()),
-        mode: Some(if job.variant.classic { "classic" } else { "presage" }.to_string()),
+        mode: Some(job.variant.mode.as_str().to_string()),
         autonomy: None,
         max_turns: Some(shared.max_turns),
         time_budget_secs: Some(shared.time_budget),
@@ -909,8 +909,9 @@ pub fn render(r: &Report) -> String {
         }
 
         for variant in &r.variants {
-            // Presage's variants are measured against classic, another harness against Presage.
-            let against = if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "presage") { "presage" } else { "classic" };
+            // Presage's variants are measured against the conventional loop, another harness against Presage.
+            let plain = if r.variants.iter().any(|v| v == "classic") { "classic" } else { "default" };
+            let against = if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "presage") { "presage" } else { plain };
             let (Some(c), Some(base)) = (cells(ALL, variant), cells(ALL, against)) else { continue };
             if variant == against {
                 continue;
@@ -1143,19 +1144,24 @@ mod tests {
         let Ok(Command::Run(opt)) = parse(&args("-p logfare -m glm-5.3,glm-5.3-flash -m other --variants classic,no-receipts -n 5 -j 2 --max-cost 1.5 --keep")) else { panic!("should parse") };
         assert_eq!(opt.models, ["glm-5.3", "glm-5.3-flash", "other"]);
         assert_eq!((opt.repeats, opt.jobs, opt.max_cost, opt.keep, opt.tasks.len()), (5, 2, Some(1.5), true, TASKS.len()));
-        assert_eq!(opt.variants[1], Variant::own("no-receipts", false, vec!["receipts".into()]));
+        assert_eq!(opt.variants[1], Variant::own("no-receipts", Mode::Presage, vec!["receipts".into()]));
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
         // Every mechanism has its variant, however its name is spelled.
         let Ok(Command::Run(opt)) = parse(&args("--variants presage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };
         assert_eq!((opt.variants[1].without.as_slice(), opt.variants[2].without.as_slice(), opt.variants[3].without.as_slice()), (&["attach".to_string()][..], &["short_paths".to_string()][..], &["short_paths".to_string()][..]));
         assert!(!opt.variants[1].features().attach && opt.variants[1].features().short_paths && !opt.variants[2].features().short_paths && opt.variants[2].features().attach);
-        // The review is off unless a variant asks for it.
-        let Ok(Command::Run(opt)) = parse(&args("--variants presage,presage+review,no-survey+Review")) else { panic!("should parse") };
-        assert_eq!(opt.variants.iter().map(|v| (v.name.as_str(), v.features().review, v.features().survey)).collect::<Vec<_>>(), [("presage", false, true), ("presage+review", true, true), ("no-survey+review", true, false)]);
+        // What Prosage adds is off in Presage unless asked for with `+<mechanism>`, and Prosage can
+        // be run without any of it. `classic` is still read as `default`.
+        let Ok(Command::Run(opt)) = parse(&args("--variants presage+examiner,prosage,prosage+no-examiner+effort:low,default,classic")) else { panic!("should parse") };
+        let modes: Vec<(Mode, bool, bool)> = opt.variants.iter().map(|v| (v.mode, v.features().examiner, v.features().long_thought)).collect();
+        assert_eq!(modes, [(Mode::Presage, true, false), (Mode::Prosage, true, true), (Mode::Prosage, false, true), (Mode::Plain, false, false), (Mode::Plain, false, false)]);
+        assert!(Features::OPTIONAL.iter().all(|name| Features::presage().with(name) != Some(Features::presage()) && Features::prosage().with(name) == Some(Features::prosage())));
+        let Ok(Command::Run(opt)) = parse(&args("--variants presage,presage+no-survey,no-survey+no-attach")) else { panic!("should parse") };
+        assert_eq!(opt.variants.iter().map(|v| (v.name.as_str(), v.features().attach, v.features().survey)).collect::<Vec<_>>(), [("presage", true, true), ("presage+no-survey", true, false), ("no-survey+no-attach", false, false)]);
 
         assert!(matches!(parse(&args("--list")), Ok(Command::List)));
         assert!(matches!(parse(&args("--check --tasks roman")), Ok(Command::Check(t)) if t.len() == 1));
-        for bad in ["--variants turbo", "--variants no-telepathy", "--tasks nope", "-n 0", "-n many", "--frobnicate", "-m"] {
+        for bad in ["--variants turbo", "--variants no-telepathy", "--variants presage+review", "--variants no-review", "--variants no-lessons", "--tasks nope", "-n 0", "-n many", "--frobnicate", "-m"] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
         }
     }
@@ -1165,7 +1171,7 @@ mod tests {
         let Ok(Command::Run(opt)) = parse(&args("--variants presage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters")) else { panic!("should parse") };
         let externals: Vec<(&str, Option<&str>)> = opt.variants.iter().map(|v| (v.name.as_str(), v.external.as_deref())).collect();
         assert_eq!(externals, [("presage", None), ("ext:mini", Some("mini")), ("ext:open-code_2", Some("open-code_2"))]);
-        assert!(!opt.variants[1].classic && opt.variants[1].without.is_empty());
+        assert!(opt.variants[1].mode == Mode::Presage && opt.variants[1].without.is_empty());
         assert_eq!(opt.external_dir, Some(PathBuf::from("/tmp/adapters")));
         assert_eq!(Options::default().external_dir, None);
         for bad in ["--variants ext:", "--variants ext:../mini", "--variants ext:a/b", "--variants external:mini", "--external-dir"] {

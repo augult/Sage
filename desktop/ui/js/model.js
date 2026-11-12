@@ -23,6 +23,8 @@ function createSession(meta) {
     runStartedAt: meta.created ?? 0,
     /** `{ status, verified }` of the most recent run, once it has ended. */
     outcome: null,
+    /** What `outcome` was before the message in progress: a `/goal` message that asks nothing of the model gives it back. */
+    settledOutcome: null,
     items: [],
     turns: new Map(),
     /** Number of the turn in progress, if any. */
@@ -31,7 +33,6 @@ function createSession(meta) {
     stats: null,
     watches: new Map(),
     notes: [],
-    lessons: [],
     /** Counts changes to anything the inspector shows. */
     sideRev: 0,
   };
@@ -57,9 +58,13 @@ export function apply(s, ev) {
   return true;
 }
 
+// Kinds of event the engine no longer writes. Logs from before still hold them: they are left out.
+const RETIRED = new Set(['lesson']);
+
 function reduce(s, ev) {
   if (ev === null || typeof ev !== 'object') ev = { type: 'unreadable', text: str(ev) };
   if (ev.seq > s.lastSeq) s.lastSeq = ev.seq;
+  if (RETIRED.has(ev.type)) return;
   const handler = Object.hasOwn(HANDLERS, ev.type) ? HANDLERS[ev.type] : unknown;
   try {
     // A handler that cannot use its event returns false, and the event is shown as it came.
@@ -110,7 +115,7 @@ const NO_STATS = {
   retries: 0,
   cache_misses: 0,
   cache_busts: 0,
-  lessons_learned: 0,
+  goal_checks: 0,
   elapsed_ms: 0,
   model_ms: 0,
   tool_ms: 0,
@@ -132,7 +137,18 @@ const HANDLERS = {
     if (Array.isArray(ev.skills) && ev.skills.length) s.meta.skills = [...new Set([...(Array.isArray(s.meta.skills) ? s.meta.skills : []), ...ev.skills.map(str)])];
     s.running = true;
     s.runStartedAt = num(ev.ts);
+    s.settledOutcome = s.outcome;
     s.outcome = null;
+  },
+
+  /** The session was brought back after a restart: whatever was in progress before it is over. */
+  resumed(s, ev) {
+    closeTurn(s);
+    s.running = false;
+    const row = chip(s, 'quiet', 'resumed', ev.cut_off === true ? 'after a restart · the run before was cut off' : 'after a restart');
+    row.icon = 'clock';
+    row.aloud = true;
+    s.items.push(row);
   },
 
   /** What the user changed with the message before it: the session's from here on. */
@@ -250,11 +266,44 @@ const HANDLERS = {
     place(s, ev, chip(s, 'quiet', 'note', str(ev.text), kind && kind !== 'harness' ? kind : null));
   },
 
-  lesson(s, ev) {
-    const label = ev.learned ? 'learned' : 'recalled';
-    s.lessons.push({ label, text: str(ev.text) });
+  /** The session's goal: set, cleared, asked after, or judged at the end of a run. */
+  goal(s, ev) {
+    const text = str(ev.text);
+    const detail = str(ev.detail);
+    const state = str(ev.state);
+    let row;
+    if (state === 'set') {
+      s.meta.goal = { text, met: false };
+      row = chip(s, 'quiet', 'goal', `set: ${text}`);
+    } else if (state === 'cleared') {
+      s.meta.goal = null;
+      row = chip(s, 'quiet', 'goal', text ? `cleared: ${text}` : 'there was no goal to clear');
+    } else if (state === 'shown') {
+      row = chip(s, 'quiet', 'goal', text ? `${text}${detail ? ` (${detail})` : ''}` : 'no goal is set');
+    } else if (state === 'met') {
+      if (s.meta.goal) s.meta.goal = { ...s.meta.goal, met: true };
+      row = chip(s, 'good', 'goal', detail ? `met: ${detail}` : 'met');
+    } else if (state === 'not_met') {
+      row = chip(s, 'plain', 'goal', detail ? `not met yet: ${detail}` : 'not met yet');
+    } else if (state === 'unchecked') {
+      row = chip(s, 'alert', 'goal', `could not be checked${detail ? `: ${detail}` : ''}`);
+    } else {
+      return false;
+    }
+    row.icon = 'flag';
+    // `/goal` and `/goal clear` are a message and an answer, with no run in between to finish. The
+    // answer is what the message was for: it stands in the conversation, not in a fold.
+    const answer = state === 'shown' || state === 'cleared';
+    if (answer) {
+      closeTurn(s);
+      row.aloud = true;
+    }
+    place(s, ev, row);
     s.sideRev++;
-    place(s, ev, chip(s, 'good', label, str(ev.text)));
+    if (answer) {
+      s.running = false;
+      s.outcome = s.settledOutcome;
+    }
   },
 
   approval(s, ev) {

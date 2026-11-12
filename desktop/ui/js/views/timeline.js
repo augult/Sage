@@ -116,13 +116,17 @@ function gather(items, ctx) {
       work = null;
       edits = [];
       blocks.push({ kind: 'user', key: item.key, sig: item.rev, item });
+    } else if (item.kind === 'chip' && item.aloud) {
+      // A note that is not for a bar to hold: where the session was brought back, the answer to `/goal`.
+      work = null;
+      blocks.push({ kind: 'aside', key: item.key, sig: item.rev, item });
     } else if (item.kind === 'result') {
       work = null;
       blocks.push({ kind: 'result', key: item.key, sig: `${item.rev}:${edits.length}`, item, edits });
     } else if (item.kind === 'approval' && awaitsAnswer(item, ctx)) {
       blocks.push({ kind: 'approval', key: item.key, sig: item.state, item });
     } else {
-      // The environment snapshot, a note, a lesson, an answered request: rows like any other.
+      // The environment snapshot, a note, a goal, an answered request: rows like any other.
       into(item).rows.push(item);
     }
   }
@@ -166,6 +170,9 @@ const PLAIN = {
   },
 
   approval: ({ item }, ctx) => approvalCard(item, ctx),
+
+  /** A note's row on its own in the conversation. Where a session was brought back, a hairline sets it off. */
+  aside: ({ item }, ctx) => h(`section.aside${item.label === 'resumed' ? '.is-resumed' : ''}`, noteRow(item, ctx)),
 
   /** What the provider answered instead of a reply, and that the request is being made again. */
   retry({ retry, live }) {
@@ -320,7 +327,7 @@ function row(ctx, key, classes, cells, detail, attributes = {}) {
 }
 
 /**
- * A quiet row for what happened beside the steps: a watch change, a note, a lesson, a retry.
+ * A quiet row for what happened beside the steps: a watch change, a note, a goal, a retry.
  * One that is long or runs over several lines shows its first line and unfolds the rest.
  */
 function noteRow(note, ctx) {

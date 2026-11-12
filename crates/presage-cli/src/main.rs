@@ -2,8 +2,8 @@
 
 mod bench;
 
-use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, Stats};
-use presage_core::harness::{Harness, SessionStatus, StartRequest};
+use presage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, GoalState, Stats};
+use presage_core::harness::{Changes, Harness, SessionStatus, StartRequest};
 use presage_core::tools::StepStatus;
 use presage_core::util::{fmt_bytes, fmt_duration};
 use std::io::{IsTerminal, Read, Write};
@@ -19,6 +19,7 @@ USAGE
   presage skills [show <name>]      list skills, or print one
   presage prompt [options]          print the system prompt `run` would send with the same options
   presage sessions                  list sessions
+  presage resume <id> [message…]    continue a stored session with a message
   presage show <session-id>         replay a session's log
   presage providers                 list providers and whether a key is set
   presage key <provider>            store an API key (read from stdin)
@@ -28,9 +29,14 @@ OPTIONS for run
   -p, --provider <id>      logfare | deepseek | openrouter | … (`presage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
-      --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
+      --mode <name>        presage (default): few requests, at a little cost to the result
+                           default: the conventional loop of other harnesses, nothing of Presage's
+                           prosage: for the result alone, with longer thinking, an examiner beside
+                           the run and skills switched on unasked; costs more requests
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch on a mechanism that is off unless asked for: review (repeatable)
+      --with <name>        switch on a mechanism that is off unless asked for (repeatable; none at present)
+      --goal <condition>   keep working until an independent check agrees the condition holds; with
+                           no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)
       --system-file <path> system prompt template for this run
       --no-project-instructions
@@ -40,6 +46,14 @@ OPTIONS for run
   -v, --verbose            also print the model's reasoning and every observation
       --json               print the final result as JSON on stdout
       --events             print every event as a JSON line on stdout
+
+OPTIONS for resume
+  -p, --provider <id>      continue on another provider (the session keeps its conversation)
+  -m, --model <name>       continue on another model
+  -e, --effort <level>     change the effort from here on
+      --skill <name>       switch a skill on with the message (repeatable, or comma-separated)
+  -v, --verbose, --json, --events   as for run
+  With no message, the session is told to continue where it left off; `-` reads the message from stdin.
 
 Keys are read from the environment (LOGFARE_API_KEY, DEEPSEEK_API_KEY, ZAI_API_KEY, OPENROUTER_API_KEY)
 or from ~/.presage/config.json (written by `presage key`).";
@@ -80,6 +94,22 @@ fn pct(part: u64, whole: u64) -> String {
     (part * 100 + whole / 2).checked_div(whole).map_or("–".into(), |p| format!("{p}%"))
 }
 
+/// One line for an event about the session's goal.
+fn goal_line(state: GoalState, text: &str, detail: &str) -> String {
+    let said = presage_core::util::one_line(detail, 160);
+    let with = |head: &str| if said.is_empty() { head.to_string() } else { format!("{head}: {said}") };
+    match state {
+        GoalState::Set => format!("goal set: {text}"),
+        GoalState::Cleared if text.is_empty() => "there was no goal to clear".to_string(),
+        GoalState::Cleared => "goal cleared".to_string(),
+        GoalState::Shown if text.is_empty() => "no goal is set".to_string(),
+        GoalState::Shown => format!("goal ({}): {text}", if detail.is_empty() { "not met yet" } else { detail }),
+        GoalState::Met => with("goal met"),
+        GoalState::NotMet => with("goal not met"),
+        GoalState::Unchecked => with("goal could not be checked"),
+    }
+}
+
 fn indent(text: &str, prefix: &str, max_lines: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut out: Vec<String> = lines.iter().take(max_lines).map(|l| format!("{prefix}{l}")).collect();
@@ -107,8 +137,10 @@ impl Printer {
         };
         let preds = if s.predictions > 0 { format!(" · predictions {}/{} held", s.predictions_held, s.predictions) } else { String::new() };
         let skipped = if s.skipped > 0 { format!(" ({} skipped)", s.skipped) } else { String::new() };
+        let checks = if s.goal_checks > 0 { format!(" · goal checks {}", s.goal_checks) } else { String::new() };
+        let beside = if s.side_requests > 0 { format!(" · requests beside the conversation {}", s.side_requests) } else { String::new() };
         [
-            format!("turns {} · steps {}{skipped} · surprises {}{preds}", s.turns, s.steps, s.surprises),
+            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}{beside}", s.turns, s.steps, s.surprises),
             format!("tokens: in {} ({} cached) · out {} ({} thinking) · {cost}", k(s.prompt_tokens), pct(s.cached_tokens, s.prompt_tokens), k(s.output_tokens), k(s.reasoning_tokens)),
             format!(
                 "time {} (model {}, tools {}) · output kept out of context {} · repairs {} · retries {} · cache misses {}",
@@ -182,7 +214,8 @@ impl Printer {
                 eprintln!("    {} {line}", p.cyan("◦"));
             }
             EventKind::Note { text, .. } => eprintln!("    {} {}", p.yellow("◦"), p.yellow(text)),
-            EventKind::Lesson { learned, text } => eprintln!("    {} {} {text}", p.cyan("◦"), if *learned { "learned:" } else { "recalled:" }),
+            EventKind::Goal { state, text, detail } => eprintln!("    {} {}", p.cyan("◎"), goal_line(*state, text, detail)),
+            EventKind::Resumed { cut_off, .. } => eprintln!("    {} {}", p.cyan("↻"), p.dim(if *cut_off { "session restored after a restart; the run before was cut off" } else { "session restored after a restart" })),
             EventKind::Effort { from, to, reason, .. } => eprintln!("    {} effort {from} → {to} ({reason})", p.yellow("◦")),
             EventKind::Settings { model, effort, autonomy, .. } => {
                 let changed: Vec<String> = [("model", model), ("effort", effort), ("autonomy", autonomy)].iter().filter_map(|(name, value)| value.as_ref().map(|value| format!("{name} {value}"))).collect();
@@ -230,9 +263,11 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
             "-p" | "--provider" => req.provider = Some(value(a)?),
             "-m" | "--model" => req.model = Some(value(a)?),
             "-e" | "--effort" => req.effort = Some(value(a)?),
-            "--classic" => req.mode = Some("classic".into()),
+            "--mode" => req.mode = Some(value(a)?),
+            "--classic" => req.mode = Some("default".into()),
             "--without" => req.without.push(value(a)?),
             "--with" => req.with.push(value(a)?),
+            "--goal" => req.goal = Some(value(a)?),
             "--skill" => req.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
             "--system-file" => {
                 let path = value(a)?;
@@ -250,7 +285,7 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
         }
     }
     req.task = task.join(" ");
-    if !needs_task {
+    if !needs_task || (req.goal.is_some() && req.task.trim().is_empty()) {
         return Ok(RunArgs { req, verbose, json, events });
     }
     if req.task.trim() == "-" || req.task.trim().is_empty() {
@@ -266,15 +301,69 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
     Ok(RunArgs { req, verbose, json, events })
 }
 
+/// What `presage resume` is asked: which session, what to tell it, and what changes with the message.
+#[derive(Debug)]
+struct ResumeArgs {
+    id: String,
+    message: String,
+    skills: Vec<String>,
+    changes: Changes,
+    verbose: bool,
+    json: bool,
+    events: bool,
+}
+
+/// Said to a session that is resumed without a message.
+const CONTINUE: &str = "Continue where you left off.";
+
+/// Options and words of `resume <id> [message…]`. `-` as the message is stdin.
+fn parse_resume(args: &[String]) -> Result<ResumeArgs, String> {
+    let mut run = ResumeArgs { id: String::new(), message: String::new(), skills: Vec::new(), changes: Changes::default(), verbose: false, json: false, events: false };
+    let mut words: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+        match a.as_str() {
+            "-p" | "--provider" => run.changes.provider = Some(value(a)?),
+            "-m" | "--model" => run.changes.model = Some(value(a)?),
+            "-e" | "--effort" => run.changes.effort = Some(value(a)?),
+            "--skill" => run.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
+            "-v" | "--verbose" => run.verbose = true,
+            "--json" => run.json = true,
+            "--events" => run.events = true,
+            "--" => words.extend(it.by_ref().cloned()),
+            flag if flag.starts_with('-') && flag.len() > 1 => return Err(format!("unknown option {flag}")),
+            word => words.push(word.to_string()),
+        }
+    }
+    let mut words = words.into_iter();
+    run.id = words.next().ok_or("usage: presage resume <session-id> [message…]   (`presage sessions` lists them)")?;
+    run.message = words.collect::<Vec<_>>().join(" ");
+    if run.message.trim() == "-" {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).map_err(|e| e.to_string())?;
+        run.message = buf;
+    }
+    if run.message.trim().is_empty() {
+        run.message = CONTINUE.into();
+    }
+    Ok(run)
+}
+
 struct Follower {
     printer: Printer,
     events: bool,
+    /// Events up to this sequence number belong to what was there before: not shown, and not the result.
+    after: u64,
     stats: Stats,
     result: Option<(FinishStatus, String, bool, String)>,
 }
 
 impl Follower {
     fn handle(&mut self, ev: &Event) {
+        if ev.seq <= self.after {
+            return;
+        }
         if self.events && !ev.kind.transient() {
             println!("{}", serde_json::to_string(ev).unwrap_or_default());
         }
@@ -288,7 +377,10 @@ impl Follower {
 }
 
 /// Follows a session to the end of its current run. Returns the process exit code.
-async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: bool, events: bool) -> ExitCode {
+///
+/// `after` is the last event of what the session had before this run: a session that was
+/// continued has the ends of its earlier runs in its log, and they are not this run's end.
+async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: bool, events: bool, after: u64) -> ExitCode {
     let (backlog, mut rx) = match h.subscribe(id) {
         Ok(v) => v,
         Err(e) => {
@@ -297,7 +389,7 @@ async fn follow(h: &Harness, id: &str, simulated: bool, verbose: bool, json: boo
         }
     };
     let printer = Printer { paint: Paint { on: std::io::stderr().is_terminal() }, verbose, pending: None };
-    let mut f = Follower { printer, events, stats: Stats::default(), result: None };
+    let mut f = Follower { printer, events, after, stats: Stats::default(), result: None };
     for ev in &backlog {
         f.handle(ev);
     }
@@ -400,12 +492,23 @@ async fn main() -> ExitCode {
             Err(e) => fail(e),
             Ok(run) => match h.start(run.req) {
                 Err(e) => fail(e),
-                Ok(meta) => follow(&h, &meta.id, meta.simulated, run.verbose, run.json, run.events).await,
+                Ok(meta) => follow(&h, &meta.id, meta.simulated, run.verbose, run.json, run.events, 0).await,
             },
+        },
+        Some("resume") => match parse_resume(&args[1..]) {
+            Err(e) => fail(e),
+            Ok(run) => {
+                // What the log held before: the new run is what comes after it.
+                let before = h.events(&run.id).ok().and_then(|events| events.last().map(|e| e.seq)).unwrap_or(0);
+                match h.send_with(&run.id, &run.message, &run.skills, &[], run.changes) {
+                    Err(e) => fail(e),
+                    Ok(()) => follow(&h, &run.id, h.meta(&run.id).is_ok_and(|m| m.simulated), run.verbose, run.json, run.events, before).await,
+                }
+            }
         },
         Some("demo") => match h.demo() {
             Err(e) => fail(e),
-            Ok(meta) => follow(&h, &meta.id, true, args.iter().any(|a| a == "-v" || a == "--verbose"), args.iter().any(|a| a == "--json"), false).await,
+            Ok(meta) => follow(&h, &meta.id, true, args.iter().any(|a| a == "-v" || a == "--verbose"), args.iter().any(|a| a == "--json"), false, 0).await,
         },
         Some("bench") => bench::command(&h, &args[1..]).await,
         Some("sessions") => {
@@ -420,7 +523,9 @@ async fn main() -> ExitCode {
                     (_, Some(FinishStatus::Error), _) => "failed",
                     _ => "–",
                 };
-                println!("{}  {:<13} {:>3} turns  {:<26} {}", m.id, state, m.stats.turns, m.model, m.title);
+                // A stored session that cannot be continued says why.
+                let note = m.why_closed.as_deref().map(|why| format!("  [read-only: {why}]")).unwrap_or_default();
+                println!("{}  {:<13} {:>3} turns  {:<26} {}{note}", m.id, state, m.stats.turns, m.model, m.title);
             }
             ExitCode::SUCCESS
         }
@@ -459,5 +564,59 @@ async fn main() -> ExitCode {
             }
         },
         Some(other) => fail(format!("unknown command {other:?}; try `presage --help`")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn a_goal_may_stand_in_for_the_task() {
+        let run = parse_run(&args("--goal done"), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str()), (Some("done"), ""));
+        let run = parse_run(&args("-C /tmp --goal done fix the tests"), true).unwrap();
+        assert_eq!((run.req.goal.as_deref(), run.req.task.as_str(), run.req.cwd.as_str()), (Some("done"), "fix the tests", "/tmp"));
+        assert!(parse_run(&args("--goal"), true).is_err());
+        assert_eq!(parse_run(&args("fix the tests"), true).unwrap().req.goal, None);
+    }
+
+    #[test]
+    fn resume_takes_a_session_a_message_and_what_changes_with_it() {
+        let run = parse_resume(&args("20260101-000000-ab -m glm-5.3 --skill ui,debug now the other one")).unwrap();
+        assert_eq!((run.id.as_str(), run.message.as_str(), run.changes.model.as_deref(), run.skills.as_slice()), ("20260101-000000-ab", "now the other one", Some("glm-5.3"), &["ui".to_string(), "debug".to_string()][..]));
+        let run = parse_resume(&args("-e high 20260101-000000-ab")).unwrap();
+        assert_eq!((run.message.as_str(), run.changes.effort.as_deref()), (CONTINUE, Some("high")));
+        assert!(parse_resume(&args("")).unwrap_err().contains("usage"));
+        assert!(parse_resume(&args("id --nope")).unwrap_err().contains("unknown option"));
+        assert!(parse_resume(&args("id -m")).is_err());
+    }
+
+    #[test]
+    fn a_follower_of_a_continued_session_ignores_the_ends_of_the_runs_before() {
+        let finish = |seq: u64, summary: &str| Event { seq, ts: 1, kind: EventKind::Finish { status: FinishStatus::Done, summary: summary.into(), verified: true, evidence: "e".into() } };
+        let mut follower = Follower { printer: Printer { paint: Paint { on: false }, verbose: false, pending: None }, events: false, after: 5, stats: Stats::default(), result: None };
+        for event in [finish(3, "the first run"), finish(5, "the second run"), Event { seq: 6, ts: 1, kind: EventKind::Resumed { cut_off: false, answered: 0 } }] {
+            follower.handle(&event);
+        }
+        assert!(follower.result.is_none(), "what was stored before the resumption is not this run's end");
+        follower.handle(&finish(8, "this run"));
+        assert_eq!(follower.result.map(|r| r.1).as_deref(), Some("this run"));
+    }
+
+    #[test]
+    fn goal_events_read_in_one_line() {
+        assert_eq!(goal_line(GoalState::Set, "tests pass", ""), "goal set: tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "tests pass", "met"), "goal (met): tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "tests pass", ""), "goal (not met yet): tests pass");
+        assert_eq!(goal_line(GoalState::Shown, "", ""), "no goal is set");
+        assert_eq!(goal_line(GoalState::Cleared, "tests pass", ""), "goal cleared");
+        assert_eq!(goal_line(GoalState::NotMet, "g", "gamma is not done\nand more"), "goal not met: gamma is not done");
+        assert_eq!(goal_line(GoalState::Met, "g", ""), "goal met");
+        assert_eq!(goal_line(GoalState::Unchecked, "g", "network error"), "goal could not be checked: network error");
     }
 }

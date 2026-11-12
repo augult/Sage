@@ -2,7 +2,7 @@
 //! be exercised without a key. Its token counts are fabricated from text lengths and are labelled as
 //! simulated everywhere they surface.
 
-use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Message, ProviderError, ToolCall, Usage};
+use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, ToolCall, Usage};
 use crate::text::est_tokens;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -17,14 +17,29 @@ pub struct MockTurn {
     pub calls: Vec<(String, Value)>,
     /// Overrides the finish reason, e.g. "length" to simulate a reply cut off by the output limit.
     pub finish: Option<String>,
+    /// The request fails with this error instead of being answered.
+    pub error: Option<ProviderError>,
+}
+
+/// How a request was made, apart from its messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shape {
+    pub effort: Effort,
+    /// How many tools were offered.
+    pub tools: usize,
+    pub max_tokens: u32,
 }
 
 impl MockTurn {
     pub fn calls(reasoning: &str, calls: Vec<(&str, Value)>) -> Self {
-        Self { reasoning: reasoning.into(), content: String::new(), calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(), finish: None }
+        Self { reasoning: reasoning.into(), content: String::new(), calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(), finish: None, error: None }
     }
     pub fn say(content: &str) -> Self {
-        Self { reasoning: String::new(), content: content.into(), calls: vec![], finish: None }
+        Self { reasoning: String::new(), content: content.into(), calls: vec![], finish: None, error: None }
+    }
+    /// A request that fails.
+    pub fn fail(error: ProviderError) -> Self {
+        Self { error: Some(error), ..Self::default() }
     }
 }
 
@@ -32,32 +47,55 @@ impl MockTurn {
 /// from files as they currently are.
 pub type TurnFn = Box<dyn Fn(&[Message]) -> MockTurn + Send + Sync>;
 
+/// Answers a request that is not a turn of the conversation (it runs beside it, so it has no
+/// place in the order of `turns`), or leaves it to them.
+pub type AsideFn = Box<dyn Fn(&[Message]) -> Option<MockTurn> + Send + Sync>;
+
 pub struct MockProvider {
     turns: Vec<TurnFn>,
+    aside: Option<AsideFn>,
     cursor: AtomicUsize,
     prev_prompt: AtomicU64,
     /// Milliseconds between streamed chunks; 0 in tests.
     pub chunk_delay_ms: u64,
     /// Requests as received, for assertions.
     pub requests: Mutex<Vec<Vec<Message>>>,
+    /// How each of them was made.
+    pub shapes: Mutex<Vec<Shape>>,
 }
 
 impl MockProvider {
     pub fn new(turns: Vec<TurnFn>) -> Self {
-        Self { turns, cursor: AtomicUsize::new(0), prev_prompt: AtomicU64::new(0), chunk_delay_ms: 0, requests: Mutex::new(Vec::new()) }
+        Self { turns, aside: None, cursor: AtomicUsize::new(0), prev_prompt: AtomicU64::new(0), chunk_delay_ms: 0, requests: Mutex::new(Vec::new()), shapes: Mutex::new(Vec::new()) }
     }
 
     pub fn scripted(turns: Vec<MockTurn>) -> Self {
         Self::new(turns.into_iter().map(|t| Box::new(move |_: &[Message]| t.clone()) as TurnFn).collect())
     }
 
+    pub fn has_aside(&self) -> bool {
+        self.aside.is_some()
+    }
+
+    /// Requests `aside` answers take no turn of the script.
+    pub fn with_aside(mut self, aside: AsideFn) -> Self {
+        self.aside = Some(aside);
+        self
+    }
+
     pub async fn chat(&self, req: ChatRequest<'_>, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
-        let idx = self.cursor.fetch_add(1, Ordering::SeqCst);
+        let beside = self.aside.as_ref().and_then(|answer| answer(req.messages));
+        let idx = if beside.is_some() { usize::MAX } else { self.cursor.fetch_add(1, Ordering::SeqCst) };
         self.requests.lock().unwrap().push(req.messages.to_vec());
-        let turn = match self.turns.get(idx) {
-            Some(f) => f(req.messages),
-            None => MockTurn::say("(scripted model has nothing further to say)"),
+        self.shapes.lock().unwrap().push(Shape { effort: req.effort, tools: req.tools.as_array().map_or(0, Vec::len), max_tokens: req.max_tokens });
+        let turn = match (beside, self.turns.get(idx)) {
+            (Some(turn), _) => turn,
+            (None, Some(f)) => f(req.messages),
+            (None, None) => MockTurn::say("(scripted model has nothing further to say)"),
         };
+        if let Some(error) = turn.error {
+            return Err(error);
+        }
 
         for (text, is_reasoning) in [(&turn.reasoning, true), (&turn.content, false)] {
             let chars: Vec<char> = text.chars().collect();
@@ -82,7 +120,8 @@ impl MockProvider {
 
         // Simulate a provider with a perfect prefix cache: everything sent last time is a hit now.
         let prompt = est_tokens(&serde_json::to_string(req.messages).unwrap_or_default()) + est_tokens(&req.tools.to_string());
-        let cached = self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt);
+        // A request beside the conversation shares no prefix with it.
+        let cached = if idx == usize::MAX { 0 } else { self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt) };
         let reasoning = est_tokens(&turn.reasoning);
         let output = reasoning + est_tokens(&turn.content) + calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum::<u64>();
 

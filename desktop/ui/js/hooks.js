@@ -3,6 +3,9 @@
 //   PRESAGE_UI_AUTODEMO=1                   start the walkthrough and open it
 //   PRESAGE_UI_SCRIPTED=<file>              start the scripted session the file describes and open it
 //   PRESAGE_UI_OPEN=<session id>            open that session
+//   PRESAGE_UI_REVIVE=<file>                lets a stored session that a stand-in played be continued, played from
+//                                           then on by the replies in the file (read by the shell; same shape as the
+//                                           scripted file, of which only `turns` and `delay_ms` are used)
 //   PRESAGE_UI_VIEW=settings|new|session    open that view (`session`: the most recent one)
 //   PRESAGE_UI_SCRIPT=<actions>             then play UI actions, separated by `;;`:
 //       click:<selector>          type:<selector>=><text>     key:<selector>=>Enter (or ctrl+Enter)

@@ -115,6 +115,23 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   return wrap;
 }
 
+/** What a session can be run for. `title` is shown on hover. */
+export const MODES = [
+  { value: 'presage', label: 'Presage', title: 'Few requests and little money, at a little cost to the result' },
+  { value: 'default', label: 'Default', title: 'The loop other harnesses run: one tool call after another, nothing of Presage around it' },
+  { value: 'prosage', label: 'Prosage', title: 'For the result alone: longer thinking, a second reader who examines the work, skills switched on unasked. Costs more requests and time' },
+];
+
+/** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
+export const plainMode = (mode) => mode === 'default' || mode === 'classic';
+
+/** A session's mode as its record spells it (`prosage without examiner`), with the mode's name as the app shows it. */
+export function modeLabel(mode) {
+  const [name, ...rest] = String(mode ?? '').split(' ');
+  const known = MODES.find((option) => option.value === (name === 'classic' ? 'default' : name));
+  return known ? [known.label, ...rest].join(' ') : mode;
+}
+
 export const AUTONOMIES = [
   { value: 'auto', label: 'Auto' },
   { value: 'ask', label: 'Ask' },

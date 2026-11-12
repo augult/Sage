@@ -9,13 +9,8 @@ import { h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { attachments } from './attach.js';
 import { barButton, chatBar, fitBox, onSendKey } from './common.js';
-import { AUTONOMIES, effortOptions, modelOptions, modelPicker, settingPicker } from './controls.js';
+import { AUTONOMIES, MODES, effortOptions, modelOptions, modelPicker, plainMode, settingPicker } from './controls.js';
 import { skillsButton } from './skills.js';
-
-const MODES = [
-  { value: 'presage', label: 'Presage' },
-  { value: 'classic', label: 'Classic' },
-];
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
@@ -83,7 +78,8 @@ export function mountNewSession(main, app) {
           check(),
         ),
       ),
-      paths.length > 0 && h('div.projects-rule'),
+      // Spread, not `&&`: the DOM's own `replaceChildren` would write a `false` out as text.
+      ...(paths.length > 0 ? [h('div.projects-rule')] : []),
       h(
         'button.project',
         {
@@ -119,8 +115,8 @@ export function mountNewSession(main, app) {
   let skillList = [];
   let skillsAsked = 0;
   function drawSkills() {
-    // The classic baseline takes no skills.
-    skillsSlot.replaceChildren(skillsButton({ skills: skillList, value: draft.skills, disabled: draft.mode === 'classic', onChange: (names) => (draft.skills = names) }));
+    // The conventional loop takes no skills.
+    skillsSlot.replaceChildren(skillsButton({ skills: skillList, value: draft.skills, disabled: plainMode(draft.mode), onChange: (names) => (draft.skills = names) }));
   }
   async function loadSkills() {
     const asked = ++skillsAsked;
@@ -159,7 +155,7 @@ export function mountNewSession(main, app) {
     if (!draft.task.trim()) return fail('No task.');
     return guarded(startButton, async () => {
       const { cwd, provider, model, effort, mode, autonomy } = draft;
-      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: mode === 'classic' ? [] : draft.skills, files: draft.files });
+      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: plainMode(mode) ? [] : draft.skills, files: draft.files });
       draft.task = '';
       draft.skills = [];
       draft.files = [];

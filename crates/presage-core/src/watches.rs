@@ -61,6 +61,29 @@ pub struct Watches {
     pub items: Vec<Watch>,
 }
 
+/// What of a watch is kept with a session that is stored: the check itself, not its results.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WatchSpec {
+    pub name: String,
+    pub cmd: String,
+    pub cwd: PathBuf,
+    pub expect: Option<Expect>,
+    pub auto: bool,
+    pub named: bool,
+}
+
+impl Watches {
+    pub fn specs(&self) -> Vec<WatchSpec> {
+        self.items.iter().map(|w| WatchSpec { name: w.name.clone(), cmd: w.cmd.clone(), cwd: w.cwd.clone(), expect: w.expect.clone(), auto: w.auto, named: w.named }).collect()
+    }
+
+    /// Puts back watches as `specs` gave them. Each runs again, with the first result as new, once
+    /// the workspace changes.
+    pub fn restore(&mut self, specs: Vec<WatchSpec>) {
+        self.items = specs.into_iter().map(|s| Watch { name: s.name, cmd: s.cmd, cwd: s.cwd, expect: s.expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: s.auto, named: s.named }).collect();
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WatchReport {
     pub name: String,
@@ -84,7 +107,7 @@ static VOLATILE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Digest of the output with timings, addresses and temp paths masked, so two runs that differ only
 /// in how long they took count as the same result.
-fn digest(text: &str) -> u64 {
+pub(crate) fn digest(text: &str) -> u64 {
     fnv64(VOLATILE.replace_all(text, "~").as_bytes())
 }
 

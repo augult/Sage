@@ -1,9 +1,10 @@
 // The Economy tab of the pane beside the conversation: what the session is and how it stands, then
-// Economy, Watches, and Notes and lessons.
+// Economy, Watches, and Notes.
 
 import { h, icon } from '../dom.js';
 import { bytes, duration, effortLabel, k, pct, plural, tilde } from '../format.js';
 import { known, outcomeLook, tag } from './common.js';
+import { modeLabel } from './controls.js';
 
 /** `about` is `{ state, home, skills }`: the session's state now, the home folder, its skills by title. */
 export function renderInspector(el, model, about) {
@@ -46,11 +47,13 @@ function session(model, { state, home, skills }) {
     null,
     h('div.side-name', title),
     fact('Status', standing(state)),
+    // A session that cannot be continued says why, in a word.
+    state.phase === 'closed' && state.why && fact('Why', state.why),
     fact('Folder', tilde(cwd, home), true),
     fact('Model', name),
     fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
     // The engine also reports ablations here, as "presage without <mechanism>".
-    fact('Mode', mode === 'classic' ? 'Classic' : mode === 'presage' ? 'Presage' : mode),
+    fact('Mode', modeLabel(mode)),
     fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
     skills.length > 0 && fact('Skills', skills.join(', ')),
   );
@@ -67,6 +70,7 @@ function economy(model) {
     'Economy',
     badge,
     stat('Turns', s.turns),
+    s.goal_checks > 0 && stat('Goal checks', s.goal_checks),
     stat('Steps', s.steps, s.skipped > 0 && `${s.skipped} skipped`),
     stat('Surprises', s.surprises, null, s.surprises > 0 && 'alert'),
     stat('Predictions', s.predictions > 0 ? `${s.predictions_held} of ${s.predictions} held` : 'none made'),
@@ -110,10 +114,10 @@ function watches(model) {
 }
 
 function notes(model) {
-  const entries = [...model.lessons, ...model.notes];
-  if (!entries.length) return section('Notes and lessons', null, h('p.side-note', 'None'));
+  const entries = model.notes;
+  if (!entries.length) return section('Notes', null, h('p.side-note', 'None'));
   return section(
-    'Notes and lessons',
+    'Notes',
     null,
     entries.map((entry) => h('div.note', h('span.note-label', entry.label), h('div.note-body', entry.text))),
   );

@@ -79,9 +79,15 @@ Headless test hooks via environment: `PRESAGE_UI_AUTODEMO=1` (start and open the
 scripted stand-in and open it), `PRESAGE_UI_SCRIPT` (UI actions to play once the first view is up;
 grammar in `desktop/ui/js/hooks.js`), `PRESAGE_UI_THEME=<background>` and `PRESAGE_UI_SCHEME=light|dark`
 (the painting behind the glass and the appearance, for that launch only).
-A scripted session's file may name `skills` to start with.
+A scripted session's file may name `skills` to start with and a `mode`.
+`PRESAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
+sessions a stand-in played as continuable, and a message to one brings it back, played by the
+`turns` (and `delay_ms`) of that file (a scripted file will do; the rest of it is not read).
+Start a scripted session, quit the app (SIGTERM goes through the same door as the window's
+close), start it again with `PRESAGE_UI_OPEN=<id> PRESAGE_UI_REVIVE=<file>`, and type into
+`#followup` with a script. Without the hook such a session is read-only (`simulated`).
 Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
-`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="classic"]`; a model's option
+`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
 is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
 is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. It opens `dialog.skills`,
 where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. A chat bar has
@@ -207,7 +213,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
      `pick_folder`); a folder picked there joins the list. Under the box,
      pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
-     which starts low and steps up when predictions fail), mode (Presage / Classic) and autonomy
+     which starts low and steps up when predictions fail), mode (Presage / Default / Prosage, each with what it is for as its `title`; README, "Modes") and autonomy
      (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
      other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
      from `app_state`, the providers that have a key first; one without a key has its models
@@ -219,7 +225,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      text. Nothing is sent by choosing: a skill in use goes with the task, or in a session with
      the next message. The button reads "Skills" with nothing on, then "Skills" and the number on
      (the titles are its `title` attribute), so the bar keeps to one row. A
-     new session starts with no skills, whatever the last one had; Classic takes none, so the
+     new session starts with no skills, whatever the last one had; Default takes none, so the
      button is disabled there. With no key configured, the view leads with "Add an API key", and
      Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
      by `presage demo` and by the `PRESAGE_UI_AUTODEMO` hook.
@@ -240,7 +246,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **The bar opens the rows**: the reasoning ("Thought", with its first line), a
        row per step (icon, verb, summary, the state when it was not simply fine, lines added and
        removed, duration), and the notes that arrived between them (the environment snapshot,
-       watch changes, harness notes, lessons, effort changes, trims, retries, answered
+       watch changes, harness notes, goal changes and checks, effort changes, trims, retries, answered
        approvals).
      - **A row is one line about what the tool did** ("Ran sh check.sh", "Edited report.sh",
        "Searched the web for awk printf") **and opens the same way for every tool**
@@ -285,10 +291,15 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      with `changes`) and is the session's from then on, which a `settings` event records and the
      inspector then shows. The conversation is kept. With another model picked, a line over the box
      says that model will read the whole conversation, and how many tokens, none of it cached;
-     with another effort, that some providers reread it. Closed
-     sessions are read-only replays from `session_events`, marked "read-only" after their status
-     in the inspector, with
-     no follow-up box.
+     with another effort, that some providers reread it. A session from an earlier launch that can
+     be continued (status `resumable` in the listing) is read from its log and has the same
+     follow-up box; sending a message brings it back (`store.resume`: the view subscribes and is
+     rebuilt from the whole log, so nothing shows twice), and a thin "Resumed" row with a hairline
+     marks the place in the conversation. Closed sessions, those that cannot be continued
+     (`older`, `simulated`, `busy`, `gone`, as `why_closed` says), are read-only replays from
+     `session_events`, marked "read-only" after their status in the inspector with a `Why` line
+     under it, and have no follow-up box. A `/goal` or `/goal clear` message is answered in the
+     open, in a note's row, and the Economy block counts the goal checks.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
      and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
@@ -325,7 +336,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      skills), then Economy from `stats` events (turns, steps, surprises, predictions held of made,
      prompt tokens with cached share, output with thinking share, cost "at list price" or "fabricated"
      when simulated, context size, model versus tool time, output kept out of context, repairs,
-     retries, cache misses); Watches with current state; Notes and lessons.
+     retries, cache misses); Watches with current state; Notes.
    - **Code** (`code.js`): the folder's files as a tree, read a folder at a time, and the one
      that is open as text with line numbers, to edit and Save (Ctrl/Cmd+S). Text typed and not
      saved is marked by a dot after the file's name and is asked about before it is left (another

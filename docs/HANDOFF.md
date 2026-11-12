@@ -1,10 +1,139 @@
 # Handoff: Presage
 
-Read this first. State: 12 November 2026, after the ninth session, which measured Presage against
-OpenCode and changed four of its defaults on what it found. The seventh and eighth sessions ran no
-benchmark.
+Read this first. State: 12 November 2026, after the tenth session, which removed the reflex memory
+and the review pass, added `/goal`, made a stored session continuable after a restart, and gave the
+harness three modes: Presage, Default (the conventional loop, `classic` until now) and Prosage.
+**Prosage is built and tested against a scripted model only. No benchmark of it exists**: Logfare
+answered every chat request with 502 or 503 from 14:12 UTC to the end of the session.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Tenth session: three modes, `/goal`, restart (12 November 2026)
+
+Branch `hoplite/barke-8479543e`, three commits: the removal and `/goal`; the restart (its own
+section follows this one); the modes.
+
+**The owner's brief:** not one harness that is both cheap and good, but three modes. Presage stays
+the cheap one. Default is "the default tool usage like a normal harness", for people who want the
+app. Prosage is for the result, "not even trying to be cheap", without "insanely long thinking
+times". No CI (it would spend Logfare requests on every build). Memory and the review step out,
+`/goal` in.
+
+**Removed:** `lessons.rs`, `scripts/memory-experiment/`, the review pass (`Features.review`, its
+prompt text, `presage+review`). The change report that lived in `review.rs` is `changes.rs` and is
+what the goal check reads. Logs and metas that hold the retired events still open.
+
+**`/goal`:** `goal.rs`, `Agent::before_ending` (`agent.rs`). Where a run would end, by an accepted
+`finish` or an answer in prose, one request with a fresh context and no tools is asked whether the
+goal holds; `NOT MET` sends the model back with the reasons, three times at most per message.
+`before_ending` is where every check on an ending lives: the examiner's is called there first.
+
+**Modes:** `Mode` in `state.rs` (`Presage`, `Plain`, `Prosage`; `Plain` is what users call
+`default`, and `classic` is still read as it). `--mode` in the CLI, `default` and `prosage` as
+bench variants, the Mode picker in the app. A session's snapshot names its mode, so it comes back
+as what it was.
+
+**Why Prosage is what it is.** With no provider to ask, the stored runs were read again
+(`docs/BENCHMARKS.md`, "Where Presage loses"). Presage loses on two tasks, and loses them by
+declaring work finished that its own checks passed and the hidden ones did not. The conventional
+loop loses neither, in the few runs it has on them, by doing what Presage is built to avoid: twice
+the replies, most of them spent on trying things. And of five first replies on `confdialect` this
+session, three were cut at the 14,000-token thinking cap and told to stop thinking (the two that
+were not had thought for 12,900 and 13,400 tokens). So Prosage is Presage with:
+
+- `long_thought`: the cap is about 24,000 tokens (`ChatRequest.reasoning_cap`).
+- `unhurried`: no budget line, no tips about saving replies, no half-time notes; passing checks
+  are answered with what they leave open (`COVERAGE_NOTE` in `agent.rs`). The wording that was
+  being tried when the ninth session's sandbox was replaced is this one's ancestor.
+- `examiner` (`examiner.rs`, `Agent::start_exam`/`examine`/`exam_check`): a second reader with a
+  fresh context writes a check script from the task and the files of the first message, beside
+  the run; an ending that follows changes is held while cases fail that the worker has not been
+  shown. The worker rules on each by the text; ending again with the same cases failing stands. A
+  script that does not print its count, or fails more than three cases in five the first time, is
+  set aside. A hold raises a ratchet effort one level.
+- `routing`: one request without thinking picks skills by their descriptions.
+
+All four are in `Features::OPTIONAL`, so each can be measured alone in either direction.
+
+**Decided without a measurement, and the first things to check:**
+
+- Prosage stands on Presage's loop. The stored runs would as well support standing it on the
+  conventional one (`Mode::features` is the one line to change). Run both.
+- The effort starts at `low` in every mode. The ninth session measured `ratchet-high` at twice the
+  time for no more tasks solved; Prosage was not part of that.
+- The examiner reads only the task a session starts with. A later message is not examined, and a
+  session brought back after a restart has no examiner.
+
+**To measure first**, each bench process alone in a Unix account as the ninth session did:
+
+```sh
+presage bench -p logfare --tasks confdialect,restyle -n 5 -j 1 --max-turns 60 --time-budget 1200 \
+  --variants presage,default,prosage,prosage+no-examiner,default+examiner+long_thought+routing
+presage bench -p logfare --tasks all -n 2 -j 1 --variants presage,prosage     # what Prosage breaks
+```
+
+About 1,200 and 1,000 requests. What to read off: whether `prosage` beats `presage` on the two
+tasks and matches it on the other 22; what the examiner alone is worth (`prosage+no-examiner`); how
+often a hold is a real gap and how often the examiner's mistake (the `examiner` notes of a
+session's log say which cases were held and how the run ended); how long a run waits for the
+examiner (`EXAM_WAIT` is 240 s after it was asked).
+
+**Checked:** `cargo test --workspace` (253: core 230, CLI 19, desktop 4); the three modes through
+`presage bench --scripted`; the app under xvfb (mode picker, a Prosage session, the restart flow,
+the goal rows). Two baseline `confdialect` runs finished before the gateway went down, both
+declared done with hidden cases failing: a bad reference in the second item of a list reported on
+the first item's line; `;x #y` not cut at the comment; a backslash on the last line not refused.
+
+**Also fixed:** the New session view wrote `false` above "Choose folder…" when there was no recent
+folder.
+
+**The Logfare key was pasted in chat again** (twice now). It is in no file of the repository.
+Rotate it and set `LOGFARE_API_KEY` as a project variable.
+
+## Continuing sessions after a restart (12 November 2026)
+
+Part of the tenth session, written next to the work on the modes: `agent.rs`, `harness.rs` and
+`state.rs` were edited additively on purpose, so that the two merge.
+
+**What it does:** a session stored by an earlier run of the app or the CLI is continued by sending it a
+message (`Harness::send_with` brings it back) or by `presage resume <id> [message]`. `README.md` has
+the user's side. The engine's side:
+
+- `crates/presage-core/src/resume.rs`: `Snapshot` (what `snapshot.json` holds), `write_atomic`,
+  `read` and `SessionLock` (an OS file lock on `session.lock`, with the pid written in it for the
+  message of whoever is turned away; `File::try_lock`, so a killed process leaves nothing behind).
+- `Agent::checkpoint`/`restore`/`keep_snapshots` (`agent.rs`) and `Session::checkpoint`/`restore` (`state.rs`).
+  The snapshot is written after the user message is in the conversation, after each reply, at the end
+  of a turn and when a run ends (`save_point`). `Context::answer_dangling` answers the tool calls a
+  killed run left open, `Context::restored` takes the stored conversation and its stubs.
+- `Harness::resume`, `resume_scripted` (tests, the app's headless hooks), `resume_stand_ins`, `is_live`,
+  `close_all`; `send_with` revives on demand. `list`/`meta` give stored sessions the status `resumable`
+  or `closed` with `why_closed` (`older`, `simulated`, `busy`, `gone`). `subscribe` on a stored
+  session is an error that says to send a message first (reviving on subscribe would take the lock and
+  need the key just to look at an old session); `stop` is a no-op unless another process runs it;
+  `approve` says nothing is waiting. `Harness` ending (the last handle dropped) ends its sessions
+  and frees their locks, `Live::shut`.
+- `EventKind::Resumed { cut_off, answered }` marks the restoration in the log; the UI draws it as a row.
+
+**Decisions:** a session without a snapshot is *not* rebuilt from its log: the log lacks the system
+prompt, the composed first message (environment, preflight output, attached files) and the harness's
+footers, so the model would not see the conversation it had. `seen` and the anchors' histories start
+empty (files are shown again); the evidence starts fresh; the watch results are not kept; the `reply`
+counter is not (histories are empty); the step and spill counters are, so numbers in the conversation
+are not reused. `dialects` is kept (it records whether a file already failed the syntax check before
+the tools touched it, which cannot be found out afterwards). Shell exports and the directory live in
+`shell.env` and `shell.cwd` in the session directory, which survive: only background jobs are gone.
+
+**Desktop:** a `resumable` session has a working follow-up box and is read from its log until a
+message brings it back (`store.resume`); a session that cannot be continued says why in the
+inspector (`Why`). `PRESAGE_UI_REVIVE=<file>` (see `docs/DESKTOP_UI_BRIEF.md`) lets a scripted
+session be continued with scripted replies, which is how the restart flow was photographed. The
+goal's UI was seen running for the first time: `/goal` and `/goal clear` answer in the open now (they
+were folded into "1 note"), and the Economy block shows the goal checks.
+
+**Not done:** nothing was run against a real provider; a restart with the app and the CLI running one
+session at once was exercised only with two harnesses in one process (the lock is an OS file lock, so it
+holds across processes, but only the tests' same-process case ran).
 
 ## Ninth session: against OpenCode (12 November 2026)
 

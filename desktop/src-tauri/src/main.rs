@@ -4,7 +4,7 @@
 //! headless test hooks, and an orderly end for sessions when the app quits.
 
 use presage_core::events::Event;
-use presage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, SessionStatus, StartRequest};
+use presage_core::harness::{AppState, Changes, Harness, Instructions, SessionMeta, StartRequest};
 use presage_core::provider::mock::{MockProvider, MockTurn};
 use presage_core::skills::SkillInfo;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,10 @@ struct Hooks {
     /// `PRESAGE_UI_SCRIPTED=<file>`: start a session played by a scripted stand-in and open it
     /// (see `start_scripted`). The only way to reach a live approval request without a provider.
     scripted: Option<String>,
+    /// `PRESAGE_UI_REVIVE=<file>`: sessions a stand-in played (`scripted`) can be continued, played
+    /// from here on by the replies this file holds (see `Revival`): the restart flow, shown without a
+    /// provider. A real session never needs it.
+    revive: Option<String>,
     /// `PRESAGE_UI_SCRIPT`: UI actions to play once the first view is up (grammar in `ui/js/hooks.js`).
     script: Option<String>,
     /// `PRESAGE_UI_THEME=<background>`: the painting behind the glass for this launch, by its id
@@ -55,6 +59,7 @@ impl Hooks {
             view: var("PRESAGE_UI_VIEW"),
             open: var("PRESAGE_UI_OPEN"),
             scripted: var("PRESAGE_UI_SCRIPTED"),
+            revive: var("PRESAGE_UI_REVIVE"),
             script: var("PRESAGE_UI_SCRIPT"),
             theme: var("PRESAGE_UI_THEME"),
             scheme: var("PRESAGE_UI_SCHEME"),
@@ -75,7 +80,19 @@ struct Scripted {
     /// Skills the session starts with, by name.
     #[serde(default)]
     skills: Vec<String>,
+    /// `presage` (when left out), `default` or `prosage`.
+    #[serde(default)]
+    mode: Option<String>,
     /// Milliseconds between streamed chunks of a reply.
+    #[serde(default)]
+    delay_ms: u64,
+    turns: Vec<ScriptedTurn>,
+}
+
+/// What `PRESAGE_UI_REVIVE` points at: the replies that play a session from its next message on.
+/// A file written for `PRESAGE_UI_SCRIPTED` does: what is not `turns` and `delay_ms` is left unread.
+#[derive(Deserialize)]
+struct Revival {
     #[serde(default)]
     delay_ms: u64,
     turns: Vec<ScriptedTurn>,
@@ -131,6 +148,13 @@ async fn ui_hooks(hooks: State<'_, Hooks>) -> Reply<Hooks> {
     Ok(hooks.inner().clone())
 }
 
+fn stand_in(turns: Vec<ScriptedTurn>, delay_ms: u64) -> MockProvider {
+    let turns = turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, ..Default::default() }).collect();
+    let mut provider = MockProvider::scripted(turns);
+    provider.chunk_delay_ms = delay_ms;
+    provider
+}
+
 /// Test hook: starts the session `PRESAGE_UI_SCRIPTED` describes. The path comes from the
 /// environment only, never from the webview, and no provider is contacted.
 #[tauri::command]
@@ -138,10 +162,8 @@ async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) ->
     let path = hooks.scripted.as_deref().ok_or("PRESAGE_UI_SCRIPTED is not set")?;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
-    let turns = script.turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, finish: None }).collect();
-    let mut provider = MockProvider::scripted(turns);
-    provider.chunk_delay_ms = script.delay_ms;
-    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, interactive: true, ..Default::default() };
+    let provider = stand_in(script.turns, script.delay_ms);
+    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, mode: script.mode, interactive: true, ..Default::default() };
     harness.start_scripted(req, provider)
 }
 
@@ -197,7 +219,14 @@ async fn start_demo(harness: State<'_, Harness>) -> Reply<SessionMeta> {
 
 /// `skills` are switched on with this message, and `files` are attached to it.
 #[tauri::command]
-async fn send_message(harness: State<'_, Harness>, id: String, text: String, skills: Option<Vec<String>>, files: Option<Vec<String>>, changes: Option<Changes>) -> Reply<()> {
+async fn send_message(harness: State<'_, Harness>, hooks: State<'_, Hooks>, id: String, text: String, skills: Option<Vec<String>>, files: Option<Vec<String>>, changes: Option<Changes>) -> Reply<()> {
+    // A session that is stored is brought back by the message itself. Only one a stand-in played
+    // needs the hook to say who plays it now.
+    if let Some(path) = hooks.revive.as_deref().filter(|_| !harness.is_live(&id) && harness.meta(&id).is_ok_and(|meta| meta.simulated)) {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let revival: Revival = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+        harness.resume_scripted(&id, stand_in(revival.turns, revival.delay_ms))?;
+    }
     harness.send_with(&id, &text, &skills.unwrap_or_default(), &files.unwrap_or_default(), changes.unwrap_or_default())
 }
 
@@ -216,7 +245,7 @@ async fn approve(harness: State<'_, Harness>, id: String, approval: u64, allow: 
 /// from a newer version of the engine should still reach the timeline.
 #[tauri::command]
 async fn session_events(harness: State<'_, Harness>, id: String) -> Reply<Vec<Value>> {
-    if harness.meta(&id).is_err() && !id.contains(['/', '\\', '.']) {
+    if !harness.is_live(&id) && !id.contains(['/', '\\', '.']) {
         let log = Path::new(&harness.state().data_dir).join("sessions").join(&id).join("events.jsonl");
         if let Ok(text) = std::fs::read_to_string(log) {
             let event = |line: &str| {
@@ -371,14 +400,12 @@ async fn subscribe(harness: State<'_, Harness>, id: String, on_event: Channel<Ev
 }
 
 /// Ends every session this process runs. Without it, a command an agent started (a test run, a
-/// server it left in the background) would go on running after the app has gone.
+/// server it left in the background) would go on running after the app has gone. Each session has
+/// stored what continuing it needs, so the next launch can pick it up.
 fn close_sessions(harness: &Harness) {
-    let live: Vec<String> = harness.list().into_iter().filter(|meta| meta.status != SessionStatus::Closed).map(|meta| meta.id).collect();
-    for id in &live {
-        let _ = harness.close(id);
-    }
-    // `close` only signals the session tasks, and they do the killing: leave them a moment for it.
-    if !live.is_empty() {
+    // `close` only signals the session tasks, and they do the killing and write what a run that
+    // is ended leaves: leave them a moment for it.
+    if harness.close_all() > 0 {
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 }
@@ -389,9 +416,11 @@ fn main() {
 
     let hooks = Hooks::from_env();
     let size = hooks.size;
+    let harness = Harness::new();
+    harness.resume_stand_ins(hooks.revive.is_some());
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Harness::new())
+        .manage(harness)
         .manage(hooks)
         .setup(move |app| {
             if let (Some((width, height)), Some(window)) = (size, app.get_webview_window("main")) {
