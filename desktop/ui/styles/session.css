@@ -470,8 +470,10 @@ button.row-line:focus-visible {
   transition: visibility 0s linear 180ms;
 }
 
+/* `inherit`, not `visible`: an open fold shows only where what holds it does. `visible` would
+   bring it back out of a pane that is put away, which hides itself the same way. */
 .fold.is-open > .fold-inner {
-  visibility: visible;
+  visibility: inherit;
   transition-delay: 0s;
 }
 

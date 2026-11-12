@@ -682,9 +682,10 @@ textarea.editor {
 .skill-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  /* As far from the dialog's edges, its head and each other as the close button is from its corner. */
+  gap: 10px;
   min-height: 0;
-  padding: 14px 16px 16px;
+  padding: 10px;
   overflow-y: auto;
 }
 
