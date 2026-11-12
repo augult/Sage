@@ -159,6 +159,8 @@ const HANDLERS = {
       turn.reasoning = '';
       turn.content = '';
       turn.streamRev++;
+      // One row for a run of attempts, saying the latest: with auto-retry a night can hold hundreds.
+      if (turn.rows.at(-1)?.retry) turn.rows.pop();
     }
     const row = chip(s, 'alert', 'retry', `attempt ${num(ev.attempt)}: ${str(ev.reason)} — retrying in ${duration(num(ev.wait_ms))}`);
     row.retry = { attempt: num(ev.attempt), reason: str(ev.reason) };

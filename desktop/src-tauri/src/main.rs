@@ -160,6 +160,12 @@ async fn set_defaults(harness: State<'_, Harness>, provider: Option<String>, mod
     harness.set_defaults(provider, model, effort)
 }
 
+/// Switches auto-retry, for the sessions that are running as well as the ones to come.
+#[tauri::command]
+async fn set_auto_retry(harness: State<'_, Harness>, on: bool) -> Reply<()> {
+    harness.set_auto_retry(on)
+}
+
 #[tauri::command]
 async fn list_sessions(harness: State<'_, Harness>) -> Reply<Vec<SessionMeta>> {
     Ok(harness.list())
@@ -362,6 +368,7 @@ fn main() {
             app_state,
             set_key,
             set_defaults,
+            set_auto_retry,
             list_sessions,
             start_session,
             start_demo,

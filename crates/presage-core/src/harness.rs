@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
@@ -127,6 +127,8 @@ pub struct AppState {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub effort: String,
+    /// Whether a provider that is rate limited or unreachable is retried until it answers.
+    pub auto_retry: bool,
     pub data_dir: String,
     pub home: String,
 }
@@ -208,6 +210,9 @@ struct Inner {
     data_dir: PathBuf,
     config: Mutex<Config>,
     sessions: Mutex<HashMap<String, Arc<Live>>>,
+    /// The auto-retry setting, shared with the provider of every session: switching it reaches
+    /// the ones that are running, even one that is waiting between two attempts.
+    auto_retry: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -253,14 +258,16 @@ impl Harness {
 
     pub fn at(data_dir: PathBuf) -> Self {
         let config = Config::load(&data_dir.join("config.json"));
-        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()) }) }
+        let auto_retry = Arc::new(AtomicBool::new(config.auto_retry));
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry }) }
     }
 
     /// A harness with this one's keys and defaults that keeps its sessions and lessons elsewhere,
-    /// so that benchmark runs do not mix with the user's own.
+    /// so that benchmark runs do not mix with the user's own. It never retries without end: a
+    /// benchmark has to finish.
     pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
         let config = self.inner.config.lock().unwrap().clone();
-        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()) }) }
+        Self { inner: Arc::new(Inner { data_dir, config: Mutex::new(config), sessions: Mutex::new(HashMap::new()), auto_retry: Arc::default() }) }
     }
 
     fn config_path(&self) -> PathBuf {
@@ -292,6 +299,7 @@ impl Harness {
             provider,
             model,
             effort: cfg.effort.clone().unwrap_or_else(|| "ratchet".into()),
+            auto_retry: self.inner.auto_retry.load(Ordering::Relaxed),
             data_dir: self.inner.data_dir.to_string_lossy().into_owned(),
             home: home_dir().to_string_lossy().into_owned(),
         }
@@ -320,6 +328,18 @@ impl Harness {
         cfg.model = model.or(cfg.model.take());
         cfg.effort = effort.or(cfg.effort.take());
         cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
+    }
+
+    /// Switches auto-retry: with it, a request the provider turned away for a reason that passes
+    /// (a rate limit, an overload, a dropped connection) is made again until it is answered or the
+    /// session is stopped, instead of ending the run after a few attempts. Takes effect at once,
+    /// in the sessions that are running too.
+    pub fn set_auto_retry(&self, on: bool) -> Result<(), String> {
+        let mut cfg = self.inner.config.lock().unwrap();
+        cfg.auto_retry = on;
+        cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))?;
+        self.inner.auto_retry.store(on, Ordering::Relaxed);
+        Ok(())
     }
 
     fn system_path(&self) -> PathBuf {
@@ -403,7 +423,9 @@ impl Harness {
             return Err("the task is empty".into());
         }
         let resolved = self.inner.config.lock().unwrap().resolve(req.provider.as_deref(), req.model.as_deref())?;
-        let provider = Provider::OpenAi(OpenAiProvider::new(&resolved.base_url, &resolved.key, &resolved.model, resolved.dialect).map_err(|e| e.to_string())?);
+        let mut client = OpenAiProvider::new(&resolved.base_url, &resolved.key, &resolved.model, resolved.dialect).map_err(|e| e.to_string())?;
+        client.keep_retrying = self.inner.auto_retry.clone();
+        let provider = Provider::OpenAi(client);
         let effort = req.effort.clone().or_else(|| self.inner.config.lock().unwrap().effort.clone());
         self.launch(req, provider, &resolved.id, &resolved.model, effort)
     }
@@ -765,6 +787,14 @@ mod tests {
         let other = h.with_data_dir(h.inner.data_dir.join("elsewhere"));
         assert!(other.state().providers.iter().any(|p| p.id == "openrouter" && p.has_key));
         assert!(other.list().is_empty());
+
+        // Auto-retry is kept with the defaults, and is not handed on to a benchmark's harness.
+        assert!(!h.state().auto_retry);
+        h.set_auto_retry(true).unwrap();
+        assert!(h.state().auto_retry && Harness::at(h.inner.data_dir.clone()).state().auto_retry);
+        assert!(!h.with_data_dir(h.inner.data_dir.join("bench")).state().auto_retry);
+        h.set_auto_retry(false).unwrap();
+        assert!(!h.state().auto_retry && !Harness::at(h.inner.data_dir.clone()).state().auto_retry);
     }
 
     #[tokio::test]
