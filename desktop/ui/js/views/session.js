@@ -93,7 +93,8 @@ export function mountSession(main, side, app, meta) {
   // Holds how many messages the timeline had when the last one was sent, until it shows one more.
   // Not "until a redraw sees the run": a run can start and end between two redraws.
   let awaitingRun = null;
-  const messages = () => entry.model.items.filter((item) => item.kind === 'user').length;
+  // A command the engine answers itself (`/goal`, `/goal clear`) shows no message: its answer counts.
+  const messages = () => entry.model.items.filter((item) => item.kind === 'user').length + entry.model.commands;
 
   async function send() {
     const text = box.value.trim();

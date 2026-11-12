@@ -17,14 +17,16 @@ pub struct MockTurn {
     pub calls: Vec<(String, Value)>,
     /// Overrides the finish reason, e.g. "length" to simulate a reply cut off by the output limit.
     pub finish: Option<String>,
+    /// The request fails with this instead of being answered, as when the provider is down.
+    pub error: Option<String>,
 }
 
 impl MockTurn {
     pub fn calls(reasoning: &str, calls: Vec<(&str, Value)>) -> Self {
-        Self { reasoning: reasoning.into(), content: String::new(), calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(), finish: None }
+        Self { reasoning: reasoning.into(), content: String::new(), calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(), ..Self::default() }
     }
     pub fn say(content: &str) -> Self {
-        Self { reasoning: String::new(), content: content.into(), calls: vec![], finish: None }
+        Self { content: content.into(), ..Self::default() }
     }
 }
 
@@ -58,6 +60,9 @@ impl MockProvider {
             Some(f) => f(req.messages),
             None => MockTurn::say("(scripted model has nothing further to say)"),
         };
+        if let Some(message) = &turn.error {
+            return Err(ProviderError::Protocol(message.clone()));
+        }
 
         for (text, is_reasoning) in [(&turn.reasoning, true), (&turn.content, false)] {
             let chars: Vec<char> = text.chars().collect();
@@ -82,7 +87,10 @@ impl MockProvider {
 
         // Simulate a provider with a perfect prefix cache: everything sent last time is a hit now.
         let prompt = est_tokens(&serde_json::to_string(req.messages).unwrap_or_default()) + est_tokens(&req.tools.to_string());
-        let cached = self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt);
+        // A request with no tools is a question on the side (a finish check), not a turn of the
+        // conversation: it hits nothing and leaves what the conversation has cached as it is.
+        let side = req.tools.as_array().is_none_or(|tools| tools.is_empty());
+        let cached = if side { 0 } else { self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt) };
         let reasoning = est_tokens(&turn.reasoning);
         let output = reasoning + est_tokens(&turn.content) + calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum::<u64>();
 

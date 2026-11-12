@@ -23,6 +23,9 @@ const STATE_WORDS = { surprise: 'surprise', error: 'failed', skipped: 'skipped',
 
 const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', error: 'Failed' };
 
+// How the goal stands, as `/goal` is answered.
+const GOAL_WORDS = { none: 'none set', open: 'open', met: 'met', cleared: 'cleared' };
+
 // Characters of a note that still read as one slim line.
 const LONG_NOTE = 140;
 
@@ -119,10 +122,13 @@ function gather(items, ctx) {
     } else if (item.kind === 'result') {
       work = null;
       blocks.push({ kind: 'result', key: item.key, sig: `${item.rev}:${edits.length}`, item, edits });
+    } else if (item.kind === 'goal') {
+      work = null;
+      blocks.push({ kind: 'goal', key: item.key, sig: item.rev, item });
     } else if (item.kind === 'approval' && awaitsAnswer(item, ctx)) {
       blocks.push({ kind: 'approval', key: item.key, sig: item.state, item });
     } else {
-      // The environment snapshot, a note, a lesson, an answered request: rows like any other.
+      // The environment snapshot, a note, what became of the goal, an answered request: rows like any other.
       into(item).rows.push(item);
     }
   }
@@ -175,6 +181,12 @@ const PLAIN = {
       h('div.notice-title', icon('bang', 14), 'Provider error', h('span.notice-state', live ? `retrying · attempt ${retry.attempt}` : plural(retry.attempt, 'attempt'))),
       h('div.notice-text', retry.reason),
     );
+  },
+
+  /** The answer to `/goal` or `/goal clear`: a line like an outcome's, since nothing else answers the user. */
+  goal({ item }) {
+    const said = [known(GOAL_WORDS, item.state) ?? item.state, item.text].filter(Boolean).join(' · ');
+    return h('section.result', h('div.result-line', icon('flag', 14), h('span.result-status', 'Goal'), h('span', `· ${said}`)));
   },
 
   /** How the run ended: its summary as the answer it is, a line for the outcome, and what it edited. */
@@ -320,7 +332,7 @@ function row(ctx, key, classes, cells, detail, attributes = {}) {
 }
 
 /**
- * A quiet row for what happened beside the steps: a watch change, a note, a lesson, a retry.
+ * A quiet row for what happened beside the steps: a watch change, a note, a goal check, a retry.
  * One that is long or runs over several lines shows its first line and unfolds the rest.
  */
 function noteRow(note, ctx) {
