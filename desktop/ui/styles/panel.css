@@ -126,9 +126,10 @@
 /* Code: the tree on the left, the open file on the right. The view fills the pane and scrolls in
    its own two parts. */
 
+/* Kept off the sheet and the window's edge by the gap, as the sidebar's rows are. */
 #inspector-body[data-view="code"] {
   display: flex;
-  padding: 0 0 8px;
+  padding: 0 var(--gap) var(--gap);
   overflow: hidden;
 }
 
@@ -140,10 +141,10 @@
   border-top: 1px solid var(--line);
 }
 
+/* As wide however wide the pane is dragged: the room goes to the editor. */
 .code-tree {
   flex: none;
-  width: 34%;
-  max-width: 220px;
+  width: 200px;
   padding: 6px 4px;
   overflow: auto;
   border-right: 1px solid var(--line);
@@ -194,6 +195,52 @@
   text-overflow: ellipsis;
 }
 
+/* A name being typed: a new file's or folder's, or a new one for what is there. */
+.tree-row.is-naming {
+  background: var(--fill-2);
+}
+
+.tree-input,
+.code-path-input {
+  min-width: 0;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  outline: 0;
+  background: var(--well);
+  color: var(--ink);
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
+}
+
+.tree-input {
+  flex: 1;
+}
+
+.tree-input:focus,
+.code-path-input:focus {
+  border-color: var(--ink);
+}
+
+/* The tree's right-click menu, where the pointer was. */
+.menu.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 160px;
+}
+
+.menu-rule {
+  flex: none;
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.confirm-delete {
+  width: min(400px, calc(100vw - 48px));
+}
+
 .code-pane {
   display: flex;
   flex: 1;
@@ -211,14 +258,31 @@
   padding: 0 8px 0 12px;
 }
 
+/* The open file's name, which renames it when clicked. */
 .code-path {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  margin-right: auto;
+  padding: 3px 6px;
   overflow: hidden;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: inherit;
+  text-align: left;
   font: var(--text-sm) var(--mono);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.code-path:hover {
+  background: var(--fill-2);
+}
+
+.code-path-input {
+  flex: 1;
+  margin-right: 0;
 }
 
 /* Typed and not saved: a dot after the name. */
@@ -240,7 +304,6 @@
   display: flex;
   flex: 1;
   min-height: 0;
-  margin: 0 8px 0 0;
   border: 1px solid var(--line);
   border-left: 0;
   border-radius: 0 var(--r-3) var(--r-3) 0;
@@ -313,11 +376,23 @@
   gap: 8px;
 }
 
+/* The repository on a line of its own; under it the branch and where it goes. */
 .push-target {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.push-line {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.push-line > .icon {
+  flex: none;
 }
 
 .push-repo {
@@ -363,11 +438,22 @@
   background: var(--fill-1);
 }
 
+.push-row {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+}
+
+.push-row:hover {
+  background: var(--fill-2);
+}
+
 .push-file {
   display: flex;
+  flex: 1;
   align-items: baseline;
   gap: 10px;
-  width: 100%;
+  min-width: 0;
   padding: 0 10px;
   border: 0;
   background: transparent;
@@ -376,14 +462,37 @@
   text-align: left;
 }
 
-button.push-file:hover {
-  background: var(--fill-2);
-}
 
 .push-kind {
   flex: none;
   width: 9ch;
   color: var(--muted);
+}
+
+/* Puts a changed file back as the last commit has it; shown on its row when pointed at. */
+.push-revert {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--muted);
+  visibility: hidden;
+  align-self: center;
+}
+
+.push-row:hover .push-revert,
+.push-revert:focus-visible {
+  visibility: visible;
+}
+
+.push-revert:hover {
+  background: var(--fill-3);
+  color: var(--ink);
 }
 
 .push-path {

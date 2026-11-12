@@ -217,6 +217,11 @@ pub async fn push(cwd: &Path, message: &str) -> Result<Pushed, String> {
     Ok(Pushed { commit, remote, branch, pushed: true })
 }
 
+/// Puts the file at `path` back as the last commit has it, in the index and on disk.
+pub async fn discard(cwd: &Path, path: &str) -> Result<(), String> {
+    git(cwd, &["restore", "--source=HEAD", "--staged", "--worktree", "--", path]).await.map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +279,10 @@ mod tests {
         // A commit made some other way is pushed as it is, with no message asked for.
         std::fs::write(work.join("a.txt"), "two\n").unwrap();
         assert_eq!(state(&work).await.files, [ChangedFile { path: "a.txt".into(), status: "modified" }]);
+        discard(&work, "a.txt").await.unwrap();
+        // As the commit has it, with whatever line ending git checks it out with here.
+        assert!(state(&work).await.files.is_empty() && std::fs::read_to_string(work.join("a.txt")).unwrap().trim_end() == "one");
+        std::fs::write(work.join("a.txt"), "two\n").unwrap();
         git(&work, &["commit", "--quiet", "--all", "--message", "Change a"]).await.unwrap();
         let found = state(&work).await;
         assert_eq!(found.ahead, 1);

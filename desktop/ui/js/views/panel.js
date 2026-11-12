@@ -3,6 +3,7 @@
 // the folder stands with git, and the push). The choice is kept from one session to the next.
 
 import { h, icon } from '../dom.js';
+import * as prefs from '../prefs.js';
 import { codeView } from './code.js';
 import { githubView, waiting } from './github.js';
 import { renderInspector } from './inspector.js';
@@ -14,6 +15,40 @@ const TABS = [
 ];
 
 let chosen = 'economy';
+
+// How wide the pane is while it shows code, once dragged: the editor takes what is added, the
+// tree keeps its width (styles/layout.css clamps it to the window).
+const root = document.documentElement;
+const keptWidth = Number(prefs.get('code-width'));
+if (keptWidth > 0) root.style.setProperty('--code-w', `${keptWidth}px`);
+
+/** The edge of the pane by the sheet, which drags its width while it shows code. Double-click goes back to the default. */
+function resizer(pane) {
+  const grip = h('div.pane-resize', { role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the code editor', title: 'Drag to resize · double-click to reset' });
+  grip.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    const [startX, startW] = [event.clientX, pane.getBoundingClientRect().width];
+    root.dataset.resizing = 'true';
+    const move = (moved) => root.style.setProperty('--code-w', `${Math.round(startW + startX - moved.clientX)}px`);
+    const end = () => {
+      grip.removeEventListener('pointermove', move);
+      delete root.dataset.resizing;
+      // What it came to, within the window's limits.
+      const width = Math.round(pane.getBoundingClientRect().width);
+      root.style.setProperty('--code-w', `${width}px`);
+      prefs.set('code-width', String(width));
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('lostpointercapture', end, { once: true });
+  });
+  grip.addEventListener('dblclick', () => {
+    root.style.removeProperty('--code-w');
+    prefs.set('code-width', '');
+  });
+  return grip;
+}
 
 /**
  * `bar` and `body` are the pane's two parts; `session` is `{ id, title }`.
@@ -32,6 +67,8 @@ export function mountPanel(bar, body, session) {
     ),
   );
   bar.replaceChildren(h('div.tabs', { role: 'tablist', 'aria-label': 'Pane' }, tabs));
+  const grip = resizer(body.parentElement);
+  body.parentElement.append(grip);
 
   // Made when first shown, and kept: a file stays open, and a message typed, while another tab is looked at.
   let code = null;
@@ -45,6 +82,7 @@ export function mountPanel(bar, body, session) {
       show('code');
       code.open(path);
     },
+    onDiscard: () => code?.refresh(),
   });
 
   function show(id) {
@@ -77,6 +115,7 @@ export function mountPanel(bar, body, session) {
     },
     unmount() {
       code?.unmount();
+      grip.remove();
       bar.replaceChildren();
       delete document.documentElement.dataset.panel;
       delete body.dataset.view;

@@ -12,7 +12,8 @@
 }
 
 :root[data-panel="code"] {
-  --inspector-w: clamp(360px, 42vw, 760px);
+  /* Dragged wider or narrower at its edge (js/views/panel.js), the sheet always keeps room to read. */
+  --inspector-w: clamp(360px, var(--code-w, clamp(360px, 42vw, 760px)), calc(100vw - var(--left-w) - 360px));
 }
 
 :root[data-sidebar="off"] {
@@ -383,11 +384,53 @@
 /* Inspector */
 
 #inspector {
+  position: relative;
   display: flex;
   grid-row: 1;
   grid-column: 3;
   flex-direction: column;
   min-height: 0;
+}
+
+/* The pane's edge by the sheet, which drags its width while it shows code. It straddles the gap. */
+.pane-resize {
+  position: absolute;
+  top: calc(var(--strip) + var(--gap));
+  bottom: var(--gap);
+  left: calc(-1 * var(--gap));
+  z-index: 5;
+  display: none;
+  width: calc(var(--gap) + 4px);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+:root[data-panel="code"]:not([data-inspector="off"]) .pane-resize {
+  display: block;
+}
+
+.pane-resize::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--gap) / 2 - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  content: "";
+  transition: background-color 120ms ease;
+}
+
+.pane-resize:hover::after,
+:root[data-resizing] .pane-resize::after {
+  background: var(--line-strong);
+}
+
+/* While it is dragged nothing is selected, and the pointer stays the drag's everywhere. */
+:root[data-resizing],
+:root[data-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* The inspector's share of the title bar: empty, so it drags. The caption buttons lie over its end. */

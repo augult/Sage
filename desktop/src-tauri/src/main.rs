@@ -376,6 +376,30 @@ async fn write_file(harness: State<'_, Harness>, id: String, path: String, text:
     files::write(&session_cwd(&harness, &id)?, &path, &text)
 }
 
+/// Makes an empty file, or a folder when `dir`, in the session's folder.
+#[tauri::command]
+async fn create_entry(harness: State<'_, Harness>, id: String, path: String, dir: bool) -> Reply<()> {
+    files::create(&session_cwd(&harness, &id)?, &path, dir)
+}
+
+/// Moves a file or folder of the session's folder to another path in it.
+#[tauri::command]
+async fn rename_entry(harness: State<'_, Harness>, id: String, from: String, to: String) -> Reply<()> {
+    files::rename(&session_cwd(&harness, &id)?, &from, &to)
+}
+
+/// Deletes a file or folder of the session's folder.
+#[tauri::command]
+async fn delete_entry(harness: State<'_, Harness>, id: String, path: String) -> Reply<()> {
+    files::remove(&session_cwd(&harness, &id)?, &path)
+}
+
+/// Puts a changed file back as the last commit has it.
+#[tauri::command]
+async fn git_discard(harness: State<'_, Harness>, id: String, path: String) -> Reply<()> {
+    git::discard(&session_cwd(&harness, &id)?, &path).await
+}
+
 /// Returns everything stored so far and forwards what follows to `on_event`, with nothing lost or
 /// repeated in between. Forwarding ends when the webview or the session goes away.
 #[tauri::command]
@@ -473,6 +497,10 @@ fn main() {
             list_dir,
             read_file,
             write_file,
+            create_entry,
+            rename_entry,
+            delete_entry,
+            git_discard,
             subscribe
         ])
         .build(tauri::generate_context!())

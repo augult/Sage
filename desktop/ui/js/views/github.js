@@ -6,15 +6,19 @@
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { firstLine, plural } from '../format.js';
+import { closeButton, openDialog } from './common.js';
+
+// Changes that can go back to what the last commit has.
+const REVERTIBLE = new Set(['modified', 'deleted']);
 
 // Longer than this and a commit's first line is cut off in most places it is shown.
 const SUBJECT = 72;
 
 /**
  * `session` is `{ id, title }`. `onState(state)` runs with each reading; `openFile(path)` shows a
- * changed file in the editor. Gives `{ el, load() }`.
+ * changed file in the editor; `onDiscard(path)` runs once a file is put back. Gives `{ el, load() }`.
  */
-export function githubView(session, { onState, openFile }) {
+export function githubView(session, { onState, openFile, onDiscard }) {
   const body = h('div.git-body', h('p.side-note', 'Reading…'));
   const error = h('div.form-error', { role: 'alert', hidden: true });
   const note = h('span.push-note', { role: 'status' });
@@ -63,8 +67,13 @@ export function githubView(session, { onState, openFile }) {
             h(
               'div.push-files',
               files.map((file) =>
-                // What is gone cannot be opened.
-                h(file.status === 'deleted' ? 'div.push-file' : 'button.push-file', { type: file.status !== 'deleted' && 'button', title: file.path, onclick: file.status !== 'deleted' && (() => openFile(file.path)) }, h('span.push-kind', file.status), h('span.push-path', file.path)),
+                h(
+                  'div.push-row',
+                  // What is gone cannot be opened.
+                  h(file.status === 'deleted' ? 'div.push-file' : 'button.push-file', { type: file.status !== 'deleted' && 'button', title: file.path, onclick: file.status !== 'deleted' && (() => openFile(file.path)) }, h('span.push-kind', file.status), h('span.push-path', file.path)),
+                  // What the last commit has can be put back; a new file has nothing to go back to.
+                  REVERTIBLE.has(file.status) && h('button.push-revert', { type: 'button', title: 'Discard changes', 'aria-label': `Discard changes to ${file.path}`, onclick: () => askRevert(file) }, icon('back', 14)),
+                ),
               ),
             ),
             message,
@@ -87,6 +96,39 @@ export function githubView(session, { onState, openFile }) {
     );
     log.hidden = !state.commits.length;
     if (typing) message.focus();
+  }
+
+  function askRevert(file) {
+    let go;
+    openDialog('confirm-delete', (shut) => {
+      go = h(
+        'button.btn.danger',
+        {
+          id: 'revert-go',
+          type: 'button',
+          async onclick() {
+            go.disabled = true;
+            error.hidden = true;
+            try {
+              await api.gitDiscard(session.id, file.path);
+            } catch (problem) {
+              error.textContent = String(problem);
+              error.hidden = false;
+            }
+            shut();
+            await load();
+            onDiscard?.(file.path);
+          },
+        },
+        'Discard',
+      );
+      return [
+        h('div.dialog-head', h('h2', 'Discard changes?'), closeButton(shut)),
+        h('div.unsaved-body', h('p', h('span.mono', file.path), file.status === 'deleted' ? ' comes back as the last commit has it.' : ' goes back to what the last commit has.'), h('p.muted', 'This cannot be undone.')),
+        h('div.dialog-foot', h('button.btn', { type: 'button', onclick: shut }, 'Cancel'), go),
+      ];
+    });
+    go.focus();
   }
 
   async function load() {

@@ -54,6 +54,13 @@ export const api = {
   listDir: (id, path = '') => invoke('list_dir', { id, path }),
   readFile: (id, path) => invoke('read_file', { id, path }),
   writeFile: (id, path, text) => invoke('write_file', { id, path, text }),
+  /** An empty file, or a folder when `dir`, at `path`; nothing may be there yet. */
+  createEntry: (id, path, dir) => invoke('create_entry', { id, path, dir }),
+  renameEntry: (id, from, to) => invoke('rename_entry', { id, from, to }),
+  /** Deletes a file, or a folder with everything in it. */
+  deleteEntry: (id, path) => invoke('delete_entry', { id, path }),
+  /** Puts a changed file back as the last commit has it. */
+  gitDiscard: (id, path) => invoke('git_discard', { id, path }),
 
   /** Resolves with the stored events; `onEvent` receives everything emitted after them. */
   subscribe(id, onEvent) {

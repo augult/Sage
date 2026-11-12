@@ -60,6 +60,50 @@ pub fn write(root: &Path, path: &str, text: &str) -> Result<(), String> {
     std::fs::write(&file, text).map_err(|e| format!("cannot write {path}: {e}"))
 }
 
+/// Where a new entry named by `path` would go: its folder has to be there and under the root, the
+/// name has to be a plain one, and nothing may be there yet.
+fn fresh(root: &Path, path: &str) -> Result<PathBuf, String> {
+    let path = path.trim_matches('/');
+    let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+    if name.is_empty() || name == "." || name == ".." || name.contains(['\\', ':']) || name == ".git" {
+        return Err(format!("{name:?} is not a name a file can have"));
+    }
+    let (_, folder) = within(root, parent)?;
+    if !folder.is_dir() {
+        return Err(format!("{parent} is not a folder"));
+    }
+    let target = folder.join(name);
+    if target.symlink_metadata().is_ok() {
+        return Err(format!("{path} is there already"));
+    }
+    Ok(target)
+}
+
+/// Makes an empty file, or a folder when `dir`, at `path`.
+pub fn create(root: &Path, path: &str, dir: bool) -> Result<(), String> {
+    let target = fresh(root, path)?;
+    if dir { std::fs::create_dir(&target) } else { std::fs::OpenOptions::new().write(true).create_new(true).open(&target).map(|_| ()) }.map_err(|e| format!("cannot make {path}: {e}"))
+}
+
+/// Moves the file or folder at `from` to `to`, both from the root.
+pub fn rename(root: &Path, from: &str, to: &str) -> Result<(), String> {
+    let (root_dir, source) = within(root, from)?;
+    if source == root_dir {
+        return Err("the session's folder itself cannot be renamed here".into());
+    }
+    let target = fresh(root, to)?;
+    std::fs::rename(&source, &target).map_err(|e| format!("cannot rename {from}: {e}"))
+}
+
+/// Deletes the file or folder, with all it holds, at `path`.
+pub fn remove(root: &Path, path: &str) -> Result<(), String> {
+    let (root_dir, target) = within(root, path)?;
+    if target == root_dir {
+        return Err("the session's folder itself cannot be deleted here".into());
+    }
+    if target.is_dir() { std::fs::remove_dir_all(&target) } else { std::fs::remove_file(&target) }.map_err(|e| format!("cannot delete {path}: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +136,19 @@ mod tests {
             assert!(write(&root, outside, "x").unwrap_err().contains("outside"), "{outside}");
         }
         assert!(list(&root, "..").unwrap_err().contains("outside"));
+
+        create(&root, "src/new.txt", false).unwrap();
+        create(&root, "src/made", true).unwrap();
+        assert!(create(&root, "src/new.txt", false).unwrap_err().contains("there already"));
+        assert!(create(&root, "../escape.txt", false).is_err() && create(&root, "x/..", false).is_err());
+        rename(&root, "src/new.txt", "src/made/moved.txt").unwrap();
+        assert_eq!(names("src/made"), [("src/made/moved.txt".to_string(), false)]);
+        assert!(rename(&root, "b.txt", "A.md").unwrap_err().contains("there already"));
+        assert!(rename(&root, "b.txt", "../out.txt").is_err() && rename(&root, "", "x").is_err());
+        remove(&root, "src/made").unwrap();
+        remove(&root, "b.txt").unwrap();
+        assert_eq!(names("src"), [("src/deep".to_string(), true)]);
+        assert!(remove(&root, "").is_err() && remove(&root, "../secret.txt").is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 }
