@@ -124,8 +124,8 @@ export function mountSession(main, side, app, meta) {
   const pickSlot = h('span.contents');
   const swapNote = h('div.chat-note', { role: 'status', hidden: true });
   const wanted = { provider: null, model: null, effort: null, autonomy: null };
-  // The policy as the pickers name it: the engine's `ratchet-high` is Auto.
-  const policy = (effort) => (effort === 'ratchet-high' ? 'ratchet' : effort);
+  // The policy as the pickers name it: the engine's `ratchet-low` is Auto.
+  const policy = (effort) => (effort === 'ratchet-low' ? 'ratchet' : effort);
 
   /** What the next message would change: only what differs from what the session has. */
   function changes() {

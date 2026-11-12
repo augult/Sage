@@ -182,7 +182,7 @@ fn presage_tools(watch: bool, job: bool) -> Value {
         ),
         tool(
             "write",
-            "Create a file (parent directories are created). An existing file needs overwrite:true; prefer `edit` for changes.",
+            "Create a file (parent directories are created). An existing file you have not been shown in full needs overwrite:true; prefer `edit` for changes.",
             json!({"path": {"type": "string"}, "content": {"type": "string"}, "overwrite": {"type": "boolean"}}),
             &["path", "content"],
         ),
@@ -353,10 +353,11 @@ mod tests {
         for prompt in [auto, promoted, manual] {
             assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
         }
-        // The review is described only where `finish` is answered with one.
-        let unreviewed = system_prompt(&Features::presage().without("review").unwrap());
-        assert!(auto.contains("comes back once, with your changes and a review") && auto.contains("Do not spend a reply on `git diff` first"));
-        assert!(!unreviewed.contains("comes back once") && unreviewed.contains("Re-read your changes once (`git diff`") && !unreviewed.contains('{'));
+        // The review is described only where `finish` is answered with one, which a run has to ask for.
+        let reviewed = system_prompt(&Features::presage().with("review").unwrap());
+        assert!(reviewed.contains("comes back once, with your changes and a review") && reviewed.contains("Do not spend a reply on `git diff` first") && !reviewed.contains('{'));
+        assert!(!auto.contains("comes back once") && auto.contains("Re-read your changes once (`git diff`"));
+        assert_eq!(system_prompt(&Features::presage().without("review").unwrap()), auto);
         assert_eq!(system_prompt(&Features::presage().without("scripts").unwrap()), SYSTEM_CLASSIC);
     }
 

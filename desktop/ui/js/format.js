@@ -44,12 +44,12 @@ export function folderNames(paths) {
   return new Map(paths.map((path) => [path, tail(path, taken.get(tail(path, 1)) > 1 ? 2 : 1)]));
 }
 
-/** An effort as the interface names it. The engine's `ratchet` starts high and steps up when predictions fail: Auto. */
+/** An effort as the interface names it. The engine's `ratchet` starts low and steps up when predictions fail: Auto. */
 export function effortLabel(effort) {
   const text = String(effort ?? '');
   const start = /^ratchet(?:[-:](.+))?$/.exec(text);
   if (!start) return text;
-  return !start[1] || start[1] === 'high' ? 'auto' : `auto from ${start[1]}`;
+  return !start[1] || start[1] === 'low' ? 'auto' : `auto from ${start[1]}`;
 }
 
 export const firstLine = (text) => String(text ?? '').split('\n', 1)[0];

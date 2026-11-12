@@ -1,0 +1,59 @@
+[1/24] deepseek-v4.1-flash-1017 · pager · ext:opencode #1: solved · 6 turns · $0.0052 · 19s
+[2/24] deepseek-v4.1-flash-1017 · ttlcache · ext:opencode #1: solved · 8 turns · $0.0127 · 37s
+[3/24] deepseek-v4.1-flash-1017 · audit · ext:opencode #1: solved · 11 turns · $0.0385 · 2m28s
+[4/24] deepseek-v4.1-flash-1017 · audit-clean · ext:opencode #1: solved · 22 turns · $0.1073 · 5m27s
+[5/24] deepseek-v4.1-flash-1017 · deadcode · ext:opencode #1: solved · 9 turns · $0.0126 · 1m02s
+[6/24] deepseek-v4.1-flash-1017 · deadcode-js · ext:opencode #1: solved · 10 turns · $0.0169 · 1m03s
+[7/24] deepseek-v4.1-flash-1017 · mutants · ext:opencode #1: solved · 7 turns · $0.0133 · 1m19s
+[8/24] deepseek-v4.1-flash-1017 · mutants-js · ext:opencode #1: solved · 23 turns · $0.0644 · 3m43s
+[9/24] deepseek-v4.1-flash-1017 · slowpath · ext:opencode #1: solved · 6 turns · $0.0110 · 23s
+[10/24] deepseek-v4.1-flash-1017 · nplusone · ext:opencode #1: solved · 5 turns · $0.0077 · 18s
+[11/24] deepseek-v4.1-flash-1017 · heisenbug · ext:opencode #1: solved · 8 turns · $0.0146 · 29s
+[12/24] deepseek-v4.1-flash-1017 · restyle · ext:opencode #1: solved · 9 turns · $0.0234 · 1m21s
+[13/24] deepseek-v4.1-flash-1017 · report · ext:opencode #1: solved · 4 turns · $0.0026 · 9.8s
+[14/24] deepseek-v4.1-flash-1017 · inventory · ext:opencode #1: solved · 6 turns · $0.0072 · 16s
+[15/24] deepseek-v4.1-flash-1017 · slug · ext:opencode #1: solved · 6 turns · $0.0065 · 16s
+[16/24] deepseek-v4.1-flash-1017 · tariff · ext:opencode #1: solved · 7 turns · $0.0060 · 12s
+[17/24] deepseek-v4.1-flash-1017 · textstats · ext:opencode #1: solved · 6 turns · $0.0047 · 12s
+[18/24] deepseek-v4.1-flash-1017 · roman · ext:opencode #1: solved · 8 turns · $0.0076 · 23s
+[19/24] deepseek-v4.1-flash-1017 · connpool · ext:opencode #1: solved · 9 turns · $0.0157 · 1m05s
+[20/24] deepseek-v4.1-flash-1017 · shipquote · ext:opencode #1: solved · 7 turns · $0.0196 · 50s
+[21/24] deepseek-v4.1-flash-1017 · attempts · ext:opencode #1: solved · 10 turns · $0.0308 · 44s
+[22/24] deepseek-v4.1-flash-1017 · rollup · ext:opencode #1: solved · 30 turns · $0.1168 · 9m37s
+[23/24] deepseek-v4.1-flash-1017 · confdialect · ext:opencode #1: solved · 28 turns · $0.1945 · 15m00s
+[24/24] deepseek-v4.1-flash-1017 · jobqueue · ext:opencode #1: solved · 9 turns · $0.0236 · 1m06s
+presage bench 20261112-061839-07c4 · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7496 tokens
+ext:opencode: 3 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      ext:opencode        1/1     6   42.7k    66%     532   $0.0052   $0.0134     19s
+inventory  ext:opencode        1/1     6   42.9k    53%     843   $0.0072   $0.0139     16s
+slug       ext:opencode        1/1     6   40.2k    52%     508   $0.0065   $0.0127     16s
+tariff     ext:opencode        1/1     7   65.0k    74%     643   $0.0060   $0.0203     12s
+textstats  ext:opencode        1/1     6   40.8k    68%     576   $0.0047   $0.0129     12s
+roman      ext:opencode        1/1     8   59.7k    74%    2.3k   $0.0076   $0.0206     23s
+report     ext:opencode        1/1     4   24.1k    73%     450   $0.0026   $0.0078    9.8s
+shipquote  ext:opencode        1/1     7   69.7k    65%   10.0k   $0.0196   $0.0330     50s
+attempts   ext:opencode        1/1    10    150k    58%    9.6k   $0.0308   $0.0565     44s
+connpool   ext:opencode        1/1     9   97.3k    87%    9.4k   $0.0157   $0.0405   1m05s
+confdialect ext:opencode        1/1    28    475k    85%    142k   $0.1945   $0.3140  15m00s
+rollup     ext:opencode        1/1    30    564k    91%   82.3k   $0.1168   $0.2681   9m37s
+jobqueue   ext:opencode        1/1     9   88.8k    74%   13.7k   $0.0236   $0.0430   1m06s
+ttlcache   ext:opencode        1/1     8   79.2k    78%    5.9k   $0.0127   $0.0308     37s
+audit      ext:opencode        1/1    11    143k    77%   23.4k   $0.0385   $0.0713   2m28s
+audit-clean ext:opencode        1/1    22    552k    83%   64.2k   $0.1073   $0.2426   5m27s
+deadcode   ext:opencode        1/1     9    110k    85%    5.8k   $0.0126   $0.0402   1m02s
+deadcode-js ext:opencode        1/1    10    114k    67%    4.3k   $0.0169   $0.0396   1m03s
+mutants    ext:opencode        1/1     7   76.0k    82%    7.3k   $0.0133   $0.0316   1m19s
+mutants-js ext:opencode        1/1    23    382k    78%   30.7k   $0.0644   $0.1517   3m43s
+slowpath   ext:opencode        1/1     6   47.6k    50%    3.1k   $0.0110   $0.0180     23s
+nplusone   ext:opencode        1/1     5   38.5k    54%    1.8k   $0.0077   $0.0138     18s
+heisenbug  ext:opencode        1/1     8   81.1k    62%    4.3k   $0.0146   $0.0295     29s
+restyle    ext:opencode        1/1     9    105k    60%    8.7k   $0.0234   $0.0422   1m21s
+ALL        ext:opencode      24/24     8   80.1k    77%    5.9k   $0.0139   $0.0323     47s   total $0.763, $0.0318 per solved task
+
+results: /home/bencho2/live/bench/20261112-061839-07c4/results.json
+output of an external run: /home/bencho2/live/bench/20261112-061839-07c4/external/<session>/output.log
+exit=0

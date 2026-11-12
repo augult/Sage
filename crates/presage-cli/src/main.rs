@@ -27,9 +27,10 @@ OPTIONS for run
   -C, --cwd <dir>          workspace (default: current directory)
   -p, --provider <id>      logfare | deepseek | openrouter | … (`presage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
-  -e, --effort <level>     low | high | max | ratchet (default; starts high, rises on repeated surprises)
+  -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises)
       --classic            conventional loop without scripts, predictions, watches or the finish gate (baseline)
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
+      --with <name>        switch on a mechanism that is off unless asked for: review (repeatable)
       --skill <name>       switch a skill on (repeatable, or comma-separated)
       --system-file <path> system prompt template for this run
       --no-project-instructions
@@ -231,6 +232,7 @@ fn parse_run(args: &[String], needs_task: bool) -> Result<RunArgs, String> {
             "-e" | "--effort" => req.effort = Some(value(a)?),
             "--classic" => req.mode = Some("classic".into()),
             "--without" => req.without.push(value(a)?),
+            "--with" => req.with.push(value(a)?),
             "--skill" => req.skills.extend(value(a)?.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
             "--system-file" => {
                 let path = value(a)?;

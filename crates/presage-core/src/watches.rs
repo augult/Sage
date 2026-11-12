@@ -52,6 +52,8 @@ pub struct Watch {
     pub summary: String,
     /// Set up by the harness from the model's own test command, not by the `watch` tool.
     pub auto: bool,
+    /// The command the task itself names: no other test run takes its place.
+    pub named: bool,
 }
 
 #[derive(Default)]
@@ -88,7 +90,7 @@ fn digest(text: &str) -> u64 {
 
 impl Watches {
     pub fn set(&mut self, name: &str, cmd: &str, cwd: PathBuf, expect: Option<Expect>) -> usize {
-        let fresh = Watch { name: name.to_string(), cmd: cmd.to_string(), cwd, expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: false };
+        let fresh = Watch { name: name.to_string(), cmd: cmd.to_string(), cwd, expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: false, named: false };
         match self.items.iter().position(|w| w.name == name) {
             Some(i) => {
                 self.items[i] = fresh;
@@ -259,11 +261,13 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
         }
     }
 
-    // A runner that could not start (126, 127) says nothing about the code.
-    let promote = same.is_empty() && sess.features.auto_watch && run.ms <= AUTO_MAX_MS && !matches!(run.code, None | Some(126 | 127)) && test_like(cmd);
+    // A runner that could not start (126, 127) says nothing about the code. Nor does a throwaway
+    // script: one that lives outside the workspace is gone, or failing on purpose, soon after.
+    let promote = same.is_empty() && sess.features.auto_watch && run.ms <= AUTO_MAX_MS && !matches!(run.code, None | Some(126 | 127)) && test_like(cmd) && !throwaway(cmd, &sess.ws.root);
     let previous = sess.watches.items.iter().find(|w| w.auto).map(|w| w.cmd.clone());
-    // A watch the model itself named `tests` is the model's, and of two runs the broader is kept.
-    let owned = sess.watches.items.iter().any(|w| w.name == AUTO_NAME && !w.auto);
+    // A watch the model itself named `tests` is the model's, the command the task names stays the
+    // one that is watched, and of two runs the broader is kept.
+    let owned = sess.watches.items.iter().any(|w| w.name == AUTO_NAME && (!w.auto || w.named));
     if !promote || owned || previous.as_deref().is_some_and(|old| narrows(old, cmd)) {
         return out;
     }
@@ -291,6 +295,16 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
 /// True when `new` is `old` with more arguments: the same run restricted to a part.
 fn narrows(old: &str, new: &str) -> bool {
     new.strip_prefix(old).is_some_and(|rest| rest.starts_with(char::is_whitespace))
+}
+
+/// A command that writes its own script first (a here-document), or that names a place in the
+/// system's temporary directory outside the workspace: scratch work, not the project's tests.
+fn throwaway(cmd: &str, root: &Path) -> bool {
+    if cmd.contains("<<") {
+        return true;
+    }
+    let tmp = std::env::temp_dir();
+    cmd.split(|c: char| c.is_whitespace() || "\"'=;&|()<>".contains(c)).map(Path::new).any(|word| word.is_absolute() && (word.starts_with(&tmp) || word.starts_with("/tmp")) && !word.starts_with(root))
 }
 
 /// `cd <the directory it already runs in> && rest` is just `rest`.
@@ -324,6 +338,7 @@ pub async fn preflight(sess: &mut Session, task: &str, cancel: &CancellationToke
     let cwd = sess.ws.cwd.clone();
     let idx = sess.watches.set(AUTO_NAME, cmd, cwd, None);
     sess.watches.items[idx].auto = true;
+    sess.watches.items[idx].named = true;
     let (report, code) = run_within(sess, idx, PREFLIGHT_TIMEOUT, cancel).await;
     // Too slow to repeat after every change, or a runner that could not start: not a usable watch.
     if matches!(code, None | Some(126 | 127)) {
@@ -575,6 +590,25 @@ mod tests {
         std::fs::write(s.ws.root.join("ok"), "").unwrap();
         s.evidence.changed("edit");
         assert_eq!(run_stale(&mut s, &cancel).await.1, "watch tests: FAIL → PASS · PASS");
+
+        // It is the check the task asked for: another test run of the model's does not take its place.
+        let other = finished(&s, 1, "1 failed");
+        let seen = observe(&mut s, "python3 -m unittest", &other);
+        assert!(seen.notice.is_none() && seen.reports.is_empty());
+        assert_eq!((s.watches.items.len(), s.watches.items[0].cmd.as_str(), s.watches.items[0].state), (1, "sh check.sh", WatchState::Pass));
+
+        // With no command named, the model's own test run is watched, but not a throwaway one:
+        // a script outside the workspace, or one written on the spot.
+        let mut s = test_session("watch-throwaway", Features::presage());
+        let run = finished(&s, 1, "AssertionError");
+        let tmp = std::env::temp_dir().join("presage-scratch-verify_test.py");
+        let inside = s.ws.root.join("tests/test_all.py");
+        for scratch in [format!("python3 {}", tmp.display()), format!("cd /tmp && node --test"), "python3 - <<'EOF' && python3 -m unittest\nimport m\nEOF".to_string()] {
+            assert!(throwaway(&scratch, &s.ws.root), "{scratch}");
+            assert!(observe(&mut s, &scratch, &run).notice.is_none() && s.watches.items.is_empty(), "{scratch}");
+        }
+        assert!(!throwaway(&format!("python3 {}", inside.display()), &s.ws.root) && !throwaway("npm test 2>&1 | tail -5", &s.ws.root));
+        assert!(observe(&mut s, &format!("python3 {}", inside.display()), &run).notice.is_some());
 
         // A command that cannot start is not kept, and the mechanism can be switched off.
         let mut s = test_session("watch-preflight-missing", Features::presage());

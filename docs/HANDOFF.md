@@ -1,10 +1,62 @@
 # Handoff: Presage
 
-Read this first. State: 11 November 2026, after the eighth session. Neither it nor the seventh ran
-benchmarks: the Logfare key was still at the daily limit that had stopped the sixth, whose numbers
-these are.
+Read this first. State: 12 November 2026, after the ninth session, which measured Presage against
+OpenCode and changed four of its defaults on what it found. The seventh and eighth sessions ran no
+benchmark.
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Ninth session: against OpenCode (12 November 2026)
+
+Branch `hoplite/kos-bee4c2ad`. DeepSeek V4.1 Flash through Logfare, all 24 tasks; the tables, the
+method and the raw results are in `docs/BENCHMARKS.md` and `docs/results/2026-11-12-opencode/`.
+
+**Where it stands:** in the last head-to-head (three runs per task, each run alone in a Unix
+account) Presage solved 67/72 in 5.7 requests and 59 s a run, OpenCode 1.19.5 70/72 in 10.8
+requests and 116 s, at twice the money. Before the changes below the two were level (45/48 against
+44/48, 10.5 requests against 11.0).
+
+**Changed, each on a measurement:**
+
+- *The review pass is opt-in* (`--with review`, `presage+review`, `StartRequest.with`). It cost 30
+  to 51% more replies and changed no outcome in 96 runs against 96. This is the question the
+  seventh session left to measure, and its own bar ("within one turn of `no-review`") was missed
+  by two to four. `Features::OPTIONAL` lists what is off unless asked for.
+- *The effort ratchet starts at `low`* (`ratchet` and Auto now mean `ratchet-low`; the old start
+  is `ratchet-high`). As many tasks solved, about a quarter fewer replies and half the time on
+  DeepSeek, half the replies on six tasks with GLM-5.3. A reply that only reasoned no longer
+  switches thinking off the first time (`less_thinking` in `agent.rs`): from `low` that had left
+  the hardest task without any thinking for the rest of the run.
+- *The watch* stays on the test command the task names (`Watch.named`), and a throwaway script is
+  never promoted to it (`throwaway` in `watches.rs`). It had been moved to another command, often
+  a scratch one, in a fifth to a quarter of the runs.
+- *`write`* replaces a file the model has been shown in full without `overwrite:true`
+  (`shown_whole` in `tools/write.rs`).
+- *The bench's proxy* waits for a request in flight before closing a run, which fixes the test
+  that failed in the sandbox of the eighth session's last change.
+
+**Still worse than OpenCode, and not fixed:**
+
+- `confdialect`: 7/20 over the day against OpenCode's 5/5. Presage's runs declare it done after 5
+  to 18 replies with one or two of 39 hidden cases wrong; OpenCode works on it for 25 to 30
+  requests. The review pass did not rescue it (1/2 and 0/2 with it). One thing was tried and not
+  finished: the note "every check passes, so `finish` is accepted now" comes right before the
+  early `finish` in the failing runs, and a wording that asks for the specification to be covered
+  first was running, ten runs against ten, when the sandbox was replaced and its results were
+  lost. The wording is not in the code. It is the first thing to try again.
+- `restyle`: 8/20 against 4/5, failed on the hidden check's spacing and type scale. Six of the
+  eight were in one 48-minute window, with every variant, which nothing in the sessions explains.
+  The `ui` skill solves it; whether a skill should switch itself on is still an open question.
+
+**Not done:** grading of the answers; GLM-5.3 beyond six tasks; a run of the other adapters
+(mini-swe-agent, aider, qwen, goose, codex, pi) against the new defaults; a comparison with
+classic after the changes. **How the runs were isolated**, for whoever repeats them: an account
+per parallel run (`useradd`), the key stored per account with `presage key logfare`, the
+repository `chmod 700`, the binary and `scripts/external` copied to a place all accounts can
+read, `BENCH_EXT_HOME` pointing at one installation of the harnesses, and `/tmp/opencode` made
+world-writable with the sticky bit, because OpenCode's first run as root leaves it owned by root.
+Run long benchmarks detached (`setsid nohup`): a command that outlives its tool call is killed
+with it. About 5,600 of the day's 10,000 requests were used.
 
 ## Eighth session: the desktop redesign (11 November 2026)
 
@@ -79,9 +131,9 @@ xvfb; the reminder against a real window manager's close button (the app's own b
   place during a run, the same square on a quieter fill.
 
 Checked: `cargo test --workspace` (221) and each of the above under xvfb, light and dark. The
-bench test `an_external_harness_is_run_metered_and_verified_like_presage` is unreliable in the
+bench test `an_external_harness_is_run_metered_and_verified_like_presage` was unreliable in the
 sandbox this was made in: it passed in a full run and failed when run on its own, before these
-changes as well. Not checked: the caption buttons' reach to
+changes as well (the ninth session found the cause and fixed it). Not checked: the caption buttons' reach to
 the window's edge with the inspector away, which needs a pointer; anything on Windows or macOS.
 `docs/screenshots/` predates all three.
 

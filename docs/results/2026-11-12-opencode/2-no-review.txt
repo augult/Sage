@@ -1,0 +1,87 @@
+[1/48] deepseek-v4.1-flash-1017 · tariff · no-review #1: solved · 2 turns · $0.0011 · 3.1s
+[2/48] deepseek-v4.1-flash-1017 · pager · no-review #1: solved · 3 turns · $0.0012 · 4.3s
+[3/48] deepseek-v4.1-flash-1017 · inventory · no-review #1: solved · 2 turns · $0.0008 · 4.2s
+[4/48] deepseek-v4.1-flash-1017 · textstats · no-review #1: solved · 4 turns · $0.0015 · 7.3s
+[5/48] deepseek-v4.1-flash-1017 · slug · no-review #1: solved · 3 turns · $0.0013 · 5.3s
+[6/48] deepseek-v4.1-flash-1017 · inventory · no-review #2: solved · 2 turns · $0.0011 · 3.4s
+[7/48] deepseek-v4.1-flash-1017 · pager · no-review #2: solved · 3 turns · $0.0007 · 5.1s
+[8/48] deepseek-v4.1-flash-1017 · slug · no-review #2: solved · 2 turns · $0.0007 · 3.8s
+[9/48] deepseek-v4.1-flash-1017 · tariff · no-review #2: solved · 3 turns · $0.0016 · 4.1s
+[10/48] deepseek-v4.1-flash-1017 · textstats · no-review #2: solved · 4 turns · $0.0008 · 4.9s
+[11/48] deepseek-v4.1-flash-1017 · report · no-review #2: solved · 3 turns · $0.0009 · 4.7s
+[12/48] deepseek-v4.1-flash-1017 · roman · no-review #2: solved · 4 turns · $0.0018 · 9.5s
+[13/48] deepseek-v4.1-flash-1017 · attempts · no-review #2: solved · 9 turns · $0.0157 · 39s
+[14/48] deepseek-v4.1-flash-1017 · shipquote · no-review #2: solved · 7 turns · $0.0149 · 57s
+[15/48] deepseek-v4.1-flash-1017 · connpool · no-review #2: solved · 11 turns · $0.0230 · 1m21s
+[16/48] deepseek-v4.1-flash-1017 · jobqueue · no-review #2: solved · 13 turns · $0.0149 · 1m24s
+[17/48] deepseek-v4.1-flash-1017 · confdialect · no-review #2: NOT solved (done) · 9 turns · $0.0257 · 2m43s
+[18/48] deepseek-v4.1-flash-1017 · ttlcache · no-review #2: solved · 12 turns · $0.0156 · 1m00s
+[19/48] deepseek-v4.1-flash-1017 · rollup · no-review #2: solved · 14 turns · $0.0281 · 3m12s
+[20/48] deepseek-v4.1-flash-1017 · audit · no-review #2: solved · 13 turns · $0.0139 · 1m08s
+[21/48] deepseek-v4.1-flash-1017 · deadcode-js · no-review #2: solved · 5 turns · $0.0065 · 28s
+[22/48] deepseek-v4.1-flash-1017 · deadcode · no-review #2: solved · 17 turns · $0.0199 · 1m38s
+[23/48] deepseek-v4.1-flash-1017 · mutants · no-review #2: solved · 7 turns · $0.0172 · 1m34s
+[24/48] deepseek-v4.1-flash-1017 · mutants-js · no-review #2: solved · 9 turns · $0.0162 · 1m20s
+[25/48] deepseek-v4.1-flash-1017 · slowpath · no-review #2: solved · 10 turns · $0.0070 · 33s
+[26/48] deepseek-v4.1-flash-1017 · audit-clean · no-review #2: solved · 15 turns · $0.0370 · 3m28s
+[27/48] deepseek-v4.1-flash-1017 · nplusone · no-review #2: solved · 4 turns · $0.0044 · 19s
+[28/48] deepseek-v4.1-flash-1017 · heisenbug · no-review #2: solved · 4 turns · $0.0038 · 22s
+[29/48] deepseek-v4.1-flash-1017 · roman · no-review #1: solved · 3 turns · $0.0019 · 11s
+[30/48] deepseek-v4.1-flash-1017 · report · no-review #1: solved · 3 turns · $0.0006 · 4.3s
+[31/48] deepseek-v4.1-flash-1017 · shipquote · no-review #1: solved · 2 turns · $0.0081 · 29s
+[32/48] deepseek-v4.1-flash-1017 · audit · no-review #1: solved · 10 turns · $0.0141 · 1m14s
+[33/48] deepseek-v4.1-flash-1017 · attempts · no-review #1: solved · 8 turns · $0.0100 · 33s
+[34/48] deepseek-v4.1-flash-1017 · restyle · no-review #2: NOT solved (done) · 16 turns · $0.0192 · 1m45s
+[35/48] deepseek-v4.1-flash-1017 · connpool · no-review #1: solved · 7 turns · $0.0159 · 1m27s
+[36/48] deepseek-v4.1-flash-1017 · rollup · no-review #1: solved · 3 turns · $0.0147 · 1m09s
+[37/48] deepseek-v4.1-flash-1017 · ttlcache · no-review #1: solved · 7 turns · $0.0098 · 40s
+[38/48] deepseek-v4.1-flash-1017 · jobqueue · no-review #1: solved · 5 turns · $0.0139 · 1m11s
+[39/48] deepseek-v4.1-flash-1017 · confdialect · no-review #1: solved · 14 turns · $0.0338 · 3m11s
+[40/48] deepseek-v4.1-flash-1017 · mutants-js · no-review #1: solved · 1 turns · $0.0109 · 1m12s
+[41/48] deepseek-v4.1-flash-1017 · deadcode · no-review #1: solved · 10 turns · $0.0076 · 35s
+[42/48] deepseek-v4.1-flash-1017 · deadcode-js · no-review #1: solved · 18 turns · $0.0134 · 46s
+[43/48] deepseek-v4.1-flash-1017 · nplusone · no-review #1: solved · 5 turns · $0.0064 · 35s
+[44/48] deepseek-v4.1-flash-1017 · audit-clean · no-review #1: solved · 8 turns · $0.0237 · 2m12s
+[45/48] deepseek-v4.1-flash-1017 · heisenbug · no-review #1: solved · 6 turns · $0.0042 · 21s
+[46/48] deepseek-v4.1-flash-1017 · slowpath · no-review #1: solved · 6 turns · $0.0054 · 29s
+[47/48] deepseek-v4.1-flash-1017 · mutants · no-review #1: solved · 4 turns · $0.0142 · 1m21s
+[48/48] deepseek-v4.1-flash-1017 · restyle · no-review #1: NOT solved (done) · 3 turns · $0.0126 · 54s
+presage bench 20261112-042521-8f4e · logfare · effort ratchet · 2 runs per task and variant
+fixed prompt prefix, estimated: no-review ~1925 tokens
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pager      no-review           2/2     3   10.7k    67%     718   $0.0010   $0.0020    4.7s
+inventory  no-review           2/2     2    7.6k    42%     447   $0.0009   $0.0014    3.8s
+slug       no-review           2/2   2.5    8.6k    61%     829   $0.0010   $0.0018    4.6s
+tariff     no-review           2/2   2.5   12.9k    49%     510   $0.0013   $0.0022    3.6s
+textstats  no-review           2/2     4   15.6k    77%     973   $0.0011   $0.0029    6.1s
+roman      no-review           2/2   3.5   11.6k    78%    2.4k   $0.0018   $0.0032     10s
+report     no-review           2/2     3    9.6k    74%     650   $0.0008   $0.0018    4.5s
+shipquote  no-review           2/2   4.5   54.0k    70%   15.0k   $0.0115   $0.0171     43s
+attempts   no-review           2/2   8.5    148k    75%   11.5k   $0.0129   $0.0292     36s
+connpool   no-review           2/2     9    107k    64%   22.4k   $0.0195   $0.0295   1m24s
+confdialect no-review           1/2  11.5    145k    80%   41.8k   $0.0298   $0.0469   2m57s   1 declared done, then failed verification
+rollup     no-review           2/2   8.5    100k    80%   30.2k   $0.0214   $0.0332   2m10s
+jobqueue   no-review           2/2     9   92.5k    83%   19.7k   $0.0144   $0.0257   1m17s
+ttlcache   no-review           2/2   9.5    126k    82%   15.0k   $0.0127   $0.0280     50s
+audit      no-review           2/2  11.5    144k    80%   15.4k   $0.0140   $0.0309   1m11s
+audit-clean no-review           2/2  11.5    183k    80%   40.5k   $0.0303   $0.0519   2m50s
+deadcode   no-review           2/2  13.5    183k    84%   14.9k   $0.0138   $0.0365   1m07s
+deadcode-js no-review           2/2  11.5    153k    80%    8.2k   $0.0099   $0.0280     37s
+mutants    no-review           2/2   5.5   55.4k    80%   23.1k   $0.0157   $0.0222   1m27s
+mutants-js no-review           2/2     5   46.9k    84%   20.5k   $0.0135   $0.0194   1m16s
+slowpath   no-review           2/2     8   55.2k    75%    6.6k   $0.0062   $0.0122     31s
+nplusone   no-review           2/2   4.5   29.2k    61%    6.0k   $0.0054   $0.0080     27s
+heisenbug  no-review           2/2     5   34.3k    78%    4.7k   $0.0040   $0.0079     22s
+restyle    no-review           0/2   9.5    102k    89%   23.3k   $0.0159   $0.0293   1m19s   2 declared done, then failed verification
+ALL        no-review         45/48   5.5   44.1k    75%   10.8k   $0.0099   $0.0161     37s   total $0.518, $0.0115 per solved task   3 declared done, then failed verification
+
+3 runs without a solution:
+  deepseek-v4.1-flash-1017 · restyle · no-review #1 · session 20261112-043939-9406 · done; verification: score: 8/11
+  deepseek-v4.1-flash-1017 · confdialect · no-review #2 · session 20261112-042621-9b27 · done; verification: FAILED (failures=2)
+  deepseek-v4.1-flash-1017 · restyle · no-review #2 · session 20261112-043301-da90 · done; verification: score: 8/11
+
+results: /home/benchp/live/bench/20261112-042521-8f4e/results.json
+replay a run: PRESAGE_HOME=/home/benchp/live/bench/20261112-042521-8f4e/home presage show <session>
+exit=0
