@@ -32,6 +32,8 @@ button or from the system, goes to the page first (`onCloseRequested` in `ui/js/
 asks about unsaved text and then destroys the window.
 
 Commands, each `Result<T, String>`: `app_state`, `set_key(provider, key)`,
+`add_provider(name, base_url, models, key?)` (an OpenAI-compatible endpoint of the user's own;
+answers with its id) and `remove_provider(id)`,
 `set_defaults(provider?, model?, effort?)`, `list_sessions`, `start_session(req)` (force
 `interactive = true`; `req.skills` names the skills to start with), `start_demo`,
 `send_message(id, text, skills?, changes?, files?)` (`send_with`: the skills named are switched on with the
@@ -91,8 +93,11 @@ message is `#push-message` and the button `#push-go`. In Settings:
 `#settings-skills`, `#settings-system`, `#settings-instructions`, a skill's row as
 `[data-skill="debug"]`, `#new-skill`, the text areas `#skill-file`, `#system-prompt`,
 `#global-instructions`, `#settings-keys` with a provider's row as `[data-provider="openai"]`,
+`#add-provider` and its form (`#new-provider-name`, `-url`, `-models`, `-key`, `#new-provider-add`;
+the row of one that was added has `.remove-provider`),
 `#settings-defaults` with `#default-provider` and `#default-model`, and in the reminder of unsaved
-text `#unsaved-save` and `#unsaved-discard`.
+text `#unsaved-save` and `#unsaved-discard`. The two panes are put away and brought back by
+`#toggle-sidebar` and `#toggle-inspector`.
 
 ## Front end (`desktop/ui`)
 
@@ -106,8 +111,9 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
 - **Shape.** 8px grid. Corners are barely turned: 2px tags and marks, 3px controls and rows, 4px
-  cards, menus, dialogs and the sheet. Nothing is a pill; only what sends, stops or attaches in a
-  chat bar is round, a glyph on a 28px disc with no word beside it. Every button is 28px tall, and a
+  cards, menus, dialogs and the sheet. Nothing is a pill, and nothing is round: what sends, stops
+  or attaches in a chat bar is a glyph on a 28px square with a control's corners and no word beside
+  it. Every button is 28px tall, and a
   one-line field beside one is as tall; the small buttons inside a line or a header (copy, a
   diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
   darkens when pointed at.
@@ -135,6 +141,12 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
 - **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
   caption buttons where Windows puts them. A session has no strip over its conversation: the
   window drags by the sidebar's and the inspector's.
+- **Panes.** The sidebar and the inspector are each put away and brought back by a button in
+  their own strip, at the edge next to the sheet (`ui/js/panes.js`; kept by the window). Nothing
+  slides: a pane is there or it is not, and comes back as it was left. With one away the sheet
+  takes its room, less the gap of glass, and has a strip of its own in every view, a session's
+  too, to drag the window by; the button stands in it, and with the inspector away so do the
+  caption buttons, in the sheet's corner, still answering from the window's edge beyond it.
 - **Icons.** Every glyph is drawn (`ui/js/dom.js`, and the caption buttons in `index.html`) with
   round ends and turned corners: a vertex is a small arc, a shape's corners are quarter circles.
 
@@ -257,8 +269,9 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - A row of the model's thought is led by a spark while it is at it ("Thinking") and by a
        bulb once it has ("Thought").
      - **The chat bar** (`ui/js/views/common.js`, `attach.js`): in the box, a + that attaches
-       files (the system's file dialog), the text, and one round button: Send, an arrow, or
-       while a run is in progress Stop, a square. Neither has a word on it. Attached files sit
+       files (the system's file dialog), the text, and one square button: Send, the Return
+       key's arrow on ink, or while a run is in progress Stop, a square on a quieter fill (paler
+       in the light appearance, darker in the dark one). Neither has a word on it. Attached files sit
        in the box over the text, each a chip with its name and a cross that takes it off, so
        the box grows upwards by their row; they go with the next message and show over it in
        the conversation. The pickers are under the box.
@@ -281,8 +294,13 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
      other one starts a new line; kept by the window. Auto-retry: On or Off, `set_auto_retry`,
      kept by the engine in `config.json` and applied at once to running sessions too). Then **API keys**, a line per provider: a check and the name in full ink
-     when it has a key, a ring and grey when it has none; its address; a password field; and
-     Remove when there is a key to remove. The key is kept (`set_key`) when the field is left or
+     when it has a key, a ring and grey when it has none; under the name, in small, what it is
+     known for where the name does not say (GPT, Claude, Gemini, Grok); its address; a password field; and
+     Remove when there is a key to remove. Add provider opens a form under the list (name, address,
+     models separated by commas, and a key if the endpoint asks for one; `add_provider`) for any
+     OpenAI-compatible endpoint of the user's own: it is listed after the built-in ones, needs no
+     key, and has Delete (`remove_provider`, on a second click) where the others have Remove.
+     The key is kept (`set_key`) when the field is left or
      Enter is pressed. Never show stored keys. Then **Defaults** (`set_defaults`): the provider
      and the model as dropdowns (a provider without a key is greyed and cannot be chosen) and the
      effort; each is kept the moment it is chosen. Then three sections that edit text files, each

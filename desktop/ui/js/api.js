@@ -7,6 +7,10 @@ export const api = {
   appState: () => invoke('app_state'),
   /** An empty key removes the stored one. */
   setKey: (provider, key) => invoke('set_key', { provider, key }),
+  /** An OpenAI-compatible endpoint of the user's own; `key` may be empty. Resolves with the id it goes by. */
+  addProvider: ({ name, baseUrl, models, key }) => invoke('add_provider', { name, baseUrl, models, key }),
+  /** Takes one of the user's own providers away, with its key. */
+  removeProvider: (id) => invoke('remove_provider', { id }),
   /** Fields left out keep their current value. */
   setDefaults: ({ provider, model, effort }) => invoke('set_defaults', { provider, model, effort }),
   /** Keep retrying a rate-limited or unreachable provider, in running sessions too. */

@@ -51,8 +51,8 @@ State on 11 November 2026. What is open and how to continue: `docs/HANDOFF.md`. 
   and 165 s. GLM-5.3 was measured on six tasks only. See `docs/BENCHMARKS.md` for what limits these
   numbers.
 - **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. Every
-  other preset (OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek, Groq, Together,
-  Fireworks, OpenRouter, Z.ai) follows its vendor's documented contract and is untested.
+  other preset (OpenAI, Anthropic, Google AI, DeepSeek, OpenRouter, Moonshot Kimi, xAI, Groq,
+  Together AI) follows its vendor's documented contract and is untested.
 - **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
   and the front end has the session list, the new-session form with a skills dialog, the live
   timeline with inspector, and settings for keys, defaults, skills, the system prompt and
@@ -110,12 +110,12 @@ presage bench --check --tasks all   # the tasks fail as shipped and pass with th
 presage bench -p logfare -m glm-5.3 --variants presage,no-attach,classic -n 5 -j 3
 ```
 
-Providers built in: `openai`, `anthropic`, `google`, `xai`, `mistral`, `deepseek`, `groq`,
-`together`, `fireworks`, `openrouter`, `logfare`, `zai`, `zai-coding`, plus a custom
-OpenAI-compatible endpoint in `~/.presage/config.json`. All of them are called through their
+Providers built in: `openai`, `anthropic`, `google`, `deepseek`, `openrouter`, `moonshot`, `xai`,
+`groq`, `together`, `logfare`, plus endpoints of your own: any number added in the desktop app's
+Settings, or one written by hand as `custom` in `~/.presage/config.json`. All of them are called through their
 OpenAI-compatible chat-completions endpoints. Only Logfare has been exercised live: the others
 are written from the vendors' documentation (`provider/openai.rs` has what each one takes), and
-their model lists are what each vendor documented on 11 November 2026.
+their model lists are what each vendor documented on 11 November 2026 (Moonshot's, a day later).
 
 Desktop app:
 

@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub struct ProviderDef {
     pub id: &'static str,
     pub name: &'static str,
+    /// What it is known for, in a word or two: the models it makes, or the service it is.
+    pub serves: &'static str,
     pub base_url: &'static str,
     pub key_env: &'static str,
     pub dialect: Dialect,
@@ -16,13 +18,14 @@ pub struct ProviderDef {
     pub note: &'static str,
 }
 
-/// Built-in providers. Only Logfare has been exercised live by this project; the others follow the
-/// vendors' published API contracts, and their model lists are what each vendor documented on
-/// 11 November 2026.
+/// Built-in providers, in the order they are listed. Only Logfare has been exercised live by this
+/// project; the others follow the vendors' published API contracts, and their model lists are what
+/// each vendor documented on 11 November 2026 (Moonshot's, a day later).
 pub const PROVIDERS: &[ProviderDef] = &[
     ProviderDef {
         id: "openai",
         name: "OpenAI",
+        serves: "GPT",
         base_url: "https://api.openai.com/v1",
         key_env: "OPENAI_API_KEY",
         dialect: Dialect::OpenAiPlatform,
@@ -32,6 +35,7 @@ pub const PROVIDERS: &[ProviderDef] = &[
     ProviderDef {
         id: "anthropic",
         name: "Anthropic",
+        serves: "Claude",
         base_url: "https://api.anthropic.com/v1",
         key_env: "ANTHROPIC_API_KEY",
         dialect: Dialect::Anthropic,
@@ -40,7 +44,8 @@ pub const PROVIDERS: &[ProviderDef] = &[
     },
     ProviderDef {
         id: "google",
-        name: "Google Gemini",
+        name: "Google AI",
+        serves: "Gemini",
         base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
         key_env: "GEMINI_API_KEY",
         dialect: Dialect::Gemini,
@@ -48,26 +53,9 @@ pub const PROVIDERS: &[ProviderDef] = &[
         note: "",
     },
     ProviderDef {
-        id: "xai",
-        name: "xAI",
-        base_url: "https://api.x.ai/v1",
-        key_env: "XAI_API_KEY",
-        dialect: Dialect::Xai,
-        models: &["grok-4.7", "grok-4.6", "grok-4.5"],
-        note: "",
-    },
-    ProviderDef {
-        id: "mistral",
-        name: "Mistral",
-        base_url: "https://api.mistral.ai/v1",
-        key_env: "MISTRAL_API_KEY",
-        dialect: Dialect::Mistral,
-        models: &["mistral-large-latest", "mistral-medium-3-5", "mistral-small-latest"],
-        note: "",
-    },
-    ProviderDef {
         id: "deepseek",
         name: "DeepSeek",
+        serves: "",
         base_url: "https://api.deepseek.com",
         key_env: "DEEPSEEK_API_KEY",
         dialect: Dialect::DeepSeek,
@@ -75,40 +63,9 @@ pub const PROVIDERS: &[ProviderDef] = &[
         note: "Cache hits cost 1/50 of a miss; prices double at weekday peak hours (UTC).",
     },
     ProviderDef {
-        id: "groq",
-        name: "Groq",
-        base_url: "https://api.groq.com/openai/v1",
-        key_env: "GROQ_API_KEY",
-        dialect: Dialect::Groq,
-        models: &["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        note: "",
-    },
-    ProviderDef {
-        id: "together",
-        name: "Together AI",
-        base_url: "https://api.together.ai/v1",
-        key_env: "TOGETHER_API_KEY",
-        dialect: Dialect::Together,
-        models: &["moonshotai/Kimi-K3", "deepseek-ai/DeepSeek-V4-Pro-0813", "Qwen/Qwen3.7-Max", "zai-org/GLM-5.3", "openai/gpt-oss-120b"],
-        note: "",
-    },
-    ProviderDef {
-        id: "fireworks",
-        name: "Fireworks AI",
-        base_url: "https://api.fireworks.ai/inference/v1",
-        key_env: "FIREWORKS_API_KEY",
-        dialect: Dialect::Fireworks,
-        models: &[
-            "accounts/fireworks/models/glm-5p3",
-            "accounts/fireworks/models/deepseek-v4p1-flash",
-            "accounts/fireworks/models/kimi-k3p1-pro",
-            "accounts/fireworks/models/glm-5p3-flash",
-        ],
-        note: "",
-    },
-    ProviderDef {
         id: "openrouter",
         name: "OpenRouter",
+        serves: "",
         base_url: "https://openrouter.ai/api/v1",
         key_env: "OPENROUTER_API_KEY",
         dialect: Dialect::OpenRouter,
@@ -129,31 +86,54 @@ pub const PROVIDERS: &[ProviderDef] = &[
         note: "",
     },
     ProviderDef {
+        id: "moonshot",
+        name: "Moonshot Kimi",
+        serves: "",
+        base_url: "https://api.moonshot.ai/v1",
+        key_env: "MOONSHOT_API_KEY",
+        dialect: Dialect::Moonshot,
+        models: &["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "kimi-k3"],
+        note: "",
+    },
+    ProviderDef {
+        id: "xai",
+        name: "xAI",
+        serves: "Grok",
+        base_url: "https://api.x.ai/v1",
+        key_env: "XAI_API_KEY",
+        dialect: Dialect::Xai,
+        models: &["grok-4.7", "grok-4.6", "grok-4.5"],
+        note: "",
+    },
+    ProviderDef {
+        id: "groq",
+        name: "Groq",
+        serves: "High-speed inference",
+        base_url: "https://api.groq.com/openai/v1",
+        key_env: "GROQ_API_KEY",
+        dialect: Dialect::Groq,
+        models: &["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        note: "",
+    },
+    ProviderDef {
+        id: "together",
+        name: "Together AI",
+        serves: "Open-source model hosting",
+        base_url: "https://api.together.ai/v1",
+        key_env: "TOGETHER_API_KEY",
+        dialect: Dialect::Together,
+        models: &["moonshotai/Kimi-K3", "deepseek-ai/DeepSeek-V4-Pro-0813", "Qwen/Qwen3.7-Max", "zai-org/GLM-5.3", "openai/gpt-oss-120b"],
+        note: "",
+    },
+    ProviderDef {
         id: "logfare",
         name: "Logfare",
+        serves: "",
         base_url: "https://logfare.ai/v1",
         key_env: "LOGFARE_API_KEY",
         dialect: Dialect::Logfare,
         models: &["deepseek-v4.1-flash-1017", "glm-5.3", "glm-5.3-flash"],
         note: "Free gateway. It logs prompts and completions.",
-    },
-    ProviderDef {
-        id: "zai",
-        name: "Z.ai",
-        base_url: "https://api.z.ai/api/paas/v4",
-        key_env: "ZAI_API_KEY",
-        dialect: Dialect::Zai,
-        models: &["glm-5.3", "glm-5.3-flash"],
-        note: "Pay-as-you-go GLM endpoint.",
-    },
-    ProviderDef {
-        id: "zai-coding",
-        name: "Z.ai Coding Plan",
-        base_url: "https://api.z.ai/api/coding/paas/v4",
-        key_env: "ZAI_API_KEY",
-        dialect: Dialect::Zai,
-        models: &["glm-5.3", "glm-5.3-flash"],
-        note: "Subscription endpoint: what counts there is the number of requests.",
     },
 ];
 
@@ -165,6 +145,18 @@ pub struct CustomProvider {
     pub dialect: Option<String>,
     #[serde(default)]
     pub models: Vec<String>,
+}
+
+/// The id of the one endpoint a config file names under `custom`.
+pub const CUSTOM: &str = "custom";
+
+/// An endpoint added in Settings: a custom provider with an id and a name of its own.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AddedProvider {
+    pub id: String,
+    pub name: String,
+    #[serde(flatten)]
+    pub endpoint: CustomProvider,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -183,6 +175,9 @@ pub struct Config {
     pub auto_retry: bool,
     #[serde(default)]
     pub custom: Option<CustomProvider>,
+    /// The user's own endpoints, in the order they were added.
+    #[serde(default)]
+    pub added: Vec<AddedProvider>,
 }
 
 #[derive(Clone, Debug)]
@@ -231,12 +226,72 @@ impl Config {
         self.key_for(def.id, def.key_env).is_some()
     }
 
+    /// The user's own endpoints as `(id, name, endpoint)`: the one the file names under `custom`,
+    /// then those added in Settings.
+    pub fn customs(&self) -> impl Iterator<Item = (&str, &str, &CustomProvider)> {
+        self.custom.iter().map(|c| (CUSTOM, "Custom endpoint", c)).chain(self.added.iter().map(|a| (a.id.as_str(), a.name.as_str(), &a.endpoint)))
+    }
+
+    /// Whether `id` names a provider there is, built in or the user's own.
+    pub fn knows(&self, id: &str) -> bool {
+        PROVIDERS.iter().any(|d| d.id == id) || self.customs().any(|(known, ..)| known == id)
+    }
+
     /// The provider to use when none is named: the configured one, else the first that has a key.
     pub fn default_provider(&self) -> Option<String> {
-        if let Some(p) = &self.provider {
+        // A saved choice holds while its provider is there: a build may drop one, and the user's own can be removed.
+        if let Some(p) = self.provider.as_ref().filter(|p| self.knows(p)) {
             return Some(p.clone());
         }
-        PROVIDERS.iter().find(|d| self.has_key(d)).map(|d| d.id.to_string()).or_else(|| self.custom.as_ref().map(|_| "custom".to_string()))
+        PROVIDERS.iter().find(|d| self.has_key(d)).map(|d| d.id.to_string()).or_else(|| self.customs().next().map(|(id, ..)| id.to_string()))
+    }
+
+    /// Adds an OpenAI-compatible endpoint of the user's own, and gives the id it goes by.
+    pub fn add_provider(&mut self, name: &str, base_url: &str, models: &[String]) -> Result<String, String> {
+        let name = name.trim();
+        let base_url = base_url.trim().trim_end_matches('/');
+        let models: Vec<String> = models.iter().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+        if name.is_empty() {
+            return Err("the provider needs a name".into());
+        }
+        let taken = |other: &str| other.eq_ignore_ascii_case(name);
+        if PROVIDERS.iter().any(|d| taken(d.id) || taken(d.name)) || self.customs().any(|(id, known, _)| taken(id) || taken(known)) {
+            return Err(format!("there is already a provider called {name}"));
+        }
+        if !["http://", "https://"].iter().any(|scheme| base_url.len() > scheme.len() && base_url.starts_with(scheme)) {
+            return Err("the address has to start with http:// or https://".into());
+        }
+        if models.is_empty() {
+            return Err("the provider needs at least one model".into());
+        }
+        let slug = name.to_ascii_lowercase().split(|c: char| !c.is_ascii_alphanumeric()).filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
+        let base = if slug.is_empty() { format!("{CUSTOM}-endpoint") } else { format!("{CUSTOM}-{slug}") };
+        // Two names can come to one slug ("My LLM", "my-llm"): the later one is numbered.
+        let mut id = base.clone();
+        let mut n = 1;
+        while self.knows(&id) {
+            n += 1;
+            id = format!("{base}-{n}");
+        }
+        self.added.push(AddedProvider { id: id.clone(), name: name.to_string(), endpoint: CustomProvider { base_url: base_url.to_string(), dialect: None, models } });
+        Ok(id)
+    }
+
+    /// Takes one of the user's own endpoints away, with its key and the defaults that were its.
+    pub fn remove_provider(&mut self, id: &str) -> Result<(), String> {
+        let before = self.added.len();
+        self.added.retain(|a| a.id != id);
+        if id == CUSTOM && self.custom.is_some() {
+            self.custom = None;
+        } else if self.added.len() == before {
+            return Err(format!("{id:?} is not a provider of your own"));
+        }
+        self.keys.remove(id);
+        if self.provider.as_deref() == Some(id) {
+            self.provider = None;
+            self.model = None;
+        }
+        Ok(())
     }
 
     pub fn resolve(&self, provider: Option<&str>, model: Option<&str>) -> Result<Resolved, String> {
@@ -244,14 +299,20 @@ impl Config {
             let envs: Vec<&str> = PROVIDERS.iter().map(|d| d.key_env).collect();
             format!("no provider has an API key yet. Add one in Settings, or set one of: {}", envs.join(", "))
         })?;
-        if id == "custom" {
-            let c = self.custom.as_ref().ok_or("no custom provider is configured")?;
-            let key = self.key_for("custom", "PRESAGE_API_KEY").unwrap_or_default();
-            let model = model.map(String::from).or_else(|| self.model.clone()).or_else(|| c.models.first().cloned()).ok_or("the custom provider has no model configured")?;
-            let dialect = c.dialect.as_deref().and_then(Dialect::parse).unwrap_or(Dialect::OpenAi);
-            return Ok(Resolved { id, base_url: c.base_url.clone(), dialect, key, model });
+        if id == CUSTOM && self.custom.is_none() {
+            return Err("no custom provider is configured".into());
         }
-        let def = PROVIDERS.iter().find(|d| d.id == id).ok_or_else(|| format!("unknown provider {id:?}; known: {}", PROVIDERS.iter().map(|d| d.id).collect::<Vec<_>>().join(", ")))?;
+        if let Some((_, name, c)) = self.customs().find(|(known, ..)| *known == id) {
+            // A server of one's own may ask for no key. Only the endpoint the file names takes one from the environment.
+            let key = if id == CUSTOM { self.key_for(CUSTOM, "PRESAGE_API_KEY") } else { self.keys.get(&id).map(|k| k.trim().to_string()) }.unwrap_or_default();
+            // A saved default model is not carried over from another provider.
+            let saved = self.model.clone().filter(|_| self.provider.as_deref().is_none_or(|p| p == id));
+            let model = model.map(String::from).or(saved).or_else(|| c.models.first().cloned()).ok_or_else(|| format!("{name} has no model configured"))?;
+            let dialect = c.dialect.as_deref().and_then(Dialect::parse).unwrap_or(Dialect::OpenAi);
+            return Ok(Resolved { base_url: c.base_url.clone(), dialect, key, model, id });
+        }
+        let known = PROVIDERS.iter().map(|d| d.id).chain(self.customs().map(|(id, ..)| id)).collect::<Vec<_>>().join(", ");
+        let def = PROVIDERS.iter().find(|d| d.id == id).ok_or_else(|| format!("unknown provider {id:?}; known: {known}"))?;
         let key = self.key_for(def.id, def.key_env).ok_or_else(|| format!("no API key for {}. Add it in Settings or set {}", def.name, def.key_env))?;
         // A saved default model belongs to the saved default provider only.
         let saved = self.model.clone().filter(|_| self.provider.as_deref() == Some(def.id));
@@ -272,23 +333,73 @@ mod tests {
         if no_env {
             assert!(c.resolve(None, None).unwrap_err().contains("no provider has an API key yet"));
         }
-        c.keys.insert("zai".into(), " k-zai ".into());
+        c.keys.insert("logfare".into(), " k-logfare ".into());
         if no_env {
             let r = c.resolve(None, None).unwrap();
-            assert_eq!((r.id.as_str(), r.model.as_str(), r.key.as_str(), r.dialect), ("zai", "glm-5.3", "k-zai", Dialect::Zai));
+            assert_eq!((r.id.as_str(), r.model.as_str(), r.key.as_str(), r.dialect), ("logfare", "deepseek-v4.1-flash-1017", "k-logfare", Dialect::Logfare));
         }
-        let r = c.resolve(Some("zai"), Some("glm-5.3-flash")).unwrap();
+        let r = c.resolve(Some("logfare"), Some("glm-5.3-flash")).unwrap();
         assert_eq!(r.model, "glm-5.3-flash");
         assert!(c.resolve(Some("nope"), None).unwrap_err().contains("unknown provider"));
         if std::env::var("DEEPSEEK_API_KEY").is_err() {
             assert!(c.resolve(Some("deepseek"), None).unwrap_err().contains("DEEPSEEK_API_KEY"));
         }
 
-        c.provider = Some("zai".into());
+        c.provider = Some("logfare".into());
         c.model = Some("glm-5.3-flash".into());
         assert_eq!(c.resolve(None, None).unwrap().model, "glm-5.3-flash");
         c.keys.insert("openrouter".into(), "k".into());
         assert_eq!(c.resolve(Some("openrouter"), None).unwrap().model, "deepseek/deepseek-v4.1-flash", "the saved model is not carried to another provider");
+
+        // A default saved by a build that still had that provider gives way to one that is there.
+        c.provider = Some("zai".into());
+        if no_env {
+            let r = c.resolve(None, None).unwrap();
+            assert_eq!((r.id.as_str(), r.model.as_str()), ("openrouter", "deepseek/deepseek-v4.1-flash"));
+        }
+    }
+
+    #[test]
+    fn the_list_is_the_ten_built_in_in_their_order() {
+        let ids: Vec<&str> = PROVIDERS.iter().map(|d| d.id).collect();
+        assert_eq!(ids, ["openai", "anthropic", "google", "deepseek", "openrouter", "moonshot", "xai", "groq", "together", "logfare"]);
+        assert!(PROVIDERS.iter().all(|d| !d.models.is_empty() && d.base_url.starts_with("https://")));
+    }
+
+    #[test]
+    fn endpoints_of_the_users_own_are_added_resolved_and_removed() {
+        let mut c = Config::default();
+        let one = |model: &str| vec![model.to_string()];
+        assert!(c.add_provider(" ", "http://localhost:11434/v1", &one("m")).unwrap_err().contains("name"));
+        assert!(c.add_provider("Ollama", "localhost:11434", &one("m")).unwrap_err().contains("http://"));
+        assert!(c.add_provider("Ollama", "http://localhost:11434/v1", &one(" ")).unwrap_err().contains("model"));
+        assert!(c.add_provider("openai", "http://localhost:1/v1", &one("m")).unwrap_err().contains("already"));
+
+        let id = c.add_provider(" Ollama ", "http://localhost:11434/v1/", &[" qwen3 ".into(), "".into(), "llama4".into()]).unwrap();
+        assert_eq!(id, "custom-ollama");
+        assert!(c.add_provider("ollama", "http://localhost:1/v1", &one("m")).unwrap_err().contains("already"));
+        assert_eq!(c.add_provider("My LLM", "https://llm.example/v1", &one("m")).unwrap(), "custom-my-llm");
+        assert_eq!(c.add_provider("my-llm", "https://llm.example/v1", &one("m")).unwrap(), "custom-my-llm-2");
+
+        // It asks for no key, and is the default while nothing else can be.
+        let r = c.resolve(Some(&id), None).unwrap();
+        assert_eq!((r.base_url.as_str(), r.model.as_str(), r.key.as_str(), r.dialect), ("http://localhost:11434/v1", "qwen3", "", Dialect::OpenAi));
+        if PROVIDERS.iter().all(|d| std::env::var(d.key_env).is_err()) {
+            assert_eq!(c.default_provider().as_deref(), Some("custom-ollama"));
+        }
+        c.keys.insert(id.clone(), "k".into());
+        c.provider = Some(id.clone());
+        c.model = Some("llama4".into());
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        let r = back.resolve(None, None).unwrap();
+        assert_eq!((r.id.as_str(), r.model.as_str(), r.key.as_str()), ("custom-ollama", "llama4", "k"));
+        assert_eq!(back.resolve(Some("custom-my-llm"), None).unwrap().model, "m", "the saved model is its provider's alone");
+
+        assert!(c.remove_provider("openai").is_err() && c.remove_provider("custom").is_err());
+        c.remove_provider(&id).unwrap();
+        assert!(!c.keys.contains_key(&id) && c.provider.is_none() && c.model.is_none());
+        assert!(c.resolve(Some(&id), None).unwrap_err().contains("unknown provider"));
+        assert!(c.knows("custom-my-llm") && !c.knows(&id));
     }
 
     #[test]

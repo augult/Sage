@@ -718,9 +718,9 @@ button.row-line:focus-visible {
   margin-bottom: 4px;
 }
 
-/* What sends, stops or attaches is its glyph on a disc: ink for the one that acts on the message,
-   bare for the one that adds to it. */
-.round {
+/* What sends, stops or attaches is its glyph on a square with a control's corners: ink for the one
+   that sends, bare for the one that adds to the message. */
+.bar-btn {
   display: grid;
   flex: none;
   place-items: center;
@@ -728,40 +728,51 @@ button.row-line:focus-visible {
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--r-2);
   background: transparent;
   color: var(--soft);
   transition: background-color 120ms ease, transform 120ms var(--ease);
 }
 
-.round:hover:not(:disabled) {
+.bar-btn:hover:not(:disabled) {
   background: var(--fill-3);
   color: var(--ink);
 }
 
-.round.primary {
+.bar-btn.primary {
   background: var(--primary);
   color: var(--on-primary);
 }
 
-.round.primary:hover:not(:disabled) {
+.bar-btn.primary:hover:not(:disabled) {
   background: var(--primary-hover);
   color: var(--on-primary);
 }
 
-.round:active:not(:disabled) {
+/* The one that stops stands where the one that sends did, its square always filled but nearer the
+   paper than the ink: paler in the light appearance, darker in the dark one. */
+.bar-btn.soft {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
+.bar-btn.soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.bar-btn:active:not(:disabled) {
   transform: scale(0.92);
 }
 
-.round:disabled {
+.bar-btn:disabled {
   opacity: 0.45;
 }
 
-.round .icon {
+.bar-btn .icon {
   stroke-width: 1.8;
 }
 
-.round.primary .spinner {
+.bar-btn.primary .spinner {
   border-color: color-mix(in srgb, var(--on-primary) 30%, transparent);
   border-top-color: var(--on-primary);
 }

@@ -2,14 +2,25 @@
    sheet, the one opaque surface, where reading happens. The top strip of each is the title bar. */
 
 /* How wide each of the two panes of glass is: the sidebar and the inspector are the same, until
-   the inspector shows code, which needs the room. The dither is cut to them (styles/glass.css). */
+   the inspector shows code, which needs the room. A pane that is put away leaves its column the
+   gap of glass the sheet keeps on every side. The dither is cut to the columns (styles/glass.css). */
 :root {
   --side-w: 268px;
-  --right-w: var(--side-w);
+  --inspector-w: var(--side-w);
+  --left-w: var(--side-w);
+  --right-w: var(--inspector-w);
 }
 
 :root[data-panel="code"] {
-  --right-w: clamp(360px, 42vw, 760px);
+  --inspector-w: clamp(360px, 42vw, 760px);
+}
+
+:root[data-sidebar="off"] {
+  --left-w: var(--gap);
+}
+
+:root[data-inspector="off"] {
+  --right-w: var(--gap);
 }
 
 @media (max-width: 1120px) {
@@ -21,14 +32,75 @@
 #app {
   position: relative;
   display: grid;
-  grid-template-columns: var(--side-w) minmax(0, 1fr) var(--right-w);
+  grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w);
   height: 100vh;
+}
+
+/* A pane that is put away keeps its shape out of sight, so that it comes back as it was left,
+   lists scrolled where they were. Nothing moves it there or back: it is in view or it is not. */
+:root[data-sidebar="off"] #sidebar,
+:root[data-inspector="off"] #inspector {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  visibility: hidden;
+}
+
+:root[data-sidebar="off"] #sidebar {
+  left: 0;
+  width: var(--side-w);
+}
+
+:root[data-inspector="off"] #inspector {
+  right: 0;
+  width: var(--inspector-w);
+}
+
+/* What puts a pane away and brings it back: a button in the pane's strip, at its edge by the
+   sheet. With the pane away it stands just across that edge, in the sheet's strip. */
+.pane-toggle {
+  position: absolute;
+  top: calc(var(--gap) + (var(--strip) - 28px) / 2);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--soft);
+  transition: background-color 120ms ease;
+}
+
+.pane-toggle:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+#toggle-sidebar {
+  left: calc(var(--left-w) - 36px);
+}
+
+:root[data-sidebar="off"] #toggle-sidebar {
+  left: calc(var(--left-w) + 8px);
+}
+
+#toggle-inspector {
+  right: calc(var(--right-w) - 36px);
+}
+
+/* Left of the caption buttons, which the sheet then carries too. */
+:root[data-inspector="off"] #toggle-inspector {
+  right: calc(var(--right-w) + 3 * 46px + 8px);
 }
 
 /* Sidebar */
 
 #sidebar {
   display: flex;
+  grid-row: 1;
+  grid-column: 1;
   flex-direction: column;
   min-height: 0;
   padding: 0 8px 8px;
@@ -232,6 +304,8 @@
 
 #main {
   display: flex;
+  grid-row: 1;
+  grid-column: 2;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
@@ -241,6 +315,25 @@
 
 #main > * {
   animation: enter 140ms ease-out backwards;
+}
+
+/* With a pane away the sheet has a strip of its own, to drag the window by and to carry what that
+   pane's strip carried. A session, which has no strip otherwise, starts under it. */
+#sheet-strip {
+  position: absolute;
+  top: var(--gap);
+  right: var(--right-w);
+  left: var(--left-w);
+  display: none;
+  height: var(--strip);
+}
+
+:root:is([data-sidebar="off"], [data-inspector="off"]) #sheet-strip {
+  display: block;
+}
+
+:root:is([data-sidebar="off"], [data-inspector="off"]) #main:not(:has(> .view-head)) {
+  padding-top: var(--strip);
 }
 
 /* The sheet's share of the title bar. A view that is not a session leaves it empty, to drag by. */
@@ -291,23 +384,29 @@
 
 #inspector {
   display: flex;
+  grid-row: 1;
+  grid-column: 3;
   flex-direction: column;
   min-height: 0;
 }
 
-/* The inspector's share of the title bar: empty, so it drags, with the caption buttons at its end. */
+/* The inspector's share of the title bar: empty, so it drags. The caption buttons lie over its end. */
 .pane-strip {
   flex: none;
   height: calc(var(--strip) + var(--gap));
 }
 
-/* Where Windows puts them and the size it makes them, so the corner still closes the window. */
+/* Where Windows puts them and the size it makes them, so the corner still closes the window. They
+   are the window's, not the inspector's: they stay when it is put away. */
 .window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
-  justify-content: flex-end;
 }
 
 .window-controls button {
+  position: relative;
   display: grid;
   place-items: center;
   width: 46px;
@@ -316,6 +415,31 @@
   border: 0;
   background: transparent;
   color: var(--soft);
+}
+
+/* With the inspector away the sheet carries them, in its corner and as tall as its strip. Each
+   still answers from the window's edge beyond the sheet, so the corner goes on closing the window. */
+:root[data-inspector="off"] .window-controls {
+  top: calc(var(--gap) + 1px);
+  right: calc(var(--gap) + 1px);
+}
+
+:root[data-inspector="off"] .window-controls button {
+  height: calc(var(--strip) - 1px);
+}
+
+:root[data-inspector="off"] .window-controls button::after {
+  position: absolute;
+  inset: calc(-1px - var(--gap)) 0 0;
+  content: "";
+}
+
+:root[data-inspector="off"] #win-close {
+  border-top-right-radius: calc(var(--r-3) - 1px);
+}
+
+:root[data-inspector="off"] #win-close::after {
+  right: calc(-1px - var(--gap));
 }
 
 /* Drawn like every other glyph here: round ends, turned corners. */

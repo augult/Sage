@@ -73,7 +73,11 @@ const ICONS = {
   // Actions.
   copy: 'M7.2 5.5h4.1A1.7 1.7 0 0 1 13 7.2v4.1a1.7 1.7 0 0 1-1.7 1.7H7.2a1.7 1.7 0 0 1-1.7-1.7V7.2a1.7 1.7 0 0 1 1.7-1.7zM3 9.9V4.7A1.7 1.7 0 0 1 4.7 3h5.2',
   branch: 'M5 3a1.4 1.4 0 100 2.8A1.4 1.4 0 005 3zM5 10.2A1.4 1.4 0 105 13a1.4 1.4 0 000-2.8zM11 4.4a1.4 1.4 0 100 2.8 1.4 1.4 0 000-2.8zM5 5.8v4.4M11 7.2c0 2.3-6 .9-6 3',
-  send: 'M8 12.8V4.2M4 7.6l3.3-3.4a1 1 0 0 1 1.4 0L12 7.6',
+  // The Return key's arrow: down from the upper right, then off to the left.
+  send: 'M5.9 7L3.5 9.4a.7.7 0 0 0 0 1l2.4 2.4M3.7 9.9h7.3a1.4 1.4 0 0 0 1.4-1.4V3.4',
+  // The window with its left or its right pane marked off: what puts that pane away and brings it back.
+  paneLeft: 'M3.8 3h8.4A1.8 1.8 0 0 1 14 4.8v6.4a1.8 1.8 0 0 1-1.8 1.8H3.8A1.8 1.8 0 0 1 2 11.2V4.8A1.8 1.8 0 0 1 3.8 3zM6.2 3v10',
+  paneRight: 'M3.8 3h8.4A1.8 1.8 0 0 1 14 4.8v6.4a1.8 1.8 0 0 1-1.8 1.8H3.8A1.8 1.8 0 0 1 2 11.2V4.8A1.8 1.8 0 0 1 3.8 3zM9.8 3v10',
   // What the pane beside the conversation shows.
   chart: 'M3.5 12.5V9.5M8 12.5v-9M12.5 12.5V7',
   code: 'M5.8 4.8L3 7.5a.7.7 0 0 0 0 1l2.8 2.7M10.2 4.8L13 7.5a.7.7 0 0 1 0 1l-2.8 2.7',

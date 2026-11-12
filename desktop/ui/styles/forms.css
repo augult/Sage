@@ -561,12 +561,13 @@ textarea.editor {
 }
 
 /* A provider on one line: whether it has a key, its name, where it is, the key, and its removal.
-   One without a key is greyed. */
+   One without a key is greyed. Every line is as tall, with or without the small print under the name. */
 .provider {
   display: grid;
-  grid-template-columns: 16px minmax(0, 132px) minmax(0, 1fr) minmax(0, 208px) 72px;
+  grid-template-columns: 16px minmax(0, 168px) minmax(0, 1fr) minmax(0, 208px) 72px;
   align-items: center;
   gap: 6px 10px;
+  min-height: 51px;
   padding: 8px 0;
   border-top: 1px solid var(--line);
 }
@@ -586,9 +587,25 @@ textarea.editor {
   content: "";
 }
 
+/* Its name, and under it what it is known for, where the name does not say. */
+.provider-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
 .provider-name {
   overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-serves {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -607,12 +624,28 @@ textarea.editor {
   font-weight: 500;
 }
 
-.provider.is-unset .provider-url {
+.provider.is-unset .provider-url,
+.provider.is-unset .provider-serves {
   color: var(--faint);
 }
 
 .provider > :is(.field-hint, .form-error) {
   grid-column: 2 / -1;
+}
+
+/* The form that adds a provider of the user's own, under the last of them. */
+.provider-new {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.provider-new > .field:first-child {
+  border-top: 0;
+}
+
+.provider-new > .editor-actions {
+  padding-bottom: 4px;
 }
 
 /* The reminder: what was typed and not saved, before it is left behind. */

@@ -4,7 +4,7 @@
 //! kept in memory for late subscribers, and broadcast live.
 
 use crate::agent::{Agent, AgentConfig, EffortPolicy, Retune};
-use crate::config::{Config, PROVIDERS, Resolved, data_dir};
+use crate::config::{CUSTOM, Config, PROVIDERS, Resolved, data_dir};
 use crate::demo;
 use crate::economy::prices_for;
 use crate::events::{Event, EventKind, FinishStatus, Sink, Stats};
@@ -144,11 +144,15 @@ pub struct Instructions {
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
+    /// What it is known for, in a word or two. Empty where the name says it.
+    pub serves: String,
     pub base_url: String,
     pub key_env: String,
     pub has_key: bool,
     pub models: Vec<String>,
     pub note: String,
+    /// An endpoint of the user's own: it asks for no key and can be taken away.
+    pub custom: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -312,16 +316,26 @@ impl Harness {
             .map(|d| ProviderInfo {
                 id: d.id.into(),
                 name: d.name.into(),
+                serves: d.serves.into(),
                 base_url: d.base_url.into(),
                 key_env: d.key_env.into(),
                 has_key: cfg.has_key(d),
                 models: d.models.iter().map(|m| m.to_string()).collect(),
                 note: d.note.into(),
+                custom: false,
             })
             .collect();
-        if let Some(c) = &cfg.custom {
-            providers.push(ProviderInfo { id: "custom".into(), name: "Custom endpoint".into(), base_url: c.base_url.clone(), key_env: "PRESAGE_API_KEY".into(), has_key: true, models: c.models.clone(), note: String::new() });
-        }
+        providers.extend(cfg.customs().map(|(id, name, c)| ProviderInfo {
+            id: id.into(),
+            name: name.into(),
+            serves: String::new(),
+            base_url: c.base_url.clone(),
+            key_env: if id == CUSTOM { "PRESAGE_API_KEY".into() } else { String::new() },
+            has_key: true,
+            models: c.models.clone(),
+            note: String::new(),
+            custom: true,
+        }));
         let provider = cfg.default_provider();
         let model = cfg.resolve(provider.as_deref(), None).ok().map(|r| r.model);
         AppState {
@@ -338,15 +352,35 @@ impl Harness {
 
     /// Stores (or, with an empty key, removes) an API key.
     pub fn set_key(&self, provider: &str, key: &str) -> Result<(), String> {
-        if provider != "custom" && !PROVIDERS.iter().any(|d| d.id == provider) {
+        let mut cfg = self.inner.config.lock().unwrap();
+        // The file's own endpoint may be given its key before it is written there.
+        if provider != CUSTOM && !cfg.knows(provider) {
             return Err(format!("unknown provider {provider:?}"));
         }
-        let mut cfg = self.inner.config.lock().unwrap();
         if key.trim().is_empty() {
             cfg.keys.remove(provider);
         } else {
             cfg.keys.insert(provider.to_string(), key.trim().to_string());
         }
+        cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
+    }
+
+    /// Adds an OpenAI-compatible endpoint of the user's own, with its key when it asks for one,
+    /// and gives the id it goes by.
+    pub fn add_provider(&self, name: &str, base_url: &str, models: &[String], key: &str) -> Result<String, String> {
+        let mut cfg = self.inner.config.lock().unwrap();
+        let id = cfg.add_provider(name, base_url, models)?;
+        if !key.trim().is_empty() {
+            cfg.keys.insert(id.clone(), key.trim().to_string());
+        }
+        cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))?;
+        Ok(id)
+    }
+
+    /// Takes one of the user's own endpoints away. Sessions already running on it keep running.
+    pub fn remove_provider(&self, id: &str) -> Result<(), String> {
+        let mut cfg = self.inner.config.lock().unwrap();
+        cfg.remove_provider(id)?;
         cfg.save(&self.config_path()).map_err(|e| format!("could not save the configuration: {e}"))
     }
 
@@ -831,6 +865,22 @@ mod tests {
         assert!(h.start(StartRequest { cwd: "/tmp".into(), task: "  ".into(), ..Default::default() }).unwrap_err().contains("empty"));
         h.set_key("openrouter", "").unwrap();
         assert!(!h.state().providers.iter().find(|p| p.id == "openrouter").unwrap().has_key || std::env::var("OPENROUTER_API_KEY").is_ok());
+
+        // An endpoint of the user's own: listed after the built-in ones, kept, and taken away with its key.
+        assert!(h.add_provider("Ollama", "ftp://localhost", &["qwen3".into()], "").is_err());
+        let id = h.add_provider("Ollama", "http://localhost:11434/v1", &["qwen3".into()], " sk-own ").unwrap();
+        h.set_key(&id, "sk-other").unwrap();
+        h.set_defaults(Some(id.clone()), Some("qwen3".into()), None).unwrap();
+        let state = Harness::at(h.inner.data_dir.clone()).state();
+        let own = state.providers.last().unwrap();
+        assert_eq!((own.id.as_str(), own.name.as_str(), own.custom, own.has_key, own.models.as_slice()), ("custom-ollama", "Ollama", true, true, &["qwen3".to_string()][..]));
+        assert_eq!((state.provider.as_deref(), state.model.as_deref()), (Some("custom-ollama"), Some("qwen3")));
+        assert!(!serde_json::to_string(&state).unwrap().contains("sk-other"));
+        assert!(h.remove_provider("openrouter").is_err());
+        h.remove_provider(&id).unwrap();
+        let state = Harness::at(h.inner.data_dir.clone()).state();
+        assert!(state.providers.iter().all(|p| !p.custom) && state.provider.as_deref() != Some("custom-ollama"));
+        assert!(h.set_key(&id, "k").is_err());
     }
 
     #[tokio::test]

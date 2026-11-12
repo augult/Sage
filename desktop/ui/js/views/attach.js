@@ -3,7 +3,7 @@
 
 import { api } from '../api.js';
 import { h, icon } from '../dom.js';
-import { roundButton } from './common.js';
+import { barButton } from './common.js';
 
 export const baseName = (path) => path.split(/[\\/]/).pop();
 
@@ -26,7 +26,7 @@ export function fileChip(path, onRemove) {
 export function attachments({ start, value = [], onChange }) {
   let paths = [...value];
   const list = h('div.attached', { hidden: true });
-  const button = roundButton('attach', 'Attach files', icon('plus', 16), pick, false);
+  const button = barButton('attach', 'Attach files', icon('plus', 16), pick, 'bare');
   // Scripts attach by path (js/hooks.js): the system's dialog cannot be driven.
   button.addEventListener('attach', (event) => set([...paths, ...event.detail]));
 
