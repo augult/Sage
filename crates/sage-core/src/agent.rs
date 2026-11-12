@@ -164,6 +164,9 @@ pub struct Agent {
     exam_rulings: HashMap<(usize, String), Option<Vec<String>>>,
     /// What became of the examination, for the outcome.
     exam_note: Option<String>,
+    /// The state of the workspace (its epoch) the examiners' cases were last run against, and
+    /// whether they let it stand.
+    exam_seen: Option<(u64, bool)>,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -291,7 +294,7 @@ impl Agent {
     pub fn new(provider: Provider, sess: Session, cfg: AgentConfig, sink: Arc<dyn Sink>, approvals: Arc<Approvals>) -> Self {
         let ctx = Context::new(cfg.system.as_deref().unwrap_or_else(|| prompt::system_prompt(&cfg.features)));
         let effort = cfg.effort.start();
-        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
+        Self { provider: Arc::new(provider), exams: Vec::new(), exam_opening: String::new(), exam_holds: 0, exam_shown: HashMap::new(), exam_rulings: HashMap::new(), exam_note: None, exam_seen: None, sess, ctx, cfg, sink, approvals, stats: Stats::default(), turn: 0, effort, surprise_streak: 0, failures: HashMap::new(), edits: HashMap::new(), first_message: true, budget_marks: 0, chain_hints: 2, solo_streak: 0, solo_hints: 2, offered_job_tool: false, announce: Vec::new(), attached: Vec::new(), goal: None, shown: None, keep: None, restored: None }
     }
 
     /// Files the user attached to the next message. They go to the model by path, in front of the
@@ -469,6 +472,7 @@ impl Agent {
         self.exam_shown.clear();
         self.exam_rulings.clear();
         self.exam_note = None;
+        self.exam_seen = None;
     }
 
     /// Stores the script a reply of examiner `i` holds with the session, outside the workspace.
@@ -528,6 +532,11 @@ impl Agent {
         self.count_side_request(&resp.usage, took);
         self.exams[i].thread.push(assistant(resp.content.clone()));
         if !self.adopt(i, &resp.content) {
+            // A script the output limit cut off is asked for again, shorter. Seen on the first live
+            // runs: a script of several hundred cases that never reached its closing line.
+            if resp.finish == "length" && self.repair(i, examiner::REPAIR_CUT.to_string(), run_started, cancel).await {
+                return true;
+            }
             self.note("examiner", &format!("{who} wrote no script for this task"));
             return false;
         }
@@ -1188,6 +1197,9 @@ impl Agent {
                 ));
             }
             notes.extend(self.budget_notes(run_started, turns_used, slowest));
+            if result.finished.is_none() && result.asked.is_none() && !closing && let Some(said) = self.early_exam(run_started, cancel).await {
+                notes.push(said);
+            }
             for n in &notes {
                 self.note("harness", n);
             }
@@ -1267,18 +1279,48 @@ impl Agent {
         if !self.cfg.features.examiner || self.exams.is_empty() || landing || !worked || self.cfg.autonomy != Autonomy::Auto {
             return None;
         }
-        self.exam_note = None;
-        let hold = self.examine(run_started, cancel).await;
+        // Examined already as it stands, and let stand: the cases are not run a second time.
+        let hold = if self.exam_seen == Some((ev.epoch, true)) { None } else { self.examined(run_started, cancel).await };
         if hold.is_none() && let Some(note) = &self.exam_note {
             outcome.evidence = format!("{}; {note}", outcome.evidence);
         }
-        // Work its author took for finished has a gap its own checks did not show: the next
-        // stretch is worth more thought than the last.
+        hold
+    }
+
+    /// Runs the examination and records which state of the workspace it saw. A hold raises an
+    /// effort that is left to the harness: work its author's own checks passed has a gap they did
+    /// not show, and the next stretch is worth more thought than the last.
+    async fn examined(&mut self, run_started: Instant, cancel: &CancellationToken) -> Option<String> {
+        self.exam_note = None;
+        let hold = self.examine(run_started, cancel).await;
+        self.exam_seen = Some((self.sess.evidence.epoch, hold.is_none()));
         if hold.is_some() && let EffortPolicy::Ratchet(_) = self.cfg.effort && let Some(next) = self.effort.next() {
             self.sink.emit(EventKind::Effort { turn: self.turn, from: self.effort.as_str().into(), to: next.as_str().into(), reason: "the examiner's cases found a gap".into() });
             self.effort = next;
         }
         hold
+    }
+
+    /// The examination, as soon as there is something to examine: the worker's own checks pass
+    /// on what it changed, and the examiners' scripts are written. Returns what the worker is told
+    /// with the results of its reply. Measured on the first live runs: a worker in no hurry went
+    /// on testing its own work for all the sixty replies it had and never called `finish`, so the
+    /// examiners' cases, written in its first minute, were never run. Cases from readers of the
+    /// text are better to work towards than ones it makes up, and their passing is a reason to stop.
+    async fn early_exam(&mut self, run_started: Instant, cancel: &CancellationToken) -> Option<String> {
+        let ev = &self.sess.evidence;
+        let epoch = ev.epoch;
+        let due = self.cfg.features.examiner && !self.exams.is_empty() && self.cfg.autonomy == Autonomy::Auto && epoch > ev.message_epoch && ev.fresh() && self.exam_seen.map(|(seen, _)| seen) != Some(epoch);
+        // Nothing is waited for here: a script still being written is run when it is there.
+        let writing = self.exams.iter().any(|exam| matches!(&exam.script, Script::Pending { reply, .. } if !reply.is_finished()));
+        if !due || writing {
+            return None;
+        }
+        if let Some(hold) = self.examined(run_started, cancel).await {
+            return Some(hold);
+        }
+        let note = self.exam_note.as_ref()?;
+        Some(format!("[examiner] The work as it stands was examined: {note}. The cases were written from the task and its documents alone, by engineers who have not seen the work. If everything the task asks for is done, call `finish`."))
     }
 
     /// Sends the model back to work with `message`, as the harness speaking.
@@ -2258,6 +2300,25 @@ mod tests {
         let out = r.agent.run("How long is n.txt?".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.summary.as_str(), r.agent.stats.turns), (FinishStatus::Yielded, "It has three lines.", 1));
         assert!(notes(&r, "examiner").is_empty());
+    }
+
+    #[tokio::test]
+    async fn work_whose_own_checks_pass_is_examined_before_its_author_calls_it_finished() {
+        let check = |old: &str, new: &str| fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": old, "new": new})), ("shell", json!({"cmd": format!("grep -qx {new} n.txt"), "expect_exit": "0"}))]));
+        let mut r = prosage_rig("agent-exam-early", &["examiner"], vec![check("beta", "Beta"), check("Beta", "BETA"), fixed(MockTurn::calls("", vec![("read", json!({"path": "n.txt"}))])), finish()], EXAM, "NONE");
+        let out = r.agent.run("Put line two of n.txt in capitals.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 4));
+        let sent = turns_sent(&r);
+        // The failing case comes with the results of the reply whose checks passed, not at a `finish` that may never come.
+        let first = &sent[1].last().unwrap().content;
+        assert!(first.contains("--- harness ---") && first.contains("[examiner] The work is not accepted yet.") && first.contains("FAIL line2_capitals"), "{first}");
+        // Mended, it is said to stand, once: a reply that changes nothing is not examined again.
+        let second = &sent[2].last().unwrap().content;
+        assert!(second.contains("[examiner] The work as it stands was examined: all 3 of the examiner's cases pass. The cases were written from the task and its documents alone"), "{second}");
+        assert!(!sent[3].last().unwrap().content.contains("[examiner]"));
+        // The `finish` that follows stands on that examination: the cases are not run a third time.
+        assert!(out.evidence.ends_with("; all 3 of the examiner's cases pass"), "{}", out.evidence);
+        assert_eq!(notes(&r, "examiner"), ["finish held: 1 of the examiner's 3 cases fail", "all 3 of the examiner's cases pass"]);
     }
 
     #[tokio::test]

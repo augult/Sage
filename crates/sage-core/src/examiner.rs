@@ -209,6 +209,9 @@ pub fn excerpt(output: &str) -> String {
 
 const SAME_FORMAT: &str = "Reply in the same format as before, with the whole script.";
 
+/// What an examiner is told when its reply ran into the output limit before the script ended.
+pub const REPAIR_CUT: &str = "Your reply ran into the output limit before the script ended, so there is no script. Write it again so that it fits: a table of cases and one loop that runs them, no helper that is used once, no comments, at most 60 cases, the ones most likely to show a fault first. Reply in the same format as before, with the whole script.";
+
 /// What an examiner is told when its script did not get as far as its count.
 pub fn repair_broken(output: &str) -> String {
     let shown = if output.trim().is_empty() { "(it printed nothing, or ran for too long)".to_string() } else { excerpt(output) };
@@ -327,9 +330,9 @@ pub struct Section<'a> {
     pub set_aside: Vec<&'a str>,
 }
 
-const RULE: &str = "A failing case is either a gap in your work or a mistake of the examiner. Settle each one by the text it cites, not by your code: where the text sides with the case, fix the work; where the text contradicts the case, leave the work as it is. Whatever passes now has to pass afterwards. Then call `finish` again, and name in its summary each case you leave failing with the sentence that shows it wrong.";
+const RULE: &str = "A failing case is either a gap in your work or a mistake of the examiner. Settle each one by the text it cites, not by your code: where the text sides with the case, fix the work; where the text contradicts the case, leave the work as it is. Whatever passes now has to pass afterwards. Then call `finish`, and name in its summary each case you leave failing with the sentence that shows it wrong.";
 
-const RULE_REFEREED: &str = "Each of these is taken to be a gap in your work. Read the quoted sentence and the text around it again, and fix the work where the text requires what the case expects. A case can still be wrong: where the text contradicts it, leave the work as it is, and change nothing only to make a case pass. Whatever passes now has to pass afterwards. Then call `finish` again, and name in its summary each case you leave failing with the sentence that shows it wrong.";
+const RULE_REFEREED: &str = "Each of these is taken to be a gap in your work. Read the quoted sentence and the text around it again, and fix the work where the text requires what the case expects. A case can still be wrong: where the text contradicts it, leave the work as it is, and change nothing only to make a case pass. Whatever passes now has to pass afterwards. Then call `finish`, and name in its summary each case you leave failing with the sentence that shows it wrong.";
 
 /// The cases of a hold are shown up to about this many characters; the script has the rest.
 const HOLD_CHARS: usize = 9_000;
