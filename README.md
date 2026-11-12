@@ -25,7 +25,7 @@ and the model's attention is spent only where reality diverged.**
 | **Editable system prompt** | The template is a file; a user copy replaces it, and a global and a project `AGENTS.md` are appended, each behind a fixed line saying that it is standing instructions and not a message in the conversation. `sage prompt` prints what the model gets. | `prompt.rs`, `prompts/system.md` |
 | **Anchored edits** | Lines are shown as `41kq|…` (line number + 2-letter content hash). Edits address anchors, so the model never retypes old text. The harness keeps the line shifts of its own edits, so an anchor from before an edit (every anchor of a reply that edits the same file twice) is carried to where its line is now; one that fits nowhere, or in two places, is refused with the current lines. A two-letter hash is checked, never searched for. | `anchors.rs`, `tools/edit.rs` |
 | **Price-aware policy** | The harness knows the price vector (cache hit / miss / output). History is append-only and byte-stable so that the provider's cache can hit; every request is audited (harness bust vs provider miss); old observations are trimmed only when the arithmetic says it pays. | `economy.rs`, `context.rs` |
-| **Effort ratchet** | Reasoning effort starts at `low` and rises one level after three surprises in a row (`low`, `high`, `max`). It falls only when a reply is nothing but reasoning: such a reply is cut at about 14,000 tokens of thinking (or at the output limit) and asked for again one level lower, though thinking is switched off only at the second such reply of a run. Starting at `high` (`-e ratchet-high`, the default until 12 November 2026) solved as many tasks and took about 30% more replies and twice the time on DeepSeek V4.1 Flash, and twice the replies on six tasks with GLM-5.3. | `agent.rs`, `provider/openai.rs` |
+| **Effort ratchet** | Reasoning effort starts at `low` and rises one level after three surprises in a row (`low`, `high`, `max`). It falls only when a reply is nothing but reasoning: such a reply is cut at about 14,000 tokens of thinking (or at the output limit) and asked for again one level lower, though thinking is switched off only at the second such reply of a run. A level set by hand (`low`, `high`, `max`) is left only for that one retry and is back once the model has acted; at `max` the cut comes at about 24,000 tokens, in every mode. Starting at `high` (`-e ratchet-high`, the default until 12 November 2026) solved as many tasks and took about 30% more replies and twice the time on DeepSeek V4.1 Flash, and twice the replies on six tasks with GLM-5.3. | `agent.rs`, `provider/openai.rs` |
 | **Robust plumbing** | Tool-call repair (malformed JSON, foreign argument names, calls written as text), thinking-loop watchdog, retries honouring `Retry-After` (without end while auto-retry is on, so a run outlasts a rate limit), commands that outlive their timeout become background jobs instead of being killed, noise-stripped output with the raw bytes kept on disk (`out:N`), command output shown with paths relative to the workspace. | `repair.rs`, `provider/`, `tools/jobs.rs`, `text.rs`, `workspace.rs` |
 
 `sage bench` runs any of the modes below, or one of them with a single mechanism switched on
@@ -40,7 +40,7 @@ the session starts: its system prompt and its tools are sent with the first requ
 |---|---|---|
 | **Ecosage** (`--mode ecosage`; the one a session gets unless told otherwise) | Few requests and little money, at a little cost to the result. | Everything in the table above. |
 | **Default** (`--mode default`; `classic` in earlier results) | The loop every other harness runs, for those who want the app and not Sage's ways. | One tool call after another: no scripts, predictions, watches, finish gate or first-message survey. |
-| **Prosage** (`--mode prosage`) | The result, with requests and time spent freely. | Ecosage, without what it does to stay cheap, and with a second reader. See below. |
+| **Prosage** (`--mode prosage`) | The result, with requests and time spent freely. | Ecosage's loop without what it does to stay cheap, and with second readers: two examiners who never see the work, and referees who decide which of their failing cases the text bears out. See below. |
 
 ### What Prosage changes
 
@@ -48,22 +48,39 @@ Over the stored benchmark runs (`docs/results/`), twelve of the thirteen runs Sa
 DeepSeek V4.1 Flash it had declared finished and verified: the work passed the checks the model
 chose to run and failed ones it never thought of. The conventional loop did not make that mistake
 in any of its 94 runs, at twice the requests (`docs/BENCHMARKS.md`). Prosage is built against that
-one failure, with four mechanisms that can each be switched on in Ecosage (`--with <name>`,
-`ecosage+<name>` in the bench) or off in Prosage (`--without <name>`, `prosage+no-<name>`).
-**It has not been measured against a live model yet**: the gateway was down for the rest of the
-session that built it (`docs/HANDOFF.md` has the runs to make first).
+one failure. It is not Ecosage with the effort turned up: the effort is the same setting in every
+mode (below), and what Prosage adds is done by the harness around the model. Its six mechanisms
+can each be switched on in Ecosage (`--with <name>`, `ecosage+<name>` in the bench) or off in
+Prosage (`--without <name>`, `prosage+no-<name>`).
+**It has not been measured against a live model yet**: the gateway was down for both sessions
+that built it. `docs/HANDOFF.md` has the runs to make first, `docs/RESEARCH.md` (section 3) what
+the design rests on.
 
 | Mechanism | What it does | Where |
 |---|---|---|
-| **Examiner** (`examiner`) | A second reader. When the session starts, a separate request with a fresh context is given the task and the files the worker was shown, never the work, and writes one check script from the text alone: a case for every rule, example and error the task and its documents state. It is written beside the run, so it costs a request and no waiting. When `finish` is accepted the script is run against the work. Failing cases hold the `finish` and go back to the worker, which settles each by the text it cites: fix the work, or leave the case failing and say why. A `finish` whose failing cases the worker has already been shown stands. A script that does not run to its end, or fails more than three cases in five against work whose own checks pass, is set aside. In a session whose steps wait for approval (`ask`) there is no examiner: its script would be a command run unasked. | `examiner.rs`, `agent.rs` |
+| **Examiner** (`examiner`) | A second reader. When the session starts, a separate request with a fresh context is given the task and the files the worker was shown, never the work, and writes one check script from the text alone: a case for every rule, example and error the task and its documents state. It is written beside the run, so it costs a request and no waiting. The worker is told with its task that the work will be examined this way. When `finish` is accepted the script is run against the work. A script that does not run to its end goes back to its author with its output, twice at most; one more than three in five of whose cases fail against work whose own checks pass goes back once. What is still unusable after that is set aside. In a session whose steps wait for approval (`ask`) there is no examiner: its script would be a command run unasked. | `examiner.rs`, `agent.rs` |
+| **Panel** (`panel`) | A second examiner, asked at the same moment and briefed for what a pass rule by rule leaves out: every error the text states and how it is reported, the limits of each rule, two rules meeting in one input. Where the text has nothing of that kind it answers NONE. Needs `examiner`. | `examiner.rs` |
+| **Referee** (`referee`) | A failing case holds nothing by itself: a script written blind is wrong often enough to make a worker break work that was right. Each failing case goes to two referees, separate requests that are shown the text, the script and what the case reported, and not the work. Each works out from the text what the result has to be and rules GAP (quoting the sentence that settles it), CASE or OPEN. Only a case both rule GAP holds the `finish`. It reaches the worker with what they quoted; the other failing cases are named as not to be acted on. A case is ruled on once. Without referees (`prosage+no-referee`) every failing case goes to the worker. Needs `examiner`. | `examiner.rs`, `agent.rs` |
 | **Long thought** (`long_thought`) | A reply may think for about 24,000 tokens before its first word or call, instead of being cut at 14,000 and told to act. On the specification-heavy task Sage loses most, three of five first replies were cut at that mark. | `provider/openai.rs` |
-| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass, the model is told what passing checks leave open instead of that `finish` is accepted now. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
+| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass, the model is told what passing checks leave open instead of that `finish` is accepted now. An examiner still writing is waited for up to 15 minutes instead of 4. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
 | **Routing** (`routing`) | One short request without thinking picks the skills whose subject is the task's main work, and they are switched on before the first word goes to the model. | `agent.rs`, `examiner.rs` |
 
-The effort starts where Ecosage's does, at `low`: starting at `high` took twice the time and
-solved no more tasks when it was measured on 12 November 2026. What Prosage adds is a second
-reason for it to rise: a `finish` the examiner holds raises it one level. Requests made beside the
-conversation (examiner, router) are counted in the session's tokens, cost and `side_requests`.
+A held `finish` goes back to the worker, which settles each case by the text: fix the work, or
+leave the case failing and name in its summary the sentence that shows it wrong. A `finish` all of
+whose failing cases the worker has been shown stands, and the outcome says how many were left.
+A case that passed before the worker's last changes and fails after them is marked as broken by
+them, so that a fix cannot quietly cost something that was right. Three holds at most per message.
+With a time budget, nothing more is asked for beside the run once less than 45 seconds of it are
+left.
+
+**Effort is not part of the mode.** Every mode runs at the effort it is given. `ratchet` (Auto in
+the app) starts at `low` and rises on surprises; `low`, `high` and `max` are kept as they are set,
+in Ecosage as in Prosage. At `max` a reply may think for about 24,000 tokens in any mode. A reply
+that does nothing but reason is still asked for again one level lower, but under a level that was
+set the session is back at it as soon as the model has acted. Examiners and referees think at the
+effort the session has reached, never below `high`. Under `ratchet`, a `finish` the examiners hold
+raises the effort one level. Requests made beside the conversation (examiners, referees, router)
+are counted in the session's tokens, cost and `side_requests`.
 
 ## Status
 

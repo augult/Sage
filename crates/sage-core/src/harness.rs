@@ -1377,8 +1377,8 @@ mod tests {
 
         // Prosage is Ecosage and what Ecosage leaves out to stay cheap; the conventional loop has none of either.
         let (pro, plain) = (Mode::Prosage.features(), Mode::Plain.features());
-        assert!(pro.long_thought && pro.unhurried && pro.examiner && pro.routing && pro.scripts && pro.gate);
-        assert!(!plain.scripts && !plain.examiner && !plain.routing && Mode::Ecosage.features() == Features::ecosage());
+        assert!(pro.long_thought && pro.unhurried && pro.examiner && pro.panel && pro.referee && pro.routing && pro.scripts && pro.gate);
+        assert!(!plain.scripts && !plain.examiner && !plain.referee && !plain.routing && Mode::Ecosage.features() == Features::ecosage());
         assert_eq!(Features::OPTIONAL.iter().fold(Features::ecosage(), |f, name| f.with(name).unwrap()), pro);
     }
 

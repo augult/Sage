@@ -48,7 +48,9 @@ OpenCode, mini-swe-agent):
   hit the 14,000-token cap and were cut. Whether the cut costs the task is not known: of the two
   runs that finished, one had been cut and one had not, and both failed.
 
-Prosage (`README.md`, "Modes") is built on this reading and has not been run against a model.
+Prosage (`README.md`, "Modes") is built on this reading, was reworked in the eleventh session on
+what others have measured about checks written by a second model (`docs/RESEARCH.md`, section 3),
+and has not been run against a model.
 
 ## Against OpenCode, 12 November 2026 (ninth session)
 

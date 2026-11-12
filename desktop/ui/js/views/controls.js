@@ -119,7 +119,7 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
 export const MODES = [
   { value: 'ecosage', label: 'Ecosage', title: 'Few requests and little money, at a little cost to the result' },
   { value: 'default', label: 'Default', title: 'The loop other harnesses run: one tool call after another, nothing of Sage around it' },
-  { value: 'prosage', label: 'Prosage', title: 'For the result alone: longer thinking, a second reader who examines the work, skills switched on unasked. Costs more requests and time' },
+  { value: 'prosage', label: 'Prosage', title: 'For the result alone: nothing hurries the run, examiners who never see the work check it against the task, referees decide which of their findings stand, skills are switched on unasked. Costs more requests and time' },
 ];
 
 /** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
