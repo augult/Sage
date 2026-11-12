@@ -197,7 +197,7 @@ export function mountSession(main, side, app, meta) {
     const size = entry.model.stats?.context_tokens ?? 0;
     const whole = `the whole conversation${size > 0 ? `: ${k(size)} tokens` : ''}`;
     const text = next.provider ? `${next.model ?? 'The new model'} will read ${whole}, none of it cached` : next.effort ? `On some providers a new effort rereads ${whole}` : '';
-    if (swapNote.textContent !== text) swapNote.replaceChildren(...(text ? [icon('bang', 14), text] : []));
+    swapNote.textContent = text;
     swapNote.hidden = !text;
   }
 

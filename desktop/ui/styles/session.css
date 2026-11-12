@@ -697,16 +697,10 @@ button.row-line:focus-visible {
 
 /* What the next message will cost that the last did not. */
 .chat-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 0 6px 6px;
   color: var(--soft);
   font-size: var(--text-sm);
-}
-
-.chat-note .icon {
-  color: var(--muted);
+  text-align: center;
 }
 
 .composer {
