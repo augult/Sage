@@ -281,6 +281,18 @@
   resize: none;
   white-space: pre;
   overflow: auto;
+  /* The place of its bar is kept with nothing to scroll too, so that a long line is cut short of
+     the frame and not on it. */
+  overflow-y: scroll;
+}
+
+.code-edit textarea::-webkit-scrollbar:vertical {
+  width: 14px;
+}
+
+/* As thin as any other, at the frame's edge. */
+.code-edit textarea::-webkit-scrollbar-thumb:vertical {
+  border-left-width: 7px;
 }
 
 /* GitHub: where a push goes, what would go, the one button that sends it, and the latest commits. */

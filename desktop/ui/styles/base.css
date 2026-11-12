@@ -226,6 +226,15 @@ button:disabled {
   background: transparent;
 }
 
+/* The arrow over a scrollbar, whatever it scrolls. A drawn scrollbar takes the pointer of its
+   element, so a text field's would otherwise show the I-beam of the text. */
+::-webkit-scrollbar,
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-corner {
+  cursor: default;
+}
+
 .mono {
   font-family: var(--mono);
   font-size: var(--text-sm);
