@@ -125,13 +125,10 @@ export const MODES = [
 /** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
 export const plainMode = (mode) => mode === 'default' || mode === 'classic';
 
-/** What modes were called in sessions stored before they were renamed. */
-const FORMER_MODES = { classic: 'default', presage: 'ecosage' };
-
 /** A session's mode as its record spells it (`prosage without examiner`), with the mode's name as the app shows it. */
 export function modeLabel(mode) {
   const [name, ...rest] = String(mode ?? '').split(' ');
-  const known = MODES.find((option) => option.value === (FORMER_MODES[name] ?? name));
+  const known = MODES.find((option) => option.value === (name === 'classic' ? 'default' : name));
   return known ? [known.label, ...rest].join(' ') : mode;
 }
 

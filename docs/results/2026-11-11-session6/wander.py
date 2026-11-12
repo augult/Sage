@@ -19,9 +19,9 @@ for path in sys.argv[1:]:
         seen += 1
         why = set()
         for t in texts:
-            if "presage-cli/bench" in t:
+            if "sage-cli/bench" in t:
                 why.add("fixtures")
-            if "presage-cli/bench" in t and re.search(r"/(hidden|solution)\b", t):
+            if "sage-cli/bench" in t and re.search(r"/(hidden|solution)\b", t):
                 why.add("hidden")
             for m in re.findall(r"/work/(\d+-[A-Za-z0-9+_.-]+-\d+)", t):
                 if m != own:

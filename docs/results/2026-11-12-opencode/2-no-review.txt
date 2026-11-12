@@ -46,7 +46,7 @@
 [46/48] deepseek-v4.1-flash-1017 · slowpath · no-review #1: solved · 6 turns · $0.0054 · 29s
 [47/48] deepseek-v4.1-flash-1017 · mutants · no-review #1: solved · 4 turns · $0.0142 · 1m21s
 [48/48] deepseek-v4.1-flash-1017 · restyle · no-review #1: NOT solved (done) · 3 turns · $0.0126 · 54s
-presage bench 20261112-042521-8f4e · logfare · effort ratchet · 2 runs per task and variant
+sage bench 20261112-042521-8f4e · logfare · effort ratchet · 2 runs per task and variant
 fixed prompt prefix, estimated: no-review ~1925 tokens
 
 deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
@@ -83,5 +83,5 @@ ALL        no-review         45/48   5.5   44.1k    75%   10.8k   $0.0099   $0.0
   deepseek-v4.1-flash-1017 · restyle · no-review #2 · session 20261112-043301-da90 · done; verification: score: 8/11
 
 results: /home/benchp/live/bench/20261112-042521-8f4e/results.json
-replay a run: PRESAGE_HOME=/home/benchp/live/bench/20261112-042521-8f4e/home presage show <session>
+replay a run: SAGE_HOME=/home/benchp/live/bench/20261112-042521-8f4e/home sage show <session>
 exit=0

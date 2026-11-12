@@ -1,35 +1,35 @@
-[1/12] glm-5.3 · shipquote · presage+effort:ratchet-low #1: solved · 5 turns · $0.0416 · 29s
-[2/12] glm-5.3 · audit · presage+effort:ratchet-low #1: solved · 3 turns · $0.0321 · 10s
-[3/12] glm-5.3 · audit · presage #1: solved · 5 turns · $0.0602 · 48s
-[4/12] glm-5.3 · audit-clean · presage+effort:ratchet-low #1: solved · 3 turns · $0.0274 · 19s
-[5/12] glm-5.3 · deadcode · presage #1: solved · 29 turns · $0.2528 · 2m21s
-[6/12] glm-5.3 · deadcode · presage+effort:ratchet-low #1: solved · 10 turns · $0.0914 · 49s
-[7/12] glm-5.3 · audit-clean · presage #1: solved · 17 turns · $0.2796 · 5m02s
-[8/12] glm-5.3 · shipquote · presage #1: solved · 15 turns · $0.1771 · 2m07s
-[9/12] glm-5.3 · connpool · presage #1: solved · 18 turns · $0.1334 · 1m12s
-[10/12] glm-5.3 · connpool · presage+effort:ratchet-low #1: solved · 18 turns · $0.1143 · 1m23s
-[11/12] glm-5.3 · attempts · presage #1: solved · 9 turns · $0.1366 · 58s
-[12/12] glm-5.3 · attempts · presage+effort:ratchet-low #1: solved · 5 turns · $0.0509 · 22s
-presage bench 20261112-053120-60fd · logfare · effort ratchet · 1 run per task and variant
-fixed prompt prefix, estimated: presage ~1933 tokens, presage+effort:ratchet-low ~1933 tokens
+[1/12] glm-5.3 · shipquote · ecosage+effort:ratchet-low #1: solved · 5 turns · $0.0416 · 29s
+[2/12] glm-5.3 · audit · ecosage+effort:ratchet-low #1: solved · 3 turns · $0.0321 · 10s
+[3/12] glm-5.3 · audit · ecosage #1: solved · 5 turns · $0.0602 · 48s
+[4/12] glm-5.3 · audit-clean · ecosage+effort:ratchet-low #1: solved · 3 turns · $0.0274 · 19s
+[5/12] glm-5.3 · deadcode · ecosage #1: solved · 29 turns · $0.2528 · 2m21s
+[6/12] glm-5.3 · deadcode · ecosage+effort:ratchet-low #1: solved · 10 turns · $0.0914 · 49s
+[7/12] glm-5.3 · audit-clean · ecosage #1: solved · 17 turns · $0.2796 · 5m02s
+[8/12] glm-5.3 · shipquote · ecosage #1: solved · 15 turns · $0.1771 · 2m07s
+[9/12] glm-5.3 · connpool · ecosage #1: solved · 18 turns · $0.1334 · 1m12s
+[10/12] glm-5.3 · connpool · ecosage+effort:ratchet-low #1: solved · 18 turns · $0.1143 · 1m23s
+[11/12] glm-5.3 · attempts · ecosage #1: solved · 9 turns · $0.1366 · 58s
+[12/12] glm-5.3 · attempts · ecosage+effort:ratchet-low #1: solved · 5 turns · $0.0509 · 22s
+sage bench 20261112-053120-60fd · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: ecosage ~1933 tokens, ecosage+effort:ratchet-low ~1933 tokens
 
 glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
 task       variant          solved turns  in tok cached out tok      cost  no cache    time
-audit      presage             1/1     5   47.8k    52%    5.0k   $0.0602   $0.0888     48s
-           presage+effort:ratchet-low    1/1     3   24.8k    24%     938   $0.0321   $0.0389     10s
-audit-clean presage             1/1    17    221k    83%   40.4k   $0.2796   $0.4884   5m02s
-           presage+effort:ratchet-low    1/1     3   26.3k    65%    2.3k   $0.0274   $0.0470     19s
-deadcode   presage             1/1    29    433k    81%   10.3k   $0.2528   $0.6515   2m21s
-           presage+effort:ratchet-low    1/1    10    129k    79%    6.0k   $0.0914   $0.2082     49s
-shipquote  presage             1/1    15    209k    84%   19.3k   $0.1771   $0.3778   2m07s
-           presage+effort:ratchet-low    1/1     5   37.4k    57%    3.0k   $0.0416   $0.0657     29s
-attempts   presage             1/1     9    132k    59%    9.2k   $0.1366   $0.2255     58s
-           presage+effort:ratchet-low    1/1     5   65.6k    81%    4.5k   $0.0509   $0.1116     22s
-connpool   presage             1/1    18    207k    83%    8.8k   $0.1334   $0.3286   1m12s
-           presage+effort:ratchet-low    1/1    18    196k    91%    9.5k   $0.1143   $0.3169   1m23s
-ALL        presage             6/6    16    208k    83%    9.7k   $0.1568   $0.3532   1m40s   total $1.040, $0.1733 per solved task
-           presage+effort:ratchet-low    6/6     5   51.5k    72%    3.8k   $0.0463   $0.0887     26s   total $0.358, $0.0596 per solved task
+audit      ecosage             1/1     5   47.8k    52%    5.0k   $0.0602   $0.0888     48s
+           ecosage+effort:ratchet-low    1/1     3   24.8k    24%     938   $0.0321   $0.0389     10s
+audit-clean ecosage             1/1    17    221k    83%   40.4k   $0.2796   $0.4884   5m02s
+           ecosage+effort:ratchet-low    1/1     3   26.3k    65%    2.3k   $0.0274   $0.0470     19s
+deadcode   ecosage             1/1    29    433k    81%   10.3k   $0.2528   $0.6515   2m21s
+           ecosage+effort:ratchet-low    1/1    10    129k    79%    6.0k   $0.0914   $0.2082     49s
+shipquote  ecosage             1/1    15    209k    84%   19.3k   $0.1771   $0.3778   2m07s
+           ecosage+effort:ratchet-low    1/1     5   37.4k    57%    3.0k   $0.0416   $0.0657     29s
+attempts   ecosage             1/1     9    132k    59%    9.2k   $0.1366   $0.2255     58s
+           ecosage+effort:ratchet-low    1/1     5   65.6k    81%    4.5k   $0.0509   $0.1116     22s
+connpool   ecosage             1/1    18    207k    83%    8.8k   $0.1334   $0.3286   1m12s
+           ecosage+effort:ratchet-low    1/1    18    196k    91%    9.5k   $0.1143   $0.3169   1m23s
+ALL        ecosage             6/6    16    208k    83%    9.7k   $0.1568   $0.3532   1m40s   total $1.040, $0.1733 per solved task
+           ecosage+effort:ratchet-low    6/6     5   51.5k    72%    3.8k   $0.0463   $0.0887     26s   total $0.358, $0.0596 per solved task
 
 results: /home/benchp2/live/bench/20261112-053120-60fd/results.json
-replay a run: PRESAGE_HOME=/home/benchp2/live/bench/20261112-053120-60fd/home presage show <session>
+replay a run: SAGE_HOME=/home/benchp2/live/bench/20261112-053120-60fd/home sage show <session>
 exit=0

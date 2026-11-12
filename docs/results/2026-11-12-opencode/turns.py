@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One line per turn of a Presage session.  usage: turns.py <events.jsonl> [arg chars]"""
+"""One line per turn of a Sage session.  usage: turns.py <events.jsonl> [arg chars]"""
 import json
 import sys
 

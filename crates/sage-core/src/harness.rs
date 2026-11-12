@@ -1359,7 +1359,7 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let req = |mode: Option<&str>| StartRequest { cwd: ws.to_string_lossy().into_owned(), task: "hello".into(), mode: mode.map(str::to_string), interactive: true, ..Default::default() };
         // What each is called in the session's record. No mode chooses the effort for the user.
-        for (asked, mode, effort) in [(None, "ecosage", "ratchet-low"), (Some("ecosage"), "ecosage", "ratchet-low"), (Some("presage"), "ecosage", "ratchet-low"), (Some("default"), "default", "ratchet-low"), (Some("classic"), "default", "ratchet-low"), (Some("Prosage"), "prosage", "ratchet-low")] {
+        for (asked, mode, effort) in [(None, "ecosage", "ratchet-low"), (Some("ecosage"), "ecosage", "ratchet-low"), (Some("default"), "default", "ratchet-low"), (Some("classic"), "default", "ratchet-low"), (Some("Prosage"), "prosage", "ratchet-low")] {
             let meta = h.start_scripted(req(asked), MockProvider::scripted(vec![MockTurn::say("ok")])).unwrap();
             assert_eq!((meta.mode.as_str(), meta.effort.as_str()), (mode, effort), "{asked:?}");
             until_idle(&h, &meta.id).await;

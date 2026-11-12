@@ -18,16 +18,16 @@
     "connpool"
   ],
   "variants": [
-    "presage",
-    "presage+effort:ratchet-low"
+    "ecosage",
+    "ecosage+effort:ratchet-low"
   ],
   "prefix_tokens": [
     {
-      "variant": "presage",
+      "variant": "ecosage",
       "tokens": 1933
     },
     {
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "tokens": 1933
     }
   ],
@@ -38,7 +38,7 @@
     {
       "model": "glm-5.3",
       "task": "audit",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -59,7 +59,7 @@
     {
       "model": "glm-5.3",
       "task": "audit",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -80,7 +80,7 @@
     {
       "model": "glm-5.3",
       "task": "audit-clean",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -101,7 +101,7 @@
     {
       "model": "glm-5.3",
       "task": "audit-clean",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -122,7 +122,7 @@
     {
       "model": "glm-5.3",
       "task": "deadcode",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -143,7 +143,7 @@
     {
       "model": "glm-5.3",
       "task": "deadcode",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -164,7 +164,7 @@
     {
       "model": "glm-5.3",
       "task": "shipquote",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -185,7 +185,7 @@
     {
       "model": "glm-5.3",
       "task": "shipquote",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -206,7 +206,7 @@
     {
       "model": "glm-5.3",
       "task": "attempts",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -227,7 +227,7 @@
     {
       "model": "glm-5.3",
       "task": "attempts",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -248,7 +248,7 @@
     {
       "model": "glm-5.3",
       "task": "connpool",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -269,7 +269,7 @@
     {
       "model": "glm-5.3",
       "task": "connpool",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 1,
       "errors": 0,
       "solved": 1,
@@ -290,7 +290,7 @@
     {
       "model": "glm-5.3",
       "task": "ALL",
-      "variant": "presage",
+      "variant": "ecosage",
       "runs": 6,
       "errors": 0,
       "solved": 6,
@@ -311,7 +311,7 @@
     {
       "model": "glm-5.3",
       "task": "ALL",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "runs": 6,
       "errors": 0,
       "solved": 6,
@@ -334,7 +334,7 @@
     {
       "model": "glm-5.3",
       "task": "audit",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053120-8970",
       "outcome": "done",
@@ -372,7 +372,7 @@
     {
       "model": "glm-5.3",
       "task": "audit",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053150-adb7",
       "outcome": "done",
@@ -410,7 +410,7 @@
     {
       "model": "glm-5.3",
       "task": "audit-clean",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053200-0e9d",
       "outcome": "done",
@@ -448,7 +448,7 @@
     {
       "model": "glm-5.3",
       "task": "audit-clean",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053208-5460",
       "outcome": "done",
@@ -486,7 +486,7 @@
     {
       "model": "glm-5.3",
       "task": "deadcode",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053228-2b5f",
       "outcome": "done",
@@ -524,7 +524,7 @@
     {
       "model": "glm-5.3",
       "task": "deadcode",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053450-68b0",
       "outcome": "done",
@@ -562,7 +562,7 @@
     {
       "model": "glm-5.3",
       "task": "shipquote",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053540-45d7",
       "outcome": "done",
@@ -600,7 +600,7 @@
     {
       "model": "glm-5.3",
       "task": "shipquote",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053120-fec4",
       "outcome": "done",
@@ -638,7 +638,7 @@
     {
       "model": "glm-5.3",
       "task": "attempts",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053816-14bf",
       "outcome": "done",
@@ -676,7 +676,7 @@
     {
       "model": "glm-5.3",
       "task": "attempts",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053913-6984",
       "outcome": "done",
@@ -714,7 +714,7 @@
     {
       "model": "glm-5.3",
       "task": "connpool",
-      "variant": "presage",
+      "variant": "ecosage",
       "repeat": 1,
       "session": "20261112-053702-8be4",
       "outcome": "done",
@@ -752,7 +752,7 @@
     {
       "model": "glm-5.3",
       "task": "connpool",
-      "variant": "presage+effort:ratchet-low",
+      "variant": "ecosage+effort:ratchet-low",
       "repeat": 1,
       "session": "20261112-053748-d4aa",
       "outcome": "done",

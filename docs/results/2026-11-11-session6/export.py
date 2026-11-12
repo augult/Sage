@@ -49,7 +49,7 @@ for r in res["runs"]:
     if first_only and r["repeat"] != 1:
         continue
     task, variant, sid = r["task"], r["variant"], r["session"] or ""
-    hidden_dir = f"{REPO}/crates/presage-cli/bench/{task}/hidden"
+    hidden_dir = f"{REPO}/crates/sage-cli/bench/{task}/hidden"
     hidden = {os.path.relpath(os.path.join(d, f), hidden_dir).removesuffix(".txt") if f.endswith(".log.txt") else os.path.relpath(os.path.join(d, f), hidden_dir) for d, _, fs in os.walk(hidden_dir) for f in fs}
     if sid in sessions:
         cwd, text, summary, status, evidence = sessions[sid]

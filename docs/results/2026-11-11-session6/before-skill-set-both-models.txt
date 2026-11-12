@@ -1,56 +1,56 @@
 [1/60] deepseek-v4.1-flash-1017 · audit · classic #1: NOT solved (budget) · 30 turns · $0.0411 · 2m33s
 [2/60] glm-5.3 · audit · classic #1: NOT solved (budget) · 30 turns · $0.1101 · 2m47s
-[3/60] deepseek-v4.1-flash-1017 · audit-clean · presage #1: solved · 23 turns · $0.0512 · 2m55s
-[4/60] deepseek-v4.1-flash-1017 · audit · presage #1: solved · 25 turns · $0.0595 · 3m23s
-[5/60] deepseek-v4.1-flash-1017 · audit · presage+skill #1: solved · 30 turns · $0.0497 · 3m24s
+[3/60] deepseek-v4.1-flash-1017 · audit-clean · ecosage #1: solved · 23 turns · $0.0512 · 2m55s
+[4/60] deepseek-v4.1-flash-1017 · audit · ecosage #1: solved · 25 turns · $0.0595 · 3m23s
+[5/60] deepseek-v4.1-flash-1017 · audit · ecosage+skill #1: solved · 30 turns · $0.0497 · 3m24s
 [6/60] glm-5.3 · deadcode · classic #1: solved · 30 turns · $0.1876 · 2m44s
-[7/60] glm-5.3 · deadcode · presage #1: solved · 30 turns · $0.1875 · 3m41s
-[8/60] glm-5.3 · audit · presage+skill #1: NOT solved (budget) · 30 turns · $0.3462 · 6m48s
+[7/60] glm-5.3 · deadcode · ecosage #1: solved · 30 turns · $0.1875 · 3m41s
+[8/60] glm-5.3 · audit · ecosage+skill #1: NOT solved (budget) · 30 turns · $0.3462 · 6m48s
 [9/60] glm-5.3 · audit-clean · classic #1: NOT solved (budget) · 30 turns · $0.2671 · 5m08s
-[10/60] glm-5.3 · audit-clean · presage+skill #1: solved · 30 turns · $0.4660 · 8m54s
-[11/60] glm-5.3 · deadcode-js · presage #1: solved · 30 turns · $0.2829 · 5m57s
+[10/60] glm-5.3 · audit-clean · ecosage+skill #1: solved · 30 turns · $0.4660 · 8m54s
+[11/60] glm-5.3 · deadcode-js · ecosage #1: solved · 30 turns · $0.2829 · 5m57s
 [12/60] glm-5.3 · deadcode-js · classic #1: NOT solved (budget) · 30 turns · $0.1827 · 3m48s
-[13/60] glm-5.3 · deadcode · presage+skill #1: solved · 30 turns · $0.4303 · 8m30s
-[14/60] glm-5.3 · audit-clean · presage #1: NOT solved (budget) · 26 turns · $0.5319 · 11m33s
+[13/60] glm-5.3 · deadcode · ecosage+skill #1: solved · 30 turns · $0.4303 · 8m30s
+[14/60] glm-5.3 · audit-clean · ecosage #1: NOT solved (budget) · 26 turns · $0.5319 · 11m33s
 [15/60] glm-5.3 · mutants · classic #1: solved · 30 turns · $0.2651 · 5m01s
-[16/60] glm-5.3 · deadcode-js · presage+skill #1: solved · 27 turns · $0.4091 · 8m17s
-[17/60] glm-5.3 · slowpath · presage #1: NOT solved (yielded) · 1 turns · $0.1442 · 3m17s
+[16/60] glm-5.3 · deadcode-js · ecosage+skill #1: solved · 27 turns · $0.4091 · 8m17s
+[17/60] glm-5.3 · slowpath · ecosage #1: NOT solved (yielded) · 1 turns · $0.1442 · 3m17s
 [18/60] glm-5.3 · mutants-js · classic #1: solved · 17 turns · $0.1895 · 4m13s
-[19/60] glm-5.3 · mutants · presage #1: solved · 23 turns · $0.4545 · 10m04s
-[20/60] glm-5.3 · mutants-js · presage #1: solved · 27 turns · $0.6071 · 8m22s
-[21/60] glm-5.3 · mutants · presage+skill #1: NOT solved (error: the model returned neither a tool call nor an answer three times in a row) · 3 turns · $0.4332 · 10m10s
-[22/60] glm-5.3 · nplusone · presage #1: solved · 17 turns · $0.2430 · 5m32s
-[23/60] glm-5.3 · mutants-js · presage+skill #1: NOT solved (budget) · 10 turns · $0.4742 · 10m29s
+[19/60] glm-5.3 · mutants · ecosage #1: solved · 23 turns · $0.4545 · 10m04s
+[20/60] glm-5.3 · mutants-js · ecosage #1: solved · 27 turns · $0.6071 · 8m22s
+[21/60] glm-5.3 · mutants · ecosage+skill #1: NOT solved (error: the model returned neither a tool call nor an answer three times in a row) · 3 turns · $0.4332 · 10m10s
+[22/60] glm-5.3 · nplusone · ecosage #1: solved · 17 turns · $0.2430 · 5m32s
+[23/60] glm-5.3 · mutants-js · ecosage+skill #1: NOT solved (budget) · 10 turns · $0.4742 · 10m29s
 [24/60] glm-5.3 · nplusone · classic #1: solved · 30 turns · $0.2227 · 4m07s
 [25/60] glm-5.3 · heisenbug · classic #1: solved · 14 turns · $0.0430 · 1m11s
-[26/60] glm-5.3 · heisenbug · presage+skill #1: solved · 16 turns · $0.2827 · 5m45s
-[27/60] glm-5.3 · slowpath · presage+skill #1: solved · 11 turns · $0.3102 · 10m00s
+[26/60] glm-5.3 · heisenbug · ecosage+skill #1: solved · 16 turns · $0.2827 · 5m45s
+[27/60] glm-5.3 · slowpath · ecosage+skill #1: solved · 11 turns · $0.3102 · 10m00s
 [28/60] glm-5.3 · slowpath · classic #1: solved · 23 turns · $0.2644 · 9m53s
-[29/60] glm-5.3 · heisenbug · presage #1: solved · 30 turns · $0.3892 · 6m55s
-[30/60] glm-5.3 · nplusone · presage+skill #1: solved · 23 turns · $0.4404 · 9m28s
+[29/60] glm-5.3 · heisenbug · ecosage #1: solved · 30 turns · $0.3892 · 6m55s
+[30/60] glm-5.3 · nplusone · ecosage+skill #1: solved · 23 turns · $0.4404 · 9m28s
 [31/60] deepseek-v4.1-flash-1017 · mutants-js · classic #1: solved · 13 turns · $0.0181 · 1m59s
-[32/60] deepseek-v4.1-flash-1017 · deadcode · presage+skill #1: solved · 20 turns · $0.0192 · 1m40s
+[32/60] deepseek-v4.1-flash-1017 · deadcode · ecosage+skill #1: solved · 20 turns · $0.0192 · 1m40s
 [33/60] deepseek-v4.1-flash-1017 · audit-clean · classic #1: NOT solved (budget) · 30 turns · $0.0267 · 2m58s
-[34/60] deepseek-v4.1-flash-1017 · deadcode · presage #1: solved · 30 turns · $0.0277 · 2m39s
-[35/60] deepseek-v4.1-flash-1017 · audit-clean · presage+skill #1: solved · 30 turns · $0.0386 · 4m37s
-[36/60] deepseek-v4.1-flash-1017 · deadcode-js · presage+skill #1: solved · 19 turns · $0.0170 · 1m43s
+[34/60] deepseek-v4.1-flash-1017 · deadcode · ecosage #1: solved · 30 turns · $0.0277 · 2m39s
+[35/60] deepseek-v4.1-flash-1017 · audit-clean · ecosage+skill #1: solved · 30 turns · $0.0386 · 4m37s
+[36/60] deepseek-v4.1-flash-1017 · deadcode-js · ecosage+skill #1: solved · 19 turns · $0.0170 · 1m43s
 [37/60] deepseek-v4.1-flash-1017 · deadcode · classic #1: solved · 30 turns · $0.0231 · 3m54s
 [38/60] deepseek-v4.1-flash-1017 · deadcode-js · classic #1: solved · 24 turns · $0.0210 · 2m07s
-[39/60] glm-5.3 · restyle · presage+skill #1: solved · 30 turns · $0.4327 · 9m12s
+[39/60] glm-5.3 · restyle · ecosage+skill #1: solved · 30 turns · $0.4327 · 9m12s
 [40/60] glm-5.3 · restyle · classic #1: solved · 30 turns · $0.4558 · 8m27s
-[41/60] glm-5.3 · restyle · presage #1: NOT solved (budget) · 15 turns · $0.4667 · 10m10s
+[41/60] glm-5.3 · restyle · ecosage #1: NOT solved (budget) · 15 turns · $0.4667 · 10m10s
 [42/60] deepseek-v4.1-flash-1017 · mutants · classic #1: solved · 22 turns · $0.0182 · 2m20s
-[43/60] deepseek-v4.1-flash-1017 · heisenbug · presage #1: solved · 20 turns · $0.0129 · 1m41s
-[44/60] deepseek-v4.1-flash-1017 · mutants · presage #1: solved · 25 turns · $0.0360 · 3m43s
-[45/60] deepseek-v4.1-flash-1017 · mutants · presage+skill #1: solved · 18 turns · $0.0273 · 3m18s
-[46/60] deepseek-v4.1-flash-1017 · mutants-js · presage #1: solved · 21 turns · $0.0264 · 3m25s
-[47/60] deepseek-v4.1-flash-1017 · nplusone · presage #1: solved · 8 turns · $0.0085 · 56s
+[43/60] deepseek-v4.1-flash-1017 · heisenbug · ecosage #1: solved · 20 turns · $0.0129 · 1m41s
+[44/60] deepseek-v4.1-flash-1017 · mutants · ecosage #1: solved · 25 turns · $0.0360 · 3m43s
+[45/60] deepseek-v4.1-flash-1017 · mutants · ecosage+skill #1: solved · 18 turns · $0.0273 · 3m18s
+[46/60] deepseek-v4.1-flash-1017 · mutants-js · ecosage #1: solved · 21 turns · $0.0264 · 3m25s
+[47/60] deepseek-v4.1-flash-1017 · nplusone · ecosage #1: solved · 8 turns · $0.0085 · 56s
 [48/60] deepseek-v4.1-flash-1017 · nplusone · classic #1: solved · 7 turns · $0.0057 · 28s
-[49/60] deepseek-v4.1-flash-1017 · deadcode-js · presage #1: solved · 22 turns · $0.0360 · 7m02s
-[50/60] deepseek-v4.1-flash-1017 · nplusone · presage+skill #1: solved · 16 turns · $0.0166 · 1m47s
+[49/60] deepseek-v4.1-flash-1017 · deadcode-js · ecosage #1: solved · 22 turns · $0.0360 · 7m02s
+[50/60] deepseek-v4.1-flash-1017 · nplusone · ecosage+skill #1: solved · 16 turns · $0.0166 · 1m47s
 [51/60] deepseek-v4.1-flash-1017 · heisenbug · classic #1: solved · 10 turns · $0.0050 · 29s
-[52/60] deepseek-v4.1-flash-1017 · heisenbug · presage+skill #1: solved · 11 turns · $0.0097 · 1m18s
+[52/60] deepseek-v4.1-flash-1017 · heisenbug · ecosage+skill #1: solved · 11 turns · $0.0097 · 1m18s
 [53/60] deepseek-v4.1-flash-1017 · restyle · classic #1: solved · 30 turns · $0.0264 · 3m16s
-[54/60] deepseek-v4.1-flash-1017 · restyle · presage #1: NOT solved (budget) · 30 turns · $0.0456 · 4m34s
-[55/60] deepseek-v4.1-flash-1017 · mutants-js · presage+skill #1: solved · 30 turns · $0.0350 · 7m34s
-[56/60] deepseek-v4.1-flash-1017 · restyle · presage+skill #1: solved · 30 turns · $0.0399 · 4m31s
+[54/60] deepseek-v4.1-flash-1017 · restyle · ecosage #1: NOT solved (budget) · 30 turns · $0.0456 · 4m34s
+[55/60] deepseek-v4.1-flash-1017 · mutants-js · ecosage+skill #1: solved · 30 turns · $0.0350 · 7m34s
+[56/60] deepseek-v4.1-flash-1017 · restyle · ecosage+skill #1: solved · 30 turns · $0.0399 · 4m31s

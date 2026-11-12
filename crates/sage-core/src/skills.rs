@@ -126,8 +126,7 @@ fn read_dir(dir: &Path, source: SkillSource) -> Vec<(SkillInfo, PathBuf)> {
 fn load(data_dir: &Path, cwd: Option<&Path>) -> Vec<(SkillInfo, String)> {
     let mut all: Vec<(SkillInfo, String)> = BUILTIN.iter().filter_map(|(name, text)| Some((parse(name, text, SkillSource::Builtin)?, text.to_string()))).collect();
     let mut extra: Vec<(SkillInfo, String)> = Vec::new();
-    // `.presage` is the folder's former name; a skill in `.sage` replaces one of the same name there.
-    let project: Vec<_> = cwd.map(|c| [".presage", ".sage"].into_iter().flat_map(|dir| read_dir(&c.join(dir).join("skills"), SkillSource::Project)).collect()).unwrap_or_default();
+    let project = cwd.map(|c| read_dir(&c.join(".sage").join("skills"), SkillSource::Project)).unwrap_or_default();
     for (skill, path) in read_dir(&user_dir(data_dir), SkillSource::User).into_iter().chain(project) {
         let entry = (skill, std::fs::read_to_string(&path).unwrap_or_default());
         match all.iter_mut().chain(extra.iter_mut()).find(|(s, _)| s.name == entry.0.name) {

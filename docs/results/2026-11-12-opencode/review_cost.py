@@ -25,7 +25,7 @@ for path in sorted(glob.glob(f'{root}/home/sessions/*/events.jsonl')):
     for e in events:
         t = e.get('type')
         if t == 'session_start':
-            m = re.search(r'/work/\d+-(.+)-presage', e.get('cwd', ''))
+            m = re.search(r'/work/\d+-(.+)-ecosage', e.get('cwd', ''))
             task = m.group(1) if m else '?'
         elif t == 'model':
             turns = e['turn']

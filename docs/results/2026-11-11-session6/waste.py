@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Where the turns go. waste.py <bench-dir>... [--model glm] [--mode presage]"""
+"""Where the turns go. waste.py <bench-dir>... [--model glm] [--mode ecosage]"""
 import collections, glob, json, re, sys
 
 roots = [a for a in sys.argv[1:] if not a.startswith("--")]

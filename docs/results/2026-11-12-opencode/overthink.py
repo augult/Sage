@@ -14,7 +14,7 @@ for root in sys.argv[1:]:
         for e in events:
             t = e.get('type')
             if t == 'session_start':
-                m = re.search(r'/work/\d+-(.+?)-(presage|no-review)', e.get('cwd', ''))
+                m = re.search(r'/work/\d+-(.+?)-(ecosage|no-review)', e.get('cwd', ''))
                 task = m.group(1) if m else '?'
             elif t == 'note' and e.get('kind') == 'overthinking':
                 cut_turn.append(e.get('turn'))

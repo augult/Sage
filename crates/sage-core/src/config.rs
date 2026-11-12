@@ -193,22 +193,8 @@ pub struct Resolved {
     pub model: String,
 }
 
-/// Where sessions, keys and settings are kept. What was stored under the former name, Presage,
-/// is carried over: `PRESAGE_HOME` is still read, and `~/.presage` is moved to `~/.sage` once.
 pub fn data_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("SAGE_HOME").or_else(|| std::env::var_os("PRESAGE_HOME")) {
-        return PathBuf::from(dir);
-    }
-    adopt_former_dir(&home_dir())
-}
-
-/// `<home>/.sage`, or `<home>/.presage` if it is there alone and cannot be moved.
-fn adopt_former_dir(home: &std::path::Path) -> PathBuf {
-    let (dir, former) = (home.join(".sage"), home.join(".presage"));
-    if !dir.exists() && former.is_dir() && std::fs::rename(&former, &dir).is_err() {
-        return former;
-    }
-    dir
+    std::env::var_os("SAGE_HOME").map(PathBuf::from).unwrap_or_else(|| home_dir().join(".sage"))
 }
 
 impl Config {
@@ -323,7 +309,7 @@ impl Config {
         }
         if let Some((_, name, c)) = self.customs().find(|(known, ..)| *known == id) {
             // A server of one's own may ask for no key. Only the endpoint the file names takes one from the environment.
-            let key = if id == CUSTOM { self.key_for(CUSTOM, "SAGE_API_KEY").or_else(|| self.key_for(CUSTOM, "PRESAGE_API_KEY")) } else { self.keys.get(&id).map(|k| k.trim().to_string()) }.unwrap_or_default();
+            let key = if id == CUSTOM { self.key_for(CUSTOM, "SAGE_API_KEY") } else { self.keys.get(&id).map(|k| k.trim().to_string()) }.unwrap_or_default();
             // A saved default model is not carried over from another provider.
             let saved = self.model.clone().filter(|_| self.provider.as_deref().is_none_or(|p| p == id));
             let model = model.map(String::from).or(saved).or_else(|| c.models.first().cloned()).ok_or_else(|| format!("{name} has no model configured"))?;

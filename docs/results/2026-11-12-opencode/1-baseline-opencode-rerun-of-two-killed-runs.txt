@@ -1,6 +1,6 @@
 [1/2] deepseek-v4.1-flash-1017 · audit · ext:opencode #1: solved · 6 turns · $0.0074 · 32s
 [2/2] deepseek-v4.1-flash-1017 · audit-clean · ext:opencode #1: solved · 12 turns · $0.0260 · 2m31s
-presage bench 20261112-042521-f4c2 · logfare · effort ratchet · 1 run per task and variant
+sage bench 20261112-042521-f4c2 · logfare · effort ratchet · 1 run per task and variant
 first prompt with the task, measured: ext:opencode ~7501 tokens
 
 deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing

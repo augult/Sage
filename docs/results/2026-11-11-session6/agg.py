@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate Presage session logs of bench runs.
+"""Aggregate Sage session logs of bench runs.
 
 agg.py <bench-dir>... [--rows]   bench-dir is e.g. target/scratch/ph/bench/20261111-...
 Prints per (model, variant) means, and with --rows one line per session.
@@ -13,7 +13,7 @@ rows = "--rows" in sys.argv
 def variant_of(cwd):
     # work/<n>-<task>-<variant>-<rep>; task ids may contain a hyphen (audit-clean, deadcode-js)
     name = cwd.rstrip("/").split("/")[-1]
-    m = re.match(r"\d+-(.+?)-((?:presage|classic|no-[a-z-]+?)(?:\+[^-]+(?:-[a-z]+)?)*)-(\d+)$", name)
+    m = re.match(r"\d+-(.+?)-((?:ecosage|classic|no-[a-z-]+?)(?:\+[^-]+(?:-[a-z]+)?)*)-(\d+)$", name)
     return (m.group(1), m.group(2)) if m else (name, "?")
 
 
