@@ -11,6 +11,7 @@ pub mod bootstrap;
 pub mod changes;
 pub mod config;
 pub mod context;
+pub mod contract;
 pub mod demo;
 pub mod diff;
 pub mod economy;

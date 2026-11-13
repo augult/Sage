@@ -1,14 +1,64 @@
 # Handoff: Sage
 
-Read this first. State: 12 November 2026, after the eleventh session. The tenth removed the reflex
+Read this first. State: 13 November 2026, after the twelfth session. The tenth removed the reflex
 memory and the review pass, added `/goal`, made a stored session continuable after a restart, and
 gave the harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and
-Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`) and reworked
-Prosage. Logfare came back that evening and **Prosage was run against a model for the first
-time: 47/48 against OpenCode's 45/48 and Ecosage's 44/48**, two runs per task, a lead within
-chance (the next section).
+Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`), reworked
+Prosage, and measured it live (**Prosage 47/48 against OpenCode's 45/48 and Ecosage's 44/48**).
+The twelfth session fixed six structural gaps read off those Prosage runs and tested them offline
+across all 24 benchmark tasks (next section; Logfare's daily limit was reached, so live reruns
+remain first to run once the limit resets).
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Twelfth session: Prosage tightened from the live traces (13 November 2026)
+
+No live provider key was available (Logfare daily limit reached). Reading the stored Prosage,
+Ecosage and OpenCode runs (`docs/results/2026-11-12-prosage/`, `2026-11-12-opencode/`) against the
+code exposed why Prosage lost `audit` once, burned 60 turns (`outcome: budget`, `side_requests: 1`,
+examiners never run) in 3 of 4 `restyle` runs, jumped to 57–60 turns in Sample 3 on `ttlcache`,
+`nplusone` and `rollup`, and confirmed only 1 of 73 referee cases:
+
+- **Mechanical task-contract guard (`contract.rs`, `Features.contract`):** snapshots files and
+  folders named in `Do not edit/change …` clauses (46/46 `restore` files across the 24 tasks) and
+  checks explicitly requested deliverable files (`Write \`findings.json\``, `Create \`roman.py\``,
+  etc.) before `finish` stands—even when `epoch == 0`, closing the `audit` / `audit-clean` failure
+  where a run finishes in prose or writes `notesvc/findings.json` instead of `./findings.json`.
+  Zero false positives on all 24 reference solutions.
+- **Watchless examination and verification (`agent.rs`, `script.rs`, `state.rs`):** on tasks with
+  no watched test runner (`restyle`, `audit`, `roman`), unpredicted read-only check commands that
+  exit 0 now trigger `early_exam`, passing examiner suites credit `evidence.passed` (remembering
+  that `Watches::all_pass` is false when `watches` is empty), and watchless `finish` passes through
+  to `exam_check` (falling back to the evidence gate if no examiner produced passing cases).
+- **Progress-aware settling & de-conflicted coverage notes (`agent.rs`):** `settling` now counts
+  consecutive surprise-free replies on the *same* `epoch` and resets whenever the worker edits a
+  file or hits a failing check of its own, removing the risk of cutting `confdialect` mid-fix;
+  `COVERAGE_NOTE` is suppressed on turns where `early_exam` already answered (`EXAM_STANDS` or a
+  hold), removing the contradictory instruction that drove 57–60 turn tails in Sample 3.
+- **Full-workspace sight for tool-less readers (`attach::for_readers`):** files omitted from the
+  worker's `<files>` by the 250-line or 24-file caps (`notesvc/app.py` at 262 lines in `audit`,
+  files 25–27 in `deadcode`, longer `SPEC.md`s) are supplied in `<more_files>` to the examiners
+  and referees without growing the worker's per-turn prompt.
+- **Tie-breaker referee & tolerant parsing (`agent.rs`, `examiner.rs`):** two `GAP` votes confirm
+  at once and any `CASE` vote rejects at once; a split of one `GAP` against `OPEN` (with zero
+  `CASE`) asks one tie-breaker referee, requiring 2-of-3 `GAP`. `examiner::parse` and `rulings`
+  accept markdown-formatted headers, parenthesised verdicts and two-line blocks, and fenced
+  scripts missing `{file}` are repaired once (`REPAIR_FORMAT`).
+- **Router headroom, tamper-proof scripts & per-session `TMPDIR` (`agent.rs`, `state.rs`,
+  `script.rs`):** `ROUTE_MAX_TOKENS` raised from 400 to 2,048 for providers whose thinking cannot
+  be switched off; `run_script` restores `exam_*.ext` from memory before running and `edit`/`write`
+  refuse paths inside `sess.dir`; each session sets its own `TMPDIR` outside `sess.dir`.
+
+**Checked:** `cargo test` (280 tests: 259 in `sage-core`, 21 in `sage-cli`), `cargo clippy --lib
+--bins -- -D warnings`, `sage bench --check --tasks all` (24/24) and `sage bench --scripted
+--tasks all --variants ecosage,default,prosage` (72/72), plus multi-mode failure-recovery runs on
+`audit`, `audit-clean`, `restyle`, `pager` and `confdialect`. **Not checked:** live Logfare runs
+(daily limit reached). First thing to run when the key resets:
+
+```sh
+sage bench -p logfare -m deepseek-v4.1-flash-1017 --tasks all -n 2 -j 1 --max-turns 60 --time-budget 1200 \
+  --variants ecosage,prosage,prosage+no-examiner,prosage+no-contract,ext:opencode
+```
 
 ## Eleventh session: the rename, and Prosage reworked (12 November 2026)
 

@@ -1284,4 +1284,424 @@ u.urlopen(r).read()' "$1"; }"#;
         assert_eq!((delta(3.0, 5.0), delta(1.0, 0.0), num(2.5), num(3.0)), ("-40%".into(), "n/a".into(), "2.5".into(), "3".into()));
         assert!(provider_failed("provider returned HTTP 429: slow down") && !provider_failed("the model returned neither a tool call nor an answer three times in a row"));
     }
+
+    #[test]
+    fn contract_has_zero_false_positives_and_catches_forbidden_and_missing_files_across_all_24_tasks() {
+        use sage_core::contract::Contract;
+        use sage_core::workspace::Workspace;
+
+        let base = std::env::temp_dir().join(format!("sage-bench-contracts-{}", rand_hex(4)));
+        let mut checked_restores = 0usize;
+        let mut checked_deliverables = 0usize;
+        for task in tasks::all() {
+            let root = base.join(task.id);
+            materialize(&root, task.files).unwrap();
+            let ws = Workspace::new(&root).unwrap();
+            let contract = Contract::capture(&ws, task.prompt);
+
+            // 1. For tasks that ask for a brand-new deliverable file, missing it before solution is caught.
+            for &(sol_path, _) in task.solution {
+                if !task.files.iter().any(|(f, _)| *f == sol_path) {
+                    checked_deliverables += 1;
+                    let v = contract.violations(&ws.root);
+                    assert!(
+                        v.iter().any(|msg| msg.contains(sol_path)),
+                        "task {}: missing deliverable {sol_path} was not caught by contract (got {v:?})",
+                        task.id
+                    );
+                }
+            }
+
+            // 2. Applying the reference solution produces zero contract violations on all 24 tasks.
+            materialize(&root, task.solution).unwrap();
+            let v = contract.violations(&ws.root);
+            assert!(v.is_empty(), "task {}: false-positive contract violation on reference solution: {v:?}", task.id);
+
+            // 3. Touching any protected `task.restore` file is caught on every task.
+            for &protected in task.restore {
+                checked_restores += 1;
+                let file = ws.root.join(protected);
+                let orig = std::fs::read(&file).unwrap();
+                let mut mutated = orig.clone();
+                mutated.extend_from_slice(b"\n# touched\n");
+                std::fs::write(&file, &mutated).unwrap();
+                let v = contract.violations(&ws.root);
+                assert!(
+                    v.iter().any(|msg| msg.contains(protected)),
+                    "task {}: modifying protected file {protected} was not caught (got {v:?})",
+                    task.id
+                );
+                std::fs::write(&file, orig).unwrap();
+            }
+        }
+        assert_eq!((checked_restores, checked_deliverables), (46, 6));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn prosage_recovers_live_benchmark_failure_modes_where_default_and_ecosage_fail() {
+        use sage_core::provider::Message;
+        use sage_core::provider::mock::TurnFn;
+
+        if !on_path("python3") {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("sage-bench-eval-{}", rand_hex(4)));
+        let noop_aside = || -> sage_core::provider::mock::AsideFn {
+            Box::new(|msgs| {
+                let sys = msgs.first()?.content.as_str();
+                (sys.starts_with("You route coding tasks") || sys.starts_with("You are the examiner") || sys.starts_with("You are the second examiner") || sys.starts_with("You are a referee"))
+                    .then(|| MockTurn::say("NONE"))
+            })
+        };
+        let eval_ws = |task: &Task, ws: &Path| {
+            for &r in task.restore {
+                let orig = task.files.iter().find(|(p, _)| *p == r).unwrap().1;
+                std::fs::write(ws.join(r), orig).unwrap();
+            }
+            for &(hp, hc) in task.hidden {
+                write_file(ws, hp, hc).unwrap();
+            }
+        };
+
+        // Scenario 1 (`audit` — Prosage's single loss in 96 live runs): mode-blind model summarizes
+        // findings in `finish` with `epoch == 0`, and writes `findings.json` only if held by the harness.
+        let audit = tasks::find("audit").unwrap();
+        let audit_sol = audit.solution[0].1;
+        for (label, mode, without, expect_solved) in [
+            ("default", "default", vec![], false),
+            ("ecosage", "ecosage", vec![], false),
+            ("prosage-no-contract", "prosage", vec!["contract".to_string()], false),
+            ("prosage", "prosage", vec![], true),
+        ] {
+            let h = Harness::at(base.join(format!("s1-{label}")));
+            let ws = base.join(format!("ws-s1-{label}"));
+            materialize(&ws, audit.files).unwrap();
+            let turns: Vec<TurnFn> = vec![
+                Box::new(|_| MockTurn::calls("", vec![("finish", json!({"summary": "Audited notesvc; found 6 vulnerabilities."}))])),
+                Box::new(move |msgs: &[Message]| {
+                    let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
+                    assert!(last.contains("findings.json"), "{last}");
+                    MockTurn::calls(
+                        "",
+                        vec![
+                            ("write", json!({"path": "findings.json", "content": audit_sol, "overwrite": true})),
+                            ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
+                            ("finish", json!({"summary": "Wrote findings.json at workspace root."})),
+                        ],
+                    )
+                }),
+            ];
+            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let meta = h
+                .start_scripted(
+                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit.prompt.into(), mode: Some(mode.into()), without, max_turns: Some(10), ..Default::default() },
+                    provider,
+                )
+                .unwrap();
+            let end = wait_for_end(&h, &meta.id).await.unwrap();
+            eval_ws(audit, &ws);
+            let (solved, tail) = verify(audit, &ws).await;
+            assert_eq!(solved, expect_solved, "s1 audit ({label}): end={:?}, tail={tail}", end.status);
+        }
+
+        // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
+        // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
+        let audit_clean = tasks::find("audit-clean").unwrap();
+        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+            let h = Harness::at(base.join(format!("s2-{label}")));
+            let ws = base.join(format!("ws-s2-{label}"));
+            materialize(&ws, audit_clean.files).unwrap();
+            let turns: Vec<TurnFn> = vec![
+                Box::new(|_| {
+                    MockTurn::calls(
+                        "",
+                        vec![
+                            ("write", json!({"path": "shelf/findings.json", "content": "[]\n", "overwrite": true})),
+                            ("shell", json!({"cmd": "test -f shelf/findings.json", "expect_exit": "0"})),
+                            ("finish", json!({"summary": "No vulnerabilities found."})),
+                        ],
+                    )
+                }),
+                Box::new(|msgs: &[Message]| {
+                    let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
+                    assert!(last.contains("shelf/findings.json"), "{last}");
+                    MockTurn::calls(
+                        "",
+                        vec![
+                            ("shell", json!({"cmd": "mv shelf/findings.json findings.json && test -f findings.json", "expect_exit": "0"})),
+                            ("finish", json!({"summary": "Moved findings.json to workspace root."})),
+                        ],
+                    )
+                }),
+            ];
+            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let meta = h
+                .start_scripted(
+                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit_clean.prompt.into(), mode: Some(mode.into()), max_turns: Some(10), ..Default::default() },
+                    provider,
+                )
+                .unwrap();
+            let _ = wait_for_end(&h, &meta.id).await.unwrap();
+            eval_ws(audit_clean, &ws);
+            let (solved, tail) = verify(audit_clean, &ws).await;
+            assert_eq!(solved, expect_solved, "s2 audit-clean ({label}): tail={tail}");
+        }
+
+        // Scenario 3 (`restyle` — watchless UI task, unpredicted shell inspection, split GAP/OPEN referee):
+        // The exact same mode-blind model writes a flawed draft (leaving original unstyled CSS + inline
+        // style, score < 9/11) and inspects with an unpredicted `shell` call. Only when `[examiner]`
+        // reports the confirmed GAP (via watchless `early_exam` + tie-breaker referee) does it fix the
+        // page and finish verified (even with no `expect_exit` on `finish`!).
+        let restyle = tasks::find("restyle").unwrap();
+        let (restyle_html, restyle_css) = (restyle.solution[0].1, restyle.solution[1].1);
+        let shipped_css = restyle.files.iter().find(|(p, _)| *p == "styles.css").unwrap().1;
+        let flawed_html = restyle_html.replacen("<main", "<main style=\"margin: 4px\"", 1);
+        let exam_restyle = "COMMAND: python3 {file}\n```python\nimport sys\nhtml = open('index.html', encoding='utf-8').read()\nif 'style=' in html:\n    print('FAIL no_inline_style\\n  clause: no inline styles\\n  got: style attribute present')\n    print('EXAM: 0 passed, 1 failed')\n    sys.exit(1)\nprint('EXAM: 1 passed, 0 failed')\n```";
+        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+            let h = Harness::at(base.join(format!("s3-{label}")));
+            let ws = base.join(format!("ws-s3-{label}"));
+            materialize(&ws, restyle.files).unwrap();
+            let fh = flawed_html.clone();
+            let step = std::sync::atomic::AtomicUsize::new(0);
+            let turns: Vec<TurnFn> = (0..6)
+                .map(|_| -> TurnFn {
+                    let fh = fh.clone();
+                    let n = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Box::new(move |msgs: &[Message]| {
+                        let feedback = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
+                        if n == 0 {
+                            MockTurn::calls(
+                                "",
+                                vec![
+                                    ("write", json!({"path": "index.html", "content": fh.clone(), "overwrite": true})),
+                                    ("write", json!({"path": "styles.css", "content": shipped_css, "overwrite": true})),
+                                    ("shell", json!({"cmd": "python3 -c \"open('index.html').read()\""})),
+                                ],
+                            )
+                        } else if feedback.contains("FAIL no_inline_style") {
+                            // Fixes HTML & CSS and calls `finish` with NO `expect_exit`: examiner pass verifies it!
+                            MockTurn::calls(
+                                "",
+                                vec![
+                                    ("write", json!({"path": "index.html", "content": restyle_html, "overwrite": true})),
+                                    ("write", json!({"path": "styles.css", "content": restyle_css, "overwrite": true})),
+                                    ("finish", json!({"summary": "Fixed inline styles and CSS system."})),
+                                ],
+                            )
+                        } else {
+                            MockTurn::calls(
+                                "",
+                                vec![
+                                    ("shell", json!({"cmd": "test -s styles.css", "expect_exit": "0"})),
+                                    ("finish", json!({"summary": "Done."})),
+                                ],
+                            )
+                        }
+                    })
+                })
+                .collect();
+            let nth = std::sync::atomic::AtomicUsize::new(0);
+            let provider = MockProvider::new(turns).with_aside(Box::new(move |msgs| {
+                let sys = msgs.first()?.content.as_str();
+                if sys.starts_with("You route coding tasks") {
+                    Some(MockTurn::say("ui"))
+                } else if sys.starts_with("You are the examiner") {
+                    Some(MockTurn::say(exam_restyle))
+                } else if sys.starts_with("You are the second examiner") {
+                    Some(MockTurn::say("NONE"))
+                } else if sys.starts_with("You are a referee") {
+                    let i = nth.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let verdicts = [
+                        "no_inline_style: GAP: \"Improve how index.html and styles.css look\"",
+                        "no_inline_style: OPEN: checking",
+                        "no_inline_style: GAP: \"styles belong in styles.css\"",
+                    ];
+                    Some(MockTurn::say(verdicts[i.min(2)]))
+                } else {
+                    None
+                }
+            }));
+            let meta = h
+                .start_scripted(
+                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: restyle.prompt.into(), mode: Some(mode.into()), max_turns: Some(12), ..Default::default() },
+                    provider,
+                )
+                .unwrap();
+            let end = wait_for_end(&h, &meta.id).await.unwrap();
+            eval_ws(restyle, &ws);
+            let (solved, tail) = verify(restyle, &ws).await;
+            assert_eq!(solved, expect_solved, "s3 restyle ({label}): end={:?}, verified={}, tail={tail}", end.status, end.verified);
+            if label == "prosage" {
+                assert!(end.verified && end.status == FinishStatus::Done && (2..=3).contains(&end.stats.turns), "{:?} turns={}", end.status, end.stats.turns);
+            }
+        }
+
+        // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
+        // Default and Ecosage accept `finish`, then fail when `test_pager.py` is restored; Prosage's
+        // contract guard catches the forbidden edit and sends the worker back to fix `pager.py`.
+        let pager = tasks::find("pager").unwrap();
+        let pager_sol = pager.solution[0].1;
+        let pager_orig_test = pager.files.iter().find(|(p, _)| *p == "test_pager.py").unwrap().1;
+        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+            let h = Harness::at(base.join(format!("s4-{label}")));
+            let ws = base.join(format!("ws-s4-{label}"));
+            materialize(&ws, pager.files).unwrap();
+            let turns: Vec<TurnFn> = vec![
+                Box::new(|_| {
+                    MockTurn::calls(
+                        "",
+                        vec![
+                            ("write", json!({"path": "test_pager.py", "content": "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", "overwrite": true})),
+                            ("shell", json!({"cmd": "python3 -m unittest", "expect_exit": "0"})),
+                            ("finish", json!({"summary": "Tests pass."})),
+                        ],
+                    )
+                }),
+                Box::new(move |msgs: &[Message]| {
+                    let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
+                    assert!(last.contains("test_pager.py"), "{last}");
+                    MockTurn::calls(
+                        "",
+                        vec![
+                            ("write", json!({"path": "test_pager.py", "content": pager_orig_test, "overwrite": true})),
+                            ("write", json!({"path": "pager.py", "content": pager_sol, "overwrite": true})),
+                            ("shell", json!({"cmd": "python3 -m unittest", "expect_exit": "0"})),
+                            ("finish", json!({"summary": "Restored test_pager.py and fixed pager.py."})),
+                        ],
+                    )
+                }),
+            ];
+            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let meta = h
+                .start_scripted(
+                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: pager.prompt.into(), mode: Some(mode.into()), max_turns: Some(10), ..Default::default() },
+                    provider,
+                )
+                .unwrap();
+            let _ = wait_for_end(&h, &meta.id).await.unwrap();
+            eval_ws(pager, &ws);
+            let (solved, tail) = verify(pager, &ws).await;
+            assert_eq!(solved, expect_solved, "s4 pager ({label}): tail={tail}");
+        }
+
+        // Scenario 5 (`confdialect` — Ecosage rushes to `finish` when visible `unittest` passes, whereas
+        // Prosage's `COVERAGE_NOTE` prompts 20 turns of clause-by-clause self-testing + bug fixing without
+        // `settling` cutting the run short when a bug is discovered on turn 12 and fixed on turn 13).
+        let conf = tasks::find("confdialect").unwrap();
+        let conf_sol = conf.solution[0].1;
+        let partial_conf = conf_sol.replace("raise ConfError(\"continuation at the end of the file\", number)", "break");
+        for (label, mode, expect_solved) in [("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+            let h = Harness::at(base.join(format!("s5-{label}")));
+            let ws = base.join(format!("ws-s5-{label}"));
+            materialize(&ws, conf.files).unwrap();
+            let step = std::sync::atomic::AtomicUsize::new(0);
+            let pc = partial_conf.clone();
+            let turns: Vec<TurnFn> = (0..22)
+                .map(|_| -> TurnFn {
+                    let pc = pc.clone();
+                    let step = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Box::new(move |msgs: &[Message]| {
+                        let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
+                        if step == 0 {
+                            // Visible tests pass on `partial_conf`, which misses trailing-backslash error.
+                            MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": pc.clone(), "overwrite": true}))])
+                        } else if step == 1 && last.contains("`finish` is accepted now") {
+                            // Ecosage's hurry tip triggers early `finish` on incomplete parser!
+                            MockTurn::calls("", vec![("finish", json!({"summary": "Visible tests pass."}))])
+                        } else if step < 11 {
+                            MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import conf; conf.parse('[s]\\na = 1\\n')\"", "expect_exit": "0"}))])
+                        } else if step == 11 {
+                            // Self-test on §5 trailing backslash fails (a surprise!), resetting `settled_replies`.
+                            MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import sys, conf\ntry:\n conf.parse('k = v \\\\\\n')\n sys.exit(1)\nexcept conf.ConfError:\n pass\"", "expect_exit": "0"}))])
+                        } else if step == 12 {
+                            // Worker fixes the §5 bug (`epoch` advances).
+                            MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": conf_sol, "overwrite": true}))])
+                        } else if step < 19 {
+                            MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import conf; conf.parse('a = 1\\n')\"", "expect_exit": "0"}))])
+                        } else {
+                            MockTurn::calls("", vec![("finish", json!({"summary": "All 10 sections verified."}))])
+                        }
+                    })
+                })
+                .collect();
+            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let meta = h
+                .start_scripted(
+                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: conf.prompt.into(), mode: Some(mode.into()), max_turns: Some(30), ..Default::default() },
+                    provider,
+                )
+                .unwrap();
+            let end = wait_for_end(&h, &meta.id).await.unwrap();
+            eval_ws(conf, &ws);
+            let (solved, tail) = verify(conf, &ws).await;
+            assert_eq!(solved, expect_solved, "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}", end.status, end.stats.turns);
+            if label == "prosage" {
+                assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 20));
+            }
+        }
+
+        // Scenario 6 (`audit` 262-line `notesvc/app.py` visibility): `notesvc/app.py` exceeds the
+        // 250-line worker cap, yet Prosage supplies it in `<more_files>` so the blind examiner sees
+        // every route handler and catches a missing vulnerability in `findings.json`.
+        let partial_findings = "[\n  {\"file\": \"notesvc/notes.py\", \"line\": 27, \"kind\": \"sql-injection\", \"summary\": \"SQL injection.\"},\n  {\"file\": \"notesvc/files.py\", \"line\": 18, \"kind\": \"path-traversal\", \"summary\": \"Path traversal.\"},\n  {\"file\": \"notesvc/export.py\", \"line\": 17, \"kind\": \"command-injection\", \"summary\": \"Command injection.\"},\n  {\"file\": \"notesvc/prefs.py\", \"line\": 14, \"kind\": \"insecure-deserialization\", \"summary\": \"Pickle cookie.\"}\n]\n";
+        let h = Harness::at(base.join("s6-prosage"));
+        let ws = base.join("ws-s6-prosage");
+        materialize(&ws, audit.files).unwrap();
+        let saw_app_py = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let saw_clone = saw_app_py.clone();
+        let exam_audit = "COMMAND: python3 {file}\n```python\nimport json, sys\nf = json.load(open('findings.json'))\nif len(f) < 5:\n    print('FAIL missing_vulns\\n  clause: report all real vulnerabilities\\n  got:', len(f))\n    print('EXAM: 0 passed, 1 failed')\n    sys.exit(1)\nprint('EXAM: 1 passed, 0 failed')\n```";
+        let turns: Vec<TurnFn> = vec![
+            Box::new(move |_| {
+                MockTurn::calls(
+                    "",
+                    vec![
+                        ("write", json!({"path": "findings.json", "content": partial_findings, "overwrite": true})),
+                        ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
+                        ("finish", json!({"summary": "Reported 4 issues."})),
+                    ],
+                )
+            }),
+            Box::new(move |_| {
+                MockTurn::calls(
+                    "",
+                    vec![
+                        ("write", json!({"path": "findings.json", "content": audit_sol, "overwrite": true})),
+                        ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
+                        ("finish", json!({"summary": "Reported all 6 issues."})),
+                    ],
+                )
+            }),
+        ];
+        let provider = MockProvider::new(turns).with_aside(Box::new(move |msgs| {
+            let sys = msgs.first()?.content.as_str();
+            if sys.starts_with("You route coding tasks") {
+                Some(MockTurn::say("security"))
+            } else if sys.starts_with("You are the examiner") {
+                let prompt = &msgs[1].content;
+                if prompt.contains("<more_files>\nnotesvc/app.py · 262 lines") {
+                    saw_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                Some(MockTurn::say(exam_audit))
+            } else if sys.starts_with("You are the second examiner") {
+                Some(MockTurn::say("NONE"))
+            } else if sys.starts_with("You are a referee") {
+                Some(MockTurn::say("missing_vulns: GAP: \"one object per real vulnerability\""))
+            } else {
+                None
+            }
+        }));
+        let meta = h
+            .start_scripted(
+                StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit.prompt.into(), mode: Some("prosage".into()), max_turns: Some(10), ..Default::default() },
+                provider,
+            )
+            .unwrap();
+        let end = wait_for_end(&h, &meta.id).await.unwrap();
+        eval_ws(audit, &ws);
+        assert!(saw_app_py.load(std::sync::atomic::Ordering::SeqCst), "examiner must see 262-line notesvc/app.py in <more_files>");
+        assert!(verify(audit, &ws).await.0 && end.verified);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

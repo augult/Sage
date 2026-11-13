@@ -59,6 +59,8 @@ pub struct Features {
     pub referee: bool,
     /// A skill that fits the task is switched on without being asked for.
     pub routing: bool,
+    /// Protected files and named deliverable files in the task are checked mechanically.
+    pub contract: bool,
 }
 
 /// What a session is run for.
@@ -112,22 +114,22 @@ impl Mode {
 impl Features {
     /// Ecosage and what `Features::OPTIONAL` holds back from it.
     pub fn prosage() -> Self {
-        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, ..Self::ecosage() }
+        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, contract: true, ..Self::ecosage() }
     }
 
     pub fn ecosage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false, contract: false }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
+        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false, contract: false }
     }
 
     /// The mechanisms `without` can switch off and `with` can switch on.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
+    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
+    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -161,6 +163,7 @@ impl Features {
             "panel" => &mut self.panel,
             "referee" => &mut self.referee,
             "routing" => &mut self.routing,
+            "contract" => &mut self.contract,
             _ => return None,
         };
         *slot = on;
@@ -225,6 +228,8 @@ pub struct Evidence {
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
+    /// The latest epoch at which a non-trivial read-only shell command exited 0, predicted or not.
+    pub checked_epoch: Option<u64>,
 }
 
 const FINGERPRINT_BUDGET: Duration = Duration::from_millis(400);
@@ -279,6 +284,12 @@ impl Evidence {
     /// A check passed against the workspace as it is right now.
     pub fn passed(&mut self, check: impl Into<String>) {
         self.verified = Some((self.epoch, check.into()));
+        self.checked_epoch = Some(self.epoch);
+    }
+
+    /// A non-trivial read-only command exited 0 against the workspace as it is right now.
+    pub fn note_checked(&mut self) {
+        self.checked_epoch = Some(self.epoch);
     }
 }
 
@@ -329,12 +340,27 @@ pub struct Session {
     pub dialects: HashMap<PathBuf, bool>,
     spill_seq: u32,
     pub shell_env: Vec<(String, String)>,
+    /// Per-session scratch directory for `TMPDIR`, outside `dir` so `$TMPDIR/..` never exposes `exam/`.
+    scratch: PathBuf,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.scratch);
+    }
 }
 
 impl Session {
     pub fn new(ws: Workspace, dir: PathBuf, features: Features, prices: Option<Prices>) -> std::io::Result<Self> {
         crate::util::private_dir(&dir)?;
         std::fs::create_dir_all(dir.join("out"))?;
+        let scratch = std::env::temp_dir().join(format!("sage-scratch-{}", crate::util::rand_hex(6)));
+        let _ = std::fs::create_dir_all(&scratch);
+        let mut shell_env = non_interactive_env();
+        #[cfg(unix)]
+        if scratch.is_dir() {
+            shell_env.push(("TMPDIR".to_string(), scratch.to_string_lossy().into_owned()));
+        }
         Ok(Self {
             ws,
             seen: Seen::default(),
@@ -353,7 +379,8 @@ impl Session {
             histories: HashMap::new(),
             dialects: HashMap::new(),
             spill_seq: 0,
-            shell_env: non_interactive_env(),
+            shell_env,
+            scratch,
         })
     }
 
