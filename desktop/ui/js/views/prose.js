@@ -19,8 +19,11 @@ const INLINE = {
         tabindex: '0',
         title: `${node.href}\nClick to copy`,
         onclick: () => copyText(node.href),
+        // As a button answers: Enter or Space.
         onkeydown: (event) => {
-          if (event.key === 'Enter') copyText(node.href);
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          copyText(node.href);
         },
       },
       spans(node.children),
@@ -42,13 +45,18 @@ const BLOCKS = {
   rule: () => h('hr'),
   quote: (node) => h('blockquote', node.children.map(block)),
   list: (node) => h(node.ordered ? 'ol' : 'ul', { start: node.ordered && node.start !== 1 ? node.start : null }, node.items.map((item) => h('li', item.map(block)))),
+  // The scroller sits in a plain block: as a flex item of the prose it would not count its own
+  // scrollbar in its height, which then clips the last row and adds a vertical bar.
   table: (node) =>
     h(
-      'div.table-wrap',
+      'div',
       h(
-        'table',
-        h('thead', h('tr', node.head.map((cell, i) => h('th', { align: node.align[i] }, spans(cell))))),
-        h('tbody', node.rows.map((row) => h('tr', row.map((cell, i) => h('td', { align: node.align[i] }, spans(cell)))))),
+        'div.table-wrap',
+        h(
+          'table',
+          h('thead', h('tr', node.head.map((cell, i) => h('th', { align: node.align[i] }, spans(cell))))),
+          h('tbody', node.rows.map((row) => h('tr', row.map((cell, i) => h('td', { align: node.align[i] }, spans(cell)))))),
+        ),
       ),
     ),
 };

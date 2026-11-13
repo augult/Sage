@@ -14,6 +14,7 @@ const TOOLS = {
   watch: { did: 'Watch', doing: 'Watch', one: 'set a watch', many: (n) => `set ${n} watches` },
   job: { did: 'Job', doing: 'Job', one: 'checked a background job', many: (n) => `checked background jobs ${n} times` },
   finish: { did: 'Finish', doing: 'Finishing' },
+  ask: { did: 'Asked', doing: 'Asking', one: 'asked a question', many: (n) => `asked ${n} questions` },
   // Not tools of this engine yet: how a web search and a page fetch read once one has them.
   web_search: { did: 'Searched the web for', doing: 'Searching the web for', one: 'searched the web', many: (n) => `searched the web ${n} times` },
   web_fetch: { did: 'Fetched', doing: 'Fetching', one: 'fetched a page', many: (n) => `fetched ${n} pages` },

@@ -15,5 +15,6 @@
   root.dataset.scheme = dark ? 'dark' : 'light';
   root.dataset.theme = matchMedia('(prefers-reduced-transparency: reduce)').matches ? 'none' : read('background') || 'ember';
   root.dataset.dither = read('dither') === 'off' ? 'off' : 'on';
+  root.dataset.motion = read('motion') === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on';
   for (const pane of ['sidebar', 'inspector']) root.dataset[pane] = read(pane) === 'off' ? 'off' : 'on';
 })();

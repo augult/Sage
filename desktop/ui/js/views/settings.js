@@ -22,7 +22,6 @@ const notices = new Map();
 const drafts = new Map();
 // Keys typed and not handed to the engine yet, by provider: `{ name, value }`.
 const typedKeys = new Map();
-// The provider of the user's own being added: what its form holds, or null while the form is shut.
 // The skill whose file is open: its name, NEW, or null.
 let openSkill = null;
 const NEW = '+new';
@@ -73,6 +72,9 @@ export function mountSettings(main, app) {
   // Only these two follow the engine state. The editors below them keep what is being typed.
   function draw() {
     const { state } = app;
+    // A key is kept as its field is left, which redraws: the key field moved on to keeps the focus.
+    const at = document.activeElement;
+    const typing = live.contains(at) && at.matches('.provider input') ? at.closest('[data-provider]').dataset.provider : null;
     live.replaceChildren(
       h(
         'section.panel',
@@ -82,6 +84,7 @@ export function mountSettings(main, app) {
       ),
       defaults(state, refresh),
     );
+    if (typing) live.querySelector(`[data-provider="${CSS.escape(typing)}"] input`)?.focus();
   }
 
   draw();
@@ -447,9 +450,12 @@ function skillsSection() {
     } else if (skill) {
       const key = `skill:${skill.name}`;
       const mine = skill.source !== 'builtin';
+      const text = await api.skillFile(skill.name, null);
+      // Another row was opened while this file was read: that one's load draws.
+      if (openSkill !== skill.name) return;
       editor.set({
         key,
-        text: await api.skillFile(skill.name, null),
+        text,
         save: async (text) => {
           await api.saveSkill(skill.name, text);
           await settle(key, skill.name);

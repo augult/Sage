@@ -272,7 +272,7 @@
   background: var(--fill-3);
 }
 
-.session-title {
+.session-item > .session-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;

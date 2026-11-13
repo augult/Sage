@@ -146,7 +146,8 @@
   text-decoration-color: currentColor;
 }
 
-.code {
+/* Scoped: the Code tab's view is a `.code` too (styles/panel.css). */
+.prose .code {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-3);
@@ -168,7 +169,7 @@
   letter-spacing: 0;
 }
 
-.code pre {
+.prose .code pre {
   padding: 10px 12px;
   overflow-x: auto;
   font: var(--text-sm)/1.6 var(--mono);
@@ -176,7 +177,7 @@
   tab-size: 2;
 }
 
-.code pre code {
+.prose .code pre code {
   padding: 0;
   background: none;
   font: inherit;
@@ -200,6 +201,8 @@
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
+  /* Not the prose's `anywhere`, which lets the table squeeze a column to a letter a line. */
+  overflow-wrap: break-word;
 }
 
 .prose th {
