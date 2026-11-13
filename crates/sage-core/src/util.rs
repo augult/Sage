@@ -81,6 +81,15 @@ pub fn plain_path(path: &str) -> String {
     }
 }
 
+/// Makes `dir`, with its parents, a folder only its owner can enter. What a session stores is not
+/// for the machine's other users: the conversation, and the shell's environment with every key in it.
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    Ok(())
+}
+
 /// Cut `s` to at most `max` chars, marking how much was dropped.
 pub fn truncate_chars(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {

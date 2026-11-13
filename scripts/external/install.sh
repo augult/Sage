@@ -24,19 +24,21 @@ mark() {
     echo "installed $1 $2"
 }
 
+# `install` is called as `install … || …`, and bash switches `set -e` off inside a function called
+# that way: each step that can fail returns itself, or a failed install would be marked as done.
 python_tool() { # name package version
     have "$1" "$3" && return 0
     rm -rf "${EXT_HOME:?}/$1"
-    uv venv --quiet --python 3.12 "$EXT_HOME/$1"
-    uv pip install --quiet --python "$EXT_HOME/$1/bin/python" "$2==$3"
+    uv venv --quiet --python 3.12 "$EXT_HOME/$1" || return 1
+    uv pip install --quiet --python "$EXT_HOME/$1/bin/python" "$2==$3" || return 1
     mark "$1" "$3"
 }
 
 node_tool() { # name package version
     have "$1" "$3" && return 0
     rm -rf "${EXT_HOME:?}/$1"
-    mkdir -p "$EXT_HOME/$1"
-    npm install --silent --no-fund --no-audit --prefix "$EXT_HOME/$1" "$2@$3"
+    mkdir -p "$EXT_HOME/$1" || return 1
+    npm install --silent --no-fund --no-audit --prefix "$EXT_HOME/$1" "$2@$3" || return 1
     mark "$1" "$3"
 }
 
@@ -51,10 +53,10 @@ goose_tool() {
         *) echo "goose: no release for $(uname -sm)" >&2; return 1 ;;
     esac
     rm -rf "${EXT_HOME:?}/goose"
-    mkdir -p "$EXT_HOME/goose"
-    curl -fsSL "https://github.com/block/goose/releases/download/v$GOOSE_VERSION/goose-$arch.tar.bz2" | tar -xj -C "$EXT_HOME/goose"
+    mkdir -p "$EXT_HOME/goose" || return 1
+    curl -fsSL "https://github.com/block/goose/releases/download/v$GOOSE_VERSION/goose-$arch.tar.bz2" | tar -xj -C "$EXT_HOME/goose" || return 1
     # The archive holds the binary either at its top or in one directory.
-    [ -x "$EXT_HOME/goose/goose" ] || mv "$EXT_HOME"/goose/*/goose "$EXT_HOME/goose/goose"
+    [ -x "$EXT_HOME/goose/goose" ] || mv "$EXT_HOME"/goose/*/goose "$EXT_HOME/goose/goose" || return 1
     mark goose "$GOOSE_VERSION"
 }
 

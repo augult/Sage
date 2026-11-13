@@ -38,7 +38,7 @@ OPTIONS for run
                            switched on unasked; costs more requests and time
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
       --with <name>        switch on a mechanism that is off unless asked for: long_thought, unhurried,
-                           examiner, panel, referee, routing, contract (repeatable; prosage has them all)
+                           examiner, panel, referee, routing (repeatable; prosage has them all)
       --goal <condition>   keep working until an independent check agrees the condition holds; with
                            no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)
@@ -59,8 +59,8 @@ OPTIONS for resume
   -v, --verbose, --json, --events   as for run
   With no message, the session is told to continue where it left off; `-` reads the message from stdin.
 
-Keys are read from the environment (LOGFARE_API_KEY, DEEPSEEK_API_KEY, ZAI_API_KEY, OPENROUTER_API_KEY)
-or from ~/.sage/config.json (written by `sage key`).";
+Keys are read from the environment (OPENAI_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, …: `sage providers`
+names the variable of each) or from ~/.sage/config.json (written by `sage key`).";
 
 struct Paint {
     on: bool,

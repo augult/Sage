@@ -114,11 +114,11 @@ impl Mode {
 impl Features {
     /// Ecosage and what `Features::OPTIONAL` holds back from it.
     pub fn prosage() -> Self {
-        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, contract: true, ..Self::ecosage() }
+        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, ..Self::ecosage() }
     }
 
     pub fn ecosage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false, contract: false }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, contract: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
     }
 
     pub fn classic() -> Self {
@@ -129,7 +129,7 @@ impl Features {
     pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
+    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -352,6 +352,7 @@ impl Drop for Session {
 
 impl Session {
     pub fn new(ws: Workspace, dir: PathBuf, features: Features, prices: Option<Prices>) -> std::io::Result<Self> {
+        crate::util::private_dir(&dir)?;
         std::fs::create_dir_all(dir.join("out"))?;
         let scratch = std::env::temp_dir().join(format!("sage-scratch-{}", crate::util::rand_hex(6)));
         let _ = std::fs::create_dir_all(&scratch);
@@ -545,6 +546,18 @@ mod tests {
 
         s.features = Features::ecosage().without("short_paths").unwrap();
         assert_eq!(s.shown(raw.clone()), raw);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_s_folder_is_closed_to_other_users() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = test_session("private", Features::ecosage());
+        assert_eq!(std::fs::metadata(&s.dir).unwrap().permissions().mode() & 0o777, 0o700);
+        // One that was open, from before folders were made private, is closed when it is used again.
+        std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let again = Session::new(s.ws.clone(), s.dir.clone(), Features::ecosage(), None).unwrap();
+        assert_eq!(std::fs::metadata(&again.dir).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]

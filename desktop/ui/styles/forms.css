@@ -514,11 +514,11 @@
   transform: rotate(90deg);
 }
 
-.skill-title {
+/* Scoped: a skill card's title (below) wraps instead. */
+.skill-row > .skill-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

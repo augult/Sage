@@ -236,6 +236,10 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
     if md.is_dir() {
         return list_dir(sess, &abs);
     }
+    // A device or a pipe has no end to read to.
+    if !md.is_file() {
+        return StepOutput::error(format!("{shown} is not a regular file; look at it with shell tools"));
+    }
     if md.len() > MAX_FILE_BYTES {
         return StepOutput::error(format!("{shown} is {}; look at parts of it with search, or shell (head, tail, sed -n)", fmt_bytes(md.len())));
     }

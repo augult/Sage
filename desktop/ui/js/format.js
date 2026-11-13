@@ -21,7 +21,6 @@ export function bytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Shortens a path under the home directory to `~/…`. */
 /** A Windows path without the verbatim prefix its system gives it: `\\?\C:\work` as `C:\work`. */
 export function plainPath(path) {
   const text = String(path ?? '');
@@ -29,6 +28,7 @@ export function plainPath(path) {
   return /^\\\\\?\\[A-Za-z]:/.test(text) ? text.slice(4) : text;
 }
 
+/** Shortens a path under the home directory to `~/…`. */
 export function tilde(path, home) {
   const [plain, base] = [plainPath(path), plainPath(home)];
   if (!base || !plain) return plain;

@@ -7,7 +7,8 @@
 // end of the text, and a marker with no partner is ordinary text.
 
 const FENCE = /^( {0,3})(`{3,}|~{3,})\s*([^`]*)$/;
-const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+// A closing run of `#` counts only after a space: "C#" keeps its sign.
+const HEADING = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}> ?/;
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;

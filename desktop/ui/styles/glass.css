@@ -116,8 +116,8 @@ body {
   --line: rgba(255, 255, 255, 0.11);
 }
 
-/* No background (chosen, or for people who have asked the system for less transparency, which
-   js/themes.js reads as the same): the same layout on solid panes. */
+/* No background (chosen, or what a window starts with where the system asks for less transparency
+   and none has been chosen: js/themes.js): the same layout on solid panes. */
 :root[data-theme="none"] #backdrop {
   display: none;
 }

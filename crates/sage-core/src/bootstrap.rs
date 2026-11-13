@@ -29,15 +29,23 @@ async fn sh(script: &str, cwd: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The text of a manifest, where it is an ordinary file of ordinary size. A link is not followed:
+/// a repository can point one at anything, a device that never ends included.
+fn manifest_text(path: &Path) -> Option<String> {
+    const MAX_MANIFEST: u64 = 1024 * 1024;
+    let md = std::fs::symlink_metadata(path).ok()?;
+    (md.is_file() && md.len() <= MAX_MANIFEST).then(|| std::fs::read_to_string(path).ok()).flatten()
+}
+
 fn manifest_note(root: &Path, name: &str) -> Option<String> {
     match name {
         "package.json" => {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join(name)).ok()?).ok()?;
+            let v: Value = serde_json::from_str(&manifest_text(&root.join(name))?).ok()?;
             let scripts: Vec<&str> = v.get("scripts")?.as_object()?.keys().map(String::as_str).take(12).collect();
             (!scripts.is_empty()).then(|| format!("package.json (scripts: {})", scripts.join(", ")))
         }
         "Makefile" | "makefile" | "GNUmakefile" => {
-            let text = std::fs::read_to_string(root.join(name)).ok()?;
+            let text = manifest_text(&root.join(name))?;
             let re = regex::Regex::new(r"(?m)^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:[^=]|$)").ok()?;
             let mut targets: Vec<&str> = re.captures_iter(&text).filter_map(|c| c.get(1).map(|m| m.as_str())).filter(|t| !t.starts_with('.')).collect();
             targets.dedup();

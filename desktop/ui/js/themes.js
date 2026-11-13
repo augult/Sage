@@ -1,6 +1,11 @@
 // Appearance, background, dither and motion: what the user chose, and what that comes to right now.
-// The outcome goes on <html> as data-scheme (light or dark), data-theme (the background's id) and
-// data-dither (on or off), which is all the stylesheets read; js/backdrop.js paints the background.
+// The outcome goes on <html> as data-scheme (light or dark), data-theme (the background's id),
+// data-dither and data-motion (on or off), which is all the stylesheets read; js/backdrop.js paints
+// the background.
+//
+// What is chosen in Settings holds, whatever the system says. A system that asks for less
+// transparency or less motion decides only what a setting nobody has touched starts as: no
+// background, no motion. (Windows asks for the first wherever "Transparency effects" is off.)
 //
 // A background is a painting made by a script in desktop/art (themes/<id>/art.webp, with a small
 // thumb.webp beside it), and the way its dither drifts: three waves as [x, y, speed] in cycles per
@@ -36,25 +41,32 @@ const listeners = new Set();
 // Set by the test hooks, for this launch only.
 const forced = {};
 
-/** The settings as chosen: `{ appearance, background, dither, motion }`. */
+/** What `key` has been set to, by the test hooks or in Settings; null while it has been left alone. */
+function picked(key) {
+  const value = forced[key] ?? prefs.get(key);
+  return ALLOWED[key].includes(value) ? value : null;
+}
+
+/**
+ * The settings as they stand, which is what Settings shows: `{ appearance, background, dither, motion }`.
+ * Each is what was chosen, or else what it starts as on this system.
+ */
 export function chosen() {
+  const start = { ...DEFAULTS, ...(lessGlass.matches && { background: 'none' }), ...(lessMotion.matches && { motion: 'off' }) };
   const pick = {};
-  for (const [key, fallback] of Object.entries(DEFAULTS)) {
-    const value = forced[key] ?? prefs.get(key);
-    pick[key] = ALLOWED[key].includes(value) ? value : fallback;
-  }
+  for (const key of Object.keys(DEFAULTS)) pick[key] = picked(key) ?? start[key];
   return pick;
 }
 
-/** What the choices come to now: `{ scheme, background, dither, motion }`, the system's own settings applied. */
+/** What the settings come to now: `{ scheme, background, dither, motion }`. */
 export function current() {
   const pick = chosen();
   return {
     scheme: pick.appearance === 'system' ? (prefersDark.matches ? 'dark' : 'light') : pick.appearance,
-    background: BACKGROUNDS.find((background) => background.id === (lessGlass.matches ? 'none' : pick.background)),
+    background: BACKGROUNDS.find((background) => background.id === pick.background),
     // Without it the painting is all there is behind the panes.
     dither: pick.dither === 'on',
-    motion: pick.motion === 'on' && !lessMotion.matches,
+    motion: pick.motion === 'on',
   };
 }
 
@@ -68,6 +80,7 @@ function apply() {
   document.documentElement.dataset.scheme = now.scheme;
   document.documentElement.dataset.theme = now.background.id;
   document.documentElement.dataset.dither = now.dither ? 'on' : 'off';
+  document.documentElement.dataset.motion = now.motion ? 'on' : 'off';
   for (const listener of listeners) listener(now);
 }
 

@@ -1278,11 +1278,11 @@ impl Agent {
                 // Prose only. With nobody watching, there is one reminder: of the gate where changes
                 // are unchecked, and otherwise that a plan announced to nobody is not the work. Not
                 // on the last reply of the budget: there the prose is all the report there will be.
-                if features.gate && !self.cfg.interactive && nudges_left > 0 && !landing {
+                if !self.cfg.interactive && nudges_left > 0 && !landing {
                     nudges_left -= 1;
-                    let msg = match self.sess.evidence.fresh() {
-                        false => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
-                        true => "You replied without a tool call, and nobody is here to read it or to answer. If the task is not done, carry on with tool calls. If that was your answer, call finish with it as the summary.".to_string(),
+                    let msg = match features.gate && !self.sess.evidence.fresh() {
+                        true => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
+                        false => "You replied without a tool call, and nobody is here to read it or to answer. If the task is not done, carry on with tool calls. If that was your answer, call finish with it as the summary.".to_string(),
                     };
                     self.note("gate", &msg);
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
@@ -1342,7 +1342,7 @@ impl Agent {
                     self.chain_hints = 0;
                     None
                 } else if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
-                    Some(if features.unhurried { COVERAGE_NOTE } else { "Tip: every check passes, so `finish` is accepted now and could have been in the same reply. It is skipped or refused automatically whenever a check fails." })
+                    Some(if features.unhurried { COVERAGE_NOTE } else { "Tip: every check passes, so once every rule in the task and its spec is covered, `finish` is accepted now and could have been in the same reply (it is skipped or refused automatically whenever a check fails)." })
                 } else if features.unhurried && watchless_checked && tools.last() == Some(&Tool::Shell) {
                     Some(UNHURRIED_WATCHLESS_NOTE)
                 } else if only_changes && self.sess.watches.items.is_empty() && !features.unhurried {
@@ -1994,7 +1994,7 @@ mod tests {
     async fn a_call_cut_off_by_the_output_limit_is_never_executed() {
         let mut cut = MockTurn::calls("", vec![("shell", json!({"cmd": "echo first"})), ("write", json!({"path": "big.txt", "content": "half a fi"}))]);
         cut.finish = Some("length".into());
-        let mut r = rig("agent-length", AgentConfig::new("mock"), vec![fixed(cut), fixed(MockTurn::say("ok"))]);
+        let mut r = rig("agent-length", AgentConfig::new("mock"), vec![fixed(cut), finish()]);
         r.agent.run("write".into(), &CancellationToken::new()).await;
         assert!(!r.agent.sess.ws.root.join("big.txt").exists());
         let tools: Vec<&Message> = r.agent.ctx.messages.iter().filter(|m| m.role == Role::Tool).collect();
@@ -2216,17 +2216,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn classic_mode_is_a_plain_loop() {
+    async fn classic_mode_is_a_plain_loop_and_handles_prose_and_edit_errors_cleanly() {
         let mut cfg = AgentConfig::new("mock");
         cfg.features = Features::classic();
-        let turns = vec![fixed(MockTurn::calls("", vec![("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})), ("finish", json!({"summary": "done"}))]))];
+        let turns = vec![
+            fixed(MockTurn::say("Let me read and update n.txt first.")),
+            fixed(MockTurn::calls("", vec![
+                ("read", json!({"path": "n.txt"})),
+                ("edit", json!({"path": "n.txt", "old": "beta extra", "new": "BETA"})),
+            ])),
+            fixed(MockTurn::calls("", vec![
+                ("edit", json!({"path": "n.txt", "old": "beta", "new": "BETA"})),
+                ("write", json!({"path": "n.txt", "content": "alpha\nBETA\nGAMMA\n"})),
+                ("finish", json!({"summary": "done"})),
+            ])),
+        ];
         let mut r = rig("agent-classic", cfg, turns);
         let out = r.agent.run("fix".into(), &CancellationToken::new()).await;
-        assert_eq!((out.status, out.verified), (FinishStatus::Done, false));
+        assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, false, 3));
+        assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nBETA\nGAMMA\n");
         let reqs = requests(&r);
         assert_eq!(reqs[0][0].content, prompt::SYSTEM_CLASSIC);
         let root = r.agent.sess.ws.root.display().to_string();
         assert_eq!(reqs[0][1].content, format!("cwd: {root}\n\n<task>\nfix\n</task>"), "no environment snapshot in the baseline, only where it works");
+        // Turn 1 prose plan was nudged back to work instead of ending the unattended run early.
+        assert!(reqs[1].last().unwrap().content.starts_with("[harness] You replied without a tool call, and nobody is here"));
+        // Turn 2 failed `old` match gave plain line numbers rather than non-existent anchor advice.
+        let edit_err = reqs[2].iter().rev().find(|m| m.role == Role::Tool).unwrap().content.clone();
+        assert!(edit_err.contains("Copy the current text exactly.") && !edit_err.contains("anchors"), "{edit_err}");
     }
 
     #[test]
@@ -2991,14 +3008,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn contract_holds_finish_when_a_deliverable_is_missing_or_a_protected_file_was_changed() {
-        // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: held until written.
+    async fn contract_holds_finish_in_ecosage_and_prosage_and_can_be_ablated() {
+        // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: Ecosage holds `finish` until written.
         let premature = finish();
         let write_findings = fixed(MockTurn::calls(
             "",
             vec![("write", json!({"path": "findings.json", "content": "[]\n"})), ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})), ("finish", json!({"summary": "no vulnerabilities"}))],
         ));
-        let mut r = prosage_rig("agent-contract-missing", &["contract"], vec![premature, write_findings], "NONE", "NONE");
+        let mut r = rig("agent-contract-missing", AgentConfig::new("mock"), vec![premature, write_findings]);
         let out = r.agent.run("Audit `n.txt`. Write `findings.json` in this folder. Do not change `n.txt`.".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.verified, r.agent.stats.turns, r.agent.effort()), (FinishStatus::Done, true, 2, Effort::High));
         assert!(turns_sent(&r)[1].last().unwrap().content.contains("the task asks for `findings.json`, which has not been created"));
@@ -3014,10 +3031,17 @@ mod tests {
                 ("finish", json!({"summary": "restored and wrote findings"})),
             ],
         ));
-        let mut r = prosage_rig("agent-contract-protected", &["contract"], vec![touch_forbidden, restore_and_write], "NONE", "NONE");
+        let mut r = rig("agent-contract-protected", AgentConfig::new("mock"), vec![touch_forbidden, restore_and_write]);
         let out = r.agent.run("Audit `n.txt`. Write `findings.json` in this folder. Do not edit `n.txt`.".into(), &CancellationToken::new()).await;
         assert_eq!((out.status, out.verified, r.agent.stats.turns), (FinishStatus::Done, true, 2));
         assert_eq!(std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(), "alpha\nbeta\ngamma\n");
+
+        // Ablating `contract` turns it off cleanly.
+        let mut cfg = AgentConfig::new("mock");
+        cfg.features = Features::ecosage().without("contract").unwrap();
+        let mut r = rig("agent-contract-off", cfg, vec![finish()]);
+        let out = r.agent.run("Audit `n.txt`. Write `findings.json` in this folder.".into(), &CancellationToken::new()).await;
+        assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
     }
 
     #[tokio::test]
