@@ -441,9 +441,10 @@ pub(crate) struct Accum {
 }
 
 const LOOP_CHECK_EVERY: usize = 600;
-/// Reasoning allowed in one reply before anything else has come (about 14,000 tokens). Past it the
-/// reply would rather hit the output limit than act, having cost minutes.
-const REASONING_CAP: usize = 56_000;
+/// Reasoning allowed in one reply before anything else has come (about 16,000 tokens). Past it the
+/// reply would rather hit the output limit than act, having cost minutes; 56,000 characters cut
+/// specification-heavy first turns that finished cleanly between 13,000 and 15,000 tokens.
+const REASONING_CAP: usize = 64_000;
 
 impl Accum {
     /// Feeds one line of the response body. Returns true once the stream signalled completion.

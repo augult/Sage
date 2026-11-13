@@ -19,12 +19,12 @@ code exposed why Prosage lost `audit` once, burned 60 turns (`outcome: budget`, 
 examiners never run) in 3 of 4 `restyle` runs, jumped to 57–60 turns in Sample 3 on `ttlcache`,
 `nplusone` and `rollup`, and confirmed only 1 of 73 referee cases:
 
-- **Mechanical task-contract guard (`contract.rs`, `Features.contract`):** snapshots files and
-  folders named in `Do not edit/change …` clauses (46/46 `restore` files across the 24 tasks) and
-  checks explicitly requested deliverable files (`Write \`findings.json\``, `Create \`roman.py\``,
-  etc.) before `finish` stands—even when `epoch == 0`, closing the `audit` / `audit-clean` failure
-  where a run finishes in prose or writes `notesvc/findings.json` instead of `./findings.json`.
-  Zero false positives on all 24 reference solutions.
+- **Mechanical task-contract guard (`contract.rs`, `Features.contract`, on in Ecosage and Prosage):**
+  snapshots files and folders named in `Do not edit/change …` clauses (46/46 `restore` files
+  across the 24 tasks) and checks explicitly requested deliverable files (`Write \`findings.json\``,
+  `Create \`roman.py\``, etc.) before `finish` stands—even when `epoch == 0`, closing the `audit` /
+  `audit-clean` failure where a run finishes in prose or writes `notesvc/findings.json` instead of
+  `./findings.json`. Costs zero model tokens; zero false positives on all 24 reference solutions.
 - **Watchless examination and verification (`agent.rs`, `script.rs`, `state.rs`):** on tasks with
   no watched test runner (`restyle`, `audit`, `roman`), unpredicted read-only check commands that
   exit 0 now trigger `early_exam`, passing examiner suites credit `evidence.passed` (remembering
@@ -48,8 +48,18 @@ examiners never run) in 3 of 4 `restyle` runs, jumped to 57–60 turns in Sample
   `script.rs`):** `ROUTE_MAX_TOKENS` raised from 400 to 2,048 for providers whose thinking cannot
   be switched off; `run_script` restores `exam_*.ext` from memory before running and `edit`/`write`
   refuse paths inside `sess.dir`; each session sets its own `TMPDIR` outside `sess.dir`.
+- **Zero-cost accuracy lifts for Ecosage and Default (`prompts/system.md`, `agent.rs`,
+  `provider/openai.rs`, `tools/edit.rs`):** Ecosage now carries `contract` at zero token cost,
+  qualifies its passing-check chain hint so spec-heavy tasks (`confdialect`) check untested rules
+  before finishing, raises `REASONING_CAP` from 56k to 64k chars (~16k tokens) so 13k–15k Turn-1
+  thoughts are not cut and retried, and carries one compact HTML/CSS token-and-accessibility rule
+  in `system.md` (addressing `restyle` without adding a side-request or full skill prompt; prefix
+  stays well under the 2,300-token cap). Unattended Default (`classic`) runs now nudge a prose-only
+  plan reply once instead of yielding immediately, keep whole-file `seen` coverage across `edit`s
+  so `read -> edit -> write` needs no `overwrite: true` retry, and give plain numbered context
+  instead of anchor instructions when `edit` fails with `anchors == false`.
 
-**Checked:** `cargo test` (280 tests: 259 in `sage-core`, 21 in `sage-cli`), `cargo clippy --lib
+**Checked:** `cargo test` (286 tests: 265 in `sage-core`, 21 in `sage-cli`), `cargo clippy --lib
 --bins -- -D warnings`, `sage bench --check --tasks all` (24/24) and `sage bench --scripted
 --tasks all --variants ecosage,default,prosage` (72/72), plus multi-mode failure-recovery runs on
 `audit`, `audit-clean`, `restyle`, `pager` and `confdialect`. **Not checked:** live Logfare runs
@@ -57,7 +67,7 @@ examiners never run) in 3 of 4 `restyle` runs, jumped to 57–60 turns in Sample
 
 ```sh
 sage bench -p logfare -m deepseek-v4.1-flash-1017 --tasks all -n 2 -j 1 --max-turns 60 --time-budget 1200 \
-  --variants ecosage,prosage,prosage+no-examiner,prosage+no-contract,ext:opencode
+  --variants default,ecosage,no-contract,prosage,prosage+no-examiner,ext:opencode
 ```
 
 ## Eleventh session: the rename, and Prosage reworked (12 November 2026)

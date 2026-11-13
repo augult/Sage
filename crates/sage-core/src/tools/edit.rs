@@ -154,7 +154,20 @@ fn similarity(a: &str, b: &str) -> f64 {
     shared as f64 / ta.len().max(tb.len()) as f64
 }
 
-fn apply_old(ft: &FileText, old: &str, new: &str, all: bool) -> Applied {
+fn nearby_numbered(lines: &[String], around: usize, radius: usize) -> (String, (usize, usize)) {
+    if lines.is_empty() {
+        return ("(the file is empty)\n".into(), (1, 0));
+    }
+    let center = around.clamp(1, lines.len());
+    let (from, to) = (center.saturating_sub(radius).max(1), (center + radius).min(lines.len()));
+    let mut out = String::new();
+    for ln in from..=to {
+        out.push_str(&format!("{ln:>6}\t{}\n", crate::util::truncate_chars(&lines[ln - 1], 240)));
+    }
+    (out, (from, to))
+}
+
+fn apply_old(ft: &FileText, old: &str, new: &str, all: bool, anchors: bool) -> Applied {
     let old = old.replace("\r\n", "\n");
     let new = new.replace("\r\n", "\n");
     if old.is_empty() {
@@ -180,7 +193,8 @@ fn apply_old(ft: &FileText, old: &str, new: &str, all: bool) -> Applied {
                 break;
             }
         }
-        return Err(format!("`old` matches {count} places (lines {}). Add surrounding text to make it unique, pass all:true, or use `range`.", at.join(", ")).into());
+        let how = if anchors { ", pass all:true, or use `range`" } else { " or pass all:true" };
+        return Err(format!("`old` matches {count} places (lines {}). Add surrounding text to make it unique{how}.", at.join(", ")).into());
     }
 
     // No exact match. Models most often get whitespace wrong, so retry line-wise, ignoring first
@@ -218,11 +232,16 @@ fn apply_old(ft: &FileText, old: &str, new: &str, all: bool) -> Applied {
     let probe = old_lines.iter().find(|l| !l.trim().is_empty()).copied().unwrap_or("");
     let best = ft.lines.iter().enumerate().map(|(i, l)| (similarity(probe, l), i)).filter(|(score, _)| *score >= 0.5).max_by(|a, b| a.0.total_cmp(&b.0));
     Err(match best {
-        Some((_, i)) => {
+        Some((_, i)) if anchors => {
             let (shown, window) = nearby(&ft.lines, i + 1, 3);
             Refused { message: format!("`old` was not found (it must match the file exactly). The closest text is around line {}:\n{shown}Use `range` with these anchors, or copy the text exactly.", i + 1), windows: vec![window] }
         }
-        None => "`old` was not found, and nothing similar either. Read the file and use `range` with its anchors.".into(),
+        Some((_, i)) => {
+            let (shown, window) = nearby_numbered(&ft.lines, i + 1, 3);
+            Refused { message: format!("`old` was not found (it must match the file exactly). The closest text is around line {}:\n{shown}Copy the current text exactly.", i + 1), windows: vec![window] }
+        }
+        None if anchors => "`old` was not found, and nothing similar either. Read the file and use `range` with its anchors.".into(),
+        None => "`old` was not found, and nothing similar either. Read the file and copy the exact current text.".into(),
     })
 }
 
@@ -368,11 +387,13 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
         let live = |line: usize| sess.seen.covered(&abs, hash, line, line);
         let frozen = |line: usize| history.is_some_and(|h| h.was_visible(line));
         let past = history.map_or(Past { splices: &[], seen: 0, shown: &live }, |h| h.past(sess.reply, &live, &frozen));
+        let anchors_on = sess.features.anchors;
         match (range.filter(|r| !r.trim().is_empty()), old.filter(|o| !o.is_empty()), after.filter(|a| !a.trim().is_empty())) {
             (Some(r), None, None) => apply_range(&ft, r, new, &past),
-            (None, Some(o), None) => apply_old(&ft, o, new, bool_arg(args, "all")),
+            (None, Some(o), None) => apply_old(&ft, o, new, bool_arg(args, "all"), anchors_on),
             (None, None, Some(a)) => apply_after(&ft, a, new, &past),
-            (None, None, None) => Err("say where: give exactly one of `range` (anchors, e.g. \"41kq-47px\"), `old` (exact current text) or `after` (anchor to insert after)".into()),
+            (None, None, None) if anchors_on => Err("say where: give exactly one of `range` (anchors, e.g. \"41kq-47px\"), `old` (exact current text) or `after` (anchor to insert after)".into()),
+            (None, None, None) => Err("say where: give `old` (exact current text to replace)".into()),
             _ => Err("give exactly one of `range`, `old`, `after` — not several".into()),
         }
     };
@@ -394,7 +415,11 @@ pub async fn run(sess: &mut Session, args: &Value) -> StepOutput {
     }
     let new_hash = fnv64(updated.as_bytes());
     let visible = sess.seen.windows(&abs, hash);
+    let was_whole = !ft.lines.is_empty() && sess.seen.covered(&abs, hash, 1, ft.lines.len());
     sess.histories.entry(abs.clone()).or_default().record(Splice::between(&ft.lines, &lines), new_hash, sess.reply, visible);
+    if was_whole && !lines.is_empty() {
+        sess.seen.mark(&abs, new_hash, 1, lines.len(), sess.step);
+    }
 
     let broken = if sess.features.post_edit_check { broken_by_change(sess, &abs, Some(&content), &updated).await } else { None };
     let mut out = match broken {
@@ -635,5 +660,23 @@ mod tests {
         let mut s = test_session("edit-outside", Features::ecosage());
         let out = run(&mut s, &json!({"path": "/etc/hostname", "old": "x", "new": "y"})).await;
         assert_eq!(out.status, StepStatus::Denied);
+    }
+
+    #[tokio::test]
+    async fn classic_mode_edits_give_plain_line_numbers_and_keep_whole_files_writable() {
+        let mut s = test_session("edit-classic", Features::classic());
+        std::fs::write(s.ws.root.join("calc.txt"), SRC).unwrap();
+        super::super::read::run(&mut s, &json!({"path": "calc.txt"}));
+
+        // A missed `old` in classic mode prints plain numbered lines and never mentions anchors.
+        let miss = run(&mut s, &json!({"path": "calc.txt", "old": "def divide(a, c):", "new": "def divide(a, b):"})).await;
+        assert_eq!(miss.status, StepStatus::Error);
+        assert!(miss.observation.contains("Copy the current text exactly.") && !miss.observation.contains("anchors"), "{}", miss.observation);
+
+        // Editing a file that was read whole keeps it on record as whole, so a later `write` needs no `overwrite: true`.
+        let ok = run(&mut s, &json!({"path": "calc.txt", "old": "return a / b", "new": "return a // b"})).await;
+        assert_eq!(ok.status, StepStatus::Ok);
+        let replaced = super::super::write::run(&mut s, &json!({"path": "calc.txt", "content": "x = 1\n"})).await;
+        assert_eq!(replaced.status, StepStatus::Ok, "{}", replaced.observation);
     }
 }

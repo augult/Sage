@@ -38,7 +38,7 @@ OPTIONS for run
                            switched on unasked; costs more requests and time
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
       --with <name>        switch on a mechanism that is off unless asked for: long_thought, unhurried,
-                           examiner, panel, referee, routing, contract (repeatable; prosage has them all)
+                           examiner, panel, referee, routing (repeatable; prosage has them all)
       --goal <condition>   keep working until an independent check agrees the condition holds; with
                            no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)
