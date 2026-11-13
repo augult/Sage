@@ -136,8 +136,8 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   an approval request, verbatim output and diffs are boxed; the answer is plain text.
 - **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
   180 ms while its chevron turns a quarter. The dither drifts at 20 frames a second. Motion off
-  (Settings, or `prefers-reduced-motion`) holds the dither still and removes the rest; Dither
-  off takes the dots away altogether and leaves the painting.
+  (Settings; what it starts as under `prefers-reduced-motion`) holds the dither still and removes
+  the rest; Dither off takes the dots away altogether and leaves the painting.
 - **No explanatory text.** A label, a value, a state ("Read-only", "No watches", "Built-in") or an
   error is shown; a sentence that explains how the product works is not, in a note, a caption, a
   placeholder or a tooltip. Placeholders are a word or two ("Folder", "Task"), empty states two or
@@ -171,8 +171,13 @@ background in `themes.js`), stretched without smoothing so that its dots stay sq
 shows on the glass of the sidebar and the inspector only: it is cut away where the sheet lies
 (`clip-path` in `glass.css`, from the one pane width in `layout.css`). The panes
 are translucent fills: the veil over everything, and in the middle the sheet, the reading
-surface. Nothing blurs or filters while the app runs. `prefers-reduced-transparency` is read as
-None.
+surface. Nothing blurs or filters while the app runs.
+
+The system's preferences decide what a setting starts as, never what it can be: under
+`prefers-reduced-transparency` (on Windows, "Transparency effects" switched off) the background
+starts as None, and under `prefers-reduced-motion` Motion starts as Off. Settings shows that as
+the choice in effect, and a background or a Motion chosen there holds whatever the system says
+(`chosen` in `themes.js`, and `boot.js` before the first paint).
 
 The three choices (appearance, background, motion) are kept in `localStorage` (`ui/js/prefs.js`)
 and put on `<html>` before the first paint (`ui/js/boot.js`).
