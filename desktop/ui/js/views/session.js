@@ -5,11 +5,12 @@ import { h, icon, spinner } from '../dom.js';
 import { duration, k } from '../format.js';
 import * as store from '../store.js';
 import { attachments } from './attach.js';
-import { barButton, chatBar, fitBox, onSendKey, sessionState } from './common.js';
+import { barButton, chatBar, fitBox, markIdle, onSendKey, sessionState } from './common.js';
 import { AUTONOMIES, effortOptions, modelPicker, plainMode, settingPicker } from './controls.js';
+import { dictation } from './dictate.js';
 import { mountPanel } from './panel.js';
 import { openOutput } from './output.js';
-import { skillsButton } from './skills.js';
+import { skillCommands } from './skills.js';
 import { createTimeline } from './timeline.js';
 
 // Where each session's timeline was left, what was unfolded in it and what was typed in its box
@@ -84,16 +85,33 @@ export function mountSession(main, side, app, meta) {
     rows: 1,
     'aria-label': 'Follow-up message',
     placeholder: 'Follow-up',
-    oninput: () => fitBox(box),
-    onkeydown: (event) => onSendKey(event, send),
+    oninput: () => {
+      fitBox(box);
+      markIdle(sendButton, box);
+    },
+    onkeydown: (event) => skills.key(event) || onSendKey(event, send),
   });
   box.value = drafts.get(entry.id) ?? '';
+  // Skills go with the next message, as commands typed into the box. What the session has is on
+  // for good, and the conventional loop takes none.
+  const skills = skillCommands({
+    box,
+    list: () => skillList,
+    usable: () => !plainMode(entry.model?.meta.mode),
+    locked: () => (entry.model ? activeSkills(entry.model) : []),
+    onChange: (names) => (picked = names),
+  });
   const sendButton = barButton('send-followup', 'Send', icon('send', 16), send);
   // While a run is in progress the same place stops it.
   const stopButton = barButton('stop-session', 'Stop', icon('stop', 12), requestStop, 'soft');
   stopButton.hidden = true;
   const files = attachments({ start: () => entry.meta.cwd });
   const sendError = h('div.form-error', { role: 'alert', hidden: true });
+  const fail = (problem) => {
+    sendError.textContent = String(problem);
+    sendError.hidden = false;
+  };
+  const mic = dictation({ box, fail });
   let sending = false;
   // Between a message being accepted and its `user` event arriving, the run has not visibly started.
   // Holds how many messages the timeline had when the last one was sent, until it shows one more.
@@ -107,36 +125,41 @@ export function mountSession(main, side, app, meta) {
    */
   async function send(answer) {
     const own = typeof answer === 'string';
+    // A command typed out and sent is taken now. Alone in the box, it was all there was to do.
+    if (!own && skills.take()) return;
     const text = own ? answer : box.value.trim();
     if (!text || sendButton.disabled || sendButton.hidden) return;
     const before = messages();
     sending = true;
     sendError.hidden = true;
+    mic.stop();
     render();
     try {
       await api.sendMessage(entry.id, text, picked, changes(), files.paths());
       // A session from an earlier launch has been brought back by the message: follow it from here.
       store.resume(entry);
       if (!own) box.value = '';
-      picked = [];
+      skills.clear();
       files.clear();
       fitBox(box);
       awaitingRun = before;
       pinned = true;
     } catch (problem) {
       if (own) throw problem;
-      sendError.textContent = String(problem);
-      sendError.hidden = false;
+      fail(problem);
     } finally {
       sending = false;
       render();
     }
   }
 
-  // Under the box, what the next message goes with. The model, the effort and the autonomy show
-  // what the session has until another is picked: that goes with the next message, and is the
-  // session's from then on. Of the skills, what the session has is on for good.
-  const pickSlot = h('span.contents');
+  // In the bar and under it, what the next message goes with. The effort, the model and the
+  // autonomy show what the session has until another is picked: that goes with the next message,
+  // and is the session's from then on.
+  const effortSlot = h('span.contents');
+  const modelSlot = h('span.contents');
+  const autonomySlot = h('span.contents');
+  const hint = h('span.chat-hint', 'Type / for skills');
   const swapNote = h('div.chat-note', { role: 'status', hidden: true });
   // The session's goal, while it has one: what the end of each run is held to. `/goal` sets and clears it.
   const goalText = h('span.goal-text');
@@ -177,11 +200,7 @@ export function mountSession(main, side, app, meta) {
   let pickersShown = null;
   function renderPickers(model) {
     const { meta } = model;
-    const locked = activeSkills(model);
-    // The conventional loop takes no skills.
-    const offered = plainMode(meta.mode) ? [] : skillList;
-    picked = picked.filter((name) => !locked.includes(name));
-    const signature = () => [meta.provider, meta.model, meta.effort, meta.autonomy, meta.mode, meta.simulated, offered.length, ...locked, '|', ...picked, '|', ...Object.values(wanted)].join(' ');
+    const signature = () => [meta.provider, meta.model, meta.effort, meta.autonomy, meta.simulated, '|', ...Object.values(wanted)].join(' ');
     drawNote();
     if (signature() === pickersShown) return;
     pickersShown = signature();
@@ -192,15 +211,10 @@ export function mountSession(main, side, app, meta) {
       drawNote();
     };
     const effort = wanted.effort ?? policy(meta.effort);
-    pickSlot.replaceChildren(
-      ...[
-        // A stand-in has no model to change.
-        !meta.simulated && modelPicker(app.state, wanted.provider !== null ? wanted : meta, choose),
-        offered.length > 0 && skillsButton({ skills: offered, value: picked, locked, onChange: (names) => ((picked = names), choose({})) }),
-        settingPicker('effort', 'Effort', effortOptions(effort), effort, (value) => choose({ effort: value })),
-        settingPicker('autonomy', 'Autonomy', AUTONOMIES, wanted.autonomy ?? meta.autonomy ?? 'auto', (value) => choose({ autonomy: value })),
-      ].filter(Boolean),
-    );
+    effortSlot.replaceChildren(settingPicker('effort', 'Effort', effortOptions(effort), effort, (value) => choose({ effort: value })));
+    // A stand-in has no model to change.
+    modelSlot.replaceChildren(...(meta.simulated ? [] : [modelPicker(app.state, wanted.provider !== null ? wanted : meta, choose, 'end')]));
+    autonomySlot.replaceChildren(settingPicker('autonomy', 'Autonomy', AUTONOMIES, wanted.autonomy ?? meta.autonomy ?? 'auto', (value) => choose({ autonomy: value })));
   }
 
   let stopShown = '';
@@ -210,7 +224,7 @@ export function mountSession(main, side, app, meta) {
     if (foot.hidden) return;
     drawGoal(model);
     if (!foot.firstChild) {
-      foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
+      foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, skills, box, start: effortSlot, end: [modelSlot, mic.button, stopButton, sendButton], under: [autonomySlot, hint] }));
       // As tall as a draft brought back from an earlier visit.
       fitBox(box);
     }
@@ -224,8 +238,11 @@ export function mountSession(main, side, app, meta) {
       stopShown = String(stopping);
       stopButton.replaceChildren(stopping ? spinner() : icon('stop', 12));
     }
-    // Not while a menu or the Skills dialog may be open: a redraw would close the one and strand the other.
-    if (!pickSlot.querySelector('[aria-expanded="true"]') && !document.querySelector('dialog.skills')) renderPickers(model);
+    markIdle(sendButton, box);
+    hint.hidden = plainMode(model.meta.mode);
+    skills.refresh();
+    // Not while a menu may be open: a redraw would close it.
+    if (!foot.querySelector('.pick[aria-expanded="true"]')) renderPickers(model);
   }
 
   const tick = () => {
@@ -286,6 +303,7 @@ export function mountSession(main, side, app, meta) {
       places.set(entry.id, { pinned, top: scroller.scrollTop });
       if (box.value.trim()) drafts.set(entry.id, box.value);
       else drafts.delete(entry.id);
+      mic.stop();
       panel.unmount();
     },
   };

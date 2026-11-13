@@ -457,6 +457,48 @@ changes as well (the ninth session found the cause and fixed it). Not checked: t
 the window's edge with the inspector away, which needs a pointer; anything on Windows or macOS.
 `docs/screenshots/` predates all three.
 
+**The chat bar on the glass** (13 November, branch `hoplite/sparta-lakedaimon-ceb6af95`):
+
+- *New session.* The view opens on the bare glass, with the mark, one line and the chat bar in its
+  middle. The folder is a picker under the bar, beside the mode and the autonomy.
+- *Chat bar.* A pane that frosts what is behind it (`backdrop-filter`, which the brief had ruled
+  out: the owner asked for it, and the brief now names the bar as the one exception). The effort
+  and the model are in the bar, with a microphone; Send is grey until there is text to send.
+- *Skills.* No button: `/` in the box lists them, `/<name>` switches one on and `/skills` opens the
+  dialog. Those in use are chips in the bar.
+- *Microphone.* Dictation through the webview's own Web Speech API (`ui/js/views/dictate.js`).
+  `src-tauri/Info.plist` says what macOS wants said before it grants the microphone.
+
+Checked: the real app under xvfb (the new view with the panes there and away, the `/` menu in a
+new session and in a running one, typed commands, the dialog, Settings), and the front end in
+Chrome with a stand-in for the shell (the pickers, the folder menu, Default mode, no key, light
+and dark, the smallest window, dictation against a stand-in recogniser and against Chrome's
+refusal of the microphone). Not checked: dictation with a voice, on any system (WebKitGTK, which
+is what xvfb runs, has no recogniser; WebView2 has one, with an open report of `network` errors
+since runtime 153, MicrosoftEdge/WebView2Feedback#5724); anything on Windows or macOS.
+`docs/screenshots/` predates this too.
+
+**The window around it** (13 November, same branch):
+
+- *Title bar.* A level of its own over the three panels: the sidebar's button, back and forward
+  through the views gone through, the menus, the caption buttons. The sidebar no longer carries
+  the mark and the name.
+- *Menus* (`ui/js/menubar.js`): File, Edit, View, Window, Help, with keys for the first few
+  things (the brief lists them). Help plays the walkthrough, which had no button.
+- *Panels.* The sheet runs to the window's right edge and foot; the inspector is away until asked
+  for (`sage.inspector` is `on` only once the user has opened it).
+- *Backgrounds.* Each panel shows the background or not: Settings has the window in small, cut
+  20/60/20, each part a switch. Only the middle one is on at first, so the side panels and the
+  title bar are solid. The dither stands still while no bare glass is in view.
+
+Checked: the real app under xvfb (new session, a session with the inspector away and there,
+Settings, an open menu, Ctrl+comma), and the front end in Chrome with a stand-in for the shell
+(every menu and its entries, the Edit commands on the task box, the keys, back and forward, the
+three panel switches in every combination that matters, no background, the sidebar away). Not
+checked: dragging the window by the title bar and double-clicking it, which need a pointer; Paste
+from the Edit menu, which a webview may refuse (it then says to use the key); anything on Windows
+or macOS.
+
 ## Seventh session: changes made without a benchmark (11 November 2026)
 
 The Logfare key was at its limit, so nothing below is measured. Each change rests on the recorded

@@ -136,10 +136,10 @@
 /* Code: the tree on the left, the open file on the right. The view fills the pane and scrolls in
    its own two parts. */
 
-/* Kept off the sheet and the window's edge by the gap, as the sidebar's rows are. */
+/* Kept off the sheet and the window's edge, as the sidebar's rows are. */
 #inspector-body[data-view="code"] {
   display: flex;
-  padding: 0 var(--gap) var(--gap);
+  padding: 0 8px 8px;
   overflow: hidden;
 }
 

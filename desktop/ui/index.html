@@ -20,18 +20,32 @@
       <canvas id="backdrop-dither"></canvas>
     </div>
     <div id="app">
-      <aside id="sidebar">
-        <div class="brand" data-tauri-drag-region="deep">
-          <!-- The mark of the website and the app icon: a disc, and a ring over it that is cut out
-               where it crosses the disc, so the glass shows through the cut. -->
-          <svg class="brand-mark" viewBox="2 2 20 20" width="18" height="18" aria-hidden="true">
-            <mask id="brand-ring-cut"><rect x="0" y="0" width="24" height="24" fill="#fff" /><circle cx="14.5" cy="9.5" r="6.6" fill="none" stroke="#000" stroke-width="1.8" /></mask>
-            <mask id="brand-disc-cut"><rect x="0" y="0" width="24" height="24" fill="#fff" /><circle cx="9.5" cy="14.5" r="7.5" fill="#000" /></mask>
-            <circle cx="9.5" cy="14.5" r="7.5" fill="currentColor" mask="url(#brand-ring-cut)" />
-            <circle cx="14.5" cy="9.5" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" mask="url(#brand-disc-cut)" />
-          </svg>
-          <span class="brand-name">Sage</span>
+      <!-- The title bar: the window has no system frame, so this drags it, and carries its menus
+           and its three buttons. -->
+      <header id="titlebar" data-tauri-drag-region>
+        <div class="bar-lead" data-tauri-drag-region>
+          <button class="bar-act" id="toggle-sidebar" type="button" aria-controls="sidebar"></button>
+          <span class="bar-nav">
+            <button class="bar-act" id="nav-back" type="button" aria-label="Back" title="Back" disabled></button>
+            <button class="bar-act" id="nav-forward" type="button" aria-label="Forward" title="Forward" disabled></button>
+          </span>
         </div>
+        <nav id="menubar" aria-label="Menus"></nav>
+        <div class="bar-drag" data-tauri-drag-region></div>
+        <div class="window-controls">
+          <button id="win-min" type="button" aria-label="Minimize" title="Minimize">
+            <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.75 6.5h6.5" /></svg>
+          </button>
+          <button id="win-max" type="button" aria-label="Maximize" title="Maximize">
+            <svg class="when-normal" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4.5 2.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z" /></svg>
+            <svg class="when-maximized" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 4.5h2.5A1.5 1.5 0 0 1 8 6v2.5A1.5 1.5 0 0 1 6.5 10H4a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 4 4.5zM5 2.5h3A1.5 1.5 0 0 1 9.5 4v3" /></svg>
+          </button>
+          <button id="win-close" type="button" aria-label="Close" title="Close">
+            <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+          </button>
+        </div>
+      </header>
+      <aside id="sidebar">
         <button class="nav-item" id="new-session" type="button">New session</button>
         <nav id="session-list" aria-label="Sessions"></nav>
         <div class="side-foot">
@@ -40,25 +54,10 @@
       </aside>
       <main id="main"></main>
       <aside id="inspector" aria-label="Inspector">
-        <div class="pane-strip" data-tauri-drag-region></div>
         <div id="inspector-tabs"></div>
         <div id="inspector-body"></div>
       </aside>
-      <div id="sheet-strip" data-tauri-drag-region></div>
-      <button class="pane-toggle" id="toggle-sidebar" type="button" aria-controls="sidebar"></button>
-      <button class="pane-toggle" id="toggle-inspector" type="button" aria-controls="inspector"></button>
-      <div class="window-controls">
-        <button id="win-min" type="button" aria-label="Minimize" title="Minimize">
-          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.75 6.5h6.5" /></svg>
-        </button>
-        <button id="win-max" type="button" aria-label="Maximize" title="Maximize">
-          <svg class="when-normal" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4.5 2.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z" /></svg>
-          <svg class="when-maximized" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 4.5h2.5A1.5 1.5 0 0 1 8 6v2.5A1.5 1.5 0 0 1 6.5 10H4a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 4 4.5zM5 2.5h3A1.5 1.5 0 0 1 9.5 4v3" /></svg>
-        </button>
-        <button id="win-close" type="button" aria-label="Close" title="Close">
-          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
-        </button>
-      </div>
+      <button class="bar-act" id="toggle-inspector" type="button" aria-controls="inspector"></button>
     </div>
     <div id="error-banner" role="alert" hidden>
       <div id="error-lines"></div>

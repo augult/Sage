@@ -1,20 +1,20 @@
-/* The folders of the New session view, the pickers and their menus, Settings, and the reminder of unsaved text. */
+/* The New session view, the pickers and their menus, Settings, and the reminder of unsaved text. */
 
-/* New session: in the middle of the sheet, a little above its centre, the folder the session will
-   work in. The chat bar under it is the session's own (styles/session.css). */
+/* New session: on the bare glass (styles/glass.css), a little above its middle, the app's mark,
+   the one large line the view opens with, and the chat bar (styles/session.css). */
 
 .new-body {
   display: flex;
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 24px;
   min-height: 0;
   padding: 24px;
   overflow-y: auto;
 }
 
-/* Space above and below rather than centring, which would cut off the top of a list too long to fit. */
+/* Space above and below rather than centring, which would cut off the top of what is too tall to fit. */
 .new-body::before,
 .new-body::after {
   flex: 2;
@@ -25,71 +25,48 @@
   flex: 3;
 }
 
-.projects {
+/* The pieces arrive each by itself, not the view as one: a view that fades in is cut off, while it
+   does, from the glass behind it, and the bar would have nothing to frost. */
+#main > .new-body {
+  animation: none;
+}
+
+.new-body :is(.new-hero, .new-lead, .composer, .composer-under) {
+  animation: enter 140ms ease-out backwards;
+}
+
+.new-hero {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 1px;
-  width: min(100%, 320px);
-  padding: 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-3);
-}
-
-.project {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 30px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--r-2);
-  background: transparent;
+  gap: 18px;
+  text-align: center;
+}
+
+.new-hero .brand-mark {
+  flex: none;
   color: var(--soft);
-  text-align: left;
-  transition: background-color 120ms ease;
 }
 
-.project:hover,
-.project[aria-pressed="true"] {
-  color: var(--ink);
+.new-bar {
+  flex: none;
+  width: 100%;
 }
 
-.project:hover {
-  background: var(--fill-2);
+/* With the glass to itself the bar may be wider than at the foot of a session. */
+.new-bar .chat {
+  max-width: 800px;
 }
 
-.project:focus-visible {
-  outline-offset: -2px;
+/* Out on the glass the bar is lifted off it. */
+.new-bar .composer {
+  box-shadow: var(--frost-lift);
 }
 
-.project .icon {
-  color: var(--muted);
-}
-
-.project-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The check of the folder that is chosen, at the end of its line. */
-.project .project-check {
-  visibility: hidden;
-  color: var(--ink);
-}
-
-.project[aria-pressed="true"] .project-check {
-  visibility: visible;
-}
-
-.projects-rule {
-  height: 1px;
-  margin: 3px 0;
-  background: var(--line);
+/* Room for a second line before the box has to grow. */
+.new-bar .composer textarea {
+  min-height: 54px;
 }
 
 /* A picker: the current choice as a quiet button, the others in a menu under it. */
@@ -249,6 +226,53 @@
 .menu-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Between two groups that have no name. */
+.menu-rule {
+  flex: none;
+  height: 1px;
+  margin: 3px 0;
+  background: var(--line);
+}
+
+/* What `/` at the start of a chat bar's box lists: each command by its name, with what it is for.
+   It opens upwards from the bar, and the arrow keys walk it while the focus stays in the box. */
+.slash-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+  min-width: 0;
+  max-width: min(100%, 560px);
+}
+
+.slash-menu .menu-item {
+  align-items: baseline;
+  gap: 12px;
+}
+
+.menu-item.is-active {
+  background: var(--fill-2);
+}
+
+.slash-name {
+  flex: none;
+  font: var(--text-sm) var(--mono);
+  letter-spacing: 0;
+}
+
+.slash-about {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-note {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
 
 /* A setting: its name, and beside it the control with whatever it has to say. */
@@ -470,6 +494,105 @@
 }
 
 .theme-card input:checked ~ .theme-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The panels that show the background: the window in small, as one of the backgrounds' pictures
+   cut in three as the window is, a fifth, three fifths and a fifth. A part that is on shows the
+   picture; one that is off is as solid as its panel. */
+.panel-map {
+  --map-h: 150px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 3fr 1fr;
+  width: 240px;
+}
+
+.panel-map > img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--map-h);
+  border-radius: var(--r-2);
+  object-fit: cover;
+}
+
+.panel-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.panel-zone input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.panel-zone input:disabled {
+  cursor: default;
+}
+
+.panel-face {
+  position: relative;
+  height: var(--map-h);
+  border: solid var(--line-strong);
+  border-width: 1px 0 1px 1px;
+  background: var(--flat-veil);
+}
+
+.panel-zone:first-of-type .panel-face {
+  border-radius: var(--r-2) 0 0 var(--r-2);
+}
+
+.panel-zone:last-of-type .panel-face {
+  border-right-width: 1px;
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+
+.panel-zone[data-panel="middle"] .panel-face {
+  background: var(--flat-sheet);
+}
+
+.panel-zone input:checked + .panel-face {
+  background: transparent;
+}
+
+/* The chat bar, which says which way up the window is. */
+.panel-zone[data-panel="middle"] .panel-face::after {
+  position: absolute;
+  top: 56%;
+  left: 20%;
+  width: 60%;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--frost);
+  content: "";
+}
+
+.panel-zone:hover input:not(:disabled) + .panel-face {
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+
+.panel-zone input:focus-visible + .panel-face {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.panel-name {
+  padding-top: 5px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.panel-zone input:checked ~ .panel-name {
   color: var(--ink);
   font-weight: 500;
 }
@@ -743,4 +866,78 @@ textarea.editor {
   min-height: 0;
   padding: 14px 20px 20px;
   overflow-y: auto;
+}
+
+/* Help: the commands and the keys, each beside what it does; and what the app is. */
+
+.help {
+  width: min(460px, calc(100vw - 48px));
+}
+
+.help-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+}
+
+.help-title {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.help-list + .help-title {
+  margin-top: 8px;
+}
+
+.help-list {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 5px 20px;
+  margin: 0;
+}
+
+.help-list dt {
+  font: var(--text-sm)/1.65 var(--mono);
+  letter-spacing: 0;
+}
+
+.help-list dd {
+  margin: 0;
+  color: var(--soft);
+}
+
+.about {
+  width: min(340px, calc(100vw - 48px));
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 22px 20px 20px;
+  text-align: center;
+}
+
+.about-name {
+  margin-top: 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.about-what {
+  margin-top: 10px;
+  color: var(--soft);
+}
+
+.about-data {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 14px;
+  overflow-wrap: anywhere;
 }

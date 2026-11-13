@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Dictation in a chat bar (ui/js/views/dictate.js): macOS grants neither the microphone nor
+	     speech recognition to an app that does not say what it wants them for. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Sage listens while you dictate a message.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Sage turns what you dictate into the text of a message.</string>
+</dict>
+</plist>

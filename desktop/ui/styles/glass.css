@@ -1,14 +1,20 @@
-/* The glass. Behind the panes hangs a painting the app brings itself (js/backdrop.js draws it once,
+/* The glass. Behind the window hangs a painting the app brings itself (js/backdrop.js draws it once,
    softened and pressed into a band of brightness for the appearance), and over it drifts a dither
-   on a canvas a few hundred cells wide. The panes are plain translucent fills over the two.
-   Nothing here blurs or filters while the app runs, and nothing shows what is behind the window. */
+   on a canvas a few hundred cells wide. Each of the three panels shows the two or does not, as
+   Settings says (js/themes.js puts `data-bg-left`, `data-bg-middle` and `data-bg-right` on <html>):
+   one that does is a plain translucent fill over them, one that does not is solid. Out of the box
+   only the middle one does. The panels neither blur nor filter while the app runs. One thing does,
+   the chat bar (styles/session.css), which frosts what lies behind it. Nothing shows what is
+   behind the window. */
 
 :root[data-scheme="light"] {
-  /* The material everything but the sheet sits on, and the sheet: the reading surface. */
+  /* The material a panel with the background sits on, and the sheet: the reading surface. */
   --veil: rgba(255, 255, 255, 0.26);
   --sheet: rgba(255, 255, 255, 0.87);
   --sheet-edge: rgba(17, 18, 20, 0.12);
-  --sheet-lift: 0 1px 2px rgba(17, 18, 20, 0.05), 0 6px 24px rgba(17, 18, 20, 0.07);
+  /* The chat bar's own fill, over what it blurs, and its lift where it lies out on the glass. */
+  --frost: rgba(255, 255, 255, 0.56);
+  --frost-lift: 0 1px 2px rgba(17, 18, 20, 0.05), 0 8px 28px rgba(17, 18, 20, 0.1);
   /* The same two without a painting behind them. */
   --flat-veil: #ececea;
   --flat-sheet: #fdfdfc;
@@ -18,7 +24,8 @@
   --veil: rgba(8, 9, 10, 0.3);
   --sheet: rgba(16, 17, 19, 0.86);
   --sheet-edge: rgba(255, 255, 255, 0.1);
-  --sheet-lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.3);
+  --frost: rgba(14, 15, 17, 0.52);
+  --frost-lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 32px rgba(0, 0, 0, 0.34);
   --flat-veil: #1a1b1e;
   --flat-sheet: #111214;
 }
@@ -64,7 +71,6 @@ body {
    behind the reading: the window's rectangle, less the sheet's. */
 #backdrop-dither {
   --sheet-right: calc(100% - var(--right-w));
-  --sheet-bottom: calc(100% - var(--gap));
   clip-path: polygon(
     evenodd,
     0 0,
@@ -72,11 +78,11 @@ body {
     100% 100%,
     0 100%,
     0 0,
-    var(--left-w) var(--gap),
-    var(--left-w) var(--sheet-bottom),
-    var(--sheet-right) var(--sheet-bottom),
-    var(--sheet-right) var(--gap),
-    var(--left-w) var(--gap)
+    var(--left-w) var(--bar),
+    var(--left-w) 100%,
+    var(--sheet-right) 100%,
+    var(--sheet-right) var(--bar),
+    var(--left-w) var(--bar)
   );
 }
 
@@ -89,27 +95,84 @@ body {
   background: var(--veil);
 }
 
-#main {
-  border: 1px solid var(--sheet-edge);
-  border-radius: var(--r-3);
-  background: var(--sheet);
-  box-shadow: var(--sheet-lift);
+/* The title bar and the two side panels are solid until Settings gives one its background. The
+   title bar goes with the sidebar: the two are one piece of the window's frame. */
+#titlebar,
+#sidebar,
+#inspector {
+  background: var(--flat-veil);
 }
 
-/* On the bare glass the secondary inks step up, so they hold their contrast over any picture. So
-   do the buttons that lie over a pane's strip, while the pane is there. */
-:root[data-scheme="light"] :is(#sidebar, #inspector),
-:root[data-scheme="light"]:not([data-sidebar="off"]) #toggle-sidebar,
-:root[data-scheme="light"]:not([data-inspector="off"]) :is(#toggle-inspector, .window-controls) {
+:root[data-bg-left="on"] :is(#titlebar, #sidebar),
+:root[data-bg-right="on"] #inspector {
+  background: transparent;
+}
+
+/* The sheet runs to the window's edges: it has an edge of its own only where a panel or the title
+   bar lies against it. */
+#main {
+  border: solid var(--sheet-edge);
+  border-width: 1px 0 0 1px;
+  background: var(--flat-sheet);
+}
+
+:root[data-sidebar="off"] #main {
+  border-left-width: 0;
+}
+
+/* Where the sidebar, the title bar and the sheet meet, the sheet's corner is turned as a button's
+   is. What lies outside the turn is the sidebar's: solid while the sidebar is. */
+:root:not([data-sidebar="off"]) #main {
+  border-top-left-radius: var(--r-2);
+}
+
+#sidebar::after {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: var(--r-2);
+  height: var(--r-2);
+  background: radial-gradient(circle var(--r-2) at 100% 100%, transparent calc(100% - 0.5px), var(--flat-veil) 100%);
+  content: "";
+  pointer-events: none;
+}
+
+:root[data-bg-left="on"] #sidebar::after {
+  display: none;
+}
+
+:root:not([data-inspector="off"]) #main {
+  border-right-width: 1px;
+}
+
+:root[data-bg-middle="on"]:not([data-theme="none"]) #main {
+  background: var(--sheet);
+}
+
+/* A new session opens on the bare glass: the sheet is put away, the painting and its dither run
+   under the whole panel, and the chat bar is the one pane on it. js/main.js (and js/boot.js
+   before the first paint) put `data-view` on <html>. */
+:root[data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) #main {
+  background: transparent;
+}
+
+:root[data-view="new"] #backdrop-dither {
+  clip-path: none;
+}
+
+/* On the title bar and the side panels the secondary inks step up, so they hold their contrast
+   over any picture. So do those of the sheet's own share of the window, while a new session has
+   put the sheet away. */
+:root[data-scheme="light"] :is(#titlebar, #sidebar, #inspector),
+:root[data-scheme="light"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
   --soft: #2a2c30;
   --muted: #43464b;
   --faint: #5f6368;
   --line: rgba(17, 18, 20, 0.12);
 }
 
-:root[data-scheme="dark"] :is(#sidebar, #inspector),
-:root[data-scheme="dark"]:not([data-sidebar="off"]) #toggle-sidebar,
-:root[data-scheme="dark"]:not([data-inspector="off"]) :is(#toggle-inspector, .window-controls) {
+:root[data-scheme="dark"] :is(#titlebar, #sidebar, #inspector),
+:root[data-scheme="dark"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
   --soft: #dcdde0;
   --muted: #c4c6ca;
   --faint: #a2a5aa;
@@ -117,15 +180,11 @@ body {
 }
 
 /* No background (chosen, or what a window starts with where the system asks for less transparency
-   and none has been chosen: js/themes.js): the same layout on solid panes. */
+   and none has been chosen: js/themes.js): the same layout on solid panels. */
 :root[data-theme="none"] #backdrop {
   display: none;
 }
 
 :root[data-theme="none"] #app {
   background: var(--flat-veil);
-}
-
-:root[data-theme="none"] #main {
-  background: var(--flat-sheet);
 }

@@ -27,10 +27,11 @@ export function radioChips({ name, label, options, value, onChange, segmented = 
 /**
  * A button that shows the current choice and opens a menu of the others.
  * `groups` is `[{ label, options: [{ value, label, title, disabled }] }]`; a group's label is
- * optional. `prefix` names the setting in front of the value, `empty` stands in when nothing is
- * chosen. `boxed` draws the button as a field, for a form. `onChange(value)` runs on selection.
+ * optional, and groups without one are parted by a rule. `glyph` is an icon and `prefix` the
+ * setting's name in front of the value, `empty` stands in when nothing is chosen. `boxed` draws
+ * the button as a field, for a form. `onChange(value)` runs on selection.
  */
-export function picker({ id, name, prefix, groups, value, empty = 'None', onChange, disabled = false, align, boxed = false }) {
+export function picker({ id, name, glyph, prefix, groups, value, empty = 'None', onChange, disabled = false, align, boxed = false }) {
   const options = groups.flatMap((group) => group.options);
   let chosen = value;
 
@@ -38,6 +39,7 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   const button = h(
     `button.pick${boxed ? '.boxed' : ''}`,
     { id, type: 'button', disabled: disabled || !options.length, 'aria-haspopup': 'listbox', 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)) },
+    glyph && icon(glyph, 14),
     prefix && h('span.pick-key', prefix),
     shown,
     icon('caret', 12),
@@ -45,6 +47,7 @@ export function picker({ id, name, prefix, groups, value, empty = 'None', onChan
   const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, hidden: true, onkeydown: onKey });
   for (const group of groups) {
     if (group.label) menu.append(h('div.menu-group', group.label));
+    else if (menu.childElementCount && group.options.length) menu.append(h('div.menu-rule'));
     for (const option of group.options) {
       menu.append(
         h(
@@ -137,7 +140,7 @@ export const AUTONOMIES = [
   { value: 'ask', label: 'Ask' },
 ];
 
-/** A run setting under a chat bar: its name, the current value, and a menu of the others. */
+/** A run setting in a chat bar or under it: its name, the current value, and a menu of the others. */
 export function settingPicker(key, name, options, value, onChange) {
   return picker({ id: `pick-${key}`, name, prefix: name, groups: [{ options }], value, onChange });
 }
@@ -147,8 +150,9 @@ export function settingPicker(key, name, options, value, onChange) {
  * providers, and only providers that are connected (have a key) are listed. The provider in use
  * stays, greyed, if its key has gone since, so that the choice still shows. With none connected,
  * the picker says where to add one. `current` is `{ provider, model }`; `onChange({ provider, model })`.
+ * `align` is the picker's: `end` where it stands at the right of its row.
  */
-export function modelPicker(state, current, onChange) {
+export function modelPicker(state, current, onChange, align) {
   const served = new Map();
   const listed = connected(state.providers, current.provider);
   const groups = keyedFirst(listed).map((provider) => {
@@ -164,7 +168,7 @@ export function modelPicker(state, current, onChange) {
     return { label: provider.name, options };
   });
   const empty = listed.length ? 'No model yet' : 'Add an API key in Settings';
-  return picker({ id: 'pick-model', name: 'Model', groups, value: current.provider ? `${current.provider}:${current.model ?? ''}` : null, empty, onChange: (value) => onChange(served.get(value)) });
+  return picker({ id: 'pick-model', name: 'Model', groups, value: current.provider ? `${current.provider}:${current.model ?? ''}` : null, empty, align, onChange: (value) => onChange(served.get(value)) });
 }
 
 /** The providers that have a key, and the one named `keep` (the one in use) whether it has or not. */

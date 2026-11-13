@@ -1,24 +1,35 @@
-// The New session view. The chat bar sits where a session's does, at the foot of the sheet: the
-// task, with what attaches a file before it and what starts after it, and under them the pickers
-// for model, skills, effort, mode and autonomy. In the
-// middle of the sheet is the folder the session will work in: the recent ones to pick from, and
-// the way to another. With no key configured the way to add one is offered there too.
+// The New session view. With the middle panel's background on it opens on the bare glass: in its
+// middle the app's mark, one line that asks, and the chat bar a session has at its foot. In the
+// bar are the task and, along its foot, what attaches a file, the effort, the model, the
+// microphone and what starts. Under the bar is the folder the session will work in, the recent
+// ones to pick from and the way to another, with the mode and the autonomy beside it. Skills are
+// commands typed into the task (js/views/skills.js). With no key configured the way to add one is
+// offered over the bar.
 
 import { api } from '../api.js';
-import { h, icon } from '../dom.js';
+import { brandMark, h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { attachments } from './attach.js';
-import { barButton, chatBar, fitBox, onSendKey } from './common.js';
-import { AUTONOMIES, MODES, effortOptions, modelOptions, modelPicker, plainMode, settingPicker } from './controls.js';
-import { skillsButton } from './skills.js';
+import { barButton, chatBar, fitBox, markIdle, onSendKey } from './common.js';
+import { AUTONOMIES, MODES, effortOptions, modelOptions, modelPicker, picker, plainMode, settingPicker } from './controls.js';
+import { dictation } from './dictate.js';
+import { skillCommands } from './skills.js';
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
 const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'ecosage', autonomy: 'auto', task: '', skills: [], files: [] };
 
+// What the folder menu offers besides folders: the way to another. No path is spelled so.
+const CHOOSE = ':choose';
+
 /** Workspaces of earlier real sessions, most recent first. */
 function recentWorkspaces(sessions) {
   return [...new Set(sessions.filter((meta) => !meta.simulated).map((meta) => plainPath(meta.cwd)))].slice(0, 5);
+}
+
+/** Makes `path` the folder of the session being drafted: what File > Open folder does. */
+export function useFolder(path) {
+  draft.cwd = plainPath(path);
 }
 
 export function mountNewSession(main, app) {
@@ -56,52 +67,42 @@ export function mountNewSession(main, app) {
     button.disabled = false;
   }
 
-  // The folder: the recent ones with the chosen one checked, and the way to any other.
-  const projects = h('div.projects', { role: 'group', 'aria-label': 'Folder' });
-  function drawProjects() {
-    const within = projects.contains(document.activeElement);
+  // The folder, under the bar: the recent ones with the chosen one checked, and the way to any other.
+  const folderSlot = h('span.pick-slot');
+  const folderButton = () => folderSlot.querySelector('#pick-folder');
+  function drawFolder() {
+    const within = folderSlot.contains(document.activeElement);
     // One picked with the dialog is listed as well, ahead of the recent ones.
     const paths = draft.cwd && !recent.includes(draft.cwd) ? [draft.cwd, ...recent] : recent;
     const names = folderNames(paths);
-    const check = () => {
-      const mark = icon('check', 14);
-      mark.classList.add('project-check');
-      return mark;
-    };
-    projects.replaceChildren(
-      ...paths.map((path) =>
-        h(
-          'button.project',
-          { type: 'button', title: tilde(path, state.home), 'aria-pressed': String(path === draft.cwd), onclick: () => setWorkspace(path) },
-          icon('folder', 14),
-          h('span.project-name', names.get(path)),
-          check(),
-        ),
-      ),
-      // Spread, not `&&`: the DOM's own `replaceChildren` would write a `false` out as text.
-      ...(paths.length > 0 ? [h('div.projects-rule')] : []),
-      h(
-        'button.project',
-        {
-          id: 'browse-workspace',
-          type: 'button',
-          // The system's own dialog: Explorer, Finder, the desktop's file chooser.
-          onclick: (event) =>
-            guarded(event.currentTarget, async () => {
-              const picked = await api.pickFolder(draft.cwd || null);
-              if (picked) setWorkspace(plainPath(picked));
-            }),
-        },
-        'Choose folder…',
-      ),
+    folderSlot.replaceChildren(
+      picker({
+        id: 'pick-folder',
+        name: 'Folder',
+        glyph: 'folder',
+        groups: [{ options: paths.map((path) => ({ value: path, label: names.get(path), title: tilde(path, state.home) })) }, { options: [{ value: CHOOSE, label: 'Choose folder…' }] }],
+        value: draft.cwd || null,
+        empty: 'Choose a folder',
+        onChange: (value) => (value === CHOOSE ? browse() : setWorkspace(value)),
+      }),
     );
-    if (within) projects.querySelector('[aria-pressed="true"]')?.focus();
+    if (within) folderButton().focus();
   }
   const setWorkspace = (path) => {
     draft.cwd = path;
-    drawProjects();
+    drawFolder();
     loadSkills();
   };
+  // The system's own dialog: Explorer, Finder, the desktop's file chooser.
+  async function browse() {
+    await guarded(folderButton(), async () => {
+      const picked = await api.pickFolder(draft.cwd || null);
+      if (picked) draft.cwd = plainPath(picked);
+    });
+    // Drawn again whatever came of it: the picker names the folder, not the way to another.
+    setWorkspace(draft.cwd);
+    folderButton().focus();
+  }
 
   /** A run setting: its name, the current value, and a menu of the others. */
   const setting = (key, name, options, changed) =>
@@ -110,13 +111,28 @@ export function mountNewSession(main, app) {
       changed?.();
     });
 
-  // Skills sit next to the model. The list follows the folder: a project brings its own.
-  const skillsSlot = h('span.pick-slot');
+  const task = h('textarea', {
+    id: 'task',
+    rows: 1,
+    value: draft.task,
+    placeholder: 'Describe a task or ask a question',
+    'aria-label': 'Task',
+    oninput: () => {
+      draft.task = task.value;
+      fitBox(task);
+      markIdle(startButton, task);
+    },
+    onkeydown: (event) => skills.key(event) || onSendKey(event, start),
+  });
+
+  // The skills on offer follow the folder: a project brings its own. The conventional loop takes none.
   let skillList = [];
   let skillsAsked = 0;
-  function drawSkills() {
-    // The conventional loop takes no skills.
-    skillsSlot.replaceChildren(skillsButton({ skills: skillList, value: draft.skills, disabled: plainMode(draft.mode), onChange: (names) => (draft.skills = names) }));
+  const skills = skillCommands({ box: task, list: () => skillList, usable: () => !plainMode(draft.mode), value: draft.skills, onChange: (names) => (draft.skills = names) });
+  const hint = h('span.chat-hint', 'Type / for skills');
+  function drawMode() {
+    hint.hidden = plainMode(draft.mode);
+    skills.refresh();
   }
   async function loadSkills() {
     const asked = ++skillsAsked;
@@ -124,37 +140,23 @@ export function mountNewSession(main, app) {
     // A slower answer for an earlier folder must not replace a later one.
     if (asked !== skillsAsked || JSON.stringify(listed) === JSON.stringify(skillList)) return;
     skillList = listed;
-    // Another folder may not have what was picked.
-    draft.skills = draft.skills.filter((name) => listed.some((skill) => skill.name === name));
-    drawSkills();
+    skills.refresh();
   }
-  drawProjects();
-  drawSkills();
-  loadSkills();
-
-  const task = h('textarea', {
-    id: 'task',
-    rows: 1,
-    value: draft.task,
-    placeholder: 'Task',
-    'aria-label': 'Task',
-    oninput: () => {
-      draft.task = task.value;
-      fitBox(task);
-    },
-    onkeydown: (event) => onSendKey(event, start),
-  });
 
   // With no key there is nothing to start: adding one is the view's one primary action.
   const startButton = barButton('start', 'Start', icon('send', 16), start, keyed.length > 0 ? 'primary' : 'bare');
   const files = attachments({ start: () => draft.cwd, value: draft.files, onChange: (paths) => (draft.files = paths) });
+  const mic = dictation({ box: task, fail });
 
   function start() {
     // Enter pressed again while the first start is on its way would start a second session.
     if (startButton.disabled) return;
+    // A command typed out and sent is taken now. Alone in the box, it was all there was to do.
+    if (skills.take()) return;
     if (!draft.provider) return fail('No API key.');
     if (!draft.cwd) return fail('No folder.');
     if (!draft.task.trim()) return fail('No task.');
+    mic.stop();
     return guarded(startButton, async () => {
       const { cwd, provider, model, effort, mode, autonomy } = draft;
       const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: plainMode(mode) ? [] : draft.skills, files: draft.files });
@@ -165,9 +167,8 @@ export function mountNewSession(main, app) {
     });
   }
 
-  const pickers = [modelPicker(state, draft, (choice) => Object.assign(draft, choice)), skillsSlot, setting('effort', 'Effort', effortOptions(state.effort)), setting('mode', 'Mode', MODES, drawSkills), setting('autonomy', 'Autonomy', AUTONOMIES)];
-  const foot = h(
-    'footer.session-foot',
+  const bar = h(
+    'div.new-bar',
     {
       // From a picker. In the task box the key is the user's choice.
       onkeydown: (event) => {
@@ -176,19 +177,33 @@ export function mountNewSession(main, app) {
         start();
       },
     },
-    chatBar({ over: error, files, box: task, buttons: startButton, pickers }),
+    chatBar({
+      over: error,
+      files,
+      skills,
+      box: task,
+      start: setting('effort', 'Effort', effortOptions(state.effort)),
+      end: [modelPicker(state, draft, (choice) => Object.assign(draft, choice), 'end'), mic.button, startButton],
+      under: [folderSlot, setting('mode', 'Mode', MODES, drawMode), setting('autonomy', 'Autonomy', AUTONOMIES), hint],
+    }),
   );
 
   // The way to a key leads while there is none.
-  const lead = keyed.length === 0 && h('button.btn.primary', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings' }) }, icon('key', 14), 'Add an API key');
+  const lead = keyed.length === 0 && h('button.btn.primary.new-lead', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings' }) }, icon('key', 14), 'Add an API key');
+  const hero = h('div.new-hero', brandMark(44), h('h1.view-title', 'What should we work on?'));
 
-  main.append(h('header.view-head', { 'data-tauri-drag-region': 'deep' }), h('div.new-body', projects, lead), foot);
+  main.append(h('div.new-body', hero, lead, bar));
+  drawFolder();
+  drawMode();
+  loadSkills();
   fitBox(task);
+  markIdle(startButton, task);
   // Start where the first thing is still missing.
-  (lead || (draft.cwd ? task : projects.querySelector('#browse-workspace'))).focus();
+  (lead || (draft.cwd ? task : folderButton())).focus();
   return {
     unmount() {
       skillsAsked++;
+      mic.stop();
     },
   };
 }
