@@ -235,8 +235,9 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<OutBuf>>) {
 pub fn spawn(cmd: &str, cwd: &Path, envs: &[(String, String)], state: StateMode<'_>, spill: &Path) -> std::io::Result<Running> {
     let mut c = shell_command(cmd, state);
     c.env("SAGE_PIPE", pipe_file(spill));
-    // `cd -` goes to $OLDPWD, and an inherited one is wherever Sage was launched from: a
-    // directory that has nothing to do with the session. Each command starts with it at home.
+    // `cd -` goes to $OLDPWD, and an inherited PWD or OLDPWD is wherever Sage was launched from:
+    // a directory that has nothing to do with the session. Each command starts with both at home.
+    c.env("PWD", cwd);
     c.env("OLDPWD", cwd);
     c.current_dir(cwd)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
