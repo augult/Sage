@@ -13,8 +13,10 @@
   const appearance = read('appearance');
   const dark = appearance === 'dark' || (appearance !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
   root.dataset.scheme = dark ? 'dark' : 'light';
-  root.dataset.theme = matchMedia('(prefers-reduced-transparency: reduce)').matches ? 'none' : read('background') || 'ember';
+  // What was chosen holds; what nobody has chosen starts as the system asks (js/themes.js).
+  const less = (what) => matchMedia(`(prefers-reduced-${what}: reduce)`).matches;
+  root.dataset.theme = read('background') || (less('transparency') ? 'none' : 'ember');
   root.dataset.dither = read('dither') === 'off' ? 'off' : 'on';
-  root.dataset.motion = read('motion') === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on';
+  root.dataset.motion = (read('motion') || (less('motion') ? 'off' : 'on')) === 'off' ? 'off' : 'on';
   for (const pane of ['sidebar', 'inspector']) root.dataset[pane] = read(pane) === 'off' ? 'off' : 'on';
 })();
