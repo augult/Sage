@@ -47,12 +47,12 @@ const EDGES_BRIEF: &str = "- The first examiner goes through the text rule by ru
 
 const FORMAT: &str = "\
 - Write the script as you go through the text. Do not work every case out before you begin to write: a reply that is all thought and no script is lost.
-- Where the text leaves a point open or you are not sure what it requires, write no case. A wrong case costs more than a missing one.
-- Cover what the existing tests leave out; do not repeat them.
+- Where the text leaves a point open or you are not sure what it requires, write no case. A wrong case costs more than a missing one. Check boundary wording verbatim (`<` against `<=`, 0-based against 1-based, inclusive against exclusive, empty against missing) before writing an expected value.
+- Cover what the existing tests leave out; do not repeat them. When the task asks for a new test file covering existing code that must stay unchanged, run that test file against the code as given and against small copies in a temporary directory that each break one documented rule.
 - Use only the interface that the task, the documents and the existing code fix: names, signatures, files, commands. Never guess one.
 - The script is stored outside the project and run from the project's root directory, so it reaches the project's code relative to the working directory (in Python: `sys.path.insert(0, os.getcwd())`). It uses the project's language and nothing that is not already installed. It changes no file of the project; anything it needs to write goes into a temporary directory.
 - Every case runs on its own: a case that raises or crashes counts as failed and the others still run. Load the project's code inside the cases, so that code that is missing or does not load fails them and does not stop the script.
-- Print nothing for a case that passes. For each failed case print one block: first a line `FAIL <name>`, then on lines of their own the clause in a few words, the input, what the text requires and what came back. The last line printed is exactly `EXAM: <passed> passed, <failed> failed`. The exit status is 0 only if no case failed.
+- Print nothing for a case that passes. For each failed case print one block: first a line `FAIL <name>`, then on lines of their own the clause in a few words, the input, what the text requires and what came back (`repr()` of the value, or for an exception its class and any attributes the text specifies, such as `.line` or `.code`). The last line printed is exactly `EXAM: <passed> passed, <failed> failed`. The exit status is 0 only if no case failed.
 - Lines of the files shown may begin with a short anchor such as `41kq`; it is not part of the file.
 
 If the task is a question, an investigation or a review, or if nothing about its result can be checked by a script, reply with the single word NONE.
@@ -91,7 +91,11 @@ pub struct Script {
 
 /// Reads an examiner's reply. `None` when it holds no script, which is also what `NONE` is.
 pub fn parse(reply: &str) -> Option<Script> {
-    let command = reply.lines().find_map(|l| l.trim().strip_prefix("COMMAND:"))?.trim().trim_matches('`').trim().to_string();
+    let command = reply.lines().find_map(|l| {
+        let cleaned = l.trim().trim_start_matches(['*', '_', '#', '>', '-', ' ']);
+        let head = cleaned.get(..8)?;
+        head.eq_ignore_ascii_case("command:").then(|| cleaned[8..].trim_start_matches(['*', '_']).trim().trim_matches('`').trim().to_string())
+    })?;
     if !command.contains("{file}") {
         return None;
     }
@@ -109,6 +113,12 @@ pub fn parse(reply: &str) -> Option<Script> {
         _ => "txt",
     };
     (!body.trim().is_empty()).then(|| Script { command, ext: ext.to_string(), body: body.to_string() })
+}
+
+/// True when `reply` tried to send a script (not `NONE`), even if `parse` refused its format.
+pub fn looks_like_script_attempt(reply: &str) -> bool {
+    let trimmed = reply.trim();
+    !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("none") && trimmed.contains("```")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,6 +222,9 @@ const SAME_FORMAT: &str = "Reply in the same format as before, with the whole sc
 /// What an examiner is told when its reply ran into the output limit before the script ended.
 pub const REPAIR_CUT: &str = "Your reply ran into the output limit before the script ended, so there is no script. Write it again so that it fits: a table of cases and one loop that runs them, no helper that is used once, no comments, at most 60 cases, the ones most likely to show a fault first. Reply in the same format as before, with the whole script.";
 
+/// What an examiner is told when its reply held a code block without `COMMAND: ... {file}`.
+pub const REPAIR_FORMAT: &str = "Your reply held a script, not in the required format: the `COMMAND:` line was missing or omitted the literal `{file}` placeholder. Reply with `COMMAND: <runner> {file}` on its own line followed by one fenced code block holding the whole script, or `NONE`.";
+
 /// What an examiner is told when its script did not get as far as its count.
 pub fn repair_broken(output: &str) -> String {
     let shown = if output.trim().is_empty() { "(it printed nothing, or ran for too long)".to_string() } else { excerpt(output) };
@@ -285,26 +298,58 @@ const MAX_GROUND_CHARS: usize = 400;
 /// What a referee's reply rules on each of `names`, with the sentence it quotes or its reason. A
 /// case the reply has no readable line for is not in the result.
 pub fn rulings(reply: &str, names: &[String]) -> HashMap<String, (Ruling, String)> {
+    fn strip_label(s: &str) -> &str {
+        for prefix in ["case ", "fail: ", "fail ", "failed: ", "failed "] {
+            if s.get(..prefix.len()).is_some_and(|h| h.eq_ignore_ascii_case(prefix)) {
+                return bare(&s[prefix.len()..]);
+            }
+        }
+        s
+    }
     let named = |line: &str| -> Option<(String, usize)> {
         names.iter().filter(|n| line.starts_with(n.as_str()) && !line[n.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')).max_by_key(|n| n.len()).map(|n| (n.clone(), n.len()))
     };
-    let mut found = HashMap::new();
-    for line in reply.lines() {
-        let line = bare(line);
-        // A numbered list: but only where the number is not the start of a name.
-        let unnumbered = bare(line.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ')']));
-        let Some((name, line)) = named(line).map(|(n, len)| (n, &line[len..])).or_else(|| named(unnumbered).map(|(n, len)| (n, &unnumbered[len..]))) else { continue };
-        let rest = line.trim_start_matches(|c: char| c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}".contains(c));
+    let verdict_in = |s: &str| -> Option<(Ruling, String)> {
+        let mut rest = s.trim_start_matches(|c: char| c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c));
+        for label in ["ruling", "verdict"] {
+            if rest.get(..label.len()).is_some_and(|h| h.eq_ignore_ascii_case(label))
+                && rest[label.len()..].starts_with(|c: char| !c.is_ascii_alphanumeric())
+            {
+                rest = rest[label.len()..].trim_start_matches(|c: char| c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c));
+            }
+        }
         // ASCII case only, so that byte positions in `upper` are those of `rest`.
         let upper = rest.to_ascii_uppercase();
-        let Some((ruling, len)) = [("GAP", Ruling::Gap), ("CASE", Ruling::Case), ("OPEN", Ruling::Open)]
+        let (ruling, len) = [("GAP", Ruling::Gap), ("CASE", Ruling::Case), ("OPEN", Ruling::Open)]
             .into_iter()
-            .find_map(|(word, ruling)| (upper.starts_with(word) && !upper[word.len()..].starts_with(|c: char| c.is_ascii_alphanumeric())).then_some((ruling, word.len())))
-        else {
-            continue;
-        };
-        let ground = rest[len..].trim_matches(|c: char| c.is_whitespace() || "`*_:-\u{2013}\u{2014}".contains(c));
-        found.entry(name).or_insert((ruling, truncate_chars(ground, MAX_GROUND_CHARS)));
+            .find_map(|(word, ruling)| (upper.starts_with(word) && !upper[word.len()..].starts_with(|c: char| c.is_ascii_alphanumeric())).then_some((ruling, word.len())))?;
+        let ground = rest[len..].trim_matches(|c: char| c.is_whitespace() || "`*_:-)\u{2013}\u{2014}]".contains(c));
+        Some((ruling, truncate_chars(ground, MAX_GROUND_CHARS)))
+    };
+
+    let mut found = HashMap::new();
+    let mut pending: Option<String> = None;
+    for raw in reply.lines() {
+        let line = strip_label(bare(raw));
+        // A numbered list: but only where the number is not the start of a name.
+        let unnumbered = strip_label(bare(line.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ')'])));
+        if let Some((name, tail)) = named(line).map(|(n, len)| (n, &line[len..])).or_else(|| named(unnumbered).map(|(n, len)| (n, &unnumbered[len..]))) {
+            if let Some(v) = verdict_in(tail) {
+                found.entry(name).or_insert(v);
+                pending = None;
+            } else if tail.trim_matches(|c: char| c.is_whitespace() || "`*_\"':-".contains(c)).is_empty() {
+                // Heading or bullet naming the case alone, with the ruling on the next line.
+                pending = Some(name);
+            } else {
+                pending = None;
+            }
+        } else if let Some(name) = pending.take() {
+            if let Some(v) = verdict_in(line) {
+                found.entry(name).or_insert(v);
+            } else if line.is_empty() {
+                pending = Some(name);
+            }
+        }
     }
     found
 }
@@ -413,6 +458,8 @@ mod tests {
         assert!(script.body.starts_with("import os") && script.body.ends_with("failed')"));
         assert_eq!(parse("NONE"), None);
         assert_eq!(parse("COMMAND: python3 exam.py\n```python\nx\n```"), None, "a command that does not say where the file goes");
+        assert!(looks_like_script_attempt("COMMAND: python3 exam.py\n```python\nx\n```") && !looks_like_script_attempt("NONE"));
+        assert_eq!(parse("**Command:** `python3 {file}`\n```python\nx = 1\n```").unwrap().command, "python3 {file}");
         assert_eq!(parse("COMMAND: node {file}\n```js\n\n```"), None);
     }
 
@@ -474,6 +521,12 @@ mod tests {
         assert_eq!(ruled.len(), 3);
         // A line that rules nothing rules nothing: a word that only begins like a ruling, a name alone.
         assert!(rulings("s5_last: GAPS in the text\ns5_last_line", &names).is_empty());
+        // Parenthesised verdicts, leading `Case`/`FAIL` labels, and two-line blocks are understood too.
+        let varied = "Case `s5_last` (GAP): \"Section 5.\"\n### `s5_last_line`\nVerdict: CASE — wrong signature\nFAIL 1_endings: [OPEN] left open";
+        let varied = rulings(varied, &names);
+        assert_eq!(varied["s5_last"], (Ruling::Gap, "\"Section 5.\"".to_string()));
+        assert_eq!(varied["s5_last_line"].0, Ruling::Case);
+        assert_eq!(varied["1_endings"].0, Ruling::Open);
 
         let cases = [Case { name: "a".into(), text: "FAIL a\n  got: 1".into() }, Case { name: "b".into(), text: "FAIL b".into() }];
         let asked = referee_brief("<task>\nT\n</task>", "print(1)\n", &cases.iter().collect::<Vec<_>>());

@@ -85,6 +85,9 @@ pub struct Runner<'a> {
     pub interactive: bool,
     /// The budget ends with this reply: `finish` is taken as it stands, since nothing can follow it.
     pub landing: bool,
+    /// Active blind examiners are waiting behind `finish` on a watchless workspace, so `finish`
+    /// after an edit may pass through to `exam_check` instead of tripping the `expect_exit` gate first.
+    pub exam_gates_finish: bool,
 }
 
 fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
@@ -305,6 +308,16 @@ impl Runner<'_> {
             let text = "[denied] refused: that is the harness's own configuration, which holds API keys. Nothing in it bears on the task.".to_string();
             return Some(StepOutput { status: StepStatus::Denied, stub: text.clone(), observation: text, ..Default::default() });
         }
+        if matches!(tool, Tool::Edit | Tool::Write)
+            && let Some(path) = str_arg(&call.args, "path")
+        {
+            let target = self.sess.ws.resolve(path);
+            let real = crate::util::canonical(&target).unwrap_or(target);
+            if real.starts_with(&self.sess.dir) && !self.sess.ws.root.starts_with(&self.sess.dir) {
+                let text = "[denied] refused: that file belongs to the harness's own session record; do not edit it.".to_string();
+                return Some(StepOutput { status: StepStatus::Denied, stub: text.clone(), observation: text, ..Default::default() });
+            }
+        }
         let danger = if tool == Tool::Shell { str_arg(&call.args, "cmd").and_then(tools::shell::danger) } else { None };
         if !tool.is_act() || (self.autonomy == Autonomy::Auto && danger.is_none()) {
             return None;
@@ -360,6 +373,9 @@ impl Runner<'_> {
             // A run that left the workspace alone is also the current result of any watch on that
             // command, and the model's own test command becomes a watch here.
             if let (Some(run), true) = (&meta.completed, self.sess.evidence.epoch == epoch_before) {
+                if meta.ok && !proves_nothing(&meta.cmd) {
+                    self.sess.evidence.note_checked();
+                }
                 let seen = watches::observe(self.sess, &meta.cmd, run);
                 for r in &seen.reports {
                     self.sink.emit(EventKind::Watch { turn: self.turn, name: r.name.clone(), cmd: r.cmd.clone(), state: r.state, change: r.change, detail: r.detail.clone() });
@@ -473,6 +489,10 @@ impl Runner<'_> {
             res.finished = Some(Finished { summary, verified: false, evidence: format!("unverified: {reason}") });
             return StepOutput::ok("[done] accepted without verification");
         }
+        if self.exam_gates_finish {
+            res.finished = Some(Finished { summary, verified: false, evidence: format!("not checked since {}", ev.last_change) });
+            return StepOutput::ok("[done] pending examination");
+        }
         // The gate asks for a check; it must not be able to trap a model that cannot produce one.
         ev.refusals += 1;
         if ev.refusals > 2 {
@@ -511,7 +531,7 @@ mod tests {
         let mut stats = Stats::default();
         let cancel = CancellationToken::new();
         let approvals = Approvals::default();
-        let res = Runner { sess, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Auto, interactive: false, landing }.run(&calls(list)).await;
+        let res = Runner { sess, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Auto, interactive: false, landing, exam_gates_finish: false }.run(&calls(list)).await;
         let events = sink.events.lock().unwrap().clone();
         (res, stats, events)
     }
@@ -713,7 +733,7 @@ mod tests {
                 }
             }
         };
-        let mut runner = Runner { sess: &mut s, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Ask, interactive: true, landing: false };
+        let mut runner = Runner { sess: &mut s, sink: &sink, cancel: &cancel, approvals: &approvals, stats: &mut stats, turn: 1, autonomy: Autonomy::Ask, interactive: true, landing: false, exam_gates_finish: false };
         let (res, _) = tokio::join!(runner.run(&list), answer);
         assert!(s.ws.root.join("a.txt").exists() && !s.ws.root.join("b.txt").exists());
         assert!(res.observations[1].1.starts_with("[denied] the user declined"));
