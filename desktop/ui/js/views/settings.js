@@ -59,7 +59,6 @@ export function mountSettings(main, app) {
   const live = h('div.contents');
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
-    h('header.view-head', { 'data-tauri-drag-region': 'deep' }),
     h('div.view-body', h('div.view-column', h('h1.view-title', 'Settings'), appearanceSection(), messagesSection(app), live, skillsSection(), systemSection(), instructionsSection(), dataFolder)),
   );
 
@@ -91,11 +90,41 @@ export function mountSettings(main, app) {
   return {};
 }
 
-/** Light or dark, the painting behind the panes, and its dither: there or not, moving or still. Kept by the window, not the engine. */
+/**
+ * Light or dark, the painting behind the panels, which of the panels show it, and its dither:
+ * there or not, moving or still. Kept by the window, not the engine.
+ */
 function appearanceSection() {
   const pick = themes.chosen();
   const choice = (name, label, values, value) =>
     radioChips({ name, label, segmented: true, options: values.map((option) => ({ value: option, label: option.charAt(0).toUpperCase() + option.slice(1) })), value, onChange: (chosen) => themes.choose({ [name]: chosen }) });
+
+  // The window in small, cut as the window is: a fifth of it the left panel, three fifths the
+  // middle one, a fifth the right. Each part is a switch for the background in that panel.
+  const map = h('div.panel-map', { id: 'panel-backgrounds', role: 'group', 'aria-label': 'Panel backgrounds' });
+  const mapHint = hint();
+  function drawMap() {
+    const now = themes.chosen();
+    const { thumb } = themes.BACKGROUNDS.find((background) => background.id === now.background);
+    map.replaceChildren(
+      ...(thumb ? [h('img', { src: thumb, alt: '', draggable: 'false' })] : []),
+      ...themes.PANELS.map((panel) => {
+        const label = `${panel.name} panel background`;
+        const flip = (event) => themes.choose({ [panel.key]: event.target.checked ? 'on' : 'off' });
+        return h(
+          'label.panel-zone',
+          { title: label, dataset: { panel: panel.id } },
+          // With no background there is nothing to show in any of them.
+          h('input', { type: 'checkbox', checked: Boolean(thumb) && now[panel.key] === 'on', disabled: !thumb, 'aria-label': label, onchange: flip }),
+          h('span.panel-face'),
+          h('span.panel-name', panel.name),
+        );
+      }),
+    );
+    mapHint.textContent = thumb ? 'The panels that show the background. Click one to switch it.' : 'Choose a background to show it in a panel.';
+  }
+  drawMap();
+
   const backgrounds = h(
     'div.theme-grid',
     { role: 'radiogroup', 'aria-label': 'Background' },
@@ -103,7 +132,16 @@ function appearanceSection() {
       h(
         'label.theme-card',
         { dataset: { background: background.id } },
-        h('input', { type: 'radio', name: 'background', value: background.id, checked: background.id === pick.background, onchange: () => themes.choose({ background: background.id }) }),
+        h('input', {
+          type: 'radio',
+          name: 'background',
+          value: background.id,
+          checked: background.id === pick.background,
+          onchange: () => {
+            themes.choose({ background: background.id });
+            drawMap();
+          },
+        }),
         h('span.theme-thumb', background.thumb && h('img', { src: background.thumb, alt: '', draggable: 'false' })),
         h('span.theme-name', background.name),
       ),
@@ -115,6 +153,7 @@ function appearanceSection() {
     h('h2.section-title', 'Appearance'),
     field('Mode', choice('appearance', 'Appearance', themes.APPEARANCES, pick.appearance)),
     field('Background', backgrounds),
+    field('Panels', map, mapHint),
     field('Dither', choice('dither', 'Dither', ['on', 'off'], pick.dither)),
     field('Motion', choice('motion', 'Motion', ['on', 'off'], pick.motion)),
   );

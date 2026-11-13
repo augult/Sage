@@ -1,11 +1,12 @@
-// The glass behind the panes: a painting the app brings itself, never what is behind the window.
+// The glass behind the panels: a painting the app brings itself, never what is behind the window.
 //
 // The chosen background (themes/<id>/art.webp) is taken once, at thumbnail size, softened, and
 // pressed into a band of brightness for the appearance, dark or light, so that text keeps its
 // contrast on the thinnest pane whatever the picture is. The result goes to one canvas behind the
-// panes, which are plain translucent fills over it (styles/glass.css): nothing blurs or filters
-// while the app runs, and nothing looks at the desktop. A second, far smaller canvas carries the
-// dither that drifts over the picture (js/dither.js).
+// panels. Those that show it are plain translucent fills over it, the rest are solid
+// (styles/glass.css): the panels neither blur nor filter while the app runs (the chat bar alone
+// does), and nothing looks at the desktop. A second, far smaller canvas carries the dither that
+// drifts over the picture (js/dither.js).
 
 import { createDither } from './dither.js';
 import * as themes from './themes.js';
@@ -138,10 +139,24 @@ function load(src) {
   });
 }
 
+/**
+ * Whether any bare glass is in view for the dither to drift over: the title bar and the sidebar
+ * with the left panel's background on, the inspector while it is there with its own, or the middle
+ * panel while a new session has put the sheet away (styles/glass.css). Everywhere else the dither
+ * is covered or cut away.
+ */
+function glassShows() {
+  const at = document.documentElement.dataset;
+  return at.bgLeft === 'on' || (at.bgRight === 'on' && at.inspector !== 'off') || (at.bgMiddle === 'on' && at.view === 'new');
+}
+
+/** The dither moves only where it can be seen. */
+const move = (now) => dither.run(now.motion && now.dither && Boolean(now.background.art) && glassShows());
+
 async function paint(now) {
   const { background, scheme } = now;
   dither.restyle(themes.ditherLook(now));
-  dither.run(now.motion && now.dither && Boolean(background.art));
+  move(now);
   const wanted = `${background.id}:${scheme}`;
   if (wanted === shown) return;
   shown = wanted;
@@ -158,4 +173,6 @@ async function paint(now) {
 export function startBackdrop() {
   themes.onChange(paint);
   paint(themes.current());
+  // The view and the inspector come and go without a change of theme.
+  new MutationObserver(() => move(themes.current())).observe(document.documentElement, { attributes: true, attributeFilter: ['data-view', 'data-inspector'] });
 }

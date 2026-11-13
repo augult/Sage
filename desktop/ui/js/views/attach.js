@@ -9,11 +9,15 @@ export const baseName = (path) => path.split(/[\\/]/).pop();
 
 /** A file by its name; the whole path is its `title`. With `onRemove`, a cross takes it off. */
 export function fileChip(path, onRemove) {
-  const name = baseName(path);
+  return chip('file', baseName(path), path, onRemove);
+}
+
+/** What goes with a message, in the bar over its text: a glyph and a name. With `onRemove`, a cross takes it off. */
+export function chip(glyph, name, title, onRemove) {
   return h(
     'span.file-chip',
-    { title: path },
-    icon('file', 14),
+    { title },
+    icon(glyph, 14),
     h('span.file-name', name),
     onRemove && h('button.file-remove', { type: 'button', 'aria-label': `Remove ${name}`, onclick: onRemove }, icon('cross', 12)),
   );

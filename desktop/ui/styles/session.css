@@ -704,9 +704,11 @@ button.row-line:focus-visible {
   color: var(--ink);
 }
 
-/* The chat bar, in a session and in the New session view alike, so that it does not move when the
-   first message is sent: the box with the text and what sends it or stops the run, and under the
-   box the pickers. */
+/* The chat bar. A session has it at the foot of the sheet; a new session opens with it in the
+   middle of the glass (styles/forms.css). The bar is a pane of frosted glass, the one thing here
+   that blurs what lies behind it: in it the text, and along its foot what attaches a file, the
+   effort, the model, the microphone and what sends or stops. Under the bar are the pickers for
+   what is the session's rather than the message's. */
 
 .session-foot {
   flex: none;
@@ -752,33 +754,47 @@ button.row-line:focus-visible {
 }
 
 .composer {
+  position: relative;
+  /* Over the pickers under it, which would otherwise lie over a menu opened from here. */
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 5px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
-  background: var(--well);
+  background: var(--frost);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
   transition: border-color 120ms ease;
 }
 
+/* The caret says where the typing goes; the pane's edge only firms up for it. */
 .composer:has(textarea:focus-visible) {
-  border-color: var(--ink);
+  border-color: color-mix(in srgb, var(--ink) 32%, transparent);
 }
 
-/* What attaches a file, the text, and what sends it or stops the run. */
-.composer-row {
+/* Along the bar's foot: what attaches a file and the effort at one end, the model, the microphone
+   and what sends at the other. The words give way before the two ends run into each other. */
+.composer-foot {
   display: flex;
-  align-items: flex-end;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 5px 5px;
 }
 
-/* The files attached, over the text: the box grows upwards by their row. */
+.composer-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* The files attached and the skills in use, over the text: the bar grows upwards by their rows. */
 .attached {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 3px 3px 0;
+  padding: 8px 8px 0;
 }
 
 .file-chip {
@@ -876,6 +892,19 @@ button.row-line:focus-visible {
   background: color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
+/* Nothing to send yet: the square stays, greyed, until something is typed. */
+.bar-btn.primary.is-idle,
+.bar-btn.primary.is-idle:hover:not(:disabled) {
+  background: var(--fill-3);
+  color: var(--faint);
+}
+
+/* The microphone while it listens: filled, like what stops a run. */
+.bar-btn[aria-pressed="true"] {
+  background: var(--fill-3);
+  color: var(--ink);
+}
+
 .bar-btn:active:not(:disabled) {
   transform: scale(0.92);
 }
@@ -893,14 +922,12 @@ button.row-line:focus-visible {
   border-top-color: var(--on-primary);
 }
 
-/* One line is as tall as the button beside it. */
+/* The text has the bar's whole width, over its foot. */
 .composer textarea {
   display: block;
-  flex: 1;
-  min-width: 0;
-  min-height: 28px;
+  width: 100%;
   max-height: 160px;
-  padding: 3px 3px 4px;
+  padding: 9px 12px 3px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -913,8 +940,9 @@ button.row-line:focus-visible {
   color: var(--faint);
 }
 
-/* As tall with no picker in it as with a row of them, so the box stays where it is. */
+/* As tall with no picker in it as with a row of them, so the bar stays where it is. */
 .composer-under {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -923,7 +951,21 @@ button.row-line:focus-visible {
   padding: 4px 4px 0;
 }
 
+/* A menu opened from under the bar lies over it. */
+.composer-under:has(.pick[aria-expanded="true"]) {
+  z-index: 2;
+}
+
 .composer-under .pick-slot {
   flex: 0 1 auto;
   max-width: 50%;
+}
+
+/* How skills are switched on, said once at the end of the row. */
+.chat-hint {
+  margin-left: auto;
+  padding: 0 6px;
+  color: var(--faint);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }

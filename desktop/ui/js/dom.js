@@ -77,6 +77,10 @@ const ICONS = {
   branch: 'M5 3a1.4 1.4 0 100 2.8A1.4 1.4 0 005 3zM5 10.2A1.4 1.4 0 105 13a1.4 1.4 0 000-2.8zM11 4.4a1.4 1.4 0 100 2.8 1.4 1.4 0 000-2.8zM5 5.8v4.4M11 7.2c0 2.3-6 .9-6 3',
   // The Return key's arrow: down from the upper right, then off to the left.
   send: 'M5.9 7L3.5 9.4a.7.7 0 0 0 0 1l2.4 2.4M3.7 9.9h7.3a1.4 1.4 0 0 0 1.4-1.4V3.4',
+  // A microphone: its head, the cradle that stands clear of it, and the stem.
+  mic: 'M8 1.8a1.8 1.8 0 0 0-1.8 1.8v3.6a1.8 1.8 0 0 0 3.6 0V3.6A1.8 1.8 0 0 0 8 1.8zM3.4 7.2a4.6 4.6 0 0 0 9.2 0M8 11.8v2.4',
+  // A key with a slash on it: what a command typed into a chat bar switched on.
+  slash: 'M4.7 2.5h6.6a2.2 2.2 0 0 1 2.2 2.2v6.6a2.2 2.2 0 0 1-2.2 2.2H4.7a2.2 2.2 0 0 1-2.2-2.2V4.7a2.2 2.2 0 0 1 2.2-2.2zM9.3 5.4l-2.6 5.2',
   // The window with its left or its right pane marked off: what puts that pane away and brings it back.
   paneLeft: 'M3.8 3h8.4A1.8 1.8 0 0 1 14 4.8v6.4a1.8 1.8 0 0 1-1.8 1.8H3.8A1.8 1.8 0 0 1 2 11.2V4.8A1.8 1.8 0 0 1 3.8 3zM6.2 3v10',
   paneRight: 'M3.8 3h8.4A1.8 1.8 0 0 1 14 4.8v6.4a1.8 1.8 0 0 1-1.8 1.8H3.8A1.8 1.8 0 0 1 2 11.2V4.8A1.8 1.8 0 0 1 3.8 3zM9.8 3v10',
@@ -109,6 +113,32 @@ export function icon(name, size = 16) {
 }
 
 export const spinner = () => h('span.spinner', { 'aria-hidden': 'true' });
+
+let marks = 0;
+
+/**
+ * The app's mark at `size`, as the website and the app icon have it: a disc, and a ring over it
+ * that is cut out where it crosses the disc, so what is behind shows through the cut.
+ */
+export function brandMark(size) {
+  const el = (name, attributes, ...children) => {
+    const node = document.createElementNS(SVG, name);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+    node.append(...children);
+    return node;
+  };
+  const whole = () => el('rect', { x: 0, y: 0, width: 24, height: 24, fill: '#fff' });
+  // Each mark cuts by masks of its own: two on a page must not share them.
+  const cut = `mark-${++marks}`;
+  return el(
+    'svg',
+    { class: 'brand-mark', viewBox: '2 2 20 20', width: size, height: size, 'aria-hidden': 'true' },
+    el('mask', { id: `${cut}-ring` }, whole(), el('circle', { cx: 14.5, cy: 9.5, r: 6.6, fill: 'none', stroke: '#000', 'stroke-width': 1.8 })),
+    el('mask', { id: `${cut}-disc` }, whole(), el('circle', { cx: 9.5, cy: 14.5, r: 7.5, fill: '#000' })),
+    el('circle', { cx: 9.5, cy: 14.5, r: 7.5, fill: 'currentColor', mask: `url(#${cut}-ring)` }),
+    el('circle', { cx: 14.5, cy: 9.5, r: 6.6, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, mask: `url(#${cut}-disc)` }),
+  );
+}
 
 /** The mark of a run in progress: a dot, and around it a ring that swells and fades (styles/base.css). */
 export function pulse(size = 16) {

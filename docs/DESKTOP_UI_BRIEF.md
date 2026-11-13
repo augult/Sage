@@ -86,13 +86,21 @@ sessions a stand-in played as continuable, and a message to one brings it back, 
 Start a scripted session, quit the app (SIGTERM goes through the same door as the window's
 close), start it again with `SAGE_UI_OPEN=<id> SAGE_UI_REVIVE=<file>`, and type into
 `#followup` with a script. Without the hook such a session is read-only (`simulated`).
-Pickers answer to scripts as `#pick-model`, `#pick-skills`, `#pick-effort`, `#pick-mode`,
-`#pick-autonomy`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
-is `#pick-model-menu [data-value="<provider>:<model>"]`. The Skills button
-is disabled until its list has loaded: click `#pick-skills:not(:disabled)`. It opens `dialog.skills`,
-where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. A chat bar has
+Pickers answer to scripts as `#pick-model`, `#pick-effort`, `#pick-mode`, `#pick-autonomy` and
+`#pick-folder`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
+is `#pick-model-menu [data-value="<provider>:<model>"]` and a recent folder's
+`#pick-folder-menu [data-value="<path>"]`. Skills are commands typed into the box, once their
+list has loaded (`wait:800`): `type:#task=>/debug fix it` switches Debug on and leaves the rest
+as the task, and `type:#task=>/skills;;key:#task=>Enter` opens `dialog.skills`,
+where a skill's card is `[data-skill="debug"]` with `.skill-use` and `.skill-view` in it. The menu
+a typed `/` opens is `#task-commands` (`#followup-commands` in a session), a command in it
+`[data-command="debug"]`, and a skill switched on a chip in the bar, `.file-chip[data-skill="debug"]`. A chat bar has
 `#attach` (a script attaches by path, `attach:#attach=><path>,<path>`: the system's dialog cannot be
-driven), the box `#task` or `#followup`, and `#start`, `#send-followup` or `#stop-session`. The
+driven), the box `#task` or `#followup`, the microphone `#dictate`, and `#start`, `#send-followup` or `#stop-session`. The
+title bar has `#toggle-sidebar`, `#nav-back` and `#nav-forward`, and a menu is `#menu-file` (`-edit`,
+`-view`, `-window`, `-help`) with its entries as `[data-command="new-session"]`; a key the app
+listens for is played as `key:body=>ctrl+n`. The inspector is brought by `click:#toggle-inspector`;
+in Settings a panel's background is `#panel-backgrounds [data-panel="left"] input`. The
 inspector's bar is `#tab-economy`, `#tab-code` and `#tab-github`; in Code a row of the tree is
 `[data-path="src/board.js"]`, the text `#code-text` and its button `#code-save`; in GitHub the
 message is `#push-message` and the button `#push-go`. In Settings:
@@ -117,8 +125,8 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
 - **Shape.** 8px grid. Corners are barely turned: 2px tags and marks, 3px controls and rows, 4px
-  cards, menus, dialogs and the sheet. Nothing is a pill, and nothing is round: what sends, stops
-  or attaches in a chat bar is a glyph on a 28px square with a control's corners and no word beside
+  cards, menus, dialogs and the sheet. Nothing is a pill, and nothing is round: what sends, stops,
+  attaches or listens in a chat bar is a glyph on a 28px square with a control's corners and no word beside
   it. Every button is 28px tall, and a
   one-line field beside one is as tall; the small buttons inside a line or a header (copy, a
   diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
@@ -144,23 +152,41 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   three. Where a control is unclear without a sentence, the control is changed. What the engine
   itself reports about a provider (a gateway that logs prompts) is data: it is the `title` of the
   provider's name in Settings, not a line of its own.
-- **Title bar.** The top 44px of each pane is the title bar (`data-tauri-drag-region`), with the
-  caption buttons where Windows puts them. A session has no strip over its conversation: the
-  window drags by the sidebar's and the inspector's.
-- **Panes.** The sidebar and the inspector are each put away and brought back by a button in
-  their own strip, at the edge next to the sheet (`ui/js/panes.js`; kept by the window). Nothing
-  slides: a pane is there or it is not, and comes back as it was left. With one away the sheet
-  takes its room, less the gap of glass, and has a strip of its own in every view, a session's
-  too, to drag the window by; the button stands in it, and with the inspector away so do the
-  caption buttons, in the sheet's corner, still answering from the window's edge beyond it.
+- **Title bar.** A level of its own along the top of the window, 40px tall, over the three panels
+  (`#titlebar` in `index.html`, `data-tauri-drag-region` where it holds nothing). From the left:
+  the button that puts the sidebar away, the arrows that go back and forward through the views
+  gone through (`main.js` keeps the trail), the menus, and at the far end the caption buttons
+  where Windows puts them. The lead of the bar is as wide as the sidebar, so the menus start
+  where the sheet does.
+- **Menus** (`ui/js/menubar.js`). File: New session, Open folder… (the system's folder dialog;
+  the folder becomes the new session's), Settings, Close window. Edit: Undo, Redo, Cut, Copy,
+  Paste, Select all, on the text field the focus is in (a press on the bar leaves the focus where
+  it was); Copy also takes what is selected in the conversation. View: Back, Forward, Sidebar,
+  Inspector, the inspector's three views (a session's only), and the appearance. Window:
+  Minimize, Maximize or Restore, and the six newest sessions, to go to. Help: Play the
+  walkthrough (`start_demo`), Commands and keys (a dialog of the `/` commands and the keys), About
+  Sage (version and data folder). The app listens for Ctrl/Cmd+N, +O, +comma, +B (sidebar),
+  +Shift+B (inspector), and for Alt+Left and Alt+Right (Cmd+[ and Cmd+] on a Mac); a dialog keeps
+  the keys to itself. An open menu takes the arrow keys, Enter and Escape from the document.
+- **Panels.** Under the title bar are the sidebar, the sheet and the inspector. The sheet runs to
+  the window's foot and to its right edge: the inspector is put away until it is asked for (kept
+  by the window, like the sidebar's being there), and with the sidebar away too the sheet is the
+  whole window under the bar. Each side panel is put away and brought back by a button
+  (`ui/js/panes.js`): the sidebar's at the start of the title bar, the inspector's in the sheet's
+  top right corner. Nothing slides: a panel is there or it is not, and comes back as it was left.
+  Where the sidebar, the title bar and the sheet meet, the sheet's corner is turned as a button's
+  is (3px).
 - **Icons.** Every glyph is drawn (`ui/js/dom.js`, and the caption buttons in `index.html`) with
   round ends and turned corners: a vertex is a small arc, a shape's corners are quarter circles.
 
 ### Glass (`ui/js/backdrop.js`, `ui/js/dither.js`, `ui/js/themes.js`, `ui/styles/glass.css`)
 
-No `backdrop-filter`, no system acrylic and no window transparency: the first two blur again on
-every frame, which is what makes acrylic windows lag on Windows 10, and the window never shows
-what is behind it. The app brings its own picture. A background is a painting made by a script
+No system acrylic and no window transparency, and no `backdrop-filter` on the panes: acrylic and
+the filter blur again on every frame, which is what makes acrylic windows lag on Windows 10, and
+the window never shows what is behind it. One thing is excepted, at the owner's wish: the chat
+bar frosts what lies behind it (`backdrop-filter` in `session.css`). It is one strip, at most
+800px wide; in a session what lies behind it is the sheet, which does not move, and in the New
+session view the dither, which is redrawn twenty times a second. The app brings its own picture. A background is a painting made by a script
 (`desktop/art/<id>.py`, numpy and Pillow, deterministic; it writes `ui/themes/<id>/art.webp` at
 2400×1500 and `thumb.webp` at 480×300): Ember, Orchid, Tide and Graphite, or None for flat panes.
 At start-up, and on every change of background or appearance, `backdrop.js` takes the painting
@@ -168,10 +194,17 @@ at 320px, softens it, presses its brightness into a band (14–76 of 255 for dar
 light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
 much smaller canvas carries an ordered dither (an 8×8 Bayer matrix over three slow waves, set per
 background in `themes.js`), stretched without smoothing so that its dots stay square. The dither
-shows on the glass of the sidebar and the inspector only: it is cut away where the sheet lies
-(`clip-path` in `glass.css`, from the one pane width in `layout.css`). The panes
-are translucent fills: the veil over everything, and in the middle the sheet, the reading
-surface. Nothing blurs or filters while the app runs.
+shows on the bare glass only: it is cut away where the sheet lies
+(`clip-path` in `glass.css`, from the one pane width in `layout.css`), and it stands still while
+no bare glass is in view (`backdrop.js`). Each of the three panels shows the background or does
+not (Settings, Panels; `data-bg-left`, `data-bg-middle` and `data-bg-right` on `<html>`, from
+`themes.js` and, before the first paint, `boot.js`). Out of the box only the middle one does: the
+sidebar, the title bar (which goes with the sidebar) and the inspector are solid. A panel that
+shows it is a translucent fill over it: the veil for a side panel, and in the middle the sheet, the
+reading surface. With the middle panel's background on, the New session view puts the sheet away
+(`data-view="new"` on `<html>`, from `main.js` and `boot.js`): there the painting and its dither
+run under the whole panel, the secondary inks step up as they do on the side panels, and the chat
+bar is the one pane on the glass. Nothing but the chat bar blurs or filters while the app runs.
 
 The system's preferences decide what a setting starts as, never what it can be: under
 `prefers-reduced-transparency` (on Windows, "Transparency effects" switched off) the background
@@ -198,7 +231,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
 
-1. **Sidebar**: app mark and name (the strip drags the window), New session, a tab per folder
+1. **Sidebar**: New session, a tab per folder
    (chevron and the folder's name; the folders stand in the order of their newest
    session, each opens onto its sessions and stays shut once shut, kept by the window; a shut
    folder shows the mark of a session in it that is running or waiting for an approval; going to
@@ -210,30 +243,43 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    right. The sidebar and the inspector are the
    same width, until the inspector shows Code, which widens it.
 2. **Main**:
-   - *New session*: no title and no picture. At the foot of the sheet is the chat bar, built
-     by the same function as a session's (`chatBar` in `ui/js/views/common.js`) so that it is
-     in the same place once the first message is sent: a box with the task and Start, and under
-     the box the pickers. In the middle of the sheet, a little above its centre, is the folder:
-     the folders of up to five recent sessions by name (the full path is the `title`), the
-     chosen one checked, and under a rule "Choose folder…" (the system's own folder dialog,
-     `pick_folder`); a folder picked there joins the list. Under the box,
-     pickers for model, skills, effort (Auto, Low, High, Max: Auto is the engine's `ratchet`,
-     which starts low and steps up when predictions fail), mode (Ecosage / Default / Prosage, each with what it is for as its `title`; README, "Modes") and autonomy
-     (Auto / Ask). Start is Enter in the task, or Ctrl/Cmd+Enter if Settings says so; the
-     other of the two breaks the line, as Shift+Enter always does; the key is not written beside the box. The model menu lists models under their provider
-     from `app_state`, the providers that have a key first; one without a key has its models
-     greyed and disabled. A menu is as wide as its words, and the check of what is chosen sits at
-     the end of its line. Paths are shown without Windows' `\\?\` prefix. The Skills button sits next to the model and
-     opens a dialog of the skills of the chosen folder (`list_skills`) as cards, two to a row:
-     on each its title, its description, Use (which reads "In use" once on; several can be on),
-     View (the whole skill in place of the cards, with a way back) and a button that copies its
-     text. Nothing is sent by choosing: a skill in use goes with the task, or in a session with
-     the next message. The button reads "Skills" with nothing on, then "Skills" and the number on
-     (the titles are its `title` attribute), so the bar keeps to one row. A
-     new session starts with no skills, whatever the last one had; Default takes none, so the
-     button is disabled there. With no key configured, the view leads with "Add an API key", and
-     Start is not the primary button. The walkthrough (`start_demo`) has no button: it is played
-     by `sage demo` and by the `SAGE_UI_AUTODEMO` hook.
+   - *New session*: no title and no picture, and with the middle panel's background on no sheet:
+     the view opens on the bare glass
+     (see Glass). In its middle, a little above the centre, are the app's mark, one large line
+     ("What should we work on?") and the chat bar, built by the same function as a session's
+     (`chatBar` in `ui/js/views/common.js`); once the first message is sent the bar is at the
+     foot of the sheet. In the bar are the task and, along its foot, the + that attaches files
+     and the effort (Auto, Low, High, Max: Auto is the engine's `ratchet`, which starts low and
+     steps up when predictions fail) at one end, and the model, the microphone and Start at the
+     other. Under the bar are the folder, the mode (Ecosage / Default / Prosage, each with what
+     it is for as its `title`; README, "Modes") and the autonomy (Auto / Ask). The folder is a
+     picker like the rest: the folders of up to five recent sessions by name (the full path is
+     the `title`), the chosen one checked, and under a rule "Choose folder…" (the system's own
+     folder dialog, `pick_folder`); a folder picked there joins the list. Start is Enter in the
+     task, or Ctrl/Cmd+Enter if Settings says so; the other of the two breaks the line, as
+     Shift+Enter always does; the key is not written beside the box. Start is grey until the
+     task holds something. The model menu lists models under their provider from `app_state`,
+     the providers that have a key first; one without a key has its models greyed and disabled.
+     A menu is as wide as its words, and the check of what is chosen sits at the end of its
+     line. Paths are shown without Windows' `\\?\` prefix. Skills have no button: they are
+     commands typed at the start of the task (`ui/js/views/skills.js`), as `/goal` is. `/`
+     opens a menu over the bar of `/skills` and the skills of the chosen folder (`list_skills`)
+     by name, each with its description; it narrows as the name is typed, the arrow keys walk
+     it, Enter or Tab takes the row and Escape closes it. `/<name>` switches that skill on, as
+     soon as a space ends the name or when the task is sent, and comes off the text; `/skills`
+     opens a dialog of the skills as cards, two to a row: on each its title, its description,
+     Use (which reads "In use" once on; several can be on), View (the whole skill in place of
+     the cards, with a way back) and a button that copies its text. A skill switched on is a
+     chip in the bar over the text, with a cross that takes it off. Nothing is sent by
+     choosing: a skill in use goes with the task, or in a session with the next message. A
+     new session starts with no skills, whatever the last one had; Default takes none, and says
+     so in place of the menu. The microphone dictates into the task (`ui/js/views/dictate.js`):
+     it listens through the webview's own speech recognition (the Web Speech API) until it is
+     pressed again, puts what it hears where the caret is, and says over the bar why it
+     stopped where the webview has no recogniser or refuses the microphone. With no key
+     configured, the view leads with "Add an API key" under its line, and Start is not the
+     primary button. The walkthrough (`start_demo`) has no button: it is played by `sage demo`
+     and by the `SAGE_UI_AUTODEMO` hook.
    - *Session*: no header: what the session is (title, status, folder, model, effort, mode,
      autonomy, skills) is the first block of the inspector's Economy tab. The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on
@@ -279,18 +325,23 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - A run the user stopped ends on its summary alone ("Stopped by the user.").
      - A row of the model's thought is led by a spark while it is at it ("Thinking") and by a
        bulb once it has ("Thought").
-     - **The chat bar** (`ui/js/views/common.js`, `attach.js`): in the box, a + that attaches
-       files (the system's file dialog), the text, and one square button: Send, the Return
-       key's arrow on ink, or while a run is in progress Stop, a square on a quieter fill (paler
-       in the light appearance, darker in the dark one). Neither has a word on it. Attached files sit
-       in the box over the text, each a chip with its name and a cross that takes it off, so
-       the box grows upwards by their row; they go with the next message and show over it in
-       the conversation. The pickers are under the box.
+     - **The chat bar** (`ui/js/views/common.js`, `attach.js`, `skills.js`, `dictate.js`): a
+       pane of frosted glass, the one thing in the app that blurs what lies behind it. In it
+       is the text, and along its foot a + that attaches files (the system's file dialog) and
+       the effort at one end, and at the other the model, the microphone and one square
+       button: Send, the Return key's arrow on ink, grey until there is text to send, or while
+       a run is in progress Stop, a square on a quieter fill (paler in the light appearance,
+       darker in the dark one). None of the squares has a word on it. Attached files and the
+       skills switched on sit in the bar over the text, each a chip with its name and a cross
+       that takes it off, so the bar grows upwards by their rows; they go with the next
+       message, and the files show over it in the conversation. Under the bar are the pickers
+       for what is the session's rather than the message's.
 
      Nothing is open until the user opens it, and what they opened stays open across redraws and
      on coming back to the session. Idle sessions get
-     a follow-up box with the same pickers under it, less the mode: model, Skills, effort and
-     autonomy. The session's skills are in use and locked, and any others picked are switched on
+     a follow-up box in the same bar, with the effort and the model in it and the autonomy
+     under it; the folder and the mode are the session's for good. The session's skills are in
+     use and locked (the `/` menu shows them checked), and any others switched on go
      with the next message (`send_message` with `skills`). The model, the effort and the autonomy
      show what the session has; another one picked goes with the next message (`send_message`
      with `changes`) and is the session's from then on, which a `settings` event records and the
@@ -306,7 +357,11 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      under it, and have no follow-up box. A `/goal` or `/goal clear` message is answered in the
      open, in a note's row, and the Economy block counts the goal checks.
    - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
-     and None, each as a small picture of itself; Dither: On or Off; Motion: On or Off; each
+     and None, each as a small picture of itself; Panels: one more such picture, of the chosen
+     background, cut in three as the window is, a fifth for the left panel, three fifths for the
+     middle one and a fifth for the right, each part a switch for the background in that panel
+     and solid while it is off, with nothing to switch while the background is None;
+     Dither: On or Off; Motion: On or Off; each
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
      other one starts a new line; kept by the window. Auto-retry: On or Off, `set_auto_retry`,
      kept by the engine in `config.json` and applied at once to running sessions too). Then **API keys**, a line per provider: a check and the name in full ink
@@ -334,7 +389,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      - **Instructions**: the user's `AGENTS.md` for every project. The engine puts a line of its own ahead of it in the prompt (and ahead of a project's file), not shown here and not editable: that what follows is standing instructions, not a message in the conversation.
 
      Reset and Delete take a second click ("Confirm"). The data folder is the last line.
-3. **Inspector** (empty unless a session is open): the caption buttons, then a bar of three
+3. **Inspector** (away until its button or the View menu brings it; empty unless a session is open): a bar of three
    buttons that says what the pane shows (`ui/js/views/panel.js`; the choice is kept from one
    session to the next):
    - **Economy** (`inspector.js`): Session (title, status, folder, model, effort, mode, autonomy,
@@ -379,15 +434,15 @@ predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (v
 | --- | --- |
 | `new-session.jpg` | `SAGE_UI_VIEW=new`, no key |
 | `new-session-model-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:#pick-model'` |
-| `new-session-skills-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='wait:800;;click:#pick-skills:not(:disabled);;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
+| `new-session-skills-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='wait:800;;type:#task=>/skills;;key:#task=>Enter;;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
 | `session.jpg` | `SAGE_UI_AUTODEMO=1` |
 | `session-tools.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
 | `session-diff.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
 | `session-sources.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
-| `session-skills.jpg` | `SAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;click:#pick-skills:not(:disabled);;click:[data-skill="ui"] .skill-use` |
+| `session-skills.jpg` | `SAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;type:#followup=>/skills;;key:#followup=>Enter;;click:[data-skill="ui"] .skill-use` |
 | `session-github.jpg` | a session whose folder is a git repository with a github.com remote, uncommitted changes and unpushed commits, then `click:#tab-github` |
 | `session-code.jpg` | the same session, then `click:#tab-code;;click:[data-path="src"];;click:[data-path="src/board.js"]` |
-| `session-attach.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:.project;;attach:#attach=><path>,<path>;;type:#task=>…'` |
+| `session-attach.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='attach:#attach=><path>,<path>;;type:#task=>…'` |
 | `session-error.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
 | `settings.jpg` | `SAGE_UI_VIEW=settings` |
 | `settings-keys.jpg` | `SAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x SAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |

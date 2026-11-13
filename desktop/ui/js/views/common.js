@@ -33,12 +33,27 @@ export function onSendKey(event, send) {
 }
 
 /**
- * The chat bar, the same in a new session as in a running one, so that it is where it was once
- * the first message is sent: what went wrong over it; the box, with the attached files over the
- * text, what attaches one before it and what sends it after; and under the box the pickers.
+ * The chat bar, of a new session and of a running one. What went wrong lies over it. The bar is a
+ * pane of frosted glass: the attached files and the skills in use over the text, and along its
+ * foot what attaches a file and `start` at one end, `end` at the other, which closes with what
+ * sends. Under the bar is `under`: what is chosen for the session rather than for the message.
+ * `skills` is the bar's `skillCommands` (js/views/skills.js).
  */
-export function chatBar({ over, files, box, buttons, pickers }) {
-  return h('div.chat', over, h('div.composer', files.list, h('div.composer-row', files.button, box, buttons)), h('div.composer-under', pickers));
+export function chatBar({ over, files, skills, box, start, end, under }) {
+  const foot = h('div.composer-foot', h('div.composer-side', files.button, start), h('div.composer-side', end));
+  const composer = h('div.composer', skills.menu, files.list, skills.chips, box, foot);
+  // The pane is the box's own: a press on its surface, between the controls, goes to the text.
+  composer.addEventListener('mousedown', (event) => {
+    if (event.target.closest('button, textarea, .menu, .file-chip')) return;
+    event.preventDefault();
+    box.focus();
+  });
+  return h('div.chat', over, composer, h('div.composer-under', under));
+}
+
+/** What sends is grey until `box` holds something to send. */
+export function markIdle(button, box) {
+  button.classList.toggle('is-idle', !box.value.trim());
 }
 
 /**

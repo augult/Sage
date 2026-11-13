@@ -1,5 +1,6 @@
 // Appearance, background, dither and motion: what the user chose, and what that comes to right now.
 // The outcome goes on <html> as data-scheme (light or dark), data-theme (the background's id),
+// data-bg-left, data-bg-middle and data-bg-right (whether that panel shows the background),
 // data-dither and data-motion (on or off), which is all the stylesheets read; js/backdrop.js paints
 // the background.
 //
@@ -25,8 +26,17 @@ export const BACKGROUNDS = [
 ];
 export const APPEARANCES = ['system', 'light', 'dark'];
 
-const DEFAULTS = { appearance: 'system', background: 'ember', dither: 'on', motion: 'on' };
-const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), dither: ['on', 'off'], motion: ['on', 'off'] };
+// The three panels of the window, and the setting that says whether each shows the background.
+export const PANELS = [
+  { id: 'left', key: 'bg-left', name: 'Left' },
+  { id: 'middle', key: 'bg-middle', name: 'Middle' },
+  { id: 'right', key: 'bg-right', name: 'Right' },
+];
+
+// Out of the box the background shows in the middle panel alone.
+const DEFAULTS = { appearance: 'system', background: 'ember', dither: 'on', motion: 'on', 'bg-left': 'off', 'bg-middle': 'on', 'bg-right': 'off' };
+const SWITCH = ['on', 'off'];
+const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), dither: SWITCH, motion: SWITCH, 'bg-left': SWITCH, 'bg-middle': SWITCH, 'bg-right': SWITCH };
 const QUIET_DITHER = { waves: [[0.008, 0.004, 0.03], [-0.005, 0.009, 0.022], [0.003, -0.006, 0.017]], warp: 10, reach: [0.2, 0.8], fill: 0.4 };
 // The dots over the pressed backdrop: faint, and of both kinds, so they show on any picture.
 const INKS = {
@@ -48,7 +58,8 @@ function picked(key) {
 }
 
 /**
- * The settings as they stand, which is what Settings shows: `{ appearance, background, dither, motion }`.
+ * The settings as they stand, which is what Settings shows: `{ appearance, background, dither, motion }`
+ * and, under each panel's key, whether that panel shows the background.
  * Each is what was chosen, or else what it starts as on this system.
  */
 export function chosen() {
@@ -81,10 +92,12 @@ function apply() {
   document.documentElement.dataset.theme = now.background.id;
   document.documentElement.dataset.dither = now.dither ? 'on' : 'off';
   document.documentElement.dataset.motion = now.motion ? 'on' : 'off';
+  const pick = chosen();
+  for (const panel of PANELS) document.documentElement.setAttribute(`data-bg-${panel.id}`, pick[panel.key]);
   for (const listener of listeners) listener(now);
 }
 
-/** Keeps a choice: `{ appearance }`, `{ background }`, `{ dither }` or `{ motion }`. */
+/** Keeps a choice: `{ appearance }`, `{ background }`, `{ dither }`, `{ motion }` or a panel's, as `{ 'bg-left': 'on' }`. */
 export function choose(change) {
   for (const [key, value] of Object.entries(change)) {
     if (ALLOWED[key]?.includes(value)) prefs.set(key, value);

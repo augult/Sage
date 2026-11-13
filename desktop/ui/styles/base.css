@@ -15,10 +15,8 @@
   --r-2: 3px;
   --r-3: 4px;
 
-  /* Height of the strip along the top of every pane; together they are the title bar. */
-  --strip: 44px;
-  /* Between the sheet and the window's edge, where the glass shows. */
-  --gap: 8px;
+  /* Height of the title bar, the level over the three panels. */
+  --bar: 40px;
 
   /* Four sizes carry the interface; the fifth is the one large line a view opens with. */
   --text-xs: 11px;
@@ -366,7 +364,7 @@ button:disabled {
   transition: none !important;
 }
 
-:root[data-motion="off"] :is(#main > *, .menu, dialog[open]) {
+:root[data-motion="off"] :is(#main > *, .new-body :is(.new-hero, .new-lead, .composer, .composer-under), .menu, dialog[open]) {
   animation: none !important;
 }
 
