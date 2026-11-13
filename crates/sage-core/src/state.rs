@@ -114,11 +114,11 @@ impl Mode {
 impl Features {
     /// Ecosage and what `Features::OPTIONAL` holds back from it.
     pub fn prosage() -> Self {
-        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, contract: true, ..Self::ecosage() }
+        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, ..Self::ecosage() }
     }
 
     pub fn ecosage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false, contract: false }
+        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, contract: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
     }
 
     pub fn classic() -> Self {
@@ -129,7 +129,7 @@ impl Features {
     pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
+    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {

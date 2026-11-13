@@ -395,7 +395,7 @@ mod tests {
     fn spill(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("sage-jobs-{}", crate::util::rand_hex(4)));
         std::fs::create_dir_all(&d).unwrap();
-        d.join(name)
+        crate::util::canonical(&d).unwrap_or(d).join(name)
     }
 
     #[test]

@@ -1366,11 +1366,13 @@ u.urlopen(r).read()' "$1"; }"#;
 
         // Scenario 1 (`audit` — Prosage's single loss in 96 live runs): mode-blind model summarizes
         // findings in `finish` with `epoch == 0`, and writes `findings.json` only if held by the harness.
+        // Both Ecosage and Prosage now enforce `contract` at zero token cost.
         let audit = tasks::find("audit").unwrap();
         let audit_sol = audit.solution[0].1;
         for (label, mode, without, expect_solved) in [
             ("default", "default", vec![], false),
-            ("ecosage", "ecosage", vec![], false),
+            ("ecosage-no-contract", "ecosage", vec!["contract".to_string()], false),
+            ("ecosage", "ecosage", vec![], true),
             ("prosage-no-contract", "prosage", vec!["contract".to_string()], false),
             ("prosage", "prosage", vec![], true),
         ] {
@@ -1408,7 +1410,7 @@ u.urlopen(r).read()' "$1"; }"#;
         // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
         // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
         let audit_clean = tasks::find("audit-clean").unwrap();
-        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", true), ("prosage", "prosage", true)] {
             let h = Harness::at(base.join(format!("s2-{label}")));
             let ws = base.join(format!("ws-s2-{label}"));
             materialize(&ws, audit_clean.files).unwrap();
@@ -1538,12 +1540,12 @@ u.urlopen(r).read()' "$1"; }"#;
         }
 
         // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
-        // Default and Ecosage accept `finish`, then fail when `test_pager.py` is restored; Prosage's
-        // contract guard catches the forbidden edit and sends the worker back to fix `pager.py`.
+        // Default accepts `finish` and fails when `test_pager.py` is restored; Ecosage and Prosage's
+        // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
         let pager_orig_test = pager.files.iter().find(|(p, _)| *p == "test_pager.py").unwrap().1;
-        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", true), ("prosage", "prosage", true)] {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
             materialize(&ws, pager.files).unwrap();
@@ -1607,7 +1609,8 @@ u.urlopen(r).read()' "$1"; }"#;
                             // Visible tests pass on `partial_conf`, which misses trailing-backslash error.
                             MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": pc.clone(), "overwrite": true}))])
                         } else if step == 1 && last.contains("`finish` is accepted now") {
-                            // Ecosage's hurry tip triggers early `finish` on incomplete parser!
+                            // Ecosage qualifies `finish` with spec coverage, while still accepting a direct finish without examiners.
+                            assert!(last.contains("once every rule in the task and its spec is covered"), "{last}");
                             MockTurn::calls("", vec![("finish", json!({"summary": "Visible tests pass."}))])
                         } else if step < 11 {
                             MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import conf; conf.parse('[s]\\na = 1\\n')\"", "expect_exit": "0"}))])
