@@ -248,11 +248,12 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             }
         }
     }
-    // A nested object that leaked out in GLM's native call syntax (see `guard::unleak`).
-    for value in map.values_mut() {
-        if let Some(obj) = value.as_str().and_then(crate::guard::unleak) {
-            *value = obj;
-        }
+    // A nested `expect` that leaked out in GLM's native call syntax (see `guard::unleak`). Only
+    // there: in any other argument, text that holds those marks is text the model means as it is.
+    if let Some(value) = map.get_mut("expect")
+        && let Some(obj) = value.as_str().and_then(crate::guard::unleak)
+    {
+        *value = obj;
     }
     let num = |m: &Map<String, Value>, k: &str| m.get(k).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
     // `read {"out": 1}`: the model means the saved output `out:1`.
@@ -277,7 +278,7 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
         let limit = num(&map, "limit").or_else(|| num(&map, "max_lines"));
         match (start, end, limit) {
             (Some(s), Some(e), _) => drop(map.insert("lines".into(), json!(format!("{s}-{e}")))),
-            (Some(s), None, Some(l)) => drop(map.insert("lines".into(), json!(format!("{s}-{}", s + l.saturating_sub(1))))),
+            (Some(s), None, Some(l)) => drop(map.insert("lines".into(), json!(format!("{s}-{}", s.saturating_add(l.saturating_sub(1)))))),
             (Some(s), None, None) => drop(map.insert("lines".into(), json!(format!("{s}+")))),
             (None, _, Some(l)) => drop(map.insert("lines".into(), json!(format!("1-{l}")))),
             _ => {}

@@ -23,6 +23,21 @@ fn within(root: &Path, path: &str) -> Result<(PathBuf, PathBuf), String> {
     if full.starts_with(&root) { Ok((root, full)) } else { Err(format!("{path} is outside the session's folder")) }
 }
 
+/// Where the entry `path` names is, for renaming or deleting it: its folder as `within` finds it,
+/// with the name left as it stands, so that a link is itself what goes and not what it leads to.
+fn entry(root: &Path, path: &str) -> Result<(PathBuf, PathBuf), String> {
+    let trimmed = path.trim_matches('/');
+    let (parent, name) = trimmed.rsplit_once('/').unwrap_or(("", trimmed));
+    // The folder itself, a step, or a name that could be a path of its own: nothing is left unresolved.
+    if matches!(name, "" | "." | "..") || name.contains(['\\', ':']) {
+        return within(root, path);
+    }
+    let (root, folder) = within(root, parent)?;
+    let full = folder.join(name);
+    full.symlink_metadata().map_err(|e| format!("cannot open {path}: {e}"))?;
+    Ok((root, full))
+}
+
 /// What the directory at `path` holds: folders first, then files, each by name. Git's own
 /// directory is left out.
 pub fn list(root: &Path, path: &str) -> Result<Vec<Entry>, String> {
@@ -44,7 +59,12 @@ pub fn list(root: &Path, path: &str) -> Result<Vec<Entry>, String> {
 /// The text of the file at `path`.
 pub fn read(root: &Path, path: &str) -> Result<String, String> {
     let (_, file) = within(root, path)?;
-    let size = std::fs::metadata(&file).map_err(|e| format!("cannot read {path}: {e}"))?.len();
+    let md = std::fs::metadata(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+    // A folder has no text, and a device or a pipe has no end to read to.
+    if !md.is_file() {
+        return Err(format!("{path} is not a file"));
+    }
+    let size = md.len();
     if size > MAX_BYTES {
         return Err(format!("{path} is too large to edit here ({})", sage_core::util::fmt_bytes(size)));
     }
@@ -87,7 +107,7 @@ pub fn create(root: &Path, path: &str, dir: bool) -> Result<(), String> {
 
 /// Moves the file or folder at `from` to `to`, both from the root.
 pub fn rename(root: &Path, from: &str, to: &str) -> Result<(), String> {
-    let (root_dir, source) = within(root, from)?;
+    let (root_dir, source) = entry(root, from)?;
     if source == root_dir {
         return Err("the session's folder itself cannot be renamed here".into());
     }
@@ -97,10 +117,11 @@ pub fn rename(root: &Path, from: &str, to: &str) -> Result<(), String> {
 
 /// Deletes the file or folder, with all it holds, at `path`.
 pub fn remove(root: &Path, path: &str) -> Result<(), String> {
-    let (root_dir, target) = within(root, path)?;
+    let (root_dir, target) = entry(root, path)?;
     if target == root_dir {
         return Err("the session's folder itself cannot be deleted here".into());
     }
+    // A link to a folder goes as the link it is: `remove_dir_all` does not follow one.
     if target.is_dir() { std::fs::remove_dir_all(&target) } else { std::fs::remove_file(&target) }.map_err(|e| format!("cannot delete {path}: {e}"))
 }
 
@@ -149,6 +170,36 @@ mod tests {
         remove(&root, "b.txt").unwrap();
         assert_eq!(names("src"), [("src/deep".to_string(), true)]);
         assert!(remove(&root, "").is_err() && remove(&root, "../secret.txt").is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_renamed_and_deleted_as_itself_and_never_followed_out() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("sage-files-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("work");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        std::fs::write(root.join("real/keep.txt"), "kept\n").unwrap();
+        std::fs::write(base.join("outside/secret.txt"), "no").unwrap();
+        symlink(root.join("real"), root.join("inward")).unwrap();
+        symlink(base.join("outside"), root.join("outward")).unwrap();
+        symlink(root.join("nowhere"), root.join("dangling")).unwrap();
+
+        // Nothing is reached through a link that leads out of the folder.
+        for reached in [read(&root, "outward/secret.txt").map(|_| ()), remove(&root, "outward/secret.txt"), rename(&root, "outward/secret.txt", "taken.txt")] {
+            assert!(reached.unwrap_err().contains("outside"));
+        }
+        // The link is what is renamed and deleted: what it leads to stays where it is.
+        rename(&root, "inward", "alias").unwrap();
+        assert!(root.join("alias").is_symlink() && root.join("real/keep.txt").is_file());
+        remove(&root, "alias").unwrap();
+        remove(&root, "outward").unwrap();
+        remove(&root, "dangling").unwrap();
+        assert!(["alias", "outward", "dangling"].iter().all(|name| root.join(name).symlink_metadata().is_err()));
+        assert!(root.join("real/keep.txt").is_file() && base.join("outside/secret.txt").is_file());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

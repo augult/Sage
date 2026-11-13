@@ -240,13 +240,17 @@ pub async fn run_stale(sess: &mut Session, cancel: &CancellationToken) -> (Vec<W
         reports.push(run_one(sess, idx, cancel).await);
     }
     // The batch is atomic: watches that write caches must not make each other look stale forever.
-    let epoch = sess.evidence.epoch;
-    for w in &mut sess.watches.items {
-        w.epoch = epoch;
-    }
-    if sess.watches.all_pass() {
-        let names = sess.watches.names();
-        sess.evidence.passed(format!("watch {names}"));
+    // One that was stopped part-way is no batch: a watch it did not get to still shows the result
+    // it had before the change, and stays stale so that it is run before anything is claimed.
+    if !cancel.is_cancelled() {
+        let epoch = sess.evidence.epoch;
+        for w in &mut sess.watches.items {
+            w.epoch = epoch;
+        }
+        if sess.watches.all_pass() {
+            let names = sess.watches.names();
+            sess.evidence.passed(format!("watch {names}"));
+        }
     }
     let mut text: Vec<String> = reports.iter().filter(|r| !r.detail.is_empty()).map(|r| r.detail.clone()).collect();
     let quiet: Vec<&str> = reports.iter().filter(|r| r.detail.is_empty()).map(|r| r.name.as_str()).collect();
@@ -499,6 +503,29 @@ mod tests {
         s.evidence.changed("edit");
         let (_, text) = run_stale(&mut s, &cancel).await;
         assert_eq!(text, "watch tests: FAIL → PASS · 3 passed in 0.12s");
+    }
+
+    #[tokio::test]
+    async fn watches_a_stopped_run_did_not_get_to_are_not_taken_as_run() {
+        let mut s = test_session("watch-stopped", Features::ecosage());
+        std::fs::write(s.ws.root.join("ok"), "").unwrap();
+        add(&mut s, "a", "true");
+        add(&mut s, "b", "test -f ok");
+        run_stale(&mut s, &CancellationToken::new()).await;
+        assert!(s.evidence.fresh());
+
+        // A change breaks `b`, and the user stops the run before the watches are run again.
+        std::fs::remove_file(s.ws.root.join("ok")).unwrap();
+        s.evidence.changed("edit");
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+        let (reports, _) = run_stale(&mut s, &stopped).await;
+        assert!(reports.is_empty() && !s.evidence.fresh(), "nothing ran, so nothing is verified");
+
+        // The next run still owes both of them, and finds the one that broke.
+        let (reports, _) = run_stale(&mut s, &CancellationToken::new()).await;
+        assert_eq!(reports.len(), 2);
+        assert!(!s.evidence.fresh() && s.watches.items[1].state == WatchState::Fail);
     }
 
     #[tokio::test]

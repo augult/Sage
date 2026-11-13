@@ -333,6 +333,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(ws: Workspace, dir: PathBuf, features: Features, prices: Option<Prices>) -> std::io::Result<Self> {
+        crate::util::private_dir(&dir)?;
         std::fs::create_dir_all(dir.join("out"))?;
         Ok(Self {
             ws,
@@ -518,6 +519,18 @@ mod tests {
 
         s.features = Features::ecosage().without("short_paths").unwrap();
         assert_eq!(s.shown(raw.clone()), raw);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_s_folder_is_closed_to_other_users() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = test_session("private", Features::ecosage());
+        assert_eq!(std::fs::metadata(&s.dir).unwrap().permissions().mode() & 0o777, 0o700);
+        // One that was open, from before folders were made private, is closed when it is used again.
+        std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let again = Session::new(s.ws.clone(), s.dir.clone(), Features::ecosage(), None).unwrap();
+        assert_eq!(std::fs::metadata(&again.dir).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]

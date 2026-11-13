@@ -15,6 +15,9 @@ use tokio_util::sync::CancellationToken;
 
 const HEAD_CAP: usize = 48 * 1024;
 const TAIL_CAP: usize = 256 * 1024;
+/// How much of one command's output the spill file keeps. A command that never stops printing (a
+/// loop, a server left chattering in the background) would otherwise fill the disk.
+const SPILL_CAP: u64 = 256 * 1024 * 1024;
 
 /// Captured output: the first and last parts stay in memory, everything goes to the spill file.
 pub struct OutBuf {
@@ -23,16 +26,24 @@ pub struct OutBuf {
     dropped: bool,
     pub total: u64,
     file: Option<std::fs::File>,
+    spill_cap: u64,
 }
 
 impl OutBuf {
     pub fn new(spill: &Path) -> Self {
-        Self { head: Vec::new(), tail: VecDeque::new(), dropped: false, total: 0, file: std::fs::File::create(spill).ok() }
+        Self { head: Vec::new(), tail: VecDeque::new(), dropped: false, total: 0, file: std::fs::File::create(spill).ok(), spill_cap: SPILL_CAP }
     }
 
     pub fn push(&mut self, mut data: &[u8]) {
         if let Some(f) = &mut self.file {
-            let _ = f.write_all(data);
+            let room = self.spill_cap.saturating_sub(self.total);
+            if data.len() as u64 <= room {
+                let _ = f.write_all(data);
+            } else {
+                let _ = f.write_all(&data[..room as usize]);
+                let _ = f.write_all(format!("\n[the output went on past {}: the rest was not kept]\n", crate::util::fmt_bytes(self.spill_cap)).as_bytes());
+                self.file = None;
+            }
         }
         self.total += data.len() as u64;
         if self.head.len() < HEAD_CAP {
@@ -402,6 +413,23 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 500_000, "nothing is lost on disk");
         assert!(snap.ends_with(line.as_bytes()));
         assert_eq!(b.since(b.total - 200), [line.as_bytes(), line.as_bytes()].concat());
+    }
+
+    #[test]
+    fn the_spill_file_stops_growing_at_its_limit() {
+        let path = spill("endless.log");
+        let mut b = OutBuf::new(&path);
+        b.spill_cap = 250;
+        let line = format!("{}\n", "y".repeat(99));
+        for _ in 0..50 {
+            b.push(line.as_bytes());
+        }
+        let kept = std::fs::read_to_string(&path).unwrap();
+        assert!(kept.starts_with(&line.repeat(2)) && kept.ends_with("the rest was not kept]\n"), "{kept}");
+        assert!(kept.len() < 400, "{}", kept.len());
+        // What the model is shown still follows the command to its end.
+        assert_eq!(b.total, 5_000);
+        assert!(b.snapshot().0.ends_with(line.as_bytes()));
     }
 
     #[cfg(unix)]

@@ -76,7 +76,8 @@ pub fn clean(raw: &[u8]) -> String {
                 }
                 out.push('\t');
             }
-            c if (c as u32) < 0x20 || c == '\x7f' => {}
+            // The control characters of both ranges: a terminal may act on the upper ones as on an escape.
+            c if (c as u32) < 0x20 || c == '\x7f' || ('\u{80}'..='\u{9f}').contains(&c) => {}
             c => {
                 // A bare CR means "redraw this line": the text that follows replaces it.
                 if pending_cr {
@@ -205,8 +206,9 @@ pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill
     let total = lines.len();
     let (mut head, mut tail) = (head.min(total), tail.min(total));
     // Everything fits by line count: still two ends, so that a cut for size comes out of the middle
-    // and not off the end, where the verdict is.
+    // and not off the end, where the verdict is. Also where the head alone would take every line.
     if head + tail >= total {
+        head = head.min(total / 2);
         tail = total - head;
     }
     loop {
@@ -267,6 +269,7 @@ mod tests {
         assert_eq!(clean(b"loading\rdone\r"), "done");
         assert_eq!(clean(b"abc\x08\x08de"), "ade");
         assert_eq!(clean(b"a\x00b\x07c"), "abc");
+        assert_eq!(clean("a\u{9b}31mb\u{9d}c".as_bytes()), "a31mbc");
     }
 
     #[test]
@@ -320,6 +323,13 @@ mod tests {
         let b = bound(&lines, 20, 80, 10_000, Some("out:1"));
         assert!(b.text.ends_with("AssertionError: expected 3 got 4\n") && b.text.starts_with("step 01 "), "{}", b.text);
         assert!(b.hidden_lines > 0 && b.text.contains("lines hidden · read path \"out:1\""));
+        // Fewer lines than the head alone may take, and still too long: the same holds.
+        let mut wide: Vec<String> = (1..=14).map(|i| format!("row {i:02} {}", "x".repeat(1000))).collect();
+        wide.push("AssertionError: expected 3 got 4".into());
+        for (head, tail, chars) in [(20, 80, 10_000), (60, 60, 8_000)] {
+            let b = bound(&wide, head, tail, chars, Some("out:2"));
+            assert!(b.text.ends_with("AssertionError: expected 3 got 4\n") && b.text.starts_with("row 01 ") && b.hidden_lines > 0, "{}", b.text);
+        }
         // Output that fits is shown once, whole.
         let short: Vec<String> = (1..=5).map(|i| format!("l{i}")).collect();
         assert_eq!(bound(&short, 20, 80, 10_000, None).text, "l1\nl2\nl3\nl4\nl5\n");

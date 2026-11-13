@@ -251,7 +251,7 @@ async fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> std::io::Res
                 while !line(stream, buf).await?.is_empty() {}
                 break;
             }
-            if body.len() + size > MAX_BODY {
+            if size > MAX_BODY - body.len() {
                 return Err(bad("request body too large"));
             }
             fill(stream, buf, size + 2).await?;
@@ -462,6 +462,12 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         return Ok(req.keep_alive);
     };
     let rest = rest.trim_start_matches('/');
+    // A path the provider would read as another one (`./chat/completions`, `x/../responses`, `%2e`)
+    // is not relayed: it would be a model request that is neither counted nor held to the limit.
+    if rest.split('/').any(|part| part == "." || part == "..") || rest.contains(['%', '\\']) {
+        refuse(stream, 404, "bench_no_route", "bench proxy: the path must be written plainly", req.keep_alive).await?;
+        return Ok(req.keep_alive);
+    }
     let Some(meter) = inner.runs.lock().unwrap().get(run).cloned() else {
         refuse(stream, 404, "bench_run_over", "bench proxy: this run is over", req.keep_alive).await?;
         return Ok(req.keep_alive);

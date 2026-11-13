@@ -111,9 +111,9 @@ impl Context {
             CacheVerdict::First
         } else if !prefix_stable {
             CacheVerdict::Bust
-        } else if usage.cached * 10 >= expected * 9 {
+        } else if usage.cached.saturating_mul(10) >= expected.saturating_mul(9) {
             CacheVerdict::Hit
-        } else if usage.cached * 10 >= expected * 3 {
+        } else if usage.cached.saturating_mul(10) >= expected.saturating_mul(3) {
             CacheVerdict::Partial
         } else {
             CacheVerdict::Miss
