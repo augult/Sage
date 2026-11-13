@@ -343,7 +343,9 @@ async fn set_global_instructions(harness: State<'_, Harness>, text: String) -> R
 
 /// The folder a session works in, whether it is running or from an earlier launch.
 fn session_cwd(harness: &Harness, id: &str) -> Reply<PathBuf> {
-    harness.list().into_iter().find(|meta| meta.id == id).map(|meta| PathBuf::from(meta.cwd)).ok_or_else(|| format!("no session {id}"))
+    // Asked for with every reading of the files and git panels: this session's own record, not
+    // the whole list, which reads every stored session from disk.
+    harness.meta(id).map(|meta| PathBuf::from(meta.cwd)).map_err(|_| format!("no session {id}"))
 }
 
 /// Where the session's workspace stands with git: branch, remote, what is uncommitted or unpushed.

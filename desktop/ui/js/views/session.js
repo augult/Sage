@@ -12,9 +12,11 @@ import { openOutput } from './output.js';
 import { skillsButton } from './skills.js';
 import { createTimeline } from './timeline.js';
 
-// Where each session's timeline was left and what was unfolded in it, so coming back loses neither.
+// Where each session's timeline was left, what was unfolded in it and what was typed in its box
+// and not sent, so coming back loses none of them.
 const places = new Map();
 const unfolded = new Map();
+const drafts = new Map();
 
 export function mountSession(main, side, app, meta) {
   const entry = store.open(meta);
@@ -33,11 +35,7 @@ export function mountSession(main, side, app, meta) {
     answer: (approval, allow) => api.approve(entry.id, approval, allow),
     // A question is answered when no run is in progress; the answer goes as the next message.
     canReply: () => !entry.model.running,
-    reply: (text) => {
-      box.value = text;
-      fitBox(box);
-      return send();
-    },
+    reply: (text) => send(text),
     openOutput: (handle) => openOutput(entry.id, handle),
   });
 
@@ -89,6 +87,7 @@ export function mountSession(main, side, app, meta) {
     oninput: () => fitBox(box),
     onkeydown: (event) => onSendKey(event, send),
   });
+  box.value = drafts.get(entry.id) ?? '';
   const sendButton = barButton('send-followup', 'Send', icon('send', 16), send);
   // While a run is in progress the same place stops it.
   const stopButton = barButton('stop-session', 'Stop', icon('stop', 12), requestStop, 'soft');
@@ -102,8 +101,13 @@ export function mountSession(main, side, app, meta) {
   let awaitingRun = null;
   const messages = () => entry.model.items.filter((item) => item.kind === 'user').length;
 
-  async function send() {
-    const text = box.value.trim();
+  /**
+   * Sends what is in the box, or `answer` (a question's, which leaves the box alone and throws a
+   * failure back to the question's card, where it is shown).
+   */
+  async function send(answer) {
+    const own = typeof answer === 'string';
+    const text = own ? answer : box.value.trim();
     if (!text || sendButton.disabled || sendButton.hidden) return;
     const before = messages();
     sending = true;
@@ -113,18 +117,20 @@ export function mountSession(main, side, app, meta) {
       await api.sendMessage(entry.id, text, picked, changes(), files.paths());
       // A session from an earlier launch has been brought back by the message: follow it from here.
       store.resume(entry);
-      box.value = '';
+      if (!own) box.value = '';
       picked = [];
       files.clear();
       fitBox(box);
       awaitingRun = before;
       pinned = true;
     } catch (problem) {
+      if (own) throw problem;
       sendError.textContent = String(problem);
       sendError.hidden = false;
+    } finally {
+      sending = false;
+      render();
     }
-    sending = false;
-    render();
   }
 
   // Under the box, what the next message goes with. The model, the effort and the autonomy show
@@ -203,7 +209,11 @@ export function mountSession(main, side, app, meta) {
     foot.hidden = !entry.live && !entry.resumable;
     if (foot.hidden) return;
     drawGoal(model);
-    if (!foot.firstChild) foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
+    if (!foot.firstChild) {
+      foot.append(chatBar({ over: [goalNote, swapNote, sendError], files, box, buttons: [stopButton, sendButton], pickers: pickSlot }));
+      // As tall as a draft brought back from an earlier visit.
+      fitBox(box);
+    }
     if (awaitingRun !== null && messages() > awaitingRun) awaitingRun = null;
     if (!model.running) stopping = false;
     sendButton.hidden = model.running;
@@ -227,6 +237,8 @@ export function mountSession(main, side, app, meta) {
   let placed = false;
   let wasRunning = null;
   function render() {
+    // A send or a stop that settles after the view was left has nothing to draw into.
+    if (gone) return;
     const model = entry.model;
     notice.hidden = Boolean(model);
     if (!model) {
@@ -272,6 +284,8 @@ export function mountSession(main, side, app, meta) {
       clearInterval(ticker);
       cancelAnimationFrame(frame);
       places.set(entry.id, { pinned, top: scroller.scrollTop });
+      if (box.value.trim()) drafts.set(entry.id, box.value);
+      else drafts.delete(entry.id);
       panel.unmount();
     },
   };

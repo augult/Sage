@@ -334,14 +334,19 @@ impl OpenAiProvider {
             .header("accept", "text/event-stream")
             .body(body.to_vec())
             .send();
+        // An endpoint that takes the request and then says nothing is waited for no longer than one
+        // that stops in the middle of its answer: without a limit here the run would wait for ever.
         let resp = tokio::select! {
-            r = send => r.map_err(|e| ProviderError::Network(e.to_string()))?,
+            r = tokio::time::timeout(self.idle_timeout, send) => match r {
+                Ok(r) => r.map_err(|e| ProviderError::Network(e.to_string()))?,
+                Err(_) => return Err(ProviderError::Network(format!("no answer from provider for {}s", self.idle_timeout.as_secs()))),
+            },
             _ = cancel.cancelled() => return Err(ProviderError::Cancelled),
         };
         let status = resp.status();
         if !status.is_success() {
             let retry_after_secs = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
-            let text = resp.text().await.unwrap_or_default();
+            let text = tokio::time::timeout(self.idle_timeout, resp.text()).await.ok().and_then(Result::ok).unwrap_or_default();
             return Err(ProviderError::Http { status: status.as_u16(), message: error_message(&text), retry_after_secs });
         }
 
@@ -644,6 +649,28 @@ mod tests {
             }
         });
         format!("http://{address}/v1")
+    }
+
+    #[tokio::test]
+    async fn an_endpoint_that_takes_the_request_and_never_answers_is_given_up_on() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Connections are kept open and never answered.
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        let mut p = OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi).unwrap();
+        p.max_retries = 0;
+        p.idle_timeout = Duration::from_millis(200);
+        let messages = [Message::user("hi")];
+        let tools = json!([]);
+        let request = ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64, reasoning_cap: 0 };
+        let cancel = CancellationToken::new();
+        let answer = tokio::time::timeout(Duration::from_secs(20), p.chat(request, &mut |_| {}, &cancel)).await.expect("the request must not wait for ever");
+        assert!(matches!(answer, Err(ProviderError::Network(_))), "{:?}", answer.err().map(|e| e.to_string()));
     }
 
     #[tokio::test]

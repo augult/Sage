@@ -9,7 +9,7 @@ import { copyButton, h, icon } from '../dom.js';
 import { bytes, firstLine, plural } from '../format.js';
 import * as prefs from '../prefs.js';
 
-const ICONS = { shell: 'terminal', read: 'file', search: 'search', edit: 'pencil', write: 'filePlus', watch: 'eye', job: 'clock', finish: 'flag', web_search: 'globe', web_fetch: 'globe' };
+const ICONS = { shell: 'terminal', read: 'file', search: 'search', edit: 'pencil', write: 'filePlus', watch: 'eye', job: 'clock', finish: 'flag', ask: 'reply', web_search: 'globe', web_fetch: 'globe' };
 
 /** The icon that leads a step's row. */
 export const stepIcon = (tool) => ICONS[toolKind(tool)] ?? 'dot';

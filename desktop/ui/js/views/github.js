@@ -31,6 +31,8 @@ export function githubView(session, { onState, openFile, onDiscard }) {
   let state = null;
   let busy = false;
   let reading = 0;
+  // A reading clears only its own error: a failed push or discard stays said after the reading that follows it.
+  let readFailed = false;
 
   /** What the button would do now: commit and push, push, or nothing. */
   const pending = () => (!state?.repo || !state.branch || !state.remote ? 'none' : state.files.length ? 'commit' : state.ahead > 0 || !state.upstream ? 'push' : 'none');
@@ -111,6 +113,7 @@ export function githubView(session, { onState, openFile, onDiscard }) {
             try {
               await api.gitDiscard(session.id, file.path);
             } catch (problem) {
+              readFailed = false;
               error.textContent = String(problem);
               error.hidden = false;
             }
@@ -137,11 +140,13 @@ export function githubView(session, { onState, openFile, onDiscard }) {
       // A slower answer to an earlier question must not replace a later one.
       if (asked !== reading) return;
       state = read;
-      error.hidden = true;
+      if (readFailed) error.hidden = true;
+      readFailed = false;
       draw();
       onState(state);
     } catch (problem) {
       if (asked !== reading) return;
+      readFailed = true;
       body.replaceChildren();
       error.textContent = String(problem);
       error.hidden = false;
@@ -158,6 +163,7 @@ export function githubView(session, { onState, openFile, onDiscard }) {
       note.textContent = done.pushed ? `Pushed ${done.commit ? `${done.commit} ` : ''}to ${done.remote}/${done.branch}` : 'Already up to date';
     } catch (problem) {
       note.textContent = '';
+      readFailed = false;
       error.textContent = String(problem);
       error.hidden = false;
     }

@@ -358,33 +358,31 @@ button:disabled {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition: none !important;
-  }
+/* Motion off, in Settings or by the system's reduced motion: js/themes.js (and js/boot.js before
+   the first paint) put `data-motion` on <html>. */
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  transition: none !important;
+}
 
-  #main > *,
-  .menu,
-  dialog[open] {
-    animation: none !important;
-  }
+:root[data-motion="off"] :is(#main > *, .menu, dialog[open]) {
+  animation: none !important;
+}
 
-  .spinner {
-    animation-duration: 2.4s;
-  }
+:root[data-motion="off"] .spinner {
+  animation-duration: 2.4s;
+}
 
-  /* The ring stays where it is, as a halo. */
-  .pulse-ring {
-    opacity: 0.22;
-    transform: scale(2);
-    animation: none;
-  }
+/* The ring stays where it is, as a halo. */
+:root[data-motion="off"] .pulse-ring {
+  opacity: 0.22;
+  transform: scale(2);
+  animation: none;
+}
 
-  .caret {
-    animation: none;
-  }
+:root[data-motion="off"] .caret {
+  animation: none;
 }
 
 /* A button is a small flat block: grey for most, ink for the one a view is about. Every button is

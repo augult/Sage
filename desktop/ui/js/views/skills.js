@@ -79,15 +79,21 @@ function openSkills({ skills, isOn, isLocked, toggle }) {
     ),
   );
 
+  // The View button the skill being read was opened from: the focus goes back to it.
+  let opener = null;
+
   /** Shows `skill` whole, in place of the cards; with none, the cards again. */
   function read(skill) {
     title.textContent = skill ? skill.title : 'Skills';
     back.hidden = tools.hidden = page.hidden = !skill;
     grid.hidden = Boolean(skill);
-    if (!skill) return;
+    // What had the focus is hidden now, which would leave the focus nowhere.
+    if (!skill) return opener?.focus();
+    opener = document.activeElement;
     tools.replaceChildren(useButton(skill), copyButton(() => skill.body));
     page.replaceChildren(prose(skill.body));
     page.scrollTop = 0;
+    back.focus();
   }
 
   openDialog('skills', (close) => [h('div.dialog-head', back, title, tools, closeButton(close)), grid, page]);

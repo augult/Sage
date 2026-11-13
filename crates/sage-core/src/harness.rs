@@ -21,7 +21,7 @@ use crate::util::{civil_date, home_dir, now_ms, one_line, rand_hex};
 use crate::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -383,13 +383,19 @@ fn opening_of(req: &StartRequest) -> Result<Opening, String> {
 fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedReceiver<Input>) {
     tokio::spawn(async move {
         loop {
+            // A session that is closed takes no more messages, one that was already waiting included.
             let message = tokio::select! {
-                message = inbox.recv() => message,
+                biased;
                 _ = worker.closed.cancelled() => None,
+                message = inbox.recv() => message,
             };
             let Some(input) = message else { break };
             let cancel = CancellationToken::new();
             *worker.cancel.lock().unwrap() = cancel.clone();
+            // Closed just before the line above: `shut` cancelled the token this one replaced.
+            if worker.closed.is_cancelled() {
+                break;
+            }
             worker.set_status(SessionStatus::Running);
             match input {
                 Input::Message { text, shown, skills, retune, files } => {
@@ -532,6 +538,11 @@ impl Harness {
             EffortPolicy::parse(e).ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?;
         }
         let mut cfg = self.inner.config.lock().unwrap();
+        // A saved model is its provider's: with another provider and no model named, none is kept,
+        // or the old provider's model would be asked of the new one.
+        if model.is_none() && provider.as_ref().is_some_and(|next| cfg.provider.as_ref() != Some(next)) {
+            cfg.model = None;
+        }
         cfg.provider = provider.or(cfg.provider.take());
         cfg.model = model.or(cfg.model.take());
         cfg.effort = effort.or(cfg.effort.take());
@@ -686,6 +697,8 @@ impl Harness {
         let dir = self.inner.data_dir.join("sessions").join(&id);
         let simulated = provider.simulated();
         let cwd = ws.root.to_string_lossy().into_owned();
+        // Closing the folder above them covers the sessions stored before theirs were private.
+        let _ = crate::util::private_dir(&self.inner.data_dir.join("sessions"));
         let sess = Session::new(ws, dir.clone(), features, prices_for(model)).map_err(|e| format!("could not create the session directory: {e}"))?;
         let lock = SessionLock::acquire(&dir).map_err(|e| format!("session {id}: {e}"))?;
 
@@ -944,8 +957,10 @@ impl Harness {
             return Err("invalid session id".into());
         }
         let path = self.inner.data_dir.join("sessions").join(id).join("out").join(format!("{n}.log"));
-        let bytes = std::fs::read(&path).map_err(|_| format!("no saved output {handle} in session {id}"))?;
-        Ok(crate::text::clean(&bytes[..bytes.len().min(2 * 1024 * 1024)]))
+        // Only its start is shown, so only that is read: a command can have printed gigabytes.
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path).and_then(|file| file.take(2 * 1024 * 1024).read_to_end(&mut bytes)).map_err(|_| format!("no saved output {handle} in session {id}"))?;
+        Ok(crate::text::clean(&bytes))
     }
 
     /// Sub-directories of `path`, for the in-app folder picker.
@@ -1068,6 +1083,7 @@ impl Harness {
 
         let ws = Workspace::new(Path::new(&meta.cwd)).map_err(|e| cannot(format!("cannot use {:?} as a workspace: {e}", meta.cwd)))?;
         let (features, mode) = features_of(&StartRequest { mode: Some(snapshot.setup.mode.clone()), with: snapshot.setup.with.clone(), without: snapshot.setup.without.clone(), ..Default::default() }).map_err(cannot)?;
+        let _ = crate::util::private_dir(&self.inner.data_dir.join("sessions"));
         let sess = Session::new(ws, dir.clone(), features, prices_for(&meta.model)).map_err(|e| cannot(format!("could not open the session directory: {e}")))?;
         let mut cfg = AgentConfig::new(&meta.model);
         cfg.features = features;
@@ -1184,6 +1200,10 @@ mod tests {
         h.set_defaults(Some("openrouter".into()), Some("z-ai/glm-5.3".into()), Some("max".into())).unwrap();
         let state = Harness::at(h.inner.data_dir.clone()).state();
         assert_eq!((state.provider.as_deref(), state.model.as_deref(), state.effort.as_str()), (Some("openrouter"), Some("z-ai/glm-5.3"), "max"));
+        // Another provider with no model named: the first provider's model is not carried over to it.
+        h.set_defaults(Some("deepseek".into()), None, None).unwrap();
+        assert_eq!(h.inner.config.lock().unwrap().model, None);
+        h.set_defaults(Some("openrouter".into()), Some("z-ai/glm-5.3".into()), None).unwrap();
 
         let bad_dir = h.start(StartRequest { cwd: "/definitely/not/here".into(), task: "x".into(), provider: Some("openrouter".into()), ..Default::default() });
         assert!(bad_dir.unwrap_err().contains("cannot use"));

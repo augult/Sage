@@ -8,7 +8,7 @@
 // No event is dropped. One this build does not know, or cannot make sense of, becomes a neutral
 // chip that names its type, and the events after it are applied as usual.
 
-import { duration, effortLabel, firstLine, k } from './format.js';
+import { duration, effortLabel, firstLine, k, plural } from './format.js';
 
 function createSession(meta) {
   return {
@@ -336,7 +336,7 @@ const HANDLERS = {
   },
 
   decay(s, ev) {
-    place(s, ev, chip(s, 'alert', 'trim', `${num(ev.messages)} old observations left the context (~${k(num(ev.dropped_tokens))} tokens): ${str(ev.reason)}`));
+    place(s, ev, chip(s, 'alert', 'trim', `${plural(num(ev.messages), 'old observation')} left the context (~${k(num(ev.dropped_tokens))} tokens): ${str(ev.reason)}`));
   },
 
   stats(s, ev) {

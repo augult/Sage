@@ -150,6 +150,8 @@ export function mountNewSession(main, app) {
   const files = attachments({ start: () => draft.cwd, value: draft.files, onChange: (paths) => (draft.files = paths) });
 
   function start() {
+    // Enter pressed again while the first start is on its way would start a second session.
+    if (startButton.disabled) return;
     if (!draft.provider) return fail('No API key.');
     if (!draft.cwd) return fail('No folder.');
     if (!draft.task.trim()) return fail('No task.');

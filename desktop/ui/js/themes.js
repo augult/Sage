@@ -68,6 +68,7 @@ function apply() {
   document.documentElement.dataset.scheme = now.scheme;
   document.documentElement.dataset.theme = now.background.id;
   document.documentElement.dataset.dither = now.dither ? 'on' : 'off';
+  document.documentElement.dataset.motion = now.motion ? 'on' : 'off';
   for (const listener of listeners) listener(now);
 }
 

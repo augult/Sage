@@ -37,7 +37,9 @@ async fn git(root: &Path, args: &[&str]) -> Option<String> {
     let child = tokio::process::Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["--no-pager", "-c", "core.quotepath=off", "-c", "color.ui=never"])
+        // The user's own settings must not change what is read here: `color.status` and
+        // `color.diff` outrank `color.ui`, and `status.branch` adds a line that is no path.
+        .args(["--no-pager", "-c", "core.quotepath=off", "-c", "color.ui=never", "-c", "color.status=never", "-c", "color.diff=never", "-c", "status.branch=false", "-c", "status.relativePaths=true"])
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
@@ -70,6 +72,10 @@ fn content_hash(root: &Path, path: &str) -> Option<u64> {
     const HASH_UP_TO: u64 = 4 * 1024 * 1024;
     let file = root.join(path);
     let md = std::fs::metadata(&file).ok()?;
+    // What is no file (a link to a device, a pipe) has no content to compare, and may have no end.
+    if !md.is_file() {
+        return None;
+    }
     if md.len() > HASH_UP_TO {
         let changed = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
         return Some(fnv64(format!("{}:{changed}", md.len()).as_bytes()));

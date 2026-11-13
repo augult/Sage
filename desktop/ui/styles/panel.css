@@ -143,7 +143,7 @@
   overflow: hidden;
 }
 
-.code {
+#inspector-body > .code {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -521,13 +521,14 @@
   border-radius: var(--r-1);
   background: transparent;
   color: var(--muted);
-  visibility: hidden;
+  /* Not `visibility`, which would keep it from ever taking the keyboard focus. */
+  opacity: 0;
   align-self: center;
 }
 
 .push-row:hover .push-revert,
 .push-revert:focus-visible {
-  visibility: visible;
+  opacity: 1;
 }
 
 .push-revert:hover {

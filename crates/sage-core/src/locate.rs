@@ -15,7 +15,7 @@ pub struct Loc {
     pub line: usize,
 }
 
-static PY_FRAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"File "([^"\n]+)", line (\d+)"#).unwrap());
+static PY_FRAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"File "([^"\n]+)", line (\d{1,9})"#).unwrap());
 static PATH_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?:^|[\s('"\[<=])(?:file://)?((?:[A-Za-z]:)?[\w./\\@+~-]*[\w@+~-]\.[A-Za-z][A-Za-z0-9_]{0,7})(?::|\(|", line |, line )(\d{1,7})"#).unwrap()
 });

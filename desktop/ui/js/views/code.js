@@ -102,11 +102,16 @@ export function codeView(session) {
     mark();
   }
 
+  let opening = 0;
   /** Opens the file at `path`, once what was typed in the one open now is saved or let go. */
   async function open(path) {
+    const asked = ++opening;
     if (path === file || !(await settleUnsaved())) return;
     try {
-      show(path, await api.readFile(session.id, path));
+      const content = await api.readFile(session.id, path);
+      // Another file was asked for meanwhile: the last one asked for is the one to show.
+      if (asked !== opening) return;
+      show(path, content);
       // Its folders unfold, so the tree shows where it is.
       const parts = path.split('/').slice(0, -1);
       await Promise.all(parts.map((_, at) => unfold(parts.slice(0, at + 1).join('/'))));

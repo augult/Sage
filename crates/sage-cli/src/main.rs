@@ -59,8 +59,8 @@ OPTIONS for resume
   -v, --verbose, --json, --events   as for run
   With no message, the session is told to continue where it left off; `-` reads the message from stdin.
 
-Keys are read from the environment (LOGFARE_API_KEY, DEEPSEEK_API_KEY, ZAI_API_KEY, OPENROUTER_API_KEY)
-or from ~/.sage/config.json (written by `sage key`).";
+Keys are read from the environment (OPENAI_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, …: `sage providers`
+names the variable of each) or from ~/.sage/config.json (written by `sage key`).";
 
 struct Paint {
     on: bool,

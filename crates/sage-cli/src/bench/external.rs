@@ -64,8 +64,14 @@ pub struct Ran {
 
 fn kill_group(pid: u32) {
     // SAFETY: a plain syscall; the process group is the child's own (`process_group(0)`).
+    #[cfg(unix)]
     unsafe {
         libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
+    // Windows has no process groups of this kind: the process is ended with what it started.
+    #[cfg(not(unix))]
+    {
+        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
     }
 }
 
@@ -125,9 +131,10 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
             .stdin(Stdio::null())
             .stderr(out.try_clone()?)
             .stdout(out)
-            .process_group(0)
-            .kill_on_drop(true)
-            .spawn()
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
+        cmd.spawn()
     })();
     let mut child = match spawned {
         Ok(child) => child,

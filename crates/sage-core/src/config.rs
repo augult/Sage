@@ -208,14 +208,23 @@ impl Config {
             std::fs::create_dir_all(dir)?;
         }
         let body = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        // A file `load` could not read (a slip in an edit by hand) was taken for an empty one. It is
+        // kept beside the new one rather than written over with everything it held, keys and all.
+        if std::fs::read_to_string(path).is_ok_and(|old| !old.trim().is_empty() && serde_json::from_str::<Config>(&old).is_err()) {
+            let kept = path.with_extension("json.unreadable");
+            if std::fs::copy(path, &kept).is_ok() {
+                #[cfg(unix)]
+                let _ = std::fs::set_permissions(&kept, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+            }
+        }
         #[cfg(unix)]
         {
             use std::io::Write;
             use std::os::unix::fs::OpenOptionsExt;
             let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-            f.write_all(body.as_bytes())?;
-            // `mode` only applies when the file is created; tighten an existing one explicitly.
+            // `mode` only applies when the file is created; tighten an existing one before the keys go in.
             std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+            f.write_all(body.as_bytes())?;
         }
         #[cfg(not(unix))]
         std::fs::write(path, body)?;
@@ -425,6 +434,25 @@ mod tests {
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         assert!(Config::load(Path::new("/nonexistent/config.json")).keys.is_empty());
+    }
+
+    #[test]
+    fn a_file_that_could_not_be_read_is_kept_when_the_next_one_is_written() {
+        let path = std::env::temp_dir().join(format!("sage-cfg-{}/config.json", crate::util::rand_hex(4)));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A trailing comma left by an edit by hand.
+        let slip = "{ \"keys\": { \"openai\": \"sk-kept\" }, }";
+        std::fs::write(&path, slip).unwrap();
+        let mut c = Config::load(&path);
+        assert!(c.keys.is_empty());
+        c.keys.insert("deepseek".into(), "new".into());
+        c.save(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(path.with_extension("json.unreadable")).unwrap(), slip);
+        assert_eq!(Config::load(&path).keys.get("deepseek").map(String::as_str), Some("new"));
+        // A file that reads is simply replaced.
+        std::fs::remove_file(path.with_extension("json.unreadable")).unwrap();
+        c.save(&path).unwrap();
+        assert!(!path.with_extension("json.unreadable").exists());
     }
 
     #[test]
