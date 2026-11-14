@@ -160,7 +160,7 @@
    words, the keys that do the same after them. */
 .menu.bar-menu {
   min-width: 208px;
-  max-height: none;
+  max-height: calc(100vh - var(--bar) - 12px);
 }
 
 .bar-menu .menu-item {
@@ -449,6 +449,7 @@
 /* The sheet */
 
 #main {
+  container: workspace / inline-size;
   display: flex;
   grid-row: 2;
   grid-column: 2;
@@ -504,6 +505,7 @@
   grid-row: 2;
   grid-column: 3;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   padding-top: 8px;
 }

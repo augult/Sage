@@ -1,0 +1,7 @@
+{
+  "rules": {
+    "block-no-empty": true,
+    "declaration-block-no-duplicate-properties": [true, { "ignore": ["consecutive-duplicates-with-different-syntaxes"] }],
+    "property-no-unknown": [true, { "checkPrefixed": false }]
+  }
+}

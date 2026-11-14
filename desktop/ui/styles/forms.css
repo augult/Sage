@@ -759,7 +759,16 @@ textarea.editor {
   width: min(480px, calc(100vw - 48px));
 }
 
+/* Keep the footer visible even in a short window; only the fields scroll. */
+.provider-new {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .provider-fields {
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 4px 16px 8px;
@@ -936,6 +945,48 @@ textarea.editor {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 14px;
   overflow-wrap: anywhere;
+}
+
+/* Respond to the actual workspace, not the window: the Code inspector can
+   leave Settings much narrower even on a large screen. */
+@container workspace (max-width: 680px) {
+  .provider {
+    grid-template-columns: 16px minmax(0, 1fr) 72px;
+    gap: 8px 10px;
+    padding: 12px 0;
+  }
+
+  .provider-mark { grid-row: 1; }
+  .provider-who { grid-column: 2 / -1; grid-row: 1; }
+  .provider-url { grid-column: 2 / -1; grid-row: 2; }
+  .provider > input { grid-column: 2; grid-row: 3; }
+  .provider > button { grid-column: 3; grid-row: 3; }
+}
+
+@container workspace (max-width: 480px) {
+  .view-body { padding: 28px 16px 32px; }
+  .view-title { padding-right: 28px; }
+  .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .field-label { padding-top: 0; }
+  .panel-map { max-width: 100%; }
+  .chips.segmented { max-width: 100%; }
+  .new-body { padding: 20px 16px; }
+  .new-lead { font-size: 24px; }
+  .session-foot { padding-right: 16px; padding-left: 16px; }
+}
+
+@media (max-height: 540px) {
+  .new-body { gap: 16px; }
+  .new-hero { gap: 10px; }
+  .new-hero .brand-mark { width: 32px; height: 32px; }
+}
+
+@media (max-width: 520px) {
+  .skill-grid { grid-template-columns: minmax(0, 1fr); }
+  .help-list { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .help-list dd { margin-bottom: 8px; }
 }
