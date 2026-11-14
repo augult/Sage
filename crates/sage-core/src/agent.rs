@@ -225,6 +225,10 @@ const MIN_DECAY_TOKENS: u64 = 6_000;
 /// in any mode at the highest effort (whoever asks for `max` is asking for the thought): about
 /// 24,000 tokens, which still leaves room for the answer under the output cap.
 const LONG_THOUGHT_CHARS: usize = 96_000;
+/// Reasoning an examiner may spend before its script begins: the provider's own cap, about
+/// 16,000 tokens. A script is long, and behind more thought than that it ran into the output
+/// limit or never began; cut here, the examiner writes it from what it had thought by then.
+const EXAM_THOUGHT_CHARS: usize = 0;
 const COVERAGE_NOTE: &str = "The checks pass. They show only what they exercise, and the work is held to everything the task and the documents it names say. Before `finish`, go through those texts rule by rule and, for every rule the checks do not exercise, run a case of your own whose expected result you take from the text, not from your code.";
 const UNHURRIED_WATCHLESS_NOTE: &str = "Your check command exited 0, and no watched test or `expect_exit` prediction is on record yet. Go through the task and its documents rule by rule, check what remains, and include `expect_exit: \"0\"` on your verification command so `finish` is accepted as verified.";
 const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows. Start nothing new: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands.";
@@ -262,14 +266,9 @@ const ROUTE_WAIT: Duration = Duration::from_secs(30);
 /// Output cap of the router: one name or `NONE`, plus room for providers whose thinking cannot be switched off.
 const ROUTE_MAX_TOKENS: u32 = 2_048;
 
-type SideReply = (Result<ChatResponse, ProviderError>, Duration);
-type Vote = Option<(examiner::Ruling, String)>;
-
-struct TieAsk {
-    exam: usize,
-    split: Vec<(String, String)>,
-    reply: tokio::task::JoinHandle<SideReply>,
-}
+/// What came of a request beside the conversation, how long it took and, where it failed, the
+/// tokens it had thought by then: paid for like the rest.
+type SideReply = (Result<ChatResponse, ProviderError>, Duration, u64);
 
 enum Script {
     /// Asked for at `asked`, being written beside the run.
@@ -327,7 +326,12 @@ fn assistant(content: String) -> Message {
 /// is there to tell it to come to the point, and an examiner lost this way would be lost on just
 /// the tasks whose text takes the most reading. Not one level lower: measured on DeepSeek V4.1
 /// Flash, an examiner that thought its allowance away at `high` did the same at `low` every time.
-/// What the cut reply had thought is counted with the one that follows.
+/// It is handed what it had thought and told to answer from it. Asked again from nothing it
+/// thought it all a second time (in the baseline runs of 14 November a third of what the
+/// requests beside a run cost was thought thrown away like that); from its own notes the
+/// answer began within a few words, with as many cases as one written in a single reply.
+/// What the cut reply had thought is counted with the one that follows, or handed back with the
+/// failure where none does.
 async fn side_request(
     provider: Arc<Provider>,
     messages: Vec<Message>,
@@ -338,8 +342,9 @@ async fn side_request(
 ) -> SideReply {
     let tools = serde_json::json!([]);
     let asked = Instant::now();
-    let (mut effort, mut wasted) = (effort, 0u64);
+    let (mut messages, mut effort, mut wasted) = (messages, effort, 0u64);
     loop {
+        let mut thought = String::new();
         let reply = provider
             .chat(
                 ChatRequest {
@@ -349,7 +354,12 @@ async fn side_request(
                     max_tokens,
                     reasoning_cap,
                 },
-                &mut |_| {},
+                &mut |delta| match delta {
+                    Delta::Reasoning(text) => thought.push_str(&text),
+                    // What an attempt that failed had streamed is void.
+                    Delta::Retry { .. } => thought.clear(),
+                    Delta::Content(_) => {}
+                },
                 &cancel,
             )
             .await;
@@ -357,13 +367,22 @@ async fn side_request(
             Err(ProviderError::Overthinking(chars)) if effort != Effort::Off => {
                 wasted += chars as u64 / 4;
                 effort = Effort::Off;
+                if !thought.trim().is_empty() {
+                    messages.push(assistant(thought));
+                    messages.push(Message::user(examiner::CUT_SHORT));
+                }
             }
             Ok(mut resp) => {
                 resp.usage.output += wasted;
                 resp.usage.reasoning += wasted;
-                return (Ok(resp), asked.elapsed());
+                return (Ok(resp), asked.elapsed(), 0);
             }
-            reply => return (reply, asked.elapsed()),
+            Err(e) => {
+                if let ProviderError::Overthinking(chars) = &e {
+                    wasted += *chars as u64 / 4;
+                }
+                return (Err(e), asked.elapsed(), wasted);
+            }
         }
     }
 }
@@ -557,6 +576,19 @@ impl Agent {
         }
     }
 
+    /// Books what a request beside the conversation had thought when it was given up: nothing
+    /// came of it, and it is paid for all the same.
+    fn count_lost_thought(&mut self, tokens: u64, took: Duration) {
+        if tokens > 0 {
+            let usage = Usage {
+                output: tokens,
+                reasoning: tokens,
+                ..Usage::default()
+            };
+            self.count_side_request(&usage, took);
+        }
+    }
+
     /// Asks which of the skills the session may switch on by itself fit `task`. One short request
     /// without thinking; with no answer in time, none.
     async fn route(&mut self, task: &str, cancel: &CancellationToken) -> Vec<SkillInfo> {
@@ -576,7 +608,7 @@ impl Agent {
             0,
             cancel.child_token(),
         );
-        let Ok((Ok(resp), took)) = tokio::time::timeout(ROUTE_WAIT, request).await else {
+        let Ok((Ok(resp), took, _)) = tokio::time::timeout(ROUTE_WAIT, request).await else {
             self.note("routing", "no skill was chosen: the router did not answer");
             return Vec::new();
         };
@@ -617,14 +649,19 @@ impl Agent {
         }
     }
 
-    /// How hard an examiner or a referee is asked to think: as hard as the session has got to,
-    /// and never less than `high`. Reading a text closely is all they do.
+    /// How hard a referee is asked to think: as hard as the session has got to, and never less
+    /// than `high`. Reading a text closely is all they do, and their word holds a `finish`.
     fn reader_effort(&self) -> Effort {
         self.effort.max(Effort::High)
     }
 
-    /// Asks the examiners for their scripts. They are written while the run goes on, each with as
-    /// long to think as a reply is ever given: reading a specification closely is all they do.
+    /// How hard an examiner is asked to think: as hard as the session has got to. Its cases are
+    /// what it is asked for, and a wrong one is what the referees are there to set aside.
+    fn examiner_effort(&self) -> Effort {
+        self.effort.max(Effort::Low)
+    }
+
+    /// Asks the examiners for their scripts. They are written while the run goes on.
     fn start_exams(&mut self, opening: &str, cancel: &CancellationToken) {
         let mut angles = vec![examiner::Angle::Rules];
         if self.cfg.features.panel {
@@ -637,9 +674,9 @@ impl Agent {
             let reply = tokio::spawn(side_request(
                 self.provider.clone(),
                 thread.clone(),
-                self.reader_effort(),
+                self.examiner_effort(),
                 self.cfg.max_tokens,
-                LONG_THOUGHT_CHARS,
+                EXAM_THOUGHT_CHARS,
                 stop.clone(),
             ));
             self.exams.push(Exam {
@@ -753,7 +790,7 @@ impl Agent {
             joined = tokio::time::timeout(wait, &mut reply) => joined.ok().and_then(Result::ok),
             _ = cancel.cancelled() => None,
         };
-        let Some((answer, took)) = joined else {
+        let Some((answer, took, lost)) = joined else {
             stop.cancel();
             self.note(
                 "examiner",
@@ -764,6 +801,7 @@ impl Agent {
         let resp = match answer {
             Ok(resp) => resp,
             Err(e) => {
+                self.count_lost_thought(lost, took);
                 self.note(
                     "examiner",
                     &format!("the request to {who} failed ({e}): finished without its checks"),
@@ -851,12 +889,16 @@ impl Agent {
         let request = side_request(
             self.provider.clone(),
             self.exams[i].thread.clone(),
-            self.reader_effort(),
+            self.examiner_effort(),
             self.cfg.max_tokens,
-            LONG_THOUGHT_CHARS,
+            EXAM_THOUGHT_CHARS,
             cancel.child_token(),
         );
-        let Ok((Ok(resp), took)) = tokio::time::timeout(wait, request).await else {
+        let Ok((answer, took, lost)) = tokio::time::timeout(wait, request).await else {
+            return false;
+        };
+        let Ok(resp) = answer else {
+            self.count_lost_thought(lost, took);
             return false;
         };
         self.count_side_request(&resp.usage, took);
@@ -968,189 +1010,162 @@ impl Agent {
         }
     }
 
-    /// Has the referees rule on the failing cases nobody has ruled on yet. Each referee reads
-    /// alone. Two `GAP` rulings confirm a case at once; any `CASE` ruling or zero `GAP` rulings
-    /// sets it aside at once; a split of one `GAP` against `OPEN` (or an unanswered line, with no
-    /// `CASE`) goes to one tie-breaker referee, so a single hedged or truncated reply cannot drop
-    /// a real gap while two independent `GAP` rulings are still required to hold.
-    async fn rule(&mut self, reports: &[Report], run_started: Instant, cancel: &CancellationToken) {
-        let mut asked: Vec<(usize, Vec<String>, tokio::task::JoinHandle<SideReply>)> = Vec::new();
-        let wait = self.aside_wait(run_started, ASIDE_WAIT);
-        for report in reports {
-            let open: Vec<&examiner::Case> = report
-                .cases
-                .iter()
-                .filter(|c| {
-                    !self
-                        .exam_rulings
-                        .contains_key(&(report.exam, c.name.clone()))
-                })
-                .collect();
-            let Script::Ready { body, .. } = &self.exams[report.exam].script else {
+    /// One reading of the failing cases in `open` (by examiner), by a referee who reads alone:
+    /// one request for each examiner's script, the task, the script and those cases in it, not
+    /// the work. Returns what was ruled; a case with no ruling was not answered in time or not
+    /// in the reply. `reader` counts the readings of this examination.
+    async fn reading(
+        &mut self,
+        open: &[(usize, Vec<String>)],
+        reports: &[Report],
+        reader: usize,
+        wait: Duration,
+        cancel: &CancellationToken,
+    ) -> HashMap<(usize, String), (examiner::Ruling, String)> {
+        let mut asked: Vec<(usize, &Vec<String>, tokio::task::JoinHandle<SideReply>)> = Vec::new();
+        for (exam, names) in open {
+            let Some(report) = reports.iter().find(|r| r.exam == *exam) else {
                 continue;
             };
-            if open.is_empty() {
+            let Script::Ready { body, .. } = &self.exams[*exam].script else {
+                continue;
+            };
+            let cases: Vec<&examiner::Case> = report
+                .cases
+                .iter()
+                .filter(|c| names.contains(&c.name))
+                .collect();
+            if cases.is_empty() {
                 continue;
             }
-            let names: Vec<String> = open.iter().map(|c| c.name.clone()).collect();
-            if wait.is_none() {
-                for name in names {
-                    self.exam_rulings.insert((report.exam, name), None);
-                }
-                continue;
-            }
-            let brief = examiner::referee_brief(&self.exam_opening, body, &open);
-            for _ in 0..REFEREES {
-                asked.push((
-                    report.exam,
-                    names.clone(),
-                    tokio::spawn(side_request(
-                        self.provider.clone(),
-                        brief.clone(),
-                        self.reader_effort(),
-                        self.cfg.max_tokens,
-                        LONG_THOUGHT_CHARS,
-                        cancel.child_token(),
-                    )),
-                ));
-            }
+            let brief = examiner::referee_brief(&self.exam_opening, body, &cases);
+            asked.push((
+                *exam,
+                names,
+                tokio::spawn(side_request(
+                    self.provider.clone(),
+                    brief,
+                    self.reader_effort(),
+                    self.cfg.max_tokens,
+                    LONG_THOUGHT_CHARS,
+                    cancel.child_token(),
+                )),
+            ));
         }
-        let Some(wait) = wait.filter(|_| !asked.is_empty()) else {
-            return;
-        };
-        self.note("examiner", "the referees are asked about the failing cases");
         let until = Instant::now() + wait;
-        let mut votes: HashMap<(usize, String), Vec<Vote>> = HashMap::new();
-        for (nth, (exam, names, mut reply)) in asked.into_iter().enumerate() {
+        let which = if reader < REFEREES {
+            reader.to_string()
+        } else {
+            "tie".to_string()
+        };
+        let mut ruled = HashMap::new();
+        for (exam, names, mut reply) in asked {
             let joined = tokio::select! {
                 joined = tokio::time::timeout(until.saturating_duration_since(Instant::now()), &mut reply) => joined.ok().and_then(Result::ok),
                 _ = cancel.cancelled() => None,
             };
-            let ruled = match joined {
-                Some((Ok(resp), took)) => {
-                    self.count_side_request(&resp.usage, took);
-                    // Kept with the scripts, for whoever asks afterwards how a case was ruled on.
-                    let _ = std::fs::write(
-                        self.sess.dir.join("exam").join(format!(
-                            "referee_{}_{}-{nth}.txt",
-                            self.exams[exam].angle.label(),
-                            self.exam_holds
-                        )),
-                        &resp.content,
-                    );
-                    examiner::rulings(&resp.content, &names)
+            let (resp, took) = match joined {
+                Some((Ok(resp), took, _)) => (resp, took),
+                Some((Err(_), took, lost)) => {
+                    self.count_lost_thought(lost, took);
+                    continue;
                 }
-                _ => {
+                None => {
                     reply.abort();
-                    HashMap::new()
+                    continue;
                 }
             };
-            for name in names {
-                let vote = ruled.get(&name).cloned();
-                votes.entry((exam, name)).or_default().push(vote);
+            self.count_side_request(&resp.usage, took);
+            // Kept with the scripts, for whoever asks afterwards how a case was ruled on.
+            let _ = std::fs::write(
+                self.sess.dir.join("exam").join(format!(
+                    "referee_{}_{}-{which}.txt",
+                    self.exams[exam].angle.label(),
+                    self.exam_holds
+                )),
+                &resp.content,
+            );
+            for (name, ruling) in examiner::rulings(&resp.content, names) {
+                ruled.insert((exam, name), ruling);
             }
         }
+        ruled
+    }
 
-        let mut undecided: HashMap<usize, Vec<(String, String)>> = HashMap::new();
-        for ((exam, name), ballot) in votes {
-            let has_case = ballot
-                .iter()
-                .any(|v| matches!(v, Some((examiner::Ruling::Case, _))));
-            let gaps: Vec<String> = ballot
-                .into_iter()
-                .filter_map(|v| match v {
-                    Some((examiner::Ruling::Gap, ground)) => Some(ground),
-                    _ => None,
-                })
-                .collect();
-            if !has_case && gaps.len() >= REFEREES {
-                self.exam_rulings.insert((exam, name), Some(gaps));
-            } else if !has_case && gaps.len() == 1 {
-                undecided
-                    .entry(exam)
-                    .or_default()
-                    .push((name, gaps.into_iter().next().unwrap_or_default()));
-            } else {
-                self.exam_rulings.insert((exam, name), None);
-            }
-        }
-
-        if undecided.is_empty() {
-            return;
-        }
-        let Some(tie_wait) = self.aside_wait(run_started, ASIDE_WAIT) else {
-            for (exam, cases) in undecided {
-                for (name, _) in cases {
-                    self.exam_rulings.insert((exam, name), None);
-                }
-            }
-            return;
-        };
-        let mut tie_asked: Vec<TieAsk> = Vec::new();
-        for (exam, split) in undecided {
-            let Some(report) = reports.iter().find(|r| r.exam == exam) else {
+    /// Has the referees rule on the failing cases nobody has ruled on yet. Each referee reads
+    /// alone, and they read one after the other: a case goes to the next reader only while it
+    /// can still be confirmed, which most cannot after the first (of 73 examinations in the
+    /// first live runs one confirmed a case). The rule is the one two readers at once were held
+    /// to. Any `CASE` ruling sets a case aside at once; `GAP` from both of the first two readers
+    /// confirms it; one `GAP` between them, against `OPEN` or a line that was not answered, goes
+    /// to one tie-breaker, so a single hedged or truncated reply cannot drop a real gap while
+    /// two independent `GAP` rulings are still required to hold.
+    async fn rule(&mut self, reports: &[Report], run_started: Instant, cancel: &CancellationToken) {
+        let mut open: Vec<(usize, Vec<String>)> = Vec::new();
+        for report in reports {
+            if !matches!(self.exams[report.exam].script, Script::Ready { .. }) {
                 continue;
-            };
-            let Script::Ready { body, .. } = &self.exams[exam].script else {
-                continue;
-            };
-            let wanted: Vec<&examiner::Case> = report
+            }
+            let names: Vec<String> = report
                 .cases
                 .iter()
-                .filter(|c| split.iter().any(|(n, _)| n == &c.name))
+                .map(|c| c.name.clone())
+                .filter(|name| !self.exam_rulings.contains_key(&(report.exam, name.clone())))
                 .collect();
-            if wanted.is_empty() {
-                continue;
+            if !names.is_empty() {
+                open.push((report.exam, names));
             }
-            let brief = examiner::referee_brief(&self.exam_opening, body, &wanted);
-            let reply = tokio::spawn(side_request(
-                self.provider.clone(),
-                brief,
-                self.reader_effort(),
-                self.cfg.max_tokens,
-                LONG_THOUGHT_CHARS,
-                cancel.child_token(),
-            ));
-            tie_asked.push(TieAsk { exam, split, reply });
         }
-        let tie_until = Instant::now() + tie_wait;
-        for TieAsk {
-            exam,
-            split,
-            mut reply,
-        } in tie_asked
-        {
-            let names: Vec<String> = split.iter().map(|(n, _)| n.clone()).collect();
-            let joined = tokio::select! {
-                joined = tokio::time::timeout(tie_until.saturating_duration_since(Instant::now()), &mut reply) => joined.ok().and_then(Result::ok),
-                _ = cancel.cancelled() => None,
+        // The sentences quoted for a case by the readers who ruled `GAP` on it so far.
+        let mut gaps: HashMap<(usize, String), Vec<String>> = HashMap::new();
+        // The two readers and the tie-breaker.
+        for reader in 0..=REFEREES {
+            if open.is_empty() {
+                break;
+            }
+            let Some(wait) = self.aside_wait(run_started, ASIDE_WAIT) else {
+                break;
             };
-            let ruled = match joined {
-                Some((Ok(resp), took)) => {
-                    self.count_side_request(&resp.usage, took);
-                    let _ = std::fs::write(
-                        self.sess.dir.join("exam").join(format!(
-                            "referee_{}_{}-tie.txt",
-                            self.exams[exam].angle.label(),
-                            self.exam_holds
-                        )),
-                        &resp.content,
-                    );
-                    examiner::rulings(&resp.content, &names)
-                }
-                _ => {
-                    reply.abort();
-                    HashMap::new()
-                }
-            };
-            for (name, first_ground) in split {
-                let confirmed = match ruled.get(&name) {
-                    Some((examiner::Ruling::Gap, second_ground)) => {
-                        Some(vec![first_ground, second_ground.clone()])
+            if reader == 0 {
+                self.note("examiner", "the referees are asked about the failing cases");
+            }
+            let ruled = self.reading(&open, reports, reader, wait, cancel).await;
+            let readers_left = REFEREES - reader;
+            let mut still_open = Vec::new();
+            for (exam, names) in open {
+                let mut still = Vec::new();
+                for name in names {
+                    let key = (exam, name);
+                    match ruled.get(&key) {
+                        Some((examiner::Ruling::Case, _)) => {
+                            self.exam_rulings.insert(key, None);
+                            continue;
+                        }
+                        Some((examiner::Ruling::Gap, ground)) => {
+                            gaps.entry(key.clone()).or_default().push(ground.clone());
+                        }
+                        _ => {}
                     }
-                    _ => None,
-                };
-                self.exam_rulings.insert((exam, name), confirmed);
+                    let missing = REFEREES.saturating_sub(gaps.get(&key).map_or(0, Vec::len));
+                    if missing == 0 {
+                        let grounds = gaps.remove(&key);
+                        self.exam_rulings.insert(key, grounds);
+                    } else if missing <= readers_left {
+                        still.push(key.1);
+                    } else {
+                        self.exam_rulings.insert(key, None);
+                    }
+                }
+                if !still.is_empty() {
+                    still_open.push((exam, still));
+                }
+            }
+            open = still_open;
+        }
+        // What nobody could be asked about any more is not confirmed.
+        for (exam, names) in open {
+            for name in names {
+                self.exam_rulings.insert((exam, name), None);
             }
         }
     }
@@ -4436,7 +4451,10 @@ mod tests {
             if system == examiner::system(examiner::Angle::Rules)
                 && thought.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < beside.overthinks
             {
-                return Some(MockTurn::fail(ProviderError::Overthinking(120_000)));
+                return Some(MockTurn {
+                    reasoning: "line 2 has to read BETA".into(),
+                    ..MockTurn::fail(ProviderError::Overthinking(120_000))
+                });
             }
             let said = if system == examiner::system(examiner::Angle::Rules) {
                 beside
@@ -5040,9 +5058,11 @@ mod tests {
         );
 
         // Two referees are asked, each alone, and shown the text, the script and the failed cases, not the work.
+        // The second is asked only about the case the first did not set aside.
         let asked = asked_of(&r, examiner::REFEREE_SYSTEM);
         assert_eq!(asked.len(), 2);
-        assert_eq!(asked[0], asked[1]);
+        let again = &asked[1][1].content;
+        assert!(again.contains("<script>\np=0; f=0\n") && again.contains("<failed_cases>\nFAIL line2_capitals\n  checked: sed -n 2p n.txt | grep -qx BETA\n</failed_cases>"), "{again}");
         let shown = &asked[0][1].content;
         assert!(shown.contains("<task>\nPut line two of n.txt in capitals.\n</task>") && shown.contains("<script>\np=0; f=0\n") && shown.contains("<failed_cases>\nFAIL line2_capitals\n  checked: sed -n 2p n.txt | grep -qx BETA\n\nFAIL line4_delta\n") && shown.ends_with("Rule on each failed case now."), "{shown}");
 
@@ -5507,9 +5527,69 @@ mod tests {
             "{}",
             out.evidence
         );
-        assert_eq!(efforts_asked(&r), [Effort::High, Effort::Off]);
+        // An examiner thinks as hard as the session, not harder, and no longer than leaves room for
+        // its script.
+        assert_eq!(efforts_asked(&r), [Effort::Low, Effort::Off]);
+        assert!(
+            shapes(&r)
+                .iter()
+                .zip(requests(&r))
+                .filter(|(_, m)| m[0].content == examiner::system(examiner::Angle::Rules))
+                .all(|(s, _)| s.reasoning_cap == EXAM_THOUGHT_CHARS),
+            "{:?}",
+            shapes(&r)
+        );
         assert!(
             r.agent.stats.side_requests == 1 && r.agent.stats.reasoning_tokens >= 30_000,
+            "{:?}",
+            r.agent.stats
+        );
+        // Asked again, it is handed what it had thought and told to write from it.
+        let asked = asked_of(&r, examiner::system(examiner::Angle::Rules));
+        assert_eq!(asked[0].len(), 2);
+        assert_eq!(asked[1][..2], asked[0][..]);
+        assert_eq!(
+            asked[1][2..]
+                .iter()
+                .map(|m| (m.role, m.content.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (Role::Assistant, "line 2 has to read BETA"),
+                (Role::User, examiner::CUT_SHORT)
+            ]
+        );
+
+        // One that only reasons again is lost, and what both replies thought is paid for all the same.
+        let beside = Beside {
+            rules: EXAM,
+            edges: "NONE",
+            route: "NONE",
+            overthinks: 2,
+            ..Default::default()
+        };
+        let mut r = beside_rig(
+            "agent-exam-overthinks-twice",
+            &["examiner"],
+            vec![upper("beta", "BETA")],
+            beside,
+        );
+        let out = r
+            .agent
+            .run(
+                "Put line two of n.txt in capitals.".into(),
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(
+            !out.evidence.contains("examiner's cases"),
+            "{}",
+            out.evidence
+        );
+        assert_eq!(efforts_asked(&r), [Effort::Low, Effort::Off]);
+        assert!(
+            r.agent.stats.side_requests == 1
+                && r.agent.stats.reasoning_tokens >= 60_000
+                && r.agent.stats.output_tokens >= 60_000,
             "{:?}",
             r.agent.stats
         );
@@ -5976,6 +6056,54 @@ mod tests {
             "{}",
             out.evidence
         );
+
+        // The readers are asked one after the other, and only while the case can still be
+        // confirmed: a first `CASE` ends it with one request, two `OPEN` with two, and `OPEN`
+        // before `GAP` still goes to the tie-breaker.
+        for (name, referees, turns, side, confirmed) in [
+            ("first-veto", vec![case_veto, gap, gap], 1, 2, false),
+            ("open-open", vec![open, open, gap], 1, 3, false),
+            ("open-gap-gap", vec![open, gap, gap], 2, 4, true),
+            ("open-gap-open", vec![open, gap, open], 1, 4, false),
+        ] {
+            let beside = Beside {
+                rules: EXAM,
+                edges: "NONE",
+                referees,
+                route: "NONE",
+                ..Default::default()
+            };
+            let mut r = beside_rig(
+                &format!("agent-referee-{name}"),
+                &["examiner", "referee"],
+                vec![upper("beta", "Beta"), upper("Beta", "BETA")],
+                beside,
+            );
+            let out = r
+                .agent
+                .run(
+                    "Put line two of n.txt in capitals.".into(),
+                    &CancellationToken::new(),
+                )
+                .await;
+            assert_eq!(
+                (out.status, r.agent.stats.turns, r.agent.stats.side_requests),
+                (FinishStatus::Done, turns, side),
+                "{name}"
+            );
+            assert_eq!(
+                asked_of(&r, examiner::REFEREE_SYSTEM).len() as u32,
+                side - 1,
+                "{name}"
+            );
+            assert_eq!(
+                out.evidence
+                    .ends_with("; all 3 of the examiner's cases pass"),
+                confirmed,
+                "{name}: {}",
+                out.evidence
+            );
+        }
     }
 
     #[tokio::test]

@@ -459,6 +459,7 @@ impl OpenAiProvider {
             reasoning_cap,
             ..Accum::default()
         };
+        let mut ended = false;
         'read: loop {
             let next = tokio::select! {
                 n = tokio::time::timeout(self.idle_timeout, stream.next()) => n,
@@ -482,13 +483,21 @@ impl OpenAiProvider {
                 let done = acc.feed_line(&buf[start..line_end], on_delta)?;
                 start = line_end + 1;
                 if done {
+                    ended = true;
                     break 'read;
                 }
             }
             buf.drain(..start);
         }
         if !buf.is_empty() {
-            acc.feed_line(&buf, on_delta)?;
+            ended |= acc.feed_line(&buf, on_delta)?;
+        }
+        // Seen live: a gateway that closes a stream in the middle of the thought, with no error.
+        // What came by then is no answer: it is asked for again, like a connection that dropped.
+        if !ended && acc.broke_off() {
+            return Err(ProviderError::Network(
+                "the answer broke off before it ended".into(),
+            ));
         }
         let (response, extras) = acc.finish_with_extras()?;
         if !extras.is_empty() {
@@ -567,6 +576,11 @@ const LOOP_CHECK_EVERY: usize = 600;
 const REASONING_CAP: usize = 64_000;
 
 impl Accum {
+    /// A stream of events that named no finish reason: with no `[DONE]` either, it was cut short.
+    fn broke_off(&self) -> bool {
+        self.saw_event && self.finish.is_empty()
+    }
+
     /// Feeds one line of the response body. Returns true once the stream signalled completion.
     pub(crate) fn feed_line(
         &mut self,
@@ -806,34 +820,39 @@ mod tests {
         Ok((acc.finish()?, seen))
     }
 
+    /// Reads a whole request: answered before that, the answer may be lost with it.
+    async fn whole_request(socket: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+            if let Some(head) = text.find("\r\n\r\n") {
+                let length = text[..head]
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if request.len() >= head + 4 + length {
+                    break;
+                }
+            }
+            match socket.read(&mut chunk).await {
+                Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                _ => break,
+            }
+        }
+    }
+
     /// A local endpoint that answers the first `failures` requests with a rate limit, then a reply.
     async fn rate_limited_endpoint(failures: usize) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::io::AsyncWriteExt;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let mut served = 0;
             while let Ok((mut socket, _)) = listener.accept().await {
-                // The whole request is read before answering, or the answer may be lost with it.
-                let mut request = Vec::new();
-                let mut chunk = [0u8; 4096];
-                loop {
-                    let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
-                    if let Some(head) = text.find("\r\n\r\n") {
-                        let length = text[..head]
-                            .lines()
-                            .find_map(|l| l.strip_prefix("content-length:"))
-                            .and_then(|v| v.trim().parse::<usize>().ok())
-                            .unwrap_or(0);
-                        if request.len() >= head + 4 + length {
-                            break;
-                        }
-                    }
-                    match socket.read(&mut chunk).await {
-                        Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
-                        _ => break,
-                    }
-                }
+                whole_request(&mut socket).await;
                 let (status, extra, body) = if served < failures {
                     (
                         "429 Too Many Requests",
@@ -931,6 +950,67 @@ mod tests {
         assert_eq!(
             (reply.content.as_str(), reply.retries, attempts.as_slice()),
             ("done", 2, &[1, 2][..])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_breaks_off_is_asked_for_again() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut served = 0;
+            while let Ok((mut socket, _)) = listener.accept().await {
+                whole_request(&mut socket).await;
+                // The first answer stops in the middle of the thought: no finish reason, no `[DONE]`.
+                let end = if served == 0 {
+                    ""
+                } else {
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                };
+                served += 1;
+                let answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {{\"choices\":[{{\"delta\":{{\"reasoning_content\":\"We need\"}},\"finish_reason\":null}}]}}\n\n{end}"
+                );
+                let _ = socket.write_all(answer.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        let mut p = OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi)
+            .unwrap();
+        let messages = [Message::user("hi")];
+        let tools = json!([]);
+        let ask = || ChatRequest {
+            messages: &messages,
+            tools: &tools,
+            effort: Effort::High,
+            max_tokens: 64,
+            reasoning_cap: 0,
+        };
+        let cancel = CancellationToken::new();
+        let reply = p.chat(ask(), &mut |_| {}, &cancel).await.unwrap();
+        assert_eq!(
+            (reply.content.as_str(), reply.finish.as_str(), reply.retries),
+            ("done", "stop", 1)
+        );
+
+        // With no attempt left, the half of a thought is an error and not an answer.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                whole_request(&mut socket).await;
+                let _ = socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"reasoning_content\":\"We need\"},\"finish_reason\":null}]}\n\n").await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        p = OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi)
+            .unwrap();
+        p.max_retries = 0;
+        let gave_up = p.chat(ask(), &mut |_| {}, &cancel).await.unwrap_err();
+        assert!(
+            matches!(&gave_up, ProviderError::Network(why) if why.contains("broke off")),
+            "{gave_up}"
         );
     }
 

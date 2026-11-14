@@ -140,6 +140,10 @@ impl MockProvider {
             (None, None) => MockTurn::say("(scripted model has nothing further to say)"),
         };
         if let Some(error) = turn.error {
+            // What was thought before the request failed was streamed like any other thought.
+            if !turn.reasoning.is_empty() {
+                on_delta(Delta::Reasoning(turn.reasoning));
+            }
             return Err(error);
         }
 

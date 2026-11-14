@@ -19,6 +19,118 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
   --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## Prosage for less, 14 November 2026 (thirteenth session)
+
+What Prosage spends, and what of it buys nothing. DeepSeek V4.1 Flash
+(`deepseek-v4.1-flash-1017`), all 24 tasks, effort `ratchet`, 60 replies and 20 minutes per run.
+The rows were made the same evening against the same gateway, the arms of one comparison running
+side by side, two runs at a time each. Raw results and `pertask.py`, which prints the comparison
+by task: `docs/results/2026-11-14-prosage-cost/`.
+
+| 24 tasks | Solved | Requests (mean) | Beside the run | Output tokens | Time (mean) | Cost |
+|---|---|---:|---:|---:|---:|---:|
+| Prosage before (the twelfth session's code), two runs each | 48/48 | 8.9 | 3.4 | 66,200 | 223 s | $2.25 |
+| Examiners at the session's effort, referees one after the other; one run each | 24/24 | 9.5 | 3.5 | 56,800 | 175 s | $1.00 |
+| The same, and a cut-off examiner handed its thought back (as it is now); two runs each | 48/48 | 8.3 | 3.7 | 45,500 | 131 s | $1.74 |
+| As it is now with one examiner (`prosage+no-panel`); one run each | 24/24 | 9.2 | 2.5 | 29,300 | 140 s | $0.63 |
+
+**Prosage now costs 23% less and takes 41% less time, and solved every run before and after.**
+With 48 of 48 on both sides the solve rate cannot show a difference; what is known is that
+nothing was lost. Against what was really spent the saving is larger: the old books left out
+the thought of an examiner that failed twice (16 of 96 did, about 48,000 tokens each, $0.46 over
+the 48 runs). Counting that, it is about a third.
+
+The baseline is the twelfth session's code plus one fix it needed to be measured at all: a
+stream the gateway closes in the middle of the thought, with no error, is asked for again
+(`provider/openai.rs`). That evening the gateway did this for an hour, and such a reply had
+counted as an answer: an examiner's as "no script", the worker's as an empty reply.
+
+### Where the money went
+
+- **The requests beside the run were 71% of the cost**: $0.033 of $0.047 a run, 52,900 output
+  tokens against the worker's 13,300. The twelfth session's stopping rule works: the worker
+  averaged 9 replies, no run reached the limit, and none of the 57-to-60-reply tails of
+  12 November came back.
+- **A third of that was thought thrown away.** An examiner thinks before it writes, and on
+  DeepSeek the effort setting does not bound it (`reasoning: {enabled: false}` still thinks
+  through this gateway). In the baseline's 48 runs, 53 requests to an examiner reasoned for
+  96,000 characters with no script begun and were cut. Each was asked again from nothing and
+  thought it all a second time: 37 then wrote a script, 16 were cut again and lost, on the tasks
+  whose text takes the most reading (of the four examiners of `confdialect`'s two runs, one
+  delivered). 23 of 96 examiners delivered nothing.
+- **A second referee was asked where the first had settled it.** One `CASE` ruling sets a case
+  aside whatever the other reader says, and both were asked at once: in 7 of the baseline's 12
+  pairs of replies the first alone had set every case aside.
+
+### What was changed, and what each change is worth
+
+- **A cut-off reply is handed its own thought and told to write from it** (`side_request`).
+  Replayed on stored requests: with at least 40,000 characters of its thought in front of it, the
+  examiner began its script within 150 characters of new thought in nine cases of eleven, in
+  about 20 seconds instead of 100 to 280. With 16,000 to 24,000 characters it thought the whole
+  thing again in five of eight, so the cut cannot be made much earlier. In the 48 runs after the
+  change no examiner was lost to thinking: 9 of 96 delivered nothing, each by answering `NONE` or
+  nothing.
+- **An examiner may think for about 16,000 tokens before its script begins, not 24,000**
+  (`EXAM_THOUGHT_CHARS`). A script is 5,000 to 9,000 tokens on the hard tasks; behind more
+  thought than that it ran into the output limit of 32,000 or never began.
+- **An examiner thinks at the session's effort, not at `high`** (`examiner_effort`). At `high`
+  17 and 20 replies were cut for thinking in 24 runs each, at `low` 9, and on the seven easy tasks
+  the two scripts cost 24,000 tokens against 14,000. Referees stay at `high`.
+- **Referees read one after the other** (`Agent::rule`), a case going to the next reader only
+  while it can still be confirmed. The rule is unchanged: any `CASE` sets aside, two `GAP`
+  confirm, one `GAP` against `OPEN` goes to a tie-breaker. Of 22 examinations of a script after
+  the change, 15 took one reply, 6 two and 1 three, where each took two before.
+- The thought of a request that fails is now counted in the session's tokens and cost.
+
+By the first two rows, the effort and the referees are worth about a tenth of the cost and the
+handed-back thought the rest. The middle row is one run per task.
+
+### What the examiners are worth, measured
+
+Scripts graded against each task's reference solution and against the task as shipped
+(`confdialect`, `ttlcache`, `rollup`): a case that fails on the reference is a wrong case, one
+that fails only as shipped is what the script can catch.
+
+| Script written | Cases | Wrong | Catch as shipped |
+|---|---:|---:|---:|
+| In one reply (6 scripts) | 278 | 3 (1.1%) | 22 to 52 each |
+| From handed-back thought, 40,000 characters or more (11 scripts) | 762 | 39 (5.1%) | 33 to 60 each |
+| Told to write at most 30 cases (10 scripts) | 278 | 5 (1.8%) | 16 to 27 each |
+
+A script written from cut-off thought covers as much and is wrong more often, which is what the
+referees are for: they were asked 16 times in the 48 runs after the change and confirmed a case
+4 times (`finish` held), against 10 and 3 before. The baseline had no script at all in those
+places.
+
+### One examiner or two
+
+The last row is Prosage without its second examiner: every task solved, at 28% less again
+($0.026 a run against $0.036). It is not the default. One run per task cannot show that
+nothing is lost, and the second examiner does find things of its own: of the seven
+examinations after the change in which a referee first ruled `GAP`, three were of its
+script. `finish` was held on confirmed cases 4 times in 48 runs with two examiners and 2
+times in 24 with one. Two runs per task of `prosage,prosage+no-panel` would say more.
+
+### Tried and not kept
+
+- **A budget of 30 cases** in the examiners' instructions. It cut their output by a third on
+  the stored requests and stopped the all-thought replies, and `confdialect` was lost in both
+  runs made with it: once all 30 cases passed and the worker, told its work had been examined,
+  finished in five replies; once the twelve error cases failed on a bug of the script's own and
+  were set aside, which left the errors unexamined. An examination that says "nothing fails" is
+  acted on, so a thin one costs tasks. Stopped after 28 runs.
+- **Examiners with thinking off.** Not available: the model thinks all the same, and with
+  nothing to fall back on 13 of 48 examiners were lost.
+
+### What limits these numbers
+
+- Two runs per task, one model, one evening. Solved means the held-out verification passed.
+- The gateway closed streams and answered 502 for about an hour before these runs and now and
+  then during them. Both sides had the same fix and ran side by side.
+- Times are from a 2-core sandbox with four to six runs at once.
+- The grading of scripts is of 27 scripts on three tasks, one request each.
+
 ## Prosage, Ecosage and OpenCode, 12 November 2026 (eleventh session)
 
 The first runs of Prosage against a model, made the evening Logfare came back. DeepSeek V4.1

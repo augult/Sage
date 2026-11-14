@@ -1,15 +1,73 @@
 # Handoff: Sage
 
-Read this first. State: 13 November 2026, after the twelfth session. The tenth removed the reflex
+Read this first. State: 14 November 2026, after the thirteenth session. The tenth removed the reflex
 memory and the review pass, added `/goal`, made a stored session continuable after a restart, and
 gave the harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and
 Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`), reworked
 Prosage, and measured it live (**Prosage 47/48 against OpenCode's 45/48 and Ecosage's 44/48**).
 The twelfth session fixed six structural gaps read off those Prosage runs and tested them offline
-across all 24 benchmark tasks (next section; Logfare's daily limit was reached, so live reruns
-remain first to run once the limit resets).
+across all 24 benchmark tasks. The thirteenth measured that code live (**48/48**) and cut what
+Prosage spends beside the run: **23% less cost, 41% less time, still 48/48** (next section).
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Thirteenth session: Prosage for less (14 November 2026)
+
+**The owner's brief:** the same results or better from Prosage, for less money. Measured live
+with the Logfare key (`docs/BENCHMARKS.md`, first section; raw results in
+`docs/results/2026-11-14-prosage-cost/`).
+
+| 24 tasks, DeepSeek V4.1 Flash | Solved | Requests | Beside | Time | Cost |
+|---|---|---:|---:|---:|---:|
+| Prosage as the twelfth session left it, two runs each | 48/48 | 8.9 | 3.4 | 223 s | $2.25 |
+| Prosage now, two runs each | 48/48 | 8.3 | 3.7 | 131 s | $1.74 |
+| Prosage now with one examiner (`prosage+no-panel`), one run each | 24/24 | 9.2 | 2.5 | 140 s | $0.63 |
+
+**What the first live runs of the twelfth session's code showed.** It holds: 48/48, the worker
+at 9 replies on average, no run at the limit, no long tail. What was left to cut was beside the
+run: the examiners and referees were 71% of the cost, and a third of that was thought thrown
+away (an examiner that reasons to its allowance was cut and asked again from nothing).
+
+**Changed** (`agent.rs`, `examiner.rs`, `provider/openai.rs`):
+
+- `side_request` hands a reply that was cut off as all thought its own thought back and tells
+  it to answer from it (`examiner::CUT_SHORT`). No examiner was lost to thinking afterwards;
+  before, 16 of 96 were, and 37 more thought everything twice.
+- Examiners think at the session's effort (`examiner_effort`) and for about 16,000 tokens at
+  most before the script begins (`EXAM_THOUGHT_CHARS`). Referees are unchanged: `high`, 24,000.
+- `Agent::rule` asks the referees one after the other (`Agent::reading`), a case going on only
+  while it can still be confirmed. The rule itself is the same.
+- The thought of a request beside the run that fails is counted (`count_lost_thought`). The
+  old figures left it out, so the baseline above is understated by about $0.46.
+- A stream that ends with no finish reason and no `[DONE]` is a failed attempt and is asked
+  for again (`Accum::broke_off`). The gateway did this for an hour on the 14th; such a reply
+  had counted as an examiner's "no script" or as an empty reply of the worker.
+
+**Left as it is, on purpose:**
+
+- The number of cases an examiner writes. A budget of 30 lost `confdialect` twice in two
+  runs: the worker is told when an examination holds nothing and finishes on it, so a thin
+  script costs tasks. Whoever shortens the scripts has to change what `EXAM_STANDS` says too.
+- Both examiners. One alone solved 24/24 for 28% less, on one run per task; the second found
+  three of seven candidate gaps. `-n 2 --variants prosage,prosage+no-panel` is the run that
+  would decide it.
+- The worker's side (long thought, no hurry, the stopping rule): 29% of the cost now, and what
+  solves `confdialect` and `restyle`.
+
+**Not done:** Ecosage, Default and OpenCode were not run again, so the twelfth session's
+command below is still owed for them. Thinking cannot be switched off for DeepSeek through
+Logfare (`reasoning: {enabled: false}` still thinks), so `Effort::Off` is `low` there in
+all but name.
+
+**How the runs were made:** one account, the arms of a comparison side by side with `-j 2`
+or `-j 3` each (five to six runs at once), `--max-turns 60 --time-budget 1200 --keep`, state
+under `target/scratch/`. About 2,800 requests and $8.50 for the whole session, replays and
+abandoned arms included. Check the gateway before a long run: two streams of a `high`
+request side by side that both end with a finish reason.
+
+**Checked:** `cargo test` (291 tests), `cargo clippy --all-targets -- -D warnings`,
+`cargo fmt --check`, `sage bench --check --tasks all` (24/24), `sage bench --scripted --tasks
+all --variants ecosage,default,prosage` (72/72). The binary measured is the tree as committed.
 
 ## Twelfth session: Prosage tightened from the live traces (13 November 2026)
 
