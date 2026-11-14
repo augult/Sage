@@ -10,6 +10,7 @@ import { mountPaneToggles } from './panes.js';
 import * as store from './store.js';
 import { settleUnsaved } from './unsaved.js';
 import { mountNewSession } from './views/new-session.js';
+import { mountPanel } from './views/panel.js';
 import { mountSession } from './views/session.js';
 import { mountSettings } from './views/settings.js';
 import { listSignature, renderSessionList } from './views/sidebar.js';
@@ -32,6 +33,7 @@ backLink.append(icon('back'));
 forwardLink.append(icon('chevron'));
 
 let mounted = null;
+let emptyPanel = null;
 let listShown = null;
 
 // The views gone through, oldest first, and which of them is shown: what the two arrows of the
@@ -74,6 +76,8 @@ const app = {
    */
   show(view, visit = true) {
     mounted?.unmount?.();
+    emptyPanel?.unmount();
+    emptyPanel = null;
     app.view = view;
     if (visit && !(at >= 0 && sameView(trail[at], view))) {
       trail.splice(at + 1);
@@ -93,6 +97,8 @@ const app = {
     } else {
       mounted = view.name === 'settings' ? mountSettings(main, app) : mountNewSession(main, app);
     }
+    // The inspector's tabs belong to the window even when there is no session to inspect.
+    if (!meta) emptyPanel = mountPanel(document.getElementById('inspector-tabs'), side);
     markCurrent(newLink, view.name === 'new');
     markCurrent(settingsLink, view.name === 'settings');
     drawSessionList();
