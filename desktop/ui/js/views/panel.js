@@ -51,11 +51,11 @@ function resizer(pane) {
 }
 
 /**
- * `bar` and `body` are the pane's two parts; `session` is `{ id, title }`.
+ * `bar` and `body` are the pane's two parts; `session` is `{ id, title }`, or absent for the empty pane.
  * Gives `{ update(model, about), runEnded(), unmount() }`; `about` is what `renderInspector` takes.
  */
 export function mountPanel(bar, body, session) {
-  const economy = h('div.panel-view');
+  const economy = h('div.panel-view', !session && h('p.side-note', 'Start or choose a session to see anything here.'));
   const count = h('span.tab-count', { hidden: true });
   const tabs = TABS.map((tab) =>
     h(
@@ -72,36 +72,39 @@ export function mountPanel(bar, body, session) {
 
   // Made when first shown, and kept: a file stays open, and a message typed, while another tab is looked at.
   let code = null;
-  const github = githubView(session, {
-    onState(state) {
-      const n = waiting(state);
-      count.textContent = String(n);
-      count.hidden = n === 0;
-    },
-    openFile(path) {
-      show('code');
-      code.open(path);
-    },
-    onDiscard: () => code?.refresh(),
-  });
+  const github = session
+    ? githubView(session, {
+        onState(state) {
+          const n = waiting(state);
+          count.textContent = String(n);
+          count.hidden = n === 0;
+        },
+        openFile(path) {
+          show('code');
+          code.open(path);
+        },
+        onDiscard: () => code?.refresh(),
+      })
+    : null;
 
   function show(id) {
     chosen = id;
     // The pane is as wide as what it shows needs (styles/layout.css).
     document.documentElement.dataset.panel = id;
     tabs.forEach((tab, at) => tab.setAttribute('aria-selected', String(TABS[at].id === id)));
-    if (id === 'code') code ??= codeView(session);
-    body.replaceChildren(id === 'economy' ? economy : id === 'code' ? code.el : github.el);
+    if (session && id === 'code') code ??= codeView(session);
+    body.replaceChildren(!session || id === 'economy' ? economy : id === 'code' ? code.el : github.el);
     body.dataset.view = id;
-    if (id === 'github') github.load();
+    if (id === 'github') github?.load();
   }
 
   let shown = '';
   show(chosen);
-  github.load();
+  github?.load();
 
   return {
     update(model, about) {
+      if (!session) return;
       const { state, skills } = about;
       const now = [model.sideRev, state.phase, state.outcome, state.verified, state.approvals, ...skills].join('|');
       if (now === shown && economy.firstChild) return;
@@ -110,7 +113,7 @@ export function mountPanel(bar, body, session) {
     },
     /** A run may have changed the files and left something to push. */
     runEnded() {
-      github.load();
+      github?.load();
       code?.refresh();
     },
     unmount() {

@@ -136,7 +136,7 @@ export function mountMenuBar(bar, nav) {
     if (chip) chip.checked = true;
   }
 
-  /** One of the inspector's views, which only a session has: the inspector comes back to show it. */
+  /** One of the inspector's views, with or without a session: the inspector comes back to show it. */
   function tab(id, label) {
     const button = document.getElementById(`tab-${id}`);
     const show = () => {
