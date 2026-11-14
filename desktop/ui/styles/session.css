@@ -13,7 +13,9 @@
   gap: 12px;
   max-width: 760px;
   margin: 0 auto;
-  padding: 24px 24px 32px;
+  /* Clear the corner toggle (8px inset + 28px hit area) at the start and along the sides,
+     so messages also stay out of its hit area while scrolling. */
+  padding: 52px 48px 32px;
 }
 
 /* A message: the user's is a grey block on their side, the agent's is prose on the sheet itself. */

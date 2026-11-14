@@ -167,8 +167,13 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 24px;
-  padding: 5px 10px 5px 30px;
+  padding: 5px 10px;
   white-space: nowrap;
+}
+
+/* Only checkable entries need a leading gutter; ordinary commands have equal side padding. */
+.bar-menu .menu-item[role="menuitemcheckbox"] {
+  padding-left: 30px;
 }
 
 .bar-menu .menu-item > .icon {
@@ -181,7 +186,8 @@
 }
 
 .bar-menu .menu-group {
-  padding-left: 30px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 /* A session's title is as long as its task: it ends where the menu does. */
@@ -262,7 +268,10 @@
   grid-column: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 4px 8px 8px;
+  --side-row-inset: 8px;
+  /* The open 14px chevron's visible edge is 3.8/16 of its viewport in from the left. */
+  --side-chevron-inset: 3.325px;
+  padding: 4px 12px 12px;
 }
 
 .nav-item {
@@ -273,7 +282,7 @@
   gap: 5px;
   width: 100%;
   height: 30px;
-  padding: 0 8px 0 5px;
+  padding: 0 8px 0 7px;
   border: 0;
   border-radius: var(--r-2);
   background: transparent;
@@ -329,7 +338,7 @@
   gap: 6px;
   width: 100%;
   height: 28px;
-  padding: 0 8px 0 6px;
+  padding: 0 8px 0 var(--side-row-inset);
   border: 0;
   border-radius: var(--r-2);
   background: transparent;
@@ -380,9 +389,8 @@
   font-size: var(--text-sm);
 }
 
-/* A session: its title, and after it a mark while it runs or wants a look. The row is as wide as
-   its folder's, so both lie as far from the pane's left edge as from its right; the title starts
-   as far in from the row's left as the mark ends from its right. */
+/* A session: its title, and after it a mark while it runs or wants a look. The row has the same
+   outer insets as its folder; align its text to the visible chevron, not the SVG's empty gutter. */
 .session-item {
   display: flex;
   flex: none;
@@ -390,7 +398,7 @@
   gap: 8px;
   width: 100%;
   height: 28px;
-  padding: 0 8px 0 12px;
+  padding: 0 8px 0 calc(var(--side-row-inset) + var(--side-chevron-inset));
   border: 0;
   border-radius: var(--r-2);
   background: transparent;
