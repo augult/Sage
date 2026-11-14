@@ -1,0 +1,137 @@
+name: Release desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: '1.100.0'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
+
+      - name: Check release versions
+        id: version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --locked --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
+          $version = ($metadata.packages | Where-Object name -eq 'sage-desktop').version
+          $config = Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $config.version -ne $version) {
+            throw 'Cargo and Tauri must have the same stable release version'
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Typecheck, lint and test
+        shell: pwsh
+        run: |
+          cargo check --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Typecheck failed' }
+          cargo clippy --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          Get-ChildItem desktop/ui/js -Recurse -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax failed: $_" }
+          }
+
+      - name: Build Windows installer
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          npx --yes @tauri-apps/cli@2.12.4 build --ci --bundles nsis -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+
+      - name: Prepare and hash release assets
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          if ($installers[0].Name -ne "Sage_$env:VERSION`_x64-setup.exe") {
+            throw "Unexpected installer name: $($installers[0].Name)"
+          }
+          Copy-Item $installers[0].FullName release/
+          Copy-Item target/release/sage-desktop.exe "release/Sage_$env:VERSION`_x64.exe"
+          Get-ChildItem release/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content release/SHA256SUMS.txt -Encoding ascii
+          @"
+          # Sage $env:VERSION
+
+          Includes the latest chat/sidebar spacing, aligned session titles, balanced menu padding,
+          Economy/Code/GitHub tabs before a session is selected, and value-only Mode/Autonomy/Effort controls.
+
+          ## Windows 10/11 (64-bit)
+          - **Sage_$env:VERSION`_x64-setup.exe**: recommended installer.
+          - **Sage_$env:VERSION`_x64.exe**: standalone app; requires Microsoft Edge WebView2 Runtime.
+          - **SHA256SUMS.txt**: SHA-256 checksums for both downloads.
+
+          Built from commit $env:GITHUB_SHA. Workspace typecheck, Clippy and tests passed on the Windows build runner before packaging.
+          These downloads are not code-signed; Windows may show an unknown-publisher warning.
+          "@ | Set-Content release/RELEASE-NOTES.md -Encoding utf8
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.build.outputs.tag }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-release
+          path: release
+
+      - name: Verify assets and publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check SHA256SUMS.txt
+          # Refuse existing tags, including tags without a release, so --target
+          # cannot silently publish an older commit. No assets are overwritten.
+          count=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')
+          test "$count" = 0 || { echo "Tag $TAG already exists; refusing to overwrite it"; exit 1; }
+          gh release create "$TAG" \
+            "Sage_${VERSION}_x64-setup.exe" "Sage_${VERSION}_x64.exe" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" --title "Sage $VERSION" --notes-file RELEASE-NOTES.md --latest
