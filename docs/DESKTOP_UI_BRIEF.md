@@ -77,8 +77,9 @@ Headless test hooks via environment: `SAGE_UI_AUTODEMO=1` (start and open the de
 `SAGE_UI_VIEW=settings|new|session`, `SAGE_UI_OPEN=<session id>`. Added while building it:
 `SAGE_UI_SIZE=<width>x<height>`, `SAGE_UI_SCRIPTED=<file>` (start a session played by a
 scripted stand-in and open it), `SAGE_UI_SCRIPT` (UI actions to play once the first view is up;
-grammar in `desktop/ui/js/hooks.js`), `SAGE_UI_THEME=<background>` and `SAGE_UI_SCHEME=light|dark`
-(the painting behind the glass and the appearance, for that launch only).
+grammar in `desktop/ui/js/hooks.js`), `SAGE_UI_THEME=<background>`, `SAGE_UI_SCHEME=light|dark`
+and `SAGE_UI_PALETTE=sage|anthropic|vercel` (the painting behind the glass, the appearance and the
+palette, for that launch only).
 A scripted session's file may name `skills` to start with and a `mode`.
 `SAGE_UI_REVIVE=<file>` shows the restart flow without a provider: the shell then lists the
 sessions a stand-in played as continuable, and a message to one brings it back, played by the
@@ -132,7 +133,12 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
   darkens when pointed at.
 - **The interface has no colour.** Ink, paper and the greys between, in a light and a dark
-  appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system). Colour
+  appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system), drawn in a
+  palette (`data-palette`): Sage, the default, cool greys; Anthropic, warm mist and charcoal
+  measured from anthropic.com; or Vercel, neutral snow and charcoal measured from vercel.com.
+  Both sources are light only; their dark sides are drawn from the same colours. A palette only
+  re-sets the ink and surface tokens (`styles/palettes.css`); type, corners and motion are the
+  same in all of them. Colour
   belongs to the painting behind the glass and to two things: a failure, which must not be
   missed (`--danger`: a tool that failed has its whole line in red), and an edit, green for what
   it added and red for what it removed
@@ -212,7 +218,7 @@ starts as None, and under `prefers-reduced-motion` Motion starts as Off. Setting
 the choice in effect, and a background or a Motion chosen there holds whatever the system says
 (`chosen` in `themes.js`, and `boot.js` before the first paint).
 
-The three choices (appearance, background, motion) are kept in `localStorage` (`ui/js/prefs.js`)
+The choices (appearance, palette, background, motion) are kept in `localStorage` (`ui/js/prefs.js`)
 and put on `<html>` before the first paint (`ui/js/boot.js`).
 
 Contrast is part of the material. Over a 5,832-colour grid of what the pressed backdrop can be,
@@ -226,7 +232,9 @@ with its grain and under a dither dot, the lowest ratios are:
 | Dark, sheet | 15.5 | 11.1 | 7.4 | 4.5 |
 
 So `--ink`, `--soft` and `--muted` keep 4.5:1 everywhere; `--faint` is for marks, placeholders
-and key hints. On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1. Change a band in `backdrop.js`, a pane's
+and key hints. These figures are for the Sage palette; under the same backdrop the Anthropic
+and Vercel palettes come within a few tenths of them, their `--muted` on the sheet lowest at about
+4.9:1 and 5.0:1 (Vercel's dark glass about 4.6:1). On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1. Change a band in `backdrop.js`, a pane's
 fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
@@ -356,7 +364,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      `session_events`, marked "read-only" after their status in the inspector with a `Why` line
      under it, and have no follow-up box. A `/goal` or `/goal clear` message is answered in the
      open, in a note's row, and the Economy block counts the goal checks.
-   - *Settings*: first Appearance (Mode: System, Light or Dark; Background: the four paintings
+   - *Settings*: first Appearance (Mode: System, Light or Dark; Palette: Sage, Anthropic or Vercel, each
+     as a small window drawn in its own colours for the mode in use; Background: the four paintings
      and None, each as a small picture of itself; Panels: one more such picture, of the chosen
      background, cut in three as the window is, a fifth for the left panel, three fifths for the
      middle one and a fifth for the right, each part a switch for the background in that panel

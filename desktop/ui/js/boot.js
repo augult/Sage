@@ -1,4 +1,4 @@
-// Runs before the first paint, as a classic script: puts the chosen appearance and background on
+// Runs before the first paint, as a classic script: puts the chosen appearance, palette and background on
 // <html>, which panels show the background, which of the two side panels are put away, and the
 // view the window opens with, so the window never opens in the wrong one. js/themes.js owns the
 // appearance and the backgrounds from then on, js/panes.js the panels, js/main.js the view.
@@ -14,6 +14,7 @@
   const appearance = read('appearance');
   const dark = appearance === 'dark' || (appearance !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
   root.dataset.scheme = dark ? 'dark' : 'light';
+  root.dataset.palette = read('palette') || 'sage';
   // What was chosen holds; what nobody has chosen starts as the system asks (js/themes.js).
   const less = (what) => matchMedia(`(prefers-reduced-${what}: reduce)`).matches;
   root.dataset.theme = read('background') || (less('transparency') ? 'none' : 'orchid');

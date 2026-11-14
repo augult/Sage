@@ -507,6 +507,48 @@
   font-weight: 500;
 }
 
+/* The palettes: each a small window in its own colours, as the scheme in use draws it. */
+.palette-thumb {
+  position: relative;
+}
+
+.palette-face {
+  position: absolute;
+  inset: 0;
+  display: none;
+  padding: 12% 0 0 28%;
+  background: var(--sw-page);
+}
+
+:root[data-scheme="light"] .palette-face[data-scheme="light"],
+:root[data-scheme="dark"] .palette-face[data-scheme="dark"] {
+  display: block;
+}
+
+.palette-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 12% 14%;
+  border-top: 1px solid var(--sw-rule);
+  border-left: 1px solid var(--sw-rule);
+  border-top-left-radius: var(--r-2);
+  background: var(--sw-raised);
+}
+
+.palette-bar {
+  width: 70%;
+  height: 4px;
+  border-radius: var(--r-1);
+  background: var(--sw-ink);
+}
+
+.palette-bar.is-muted {
+  width: 45%;
+  background: var(--sw-muted);
+}
+
 /* The panels that show the background: the window in small, cut in three as the window is, a
    fifth, three fifths and a fifth. A part that is on shows its share of the picture, inside its
    own border; one that is off is as solid as its panel. */
