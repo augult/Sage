@@ -18,8 +18,9 @@ import * as prefs from './prefs.js';
 const painting = (id, name, dither) => ({ id, name, art: `themes/${id}/art.webp`, thumb: `themes/${id}/thumb.webp`, dither });
 
 export const BACKGROUNDS = [
-  painting('ember', 'Ember', { waves: [[0.0105, -0.0062, 0.046], [0.0041, 0.0113, 0.031], [-0.0063, -0.0034, 0.021]], warp: 10, reach: [0.16, 0.78], fill: 0.5 }),
+  // The first is what a window starts with.
   painting('orchid', 'Orchid', { waves: [[0.0062, 0.0041, 0.03], [-0.0043, 0.0071, 0.022], [0.0031, -0.0023, 0.015]], warp: 16, reach: [0.2, 0.8], fill: 0.46 }),
+  painting('ember', 'Ember', { waves: [[0.0105, -0.0062, 0.046], [0.0041, 0.0113, 0.031], [-0.0063, -0.0034, 0.021]], warp: 10, reach: [0.16, 0.78], fill: 0.5 }),
   painting('tide', 'Tide', { waves: [[0.0031, 0.0163, 0.04], [0.0052, -0.0112, 0.03], [0.0113, 0.0021, 0.05]], warp: 8, reach: [0.18, 0.8], fill: 0.5 }),
   painting('graphite', 'Graphite', { waves: [[0.0121, 0.0032, 0.02], [-0.0083, 0.0061, 0.035], [0.0022, 0.0093, -0.045]], warp: 12, reach: [0.2, 0.82], fill: 0.44 }),
   { id: 'none', name: 'None', art: null, thumb: null, dither: null },
@@ -33,8 +34,8 @@ export const PANELS = [
   { id: 'right', key: 'bg-right', name: 'Right' },
 ];
 
-// Out of the box the background shows in the middle panel alone.
-const DEFAULTS = { appearance: 'system', background: 'ember', dither: 'on', motion: 'on', 'bg-left': 'off', 'bg-middle': 'on', 'bg-right': 'off' };
+// Out of the box: Orchid, in all three panels, with no dither over it.
+const DEFAULTS = { appearance: 'system', background: 'orchid', dither: 'off', motion: 'on', 'bg-left': 'on', 'bg-middle': 'on', 'bg-right': 'on' };
 const SWITCH = ['on', 'off'];
 const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), dither: SWITCH, motion: SWITCH, 'bg-left': SWITCH, 'bg-middle': SWITCH, 'bg-right': SWITCH };
 const QUIET_DITHER = { waves: [[0.008, 0.004, 0.03], [-0.005, 0.009, 0.022], [0.003, -0.006, 0.017]], warp: 10, reach: [0.2, 0.8], fill: 0.4 };

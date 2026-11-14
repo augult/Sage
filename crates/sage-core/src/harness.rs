@@ -885,6 +885,58 @@ impl Harness {
         all.len()
     }
 
+    /// Gives a session another title: the first line of `title`, as long as a title gets. A
+    /// session another process is running is that one's to rename.
+    pub fn rename(&self, id: &str, title: &str) -> Result<SessionMeta, String> {
+        let title = one_line(title, 72);
+        if title.is_empty() {
+            return Err("a session needs a title".into());
+        }
+        if let Ok(live) = self.live(id) {
+            live.meta.lock().unwrap().title = title;
+            live.save_meta();
+            return Ok(live.meta.lock().unwrap().clone());
+        }
+        let path = self.unclaimed(id)?.join("meta.json");
+        // The file as it is, not as this build types it: what a newer build stored in it is kept.
+        let mut meta = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).filter(|meta| meta.is_object()).ok_or_else(|| format!("no session {id}"))?;
+        meta["title"] = title.into();
+        let body = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+        std::fs::write(&path, body).map_err(|e| format!("could not rename session {id}: {e}"))?;
+        self.stored(id).ok_or_else(|| format!("no session {id}"))
+    }
+
+    /// Deletes a session for good: its conversation, its log and what its commands printed. The
+    /// folder it worked in is not touched. A run in progress is stopped first, by whoever asks:
+    /// what a run still writes as it ends would come back into a directory being removed.
+    pub fn delete(&self, id: &str) -> Result<(), String> {
+        let dir = match self.live(id) {
+            Ok(live) => {
+                if live.meta.lock().unwrap().status == SessionStatus::Running {
+                    return Err(format!("session {id} is running: stop it first"));
+                }
+                self.close(id)?;
+                // Its log is open for appending for as long as anything holds the session.
+                live.log.lock().unwrap().take();
+                live.dir.clone()
+            }
+            Err(_) => self.unclaimed(id)?,
+        };
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("could not delete session {id}: {e}"))
+    }
+
+    /// The directory of a stored session that no process is running.
+    fn unclaimed(&self, id: &str) -> Result<PathBuf, String> {
+        let dir = self.session_dir(id)?;
+        if !dir.join("meta.json").is_file() {
+            return Err(format!("no session {id}"));
+        }
+        if SessionLock::held(&dir) {
+            return Err(format!("session {id} is running in another process: close it there first"));
+        }
+        Ok(dir)
+    }
+
     pub fn approve(&self, id: &str, approval: u64, allow: bool) -> Result<(), String> {
         let Ok(live) = self.live(id) else {
             // What was waiting for an answer died with the process that asked.
@@ -1668,6 +1720,65 @@ mod tests {
         let listed = h.list();
         assert_eq!((listed.len(), listed[0].status, listed[0].goal.clone(), listed[0].stats.turns), (1, SessionStatus::Closed, None, 7));
         assert_eq!(listed[0].why_closed.as_deref(), Some("older"), "stored before snapshots: read-only");
+    }
+
+    #[tokio::test]
+    async fn a_session_is_renamed_and_deleted_unless_it_runs_or_another_process_has_it() {
+        use crate::provider::mock::MockTurn;
+        use serde_json::json;
+        let h = harness("rename-delete");
+        let cwd = resume_workspace(&h);
+        let start = |h: &Harness| {
+            let turns = vec![MockTurn::calls("", vec![("shell", json!({"cmd": "test -f n.txt", "expect_exit": "0"})), ("finish", json!({"summary": "it is there"}))])];
+            h.start_scripted(StartRequest { cwd: cwd.clone(), task: "is n.txt there".into(), without: vec!["survey".into()], ..Default::default() }, MockProvider::scripted(turns)).unwrap().id
+        };
+        let stored_title = |h: &Harness, id: &str| serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(session_dir(h, id).join("meta.json")).unwrap()).unwrap()["title"].clone();
+
+        // Live: the title is the first line of what was asked for, and is on disk at once.
+        let id = start(&h);
+        until_idle(&h, &id).await;
+        assert_eq!(h.rename(&id, "  Is it there?\nand more ").unwrap().title, "Is it there?");
+        assert_eq!((h.meta(&id).unwrap().title.as_str(), stored_title(&h, &id)), ("Is it there?", json!("Is it there?")));
+        assert!(h.rename(&id, " \n ").unwrap_err().contains("needs a title"));
+        assert_eq!(h.rename(&id, &"x".repeat(100)).unwrap().title.chars().count(), 73, "as long as a title gets, and the mark that it was cut");
+
+        // Another harness on the same data, as another process would be: the session is not its to touch.
+        let other = Harness::at(h.inner.data_dir.clone());
+        other.resume_stand_ins(true);
+        assert!(other.rename(&id, "mine").unwrap_err().contains("another process"));
+        assert!(other.delete(&id).unwrap_err().contains("another process"));
+
+        // Not while it runs; once it does not, it goes with everything it stored, and the folder stays.
+        h.live(&id).unwrap().set_status(SessionStatus::Running);
+        assert!(h.delete(&id).unwrap_err().contains("stop it first"));
+        assert!(h.is_live(&id) && session_dir(&h, &id).is_dir());
+        h.live(&id).unwrap().set_status(SessionStatus::Idle);
+        h.delete(&id).unwrap();
+        assert!(!h.is_live(&id) && !session_dir(&h, &id).exists() && h.list().is_empty() && h.meta(&id).is_err());
+        assert!(Path::new(&cwd).join("n.txt").is_file());
+        assert!(h.delete(&id).unwrap_err().contains("no session"));
+
+        // Stored: renamed in its file, where what this build does not know of is kept, and deleted.
+        let id = start(&h);
+        until_idle(&h, &id).await;
+        h.close(&id).unwrap();
+        listed_free(&other).await;
+        let path = session_dir(&h, &id).join("meta.json");
+        let mut meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        meta["from_a_newer_build"] = json!(7);
+        std::fs::write(&path, meta.to_string()).unwrap();
+        let renamed = other.rename(&id, "Stored and renamed").unwrap();
+        assert_eq!((renamed.title.as_str(), renamed.status), ("Stored and renamed", SessionStatus::Resumable));
+        let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((&kept["title"], &kept["from_a_newer_build"], &kept["id"]), (&json!("Stored and renamed"), &json!(7), &json!(id)));
+        other.delete(&id).unwrap();
+        assert!(!session_dir(&h, &id).exists() && other.list().is_empty());
+
+        // An id is a name in the sessions folder, never a path out of it.
+        for bad in ["", "..", "../ws", "a/b", "a\\b"] {
+            assert!(h.delete(bad).is_err() && h.rename(bad, "x").is_err(), "{bad:?}");
+        }
+        assert!(Path::new(&cwd).join("n.txt").is_file());
     }
 
     // --- continuing a session after the program that ran it has ended ---

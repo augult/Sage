@@ -498,8 +498,8 @@ since runtime 153, MicrosoftEdge/WebView2Feedback#5724); anything on Windows or 
 - *Panels.* The sheet runs to the window's right edge and foot; the inspector is away until asked
   for (`sage.inspector` is `on` only once the user has opened it).
 - *Backgrounds.* Each panel shows the background or not: Settings has the window in small, cut
-  20/60/20, each part a switch. Only the middle one is on at first, so the side panels and the
-  title bar are solid. The dither stands still while no bare glass is in view.
+  20/60/20, each part a switch. In #26 only the middle one was on at first; all three are now
+  (next entry). The dither stands still while no bare glass is in view.
 
 Checked: the real app under xvfb (new session, a session with the inspector away and there,
 Settings, an open menu, Ctrl+comma), and the front end in Chrome with a stand-in for the shell
@@ -508,6 +508,27 @@ three panel switches in every combination that matters, no background, the sideb
 checked: dragging the window by the title bar and double-clicking it, which need a pointer; Paste
 from the Edit menu, which a webview may refuse (it then says to use the key); anything on Windows
 or macOS.
+
+**Sessions renamed and deleted; what a window starts as** (14 November, same branch):
+
+- *Sessions.* A right-click on a session in the sidebar opens a menu: Open, Rename, Copy folder
+  path, Stop while it runs, Delete. Until now only the Code tab's files had one, and a session
+  showed the webview's own (Back, Refresh, Print). The engine has `Harness::rename` and
+  `Harness::delete` for it (`rename_session`, `delete_session` in the shell). Delete removes the
+  session's own directory under the data folder and nothing else; it is refused while the session
+  runs and for one another process has. The file tree and the sidebar share one menu
+  (`contextMenu` in `ui/js/views/common.js`).
+- *Defaults.* A window nobody has set up opens on Orchid, in all three panels, with the dither
+  off (it was Ember, the middle panel alone, dither on). What was chosen in Settings holds.
+- *Panels in Settings.* Each part of the small window shows its own share of the picture inside
+  its own border; the chat bar drawn in it and the tooltips are gone.
+
+Checked: `cargo test --workspace`; in the real app under xvfb, a stored session renamed and one
+deleted, with its directory gone from disk and the folder it worked in untouched, the Code tab's
+menu still opening, and a first launch with the new defaults; in Chrome with a stand-in for the
+shell, the menu by pointer and by keyboard, Stop, the two dialogs and their errors, and back and
+forward after a delete. Not checked: deleting a session whose background jobs are still running;
+anything on Windows or macOS.
 
 ## Seventh session: changes made without a benchmark (11 November 2026)
 

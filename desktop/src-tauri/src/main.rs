@@ -235,6 +235,18 @@ async fn stop_session(harness: State<'_, Harness>, id: String) -> Reply<()> {
     harness.stop(&id)
 }
 
+/// Gives a session another title, and returns it as it then stands.
+#[tauri::command]
+async fn rename_session(harness: State<'_, Harness>, id: String, title: String) -> Reply<SessionMeta> {
+    harness.rename(&id, &title)
+}
+
+/// Deletes a session's record for good. The folder it worked in is not touched.
+#[tauri::command]
+async fn delete_session(harness: State<'_, Harness>, id: String) -> Reply<()> {
+    harness.delete(&id)
+}
+
 #[tauri::command]
 async fn approve(harness: State<'_, Harness>, id: String, approval: u64, allow: bool) -> Reply<()> {
     harness.approve(&id, approval, allow)
@@ -482,6 +494,8 @@ fn main() {
             start_scripted,
             send_message,
             stop_session,
+            rename_session,
+            delete_session,
             approve,
             session_events,
             read_output,

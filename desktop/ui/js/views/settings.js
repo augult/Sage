@@ -100,28 +100,28 @@ function appearanceSection() {
     radioChips({ name, label, segmented: true, options: values.map((option) => ({ value: option, label: option.charAt(0).toUpperCase() + option.slice(1) })), value, onChange: (chosen) => themes.choose({ [name]: chosen }) });
 
   // The window in small, cut as the window is: a fifth of it the left panel, three fifths the
-  // middle one, a fifth the right. Each part is a switch for the background in that panel.
+  // middle one, a fifth the right. Each part is a switch for the background in that panel, and
+  // shows its own share of the picture while it is on.
   const map = h('div.panel-map', { id: 'panel-backgrounds', role: 'group', 'aria-label': 'Panel backgrounds' });
   const mapHint = hint();
   function drawMap() {
     const now = themes.chosen();
     const { thumb } = themes.BACKGROUNDS.find((background) => background.id === now.background);
     map.replaceChildren(
-      ...(thumb ? [h('img', { src: thumb, alt: '', draggable: 'false' })] : []),
       ...themes.PANELS.map((panel) => {
         const label = `${panel.name} panel background`;
         const flip = (event) => themes.choose({ [panel.key]: event.target.checked ? 'on' : 'off' });
         return h(
           'label.panel-zone',
-          { title: label, dataset: { panel: panel.id } },
+          { dataset: { panel: panel.id } },
           // With no background there is nothing to show in any of them.
           h('input', { type: 'checkbox', checked: Boolean(thumb) && now[panel.key] === 'on', disabled: !thumb, 'aria-label': label, onchange: flip }),
-          h('span.panel-face'),
+          h('span.panel-face', thumb && h('img.panel-art', { src: thumb, alt: '', draggable: 'false' })),
           h('span.panel-name', panel.name),
         );
       }),
     );
-    mapHint.textContent = thumb ? 'The panels that show the background. Click one to switch it.' : 'Choose a background to show it in a panel.';
+    mapHint.textContent = thumb ? 'Choose which panels have a background.' : 'Choose a background to show it in a panel.';
   }
   drawMap();
 

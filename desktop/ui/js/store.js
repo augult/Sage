@@ -17,6 +17,24 @@ export function onChange(listener) {
 
 export const get = (id) => entries.get(id);
 
+/** A session that was renamed is shown under its new title wherever it is open. */
+export function retitle(id, title) {
+  const entry = entries.get(id);
+  if (!entry) return;
+  entry.meta = { ...entry.meta, title };
+  if (entry.model) {
+    entry.model.meta = { ...entry.model.meta, title };
+    // The pane beside the conversation names the session: it is drawn again.
+    entry.model.sideRev++;
+  }
+  notify(entry);
+}
+
+/** A session that was deleted is let go of: what is still on its way from it has nowhere to arrive. */
+export function forget(id) {
+  entries.delete(id);
+}
+
 /** Returns the entry for a session, loading it on first use. `entry.model` is null until loaded. */
 export function open(meta) {
   let entry = entries.get(meta.id);
