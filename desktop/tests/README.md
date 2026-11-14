@@ -2,7 +2,7 @@
 
 This dependency-free Node server serves the **actual** files in `desktop/ui/`.
 Only responses for `index.html` are modified: the server injects `fixture.js`
-before `js/main.js`. No production entry point or production IPC code changes.
+and the optional `audit.js` runner before `js/main.js`. No production entry point or production IPC code changes.
 The fixture implements synthetic Tauri IPC and window APIs in the browser.
 It does **not** exercise the Rust backend, real files, Git, network providers,
 streaming, native windows, or API credentials.
@@ -13,8 +13,9 @@ streaming, native windows, or API credentials.
 node desktop/tests/serve.mjs
 ```
 
-The listener is fixed to `0.0.0.0:4173`. In Reason Cloud use
-`preview_start({ command: 'node desktop/tests/serve.mjs', port: 4173 })`
+The listener defaults to `0.0.0.0:4173`; set `PORT` to choose a free port.
+In Reason Cloud use
+`preview_start({ command: 'PORT=4187 node desktop/tests/serve.mjs', port: 4187 })`
 instead of starting a background shell process.
 
 Open either route in a browser:
@@ -26,6 +27,21 @@ Open either route in a browser:
 - `http://localhost:4173/?view=session&test` — run the same assertions, then
   return to Hello.
 - Add `&scheme=dark` to exercise the dark appearance (light is the default).
+- `/?test&audit` — original regression suite, then workspace layout and tooltip assertions.
+- Add `&rich` for synthetic prose, code blocks, edit diffs, skill cards, a file tree/editor,
+  long model/path labels, and GitHub changes/commits. This is all **mock data**;
+  the preview cannot perform real Git, filesystem or provider operations.
+
+The audit suite reports `window.uiAuditResults` and emits `ui-audit-complete`.
+It checks Settings overflow, provider address/key readability, field bounds,
+provider dialog scrolling/actions, the scrolled Settings action hit target,
+composer bounds, all five viewport-bounded picker menus, no native titles,
+tooltip delay/edge clamping/modal rendering/pointer-events/dismissal/removal,
+late-title migration, focused-radio descriptions, inspector arrow-key navigation,
+and (with `rich`) file-editor and GitHub layout. The 17 audit assertions run after
+the original 16 checks. Finite entry animations settle before hover checks, because
+a real scroll during an animation is intentionally supposed to dismiss a tooltip.
+Use `/?test&audit&rich` at 940×600 and 1320×860 in both appearances.
 
 Tests wait for app mounting and fonts, use real navigation and tab clicks,
 and compare rendered element bounds/computed styles. A failed assertion is
@@ -67,4 +83,7 @@ initial routes and appearances. The fixture uses no package dependencies.
 ```sh
 node --check desktop/tests/serve.mjs
 node --check desktop/tests/fixture.js
+find desktop/ui/js desktop/tests -type f \( -name '*.js' -o -name '*.mjs' \) -exec node --check {} \;
+npx --yes eslint@9 --config desktop/tests/eslint.config.mjs desktop/ui/js desktop/tests
+npx --yes stylelint@16 'desktop/ui/styles/*.css' --config desktop/tests/stylelint.json
 ```

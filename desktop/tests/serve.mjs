@@ -12,12 +12,14 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const server = createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-    const file = pathname === '/__fixture.js' ? resolve(here, 'fixture.js') : resolve(ui, `.${pathname === '/' ? '/index.html' : pathname}`);
-    if (file !== resolve(here, 'fixture.js') && !file.startsWith(ui + sep)) { res.writeHead(403).end(); return; }
+    const testFile = { '/__fixture.js': 'fixture.js', '/__audit.js': 'audit.js' }[pathname];
+    const file = testFile ? resolve(here, testFile) : resolve(ui, `.${pathname === '/' ? '/index.html' : pathname}`);
+    if (!testFile && !file.startsWith(ui + sep)) { res.writeHead(403).end(); return; }
     let content = await readFile(file);
-    if (file === resolve(ui, 'index.html')) content = content.toString().replace('<script type="module" src="js/main.js"></script>', '<script src="/__fixture.js"></script>\n    <script type="module" src="js/main.js"></script>');
+    if (file === resolve(ui, 'index.html')) content = content.toString().replace('<script type="module" src="js/main.js"></script>', '<script src="/__fixture.js"></script>\n    <script src="/__audit.js"></script>\n    <script type="module" src="js/main.js"></script>');
     res.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(content);
   } catch (error) { res.writeHead(error.code === 'ENOENT' ? 404 : 500).end('Fixture asset unavailable'); }
 });
-server.listen(4173, '0.0.0.0', () => console.log('Browser-only UI fixture: http://localhost:4173/?test (mock Tauri IPC; no backend)'));
+const port = Number(process.env.PORT || 4173);
+server.listen(port, '0.0.0.0', () => console.log(`Browser-only UI fixture: http://localhost:${port}/?test (mock Tauri IPC; no backend)`));

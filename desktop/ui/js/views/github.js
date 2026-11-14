@@ -58,8 +58,8 @@ export function githubView(session, { onState, openFile, onDiscard }) {
     body.replaceChildren(
       h(
         'div.push-target',
-        h('div.push-line', icon(state.github ? 'github' : 'branch', 16), h('span.push-repo', { title: state.github ?? state.url }, state.github ?? state.url ?? 'No remote')),
-        h('div.push-line', h('span.push-branch', { title: state.branch }, state.branch ?? 'No branch checked out'), state.remote && state.branch && h('span.muted', `→ ${state.remote}`)),
+        h('div.push-line', icon(state.github ? 'github' : 'branch', 16), h('span.push-repo', { 'data-tooltip': state.github || state.url, 'data-tooltip-overflow': '' }, state.github ?? state.url ?? 'No remote')),
+        h('div.push-line', h('span.push-branch', { 'data-tooltip': state.branch, 'data-tooltip-overflow': '' }, state.branch ?? 'No branch checked out'), state.remote && state.branch && h('span.muted', `→ ${state.remote}`)),
       ),
       h('div.push-standing', standing),
       // Only with something to commit: its files, and the message they go under.
@@ -71,9 +71,9 @@ export function githubView(session, { onState, openFile, onDiscard }) {
                 h(
                   'div.push-row',
                   // What is gone cannot be opened.
-                  h(file.status === 'deleted' ? 'div.push-file' : 'button.push-file', { type: file.status !== 'deleted' && 'button', title: file.path, onclick: file.status !== 'deleted' && (() => openFile(file.path)) }, h('span.push-kind', file.status), h('span.push-path', file.path)),
+                  h(file.status === 'deleted' ? 'div.push-file' : 'button.push-file', { type: file.status !== 'deleted' && 'button', 'data-tooltip': file.path, 'data-tooltip-overflow': '', onclick: file.status !== 'deleted' && (() => openFile(file.path)) }, h('span.push-kind', file.status), h('span.push-path', file.path)),
                   // What the last commit has can be put back; a new file has nothing to go back to.
-                  REVERTIBLE.has(file.status) && h('button.push-revert', { type: 'button', title: 'Discard changes', 'aria-label': `Discard changes to ${file.path}`, onclick: () => askRevert(file) }, icon('back', 14)),
+                  REVERTIBLE.has(file.status) && h('button.push-revert', { type: 'button', 'data-tooltip': 'Discard changes', 'aria-label': `Discard changes to ${file.path}`, onclick: () => askRevert(file) }, icon('back', 14)),
                 ),
               ),
             ),
@@ -88,7 +88,7 @@ export function githubView(session, { onState, openFile, onDiscard }) {
             ...state.commits.map((commit, at) =>
               h(
                 'div.commit',
-                h('span.commit-subject', { title: commit.subject }, commit.subject),
+                h('span.commit-subject', { 'data-tooltip': commit.subject, 'data-tooltip-overflow': '' }, commit.subject),
                 h('span.commit-facts', h('span.mono', commit.hash), ` · ${commit.when}`, at < state.ahead && h('span.commit-ahead', 'not pushed')),
               ),
             ),

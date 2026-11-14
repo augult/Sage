@@ -180,8 +180,8 @@ function messagesSection(app) {
     label: 'Auto-retry',
     segmented: true,
     options: [
-      { value: 'on', label: 'On', title: 'When the provider is rate limited, overloaded or unreachable, keep retrying until it answers or you stop the session' },
-      { value: 'off', label: 'Off', title: 'Give up after eight retries, about four minutes' },
+      { value: 'on', label: 'On', title: 'Retry until connected or stopped' },
+      { value: 'off', label: 'Off', title: 'Stop after 8 retries (about 4 minutes)' },
     ],
     value: shown(),
     onChange: async (value) => {
@@ -279,9 +279,9 @@ function providerRow(provider, refresh) {
   return h(
     `div.provider${keyed ? '' : '.is-unset'}`,
     { dataset: { provider: provider.id } },
-    h('span.provider-mark', { title: mark, role: 'img', 'aria-label': mark }, keyed && icon('check', 14)),
-    h('span.provider-who', { title: provider.note || null }, h('span.provider-name', provider.name), provider.serves ? h('span.provider-serves', provider.serves) : null),
-    h('span.provider-url', { title: provider.base_url }, provider.base_url),
+    h('span.provider-mark', { 'data-tooltip': mark, role: 'img', 'aria-label': mark }, keyed && icon('check', 14)),
+    h('span.provider-who', { 'data-tooltip': provider.note || null }, h('span.provider-name', provider.name), provider.serves ? h('span.provider-serves', provider.serves) : null),
+    h('span.provider-url', { 'data-tooltip': provider.base_url, 'data-tooltip-overflow': '' }, provider.base_url),
     input,
     remove,
     said,
@@ -518,7 +518,7 @@ function skillsSection() {
       rows.push(
         h(
           'button.skill-row',
-          { type: 'button', title: skill.description || null, 'aria-expanded': String(open), dataset: { skill: skill.name }, onclick: () => show(open ? null : skill.name) },
+          { type: 'button', 'data-tooltip': skill.description || null, 'aria-expanded': String(open), dataset: { skill: skill.name }, onclick: () => show(open ? null : skill.name) },
           icon('chevron', 12),
           h('span.skill-title', skill.title),
           h('span.skill-state', skillState(skill)),

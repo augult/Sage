@@ -154,7 +154,8 @@
 /* As wide however wide the pane is dragged: the room goes to the editor. */
 .code-tree {
   flex: none;
-  width: 200px;
+  width: clamp(112px, 35%, 200px);
+  min-width: 0;
   padding: 6px 4px;
   overflow: auto;
   border-right: 1px solid var(--line);
@@ -348,7 +349,9 @@
 }
 
 .code-empty {
-  margin: 48px auto;
+  margin: 32px 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .code-edit {

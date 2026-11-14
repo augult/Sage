@@ -19,7 +19,7 @@ export function radioChips({ name, label, options, value, onChange, segmented = 
       onchange: () => onChange(option.value),
     });
     const face = h('span.chip-face', option.label, option.tag && h('span.chip-tag', option.tag));
-    group.append(h('label.chip-option', { title: option.title }, input, face));
+    group.append(h('label.chip-option', { 'data-tooltip': option.title }, input, face));
   }
   return group;
 }
@@ -38,13 +38,15 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
   const shown = h('span.pick-value');
   const button = h(
     `button.pick${boxed ? '.boxed' : ''}`,
-    { id, type: 'button', disabled: disabled || !options.length, 'aria-haspopup': 'listbox', 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)) },
+    { id, type: 'button', disabled: disabled || !options.length, 'aria-haspopup': 'listbox', 'aria-controls': `${id}-menu`, 'aria-expanded': 'false', onclick: () => (menu.hidden ? open() : close(false)), onkeydown: (event) => { if (menu.hidden && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); open(); } } },
     glyph && icon(glyph, 14),
     prefix && h('span.pick-key', prefix),
     shown,
     icon('caret', 12),
   );
-  const menu = h('div.menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, hidden: true, onkeydown: onKey });
+  const menu = h('div.menu.pick-menu', { id: `${id}-menu`, role: 'listbox', 'aria-label': name, hidden: true, onkeydown: onKey });
+  const topLayer = typeof menu.showPopover === 'function';
+  if (topLayer) menu.setAttribute('popover', 'manual');
   for (const group of groups) {
     if (group.label) menu.append(h('div.menu-group', group.label));
     else if (menu.childElementCount && group.options.length) menu.append(h('div.menu-rule'));
@@ -52,7 +54,7 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
       menu.append(
         h(
           'button.menu-item',
-          { type: 'button', role: 'option', title: option.title || null, disabled: option.disabled, dataset: { value: option.value }, onclick: () => choose(option.value) },
+          { type: 'button', role: 'option', 'data-tooltip': option.title || null, disabled: option.disabled, dataset: { value: option.value }, onclick: () => choose(option.value) },
           h('span.menu-text', option.label),
           icon('check', 12),
         ),
@@ -67,30 +69,54 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
     shown.textContent = on ? on.label : empty;
     shown.hidden = !shown.textContent;
     shown.classList.toggle('is-empty', !on);
-    button.title = on ? `${name}: ${on.label}` : name;
-    button.setAttribute('aria-label', button.title);
+    const label = on ? `${name}: ${on.label}` : name;
+    button.dataset.tooltip = on?.title ? `${name}: ${on.title}` : label;
+    button.setAttribute('aria-label', label);
     for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(chosen != null && item.dataset.value === String(chosen)));
   }
 
   const outside = (event) => {
-    if (!wrap.contains(event.target)) close(false);
+    if (!wrap.contains(event.target) && !menu.contains(event.target)) close(false);
   };
+  const scrolled = event => { if (!menu.contains(event.target)) close(false); };
+  const resized = () => close(false);
+  const detached = new MutationObserver(() => { if (!button.isConnected) close(false); });
 
   function open() {
     menu.hidden = false;
     button.setAttribute('aria-expanded', 'true');
-    // Above the button when there is no room below it.
-    wrap.classList.toggle('opens-up', innerHeight - button.getBoundingClientRect().bottom < menu.offsetHeight + 12);
-    (menu.querySelector('.menu-item[aria-selected="true"]:not(:disabled)') ?? enabled()[0])?.focus();
+    if (topLayer) menu.showPopover();
+    else (button.closest('dialog[open]') || document.body).append(menu);
+    const rect = button.getBoundingClientRect();
+    menu.style.minWidth = `${Math.min(Math.max(rect.width, 128), innerWidth - 16)}px`;
+    menu.style.maxWidth = `${Math.min(340, innerWidth - 16)}px`;
+    menu.style.maxHeight = '336px';
+    const roomBelow = innerHeight - rect.bottom - 12;
+    const roomAbove = rect.top - 12;
+    const up = roomBelow < menu.offsetHeight && roomAbove > roomBelow;
+    menu.style.maxHeight = `${Math.max(28, Math.min(336, up ? roomAbove : roomBelow))}px`;
+    const box = menu.getBoundingClientRect();
+    const left = align === 'end' ? rect.right - box.width : rect.left;
+    menu.style.left = `${Math.max(8, Math.min(left, innerWidth - box.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(up ? rect.top - box.height - 4 : rect.bottom + 4, innerHeight - box.height - 8))}px`;
+    (menu.querySelector('.menu-item[aria-selected="true"]:not(:disabled)') ?? enabled()[0])?.focus({ preventScroll: true });
     document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('scroll', scrolled, true);
+    window.addEventListener('resize', resized);
+    detached.observe(document.body, { childList: true, subtree: true });
   }
 
   function close(refocus) {
     if (menu.hidden) return;
+    if (topLayer && menu.matches(':popover-open')) menu.hidePopover();
     menu.hidden = true;
+    if (!topLayer) wrap.append(menu);
     button.setAttribute('aria-expanded', 'false');
     document.removeEventListener('pointerdown', outside, true);
-    if (refocus) button.focus();
+    document.removeEventListener('scroll', scrolled, true);
+    window.removeEventListener('resize', resized);
+    detached.disconnect();
+    if (refocus) button.focus({ preventScroll: true });
   }
 
   function choose(next) {
@@ -121,9 +147,9 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
 
 /** What a session can be run for. `title` is shown on hover. */
 export const MODES = [
-  { value: 'ecosage', label: 'Ecosage', title: 'Few requests and little money, at a little cost to the result' },
-  { value: 'default', label: 'Default', title: 'The loop other harnesses run: one tool call after another, nothing of Sage around it' },
-  { value: 'prosage', label: 'Prosage', title: 'For the result alone: nothing hurries the run, examiners who never see the work check it against the task, referees decide which of their findings stand, skills are switched on unasked. Costs more requests and time' },
+  { value: 'ecosage', label: 'Ecosage', title: 'Faster runs, lower cost' },
+  { value: 'default', label: 'Default', title: 'Standard tool-by-tool workflow' },
+  { value: 'prosage', label: 'Prosage', title: 'Extra review for thorough results. Uses more time and requests.' },
 ];
 
 /** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
@@ -137,8 +163,8 @@ export function modeLabel(mode) {
 }
 
 export const AUTONOMIES = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'ask', label: 'Ask' },
+  { value: 'auto', label: 'Auto', title: 'Act without asking' },
+  { value: 'ask', label: 'Ask', title: 'Ask before taking actions' },
 ];
 
 /** A run setting shows only its value; its accessible label and tooltip retain the setting name. */
@@ -190,13 +216,19 @@ export function providerOptions(providers, keep = null) {
   return keyedFirst(connected(providers, keep)).map((provider) => ({ value: provider.id, label: provider.name, disabled: !provider.has_key, title: provider.has_key ? provider.base_url : 'No API key' }));
 }
 
+/** Plain-language descriptions shared by Settings and both composers. */
+function effortHint(value) {
+  if (String(value).startsWith('ratchet')) return 'Starts low; increases when needed';
+  return { low: 'Faster, lighter reasoning', medium: 'Balanced speed and detail', high: 'More time for deeper reasoning', max: 'Most time for the hardest tasks' }[value] || 'Reasoning effort';
+}
+
 /** Efforts on offer, plus the configured default when it is a variant not in the list. */
 export function effortOptions(current) {
   const values = ['ratchet', 'low', 'high', 'max'];
   if (current && !values.includes(current)) values.push(current);
   return values.map((value) => {
     const label = effortLabel(value);
-    return { value, label: label.charAt(0).toUpperCase() + label.slice(1) };
+    return { value, label: label.charAt(0).toUpperCase() + label.slice(1), title: effortHint(value) };
   });
 }
 

@@ -62,7 +62,7 @@ export function markIdle(button, box) {
  * `label` is its name to those who cannot see it.
  */
 export function barButton(id, label, glyph, onclick, look = 'primary') {
-  return h(`button.bar-btn.${look}`, { id, type: 'button', title: label, 'aria-label': label, onclick }, glyph);
+  return h(`button.bar-btn.${look}`, { id, type: 'button', 'data-tooltip': label, 'aria-label': label, onclick }, glyph);
 }
 
 /** Makes a message box as tall as its text. The stylesheet says how tall it may get. */
@@ -122,16 +122,16 @@ export function stateMark(state) {
 }
 
 function glyph(mark, tone, label) {
-  return h(`span.glyph.tone-${tone}`, { title: label, role: 'img', 'aria-label': label }, mark);
+  return h(`span.glyph.tone-${tone}`, { 'data-tooltip': label, role: 'img', 'aria-label': label }, mark);
 }
 
-export const tag = (text, tone = 'plain', title) => h(`span.tag.tone-${tone}`, { title }, text);
+export const tag = (text, tone = 'plain', title) => h(`span.tag.tone-${tone}`, { 'data-tooltip': title && title !== text ? title : null }, text);
 
 /** Looks up a value the engine named. Anything this build does not know comes back undefined. */
 export const known = (table, name) => (Object.hasOwn(table, name) ? table[name] : undefined);
 
 /** The cross that closes a dialog. */
-export const closeButton = (close) => h('button.close', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, icon('cross', 14));
+export const closeButton = (close) => h('button.close', { type: 'button', 'data-tooltip': 'Close', 'aria-label': 'Close', onclick: close }, icon('cross', 14));
 
 // The right-click menu, while one is open: there is never more than one.
 let contextShown = null;
@@ -160,7 +160,7 @@ export function contextMenu(event, rows, { remove, back } = {}) {
   const item = (row) =>
     h(
       `button.menu-item${row.danger ? '.is-danger' : ''}`,
-      { type: 'button', role: 'menuitem', disabled: row.disabled, title: row.title, onclick: () => (closeContextMenu(), row.act()) },
+      { type: 'button', role: 'menuitem', disabled: row.disabled, 'data-tooltip': row.title, onclick: () => (closeContextMenu(), row.act()) },
       h('span.menu-text', row.label),
       row.glyph && h('span.menu-glyph', icon(row.glyph, 14)),
     );

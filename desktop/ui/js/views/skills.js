@@ -93,7 +93,8 @@ export function skillCommands({ box, list, usable = () => true, locked = () => [
         type: 'button',
         role: 'option',
         tabindex: '-1',
-        title: command.about,
+        'data-tooltip': command.about,
+        'data-tooltip-overflow': '',
         disabled: Boolean(command.skill) && isLocked(command.name),
         'aria-selected': String(Boolean(command.skill) && isOn(command.name)),
         dataset: { command: command.name },
@@ -254,7 +255,7 @@ function openSkills({ skills, isOn, isLocked, toggle }) {
   };
 
   const title = h('h2', 'Skills');
-  const back = h('button.act', { type: 'button', title: 'Back', 'aria-label': 'Back', hidden: true, onclick: () => read(null) }, icon('back', 14));
+  const back = h('button.act', { type: 'button', 'data-tooltip': 'Back', 'aria-label': 'Back', hidden: true, onclick: () => read(null) }, icon('back', 14));
   const tools = h('span.skill-tools', { hidden: true });
   const page = h('div.skill-page', { hidden: true });
   const grid = h(

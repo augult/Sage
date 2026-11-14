@@ -26,7 +26,7 @@ export function mountWindowControls() {
     const full = await appWindow.isMaximized();
     const label = full ? 'Restore' : 'Maximize';
     maximize.dataset.maximized = String(full);
-    maximize.title = label;
+    maximize.dataset.tooltip = label;
     maximize.setAttribute('aria-label', label);
   }
   window.addEventListener('resize', sync);

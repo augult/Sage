@@ -6,19 +6,37 @@
   const session = { id: 'fixture-hello', title: 'Hello', cwd: '/home/user/Novel', provider: 'fixture', model: 'fixture-model', mode: 'ecosage', effort: 'medium', autonomy: 'auto', simulated: false, created: 1730000000000, updated: 1730000000000, status: 'resumable', outcome: null, verified: false, stats: {}, skills: [] };
   const events = [{ type: 'session_start', seq: 1, ts: session.created, title: session.title, cwd: session.cwd, provider: session.provider, model: session.model, mode: session.mode }, { type: 'user', seq: 2, ts: session.created + 1, text: 'Hello', files: [] }];
   const state = { version: 'browser-fixture', home: '/home/user', data_dir: '/home/user/.sage', provider: 'fixture', model: 'fixture-model', effort: 'medium', auto_retry: false, providers: [{ id: 'fixture', name: 'Fixture provider', serves: 'Synthetic browser fixture', base_url: 'https://example.invalid', key_env: '', has_key: true, models: ['fixture-model'], note: 'Not a real connection', custom: false }] };
+  const rich = params.has('rich');
+  const skills = rich ? [{ name: 'ui-review', title: 'Review interface accessibility and responsive layouts', description: 'Check spacing, contrast, keyboard access, and narrow windows.', body: '# UI review\n\nCheck the interface in light and dark appearances.\n', path: '/home/user/.sage/skills/ui-review/SKILL.md' }] : [];
+  if (rich) {
+    events[0].model = session.model = state.model = 'example-reasoning-model-with-a-long-display-name';
+    state.providers[0].models = [state.model];
+    events.push(
+      { type: 'turn_start', seq: 3, turn: 1, effort: 'medium', ts: session.created + 2 },
+      { type: 'model', seq: 4, turn: 1, reasoning: 'Inspect the interface and verify the changes.', content: 'I checked the layout and adjusted the spacing.\n\n- Controls align consistently.\n- Long labels stay inside their panels.\n\n```js\nconst spacing = 8;\n```', ms: 1200, usage: { prompt: 1200, output: 180 }, calls: [{ id: 'edit-1', arguments: JSON.stringify({ path: 'src/components/Navigation.js', old: 'gap: 4px', new: 'gap: 8px' }) }] },
+      { type: 'step_end', seq: 5, turn: 1, idx: 0, tool: 'edit', summary: 'src/components/Navigation.js', status: 'ok', observation: '[OK] Updated spacing', ms: 24, change: { path: 'src/components/Navigation.js', added: 1, removed: 1, hunks: [{ old_start: 1, new_start: 1, lines: ['-gap: 4px', '+gap: 8px'] }] } },
+      { type: 'stats', seq: 6, stats: { turns: 1, steps: 1, prompt_tokens: 1200, output_tokens: 180, context_tokens: 2048, cost: 0.003, priced: true, elapsed_ms: 1224 } },
+      { type: 'finish', seq: 7, status: 'done', verified: true, summary: 'Spacing updated and checked.' },
+      { type: 'watch', seq: 8, name: 'background-test-suite-with-a-very-long-label-that-needs-wrapping', cmd: 'npm test -- --watch', state: 'pass', detail: 'All interface checks passed in this synthetic fixture.' },
+    );
+  }
   const calls = [];
   window.uiFixture = { disclaimer: 'Mock IPC browser fixture; no backend behavior is exercised.', calls, session };
   window.uiTestResults = { status: 'not-run', checks: [] };
   const handlers = {
     ui_hooks: () => ({ view: initialView, theme: 'none', scheme: params.get('scheme') || 'light' }),
     app_state: () => state,
+    set_defaults: (change) => { for (const [key, value] of Object.entries(change)) if (value !== undefined) state[key] = value; return null; },
+    set_auto_retry: ({ on }) => { state.auto_retry = on; return null; },
     list_sessions: () => [session],
     session_events: () => events,
     subscribe: () => events,
-    list_skills: () => [],
+    list_skills: () => skills,
+    skill_file: () => '---\nname: ui-review\ntitle: Review interface\ndescription: Check the interface\n---\n\nCheck spacing and keyboard access.\n',
     instructions: () => ({ system: 'Browser fixture system prompt.', system_default: 'Browser fixture system prompt.', system_custom: false, global: '' }),
-    git_state: () => ({ repo: false, branch: null, remote: null, url: null, github: false, upstream: null, ahead: 0, files: [], commits: [] }),
-    list_dir: () => [],
+    git_state: () => rich ? ({ repo: true, branch: 'feature/interface-polish-with-long-branch-name', remote: 'origin', url: 'https://github.com/example/interface', github: 'example/interface', upstream: 'origin/main', ahead: 1, files: [{ path: 'src/components/Navigation.js', status: 'modified' }, { path: 'src/styles/responsive-layout-with-a-long-name.css', status: 'new' }], commits: [{ hash: 'abc1234', subject: 'Improve interface spacing and keyboard navigation', when: 'Today' }] }) : ({ repo: false, branch: null, remote: null, url: null, github: false, upstream: null, ahead: 0, files: [], commits: [] }),
+    list_dir: ({ path }) => rich ? (path ? [{ name: 'Navigation.js', path: 'src/Navigation.js', dir: false }] : [{ name: 'src', path: 'src', dir: true }, { name: 'README-with-a-long-filename.md', path: 'README-with-a-long-filename.md', dir: false }]) : [],
+    read_file: () => '# Browser fixture\n\nThis file is synthetic; editing it never touches disk.\n',
     pick_folder: () => null,
     pick_files: () => [],
   };

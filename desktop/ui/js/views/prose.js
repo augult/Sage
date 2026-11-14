@@ -17,7 +17,7 @@ const INLINE = {
       {
         role: 'button',
         tabindex: '0',
-        title: `${node.href}\nClick to copy`,
+        'data-tooltip': `Copy link: ${node.href}`,
         onclick: () => copyText(node.href),
         // As a button answers: Enter or Space.
         onkeydown: (event) => {

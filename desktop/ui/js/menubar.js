@@ -263,7 +263,11 @@ export function mountMenuBar(bar, nav) {
   bar.addEventListener('mousedown', (event) => event.preventDefault());
 
   const entries = () => [...open.menu.querySelectorAll('.menu-item')];
-  const mark = () => entries().forEach((row, at) => row.classList.toggle('is-active', at === open.active));
+  const mark = () => {
+    const rows = entries();
+    rows.forEach((row, at) => row.classList.toggle('is-active', at === open.active));
+    rows[open.active]?.scrollIntoView({ block: 'nearest' });
+  };
 
   const row = (entry) =>
     h(

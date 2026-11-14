@@ -26,7 +26,7 @@ export function codeView(session) {
   let naming = null;
 
   const tree = h('div.code-tree', { role: 'tree', 'aria-label': 'Files', oncontextmenu: (event) => event.target === tree && menuAt(event, null), onkeydown: onTreeKey });
-  const name = h('button.code-path', { type: 'button', title: 'Rename', onclick: renameOpen });
+  const name = h('button.code-path', { type: 'button', 'data-tooltip': 'Rename file', onclick: renameOpen });
   const save = h('button.btn', { id: 'code-save', type: 'button', disabled: true, onclick: () => write().catch(() => {}) }, 'Save');
   const lines = h('pre.code-lines', { 'aria-hidden': 'true' });
   const text = h('textarea', {
@@ -76,7 +76,7 @@ export function codeView(session) {
 
   function showName() {
     name.textContent = file;
-    name.title = `${file} — click to rename`;
+    name.dataset.tooltip = `Rename ${file}`;
   }
 
   function show(path, content) {
@@ -360,7 +360,8 @@ export function codeView(session) {
         {
           type: renaming ? null : 'button',
           role: 'treeitem',
-          title: entry.path,
+          'data-tooltip': entry.path,
+          'data-tooltip-overflow': '',
           style: `padding-left:${6 + depth * 12}px`,
           dataset: { path: entry.path, dir: String(entry.dir) },
           'aria-expanded': entry.dir ? String(shown) : null,
