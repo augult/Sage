@@ -263,12 +263,30 @@ mod tests {
         // An override keeps the built-in's place; the rest follow by name.
         assert_eq!(list(&data, Some(&cwd)).iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["ui", "security", "cleanup", "debug", "tests", "performance", "alpha", "zeta"]);
         assert_eq!(file_text(&data, Some(&cwd), "security").unwrap(), "---\ntitle: Ours\n---\nproject security");
-        assert!(file_text(&data, None, "ui").unwrap().starts_with("---\nname: ui\n"));
+        // Embedded Markdown follows the checkout's line endings, including CRLF on Windows.
+        assert_eq!(file_text(&data, None, "ui").unwrap().lines().take(2).collect::<Vec<_>>(), ["---", "name: ui"]);
 
         // Deleting the user's copy brings the built-in one back.
         delete_user(&data, "security").unwrap();
         assert_eq!((get(None, "security").source, get(None, "security").overrides_builtin), (SkillSource::Builtin, false));
         assert!(delete_user(&data, "security").is_err() && delete_user(&data, "ui").is_err());
+    }
+
+    #[test]
+    fn file_text_preserves_user_and_project_line_endings() {
+        let (data, cwd) = dirs("line-endings");
+        for newline in ["\n", "\r\n"] {
+            let user = ["---", "name: security", "title: Mine", "---", "User instructions.", "Keep formatting.", ""].join(newline);
+            save_user(&data, "security", &user).unwrap();
+            assert_eq!(file_text(&data, None, "security").unwrap(), user);
+
+            let project = ["---", "name: security", "title: Ours", "---", "Project instructions.", "Keep formatting.", ""].join(newline);
+            std::fs::write(cwd.join(".sage/skills/security.md"), &project).unwrap();
+            assert_eq!(file_text(&data, Some(&cwd), "security").unwrap(), project);
+            let skill = resolve(&data, Some(&cwd), &["security".into()]).unwrap().remove(0);
+            assert_eq!((skill.title.as_str(), skill.source), ("Ours", SkillSource::Project));
+            assert_eq!(skill.body, ["Project instructions.", "Keep formatting."].join(newline));
+        }
     }
 
     #[test]

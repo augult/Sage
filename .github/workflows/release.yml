@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A branch dispatch verifies the same tests and installer without publishing.
   build:
-    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -107,6 +107,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
