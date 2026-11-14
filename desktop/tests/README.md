@@ -2,7 +2,7 @@
 
 This dependency-free Node server serves the **actual** files in `desktop/ui/`.
 Only responses for `index.html` are modified: the server injects `fixture.js`
-before `js/main.js`. No production entry point or production IPC code changes.
+and the optional `audit.js` runner before `js/main.js`. No production entry point or production IPC code changes.
 The fixture implements synthetic Tauri IPC and window APIs in the browser.
 It does **not** exercise the Rust backend, real files, Git, network providers,
 streaming, native windows, or API credentials.
@@ -34,8 +34,13 @@ Open either route in a browser:
 
 The audit suite reports `window.uiAuditResults` and emits `ui-audit-complete`.
 It checks Settings overflow, provider address/key readability, field bounds,
-provider dialog scrolling/actions, composer hit targets, viewport-bounded menus,
-absence of native titles, and (with `rich`) file-editor and GitHub layout.
+provider dialog scrolling/actions, the scrolled Settings action hit target,
+composer bounds, all five viewport-bounded picker menus, no native titles,
+tooltip delay/edge clamping/modal rendering/pointer-events/dismissal/removal,
+late-title migration, focused-radio descriptions, inspector arrow-key navigation,
+and (with `rich`) file-editor and GitHub layout. The 17 audit assertions run after
+the original 16 checks. Finite entry animations settle before hover checks, because
+a real scroll during an animation is intentionally supposed to dismiss a tooltip.
 Use `/?test&audit&rich` at 940×600 and 1320×860 in both appearances.
 
 Tests wait for app mounting and fonts, use real navigation and tab clicks,

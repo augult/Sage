@@ -797,7 +797,9 @@ textarea.editor {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
   padding: 14px 16px;
+  overflow-y: auto;
 }
 
 .unsaved-list {
@@ -935,7 +937,9 @@ textarea.editor {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-height: 0;
   padding: 22px 20px 20px;
+  overflow-y: auto;
   text-align: center;
 }
 
@@ -977,12 +981,13 @@ textarea.editor {
 }
 
 @container workspace (max-width: 480px) {
-  .view-body { padding: 28px 16px 32px; }
+  .view-body { padding: 28px 48px 32px 16px; }
   .view-title { padding-right: 28px; }
   .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .field-label { padding-top: 0; }
   .panel-map { max-width: 100%; }
   .chips.segmented { max-width: 100%; }
+  .chips.segmented .chip-face { padding: 0 8px; }
   .new-body { padding: 20px 16px; }
   .new-lead { font-size: 24px; }
   .session-foot { padding-right: 16px; padding-left: 16px; }

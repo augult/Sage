@@ -466,7 +466,8 @@
 .view-body {
   flex: 1;
   min-height: 0;
-  padding: 28px 24px 48px;
+  /* Keep scrolled settings actions out of the floating inspector toggle's hit area. */
+  padding: 28px 48px 48px 24px;
   overflow-y: auto;
 }
 

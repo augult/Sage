@@ -17,6 +17,7 @@
       { type: 'step_end', seq: 5, turn: 1, idx: 0, tool: 'edit', summary: 'src/components/Navigation.js', status: 'ok', observation: '[OK] Updated spacing', ms: 24, change: { path: 'src/components/Navigation.js', added: 1, removed: 1, hunks: [{ old_start: 1, new_start: 1, lines: ['-gap: 4px', '+gap: 8px'] }] } },
       { type: 'stats', seq: 6, stats: { turns: 1, steps: 1, prompt_tokens: 1200, output_tokens: 180, context_tokens: 2048, cost: 0.003, priced: true, elapsed_ms: 1224 } },
       { type: 'finish', seq: 7, status: 'done', verified: true, summary: 'Spacing updated and checked.' },
+      { type: 'watch', seq: 8, name: 'background-test-suite-with-a-very-long-label-that-needs-wrapping', cmd: 'npm test -- --watch', state: 'pass', detail: 'All interface checks passed in this synthetic fixture.' },
     );
   }
   const calls = [];

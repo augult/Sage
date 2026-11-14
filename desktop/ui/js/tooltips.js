@@ -84,11 +84,14 @@ document.addEventListener('pointerout', event => {
 });
 document.addEventListener('focusin', event => {
   const el = trigger(event.target);
-  if (el && event.target.matches(':focus-visible')) schedule(el, 0);
+  if (el) schedule(el, 0);
 });
 document.addEventListener('focusout', dismissTooltip);
 document.addEventListener('pointerdown', dismissTooltip, true);
 document.addEventListener('click', dismissTooltip, true);
+// A click handler may focus a new control while opening a menu. Do not let that
+// re-open a tooltip after the click's capture-phase dismissal.
+document.addEventListener('click', dismissTooltip);
 document.addEventListener('scroll', dismissTooltip, true);
 document.addEventListener('keydown', event => { if (event.key === 'Escape') dismissTooltip(); });
 window.addEventListener('blur', dismissTooltip);

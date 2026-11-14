@@ -4,7 +4,14 @@
   const params = new URLSearchParams(location.search);
   if (!params.has('audit')) return;
   const results = window.uiAuditResults = { status: 'waiting', checks: [] };
-  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const settle = async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // Entry transforms can emit a final ancestor scroll; wait for finite motion
+    // before hovering. A scroll is intentionally supposed to dismiss tooltips.
+    const animations = document.getAnimations().filter(animation => Number.isFinite(animation.effect?.getTiming().iterations));
+    await Promise.allSettled(animations.map(animation => animation.finished));
+    await new Promise(requestAnimationFrame);
+  };
   const expect = (ok, message) => { if (!ok) throw new Error(message); };
   const visible = el => el && el.getBoundingClientRect().width > 0;
   async function waitFor(predicate) {
@@ -39,12 +46,31 @@
         expect(box.right <= body.right + 1, `${el.className} reaches ${box.right}px past view ${body.right}px`);
       }
     });
+    await check('Scrolled Settings action clears the floating inspector toggle', async () => {
+      document.querySelector('#settings-keys').scrollIntoView(); await settle();
+      const button = document.querySelector('#add-provider'), box = button.getBoundingClientRect();
+      const toggle = document.querySelector('#toggle-inspector').getBoundingClientRect();
+      expect(toggle.left - box.right >= 8, `Only ${toggle.left - box.right}px of clearance`);
+      expect(button.contains(document.elementFromPoint(box.right - 5, box.top + 5)), 'Inspector toggle intercepts Add provider');
+    });
     document.querySelector('#add-provider').click(); await settle();
     await check('Provider dialog scrolls without hiding its actions', () => {
       const dialog = document.querySelector('dialog[open]'), form = dialog.querySelector('form');
       expect(form.scrollHeight <= form.clientHeight + 1 || ['auto', 'scroll'].includes(getComputedStyle(form).overflowY), `Form clips ${form.scrollHeight - form.clientHeight}px without scrolling`);
       const foot = dialog.querySelector('.dialog-foot').getBoundingClientRect();
       expect(foot.bottom <= innerHeight - 8 && foot.top >= 0, `Dialog actions off-screen: ${foot.top}..${foot.bottom}`);
+    });
+    await check('Custom tooltip renders above a modal dialog', async () => {
+      const dialog = document.querySelector('dialog[open]'), button = dialog.querySelector('.close');
+      const events = [];
+      const log = event => events.push(`${event.type}:${event.target.id || event.target.className}`);
+      for (const type of ['scroll', 'focusout', 'pointerout']) document.addEventListener(type, log, true);
+      button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }));
+      try { await waitFor(() => document.querySelector('.ui-tooltip:not([hidden])')); }
+      catch (error) { throw new Error(`${error.message}; modal events: ${events.join(', ')}; button: ${button.outerHTML}; tip: ${document.querySelector('.ui-tooltip')?.outerHTML}`); }
+      finally { for (const type of ['scroll', 'focusout', 'pointerout']) document.removeEventListener(type, log, true); }
+      expect(document.querySelector('.ui-tooltip').closest('dialog') === dialog, 'Modal tooltip is outside the active dialog');
+      button.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }));
     });
     document.querySelector('dialog[open]').close(); await settle();
     document.querySelector('#new-session').click(); await settle();
@@ -58,12 +84,14 @@
       }
     });
     await check('Picker menu stays in the viewport', async () => {
-      document.querySelector('#pick-mode').click(); await settle();
-      const menu = document.querySelector('#pick-mode-menu'), box = menu.getBoundingClientRect();
-      expect(box.left >= 4 && box.right <= innerWidth - 4 && box.top >= 4 && box.bottom <= innerHeight - 4, `Menu outside viewport: ${JSON.stringify(box.toJSON())}`);
-      const item = menu.querySelector('.menu-item'); const at = item.getBoundingClientRect();
-      expect(item.contains(document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2)), 'Menu clipped by a scroll container');
-      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      for (const id of ['mode', 'effort', 'model', 'folder', 'autonomy']) {
+        document.querySelector(`#pick-${id}`).click(); await settle();
+        const menu = document.querySelector(`#pick-${id}-menu`), box = menu.getBoundingClientRect();
+        expect(box.left >= 4 && box.right <= innerWidth - 4 && box.top >= 4 && box.bottom <= innerHeight - 4, `${id} menu outside viewport: ${JSON.stringify(box.toJSON())}`);
+        const item = menu.querySelector('.menu-item'); const at = item.getBoundingClientRect();
+        expect(item.contains(document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2)), `${id} menu clipped by a scroll container`);
+        menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      }
     });
     await check('Native title tooltips are absent', () => {
       const titles = [...document.querySelectorAll('[title]')].filter(visible);
@@ -104,6 +132,15 @@
       transient.style.cssText = 'position:fixed;left:100px;top:100px'; document.body.append(transient);
       enter(transient); await waitFor(tooltip); transient.remove(); await settle();
       expect(!tooltip(), 'Removed trigger left an orphan tooltip');
+    });
+    await check('Late native titles are migrated without a browser popup', async () => {
+      const button = document.createElement('button'); button.textContent = 'Temporary';
+      button.setAttribute('title', 'Late tooltip');
+      button.style.cssText = 'position:fixed;left:100px;top:100px'; document.body.append(button);
+      await settle();
+      expect(!button.hasAttribute('title') && button.dataset.tooltip === 'Late tooltip', 'Late native title was not migrated');
+      enter(button); await waitFor(tooltip); expect(tooltip().textContent === 'Late tooltip', 'Migrated tooltip did not render');
+      button.remove(); await settle();
     });
     document.querySelector('#open-settings').click(); await settle();
     await check('Keyboard tooltip describes the focused radio, not just its wrapper', async () => {
