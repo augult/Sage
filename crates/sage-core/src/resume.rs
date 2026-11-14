@@ -95,7 +95,8 @@ pub struct SessionLock {
 }
 
 impl SessionLock {
-    /// Takes the lock on the session in `dir`, or says which process has it.
+    /// Takes the lock on the session in `dir`, or says it is already open, with the holder's pid
+    /// when the operating system permits reading the locked file.
     pub fn acquire(dir: &Path) -> Result<Self, String> {
         let path = dir.join(LOCK);
         let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
@@ -120,6 +121,8 @@ impl SessionLock {
             }
             Err(TryLockError::WouldBlock) => {
                 let mut pid = String::new();
+                // Windows locks also prevent reading the pid through another handle, so the
+                // holder's identity is best-effort; the native lock alone decides ownership.
                 let _ = File::open(&path).and_then(|mut f| f.read_to_string(&mut pid));
                 let who = pid.trim().parse::<u32>().map_or_else(|_| "another process".to_string(), |pid| format!("process {pid}"));
                 Err(format!("it is open in {who}: only one process can run a session at a time"))
@@ -154,11 +157,27 @@ mod tests {
         assert!(!SessionLock::held(&dir));
         let first = SessionLock::acquire(&dir).expect("a stale lock file is ignored");
         assert!(SessionLock::held(&dir));
+        let pid = std::process::id().to_string();
+        // The pid is readable under advisory locks, but Windows denies reads through another
+        // handle while the native lock is held. Either way the second holder must be refused.
+        let who = match std::fs::read_to_string(dir.join(LOCK)) {
+            Ok(stored_pid) => {
+                assert_eq!(stored_pid, pid);
+                format!("process {pid}")
+            }
+            Err(_) => "another process".to_string(),
+        };
         let refused = SessionLock::acquire(&dir).unwrap_err();
-        assert!(refused.contains(&format!("process {}", std::process::id())), "{refused}");
+        assert_eq!(refused, format!("it is open in {who}: only one process can run a session at a time"));
+        assert!(SessionLock::held(&dir), "a refused acquisition must not release the first holder");
         drop(first);
         assert!(!SessionLock::held(&dir));
-        assert!(SessionLock::acquire(&dir).is_ok());
+        assert_eq!(std::fs::read_to_string(dir.join(LOCK)).unwrap(), pid, "the pid remains as metadata after the lock is released");
+        let second = SessionLock::acquire(&dir).expect("the lock is available after its holder is dropped");
+        assert!(SessionLock::held(&dir));
+        drop(second);
+        assert!(!SessionLock::held(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

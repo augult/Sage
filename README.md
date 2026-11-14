@@ -230,6 +230,13 @@ cargo run -p sage-desktop --target-dir target/desktop
 # installers: cargo install tauri-cli --version 2.12.4 --locked && cargo tauri build
 ```
 
+The **Release desktop** GitHub Actions workflow (`release.yml`) typechecks, lints,
+tests, and builds the Windows installer and standalone executable. Dispatch it on
+a development branch for a packaging preflight: the downloads and checksums are
+saved as the `windows-release` artifact, without creating a tag or release.
+Dispatching on `main` also publishes the versioned GitHub release after all checks
+pass. Existing release tags are never overwritten.
+
 ## Layout
 
 ```

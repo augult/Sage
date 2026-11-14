@@ -85,14 +85,18 @@ fn ends_path(next: Option<char>) -> bool {
 /// `text` without `dir` wherever a path starts with it: `dir/x` becomes `x`, `dir` on its own `.`
 /// and `dir/` on its own `./`. `None` when nothing does. A path that only shares the prefix
 /// (`dir-old/x`, `/mnt/dir/x`) is another place and is left as it is.
-fn cut_dir(text: &str, dir: &str) -> Option<String> {
-    let step = dir.chars().next()?.len_utf8();
+fn cut_dir(text: &str, dir: &str, windows_paths: bool) -> Option<String> {
+    // Match either Windows separator, including mixed spellings from tools. Substitution is only
+    // for matching: it preserves byte offsets, and the output still copies the original text.
+    let search_text = if windows_paths { Cow::Owned(text.replace('\\', "/")) } else { Cow::Borrowed(text) };
+    let search_dir = if windows_paths { Cow::Owned(dir.replace('\\', "/")) } else { Cow::Borrowed(dir) };
+    let step = search_dir.chars().next()?.len_utf8();
     let mut out: Option<String> = None;
     let (mut copied, mut from) = (0, 0);
-    while let Some(at) = text[from..].find(dir).map(|i| from + i) {
+    while let Some(at) = search_text[from..].find(search_dir.as_ref()).map(|i| from + i) {
         from = at + step;
         let rest = &text[at + dir.len()..];
-        let below = rest.trim_start_matches('/');
+        let below = rest.trim_start_matches(|c| c == '/' || (windows_paths && c == '\\'));
         let slashes = rest.len() - below.len();
         // Glued to what stands before it, the match is the tail of a longer path.
         let glued = text[..at].chars().next_back().is_some_and(|c| in_name(c) || matches!(c, '/' | '\\' | '$' | '}' | ')'));
@@ -139,13 +143,15 @@ impl Workspace {
         normalize(&abs)
     }
 
-    /// Shortest unambiguous way to name a path back to the model.
+    /// Shortest unambiguous way to name a path back to the model, using `/` separators on Windows.
     pub fn display(&self, abs: &Path) -> String {
-        match abs.strip_prefix(&self.cwd) {
-            Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
-            Ok(rel) => rel.to_string_lossy().into_owned(),
-            Err(_) => abs.to_string_lossy().into_owned(),
-        }
+        let path = match abs.strip_prefix(&self.cwd) {
+            Ok(rel) if rel.as_os_str().is_empty() => return ".".to_string(),
+            Ok(rel) => rel,
+            Err(_) => abs,
+        };
+        let text = path.to_string_lossy();
+        if cfg!(windows) { text.replace('\\', "/") } else { text.into_owned() }
     }
 
     /// Every absolute spelling of the directory the tools run in. None once a `cd` has left the
@@ -164,7 +170,7 @@ impl Workspace {
     pub fn shorten<'a>(&self, text: &'a str) -> Cow<'a, str> {
         let mut short: Option<String> = None;
         for dir in self.cwd_spellings() {
-            if let Some(cut) = cut_dir(short.as_deref().unwrap_or(text), &dir) {
+            if let Some(cut) = cut_dir(short.as_deref().unwrap_or(text), &dir, cfg!(windows)) {
                 short = Some(cut);
             }
         }
@@ -374,7 +380,18 @@ mod tests {
         assert_eq!(ws.resolve("deep/x.rs"), ws.root.join("src/deep/x.rs"));
         assert_eq!(ws.display(&ws.root.join("src/deep/x.rs")), "deep/x.rs");
         assert_eq!(ws.display(&ws.root.join("src")), ".");
-        assert!(ws.display(&ws.root.join("other.rs")).starts_with('/'));
+        let outside = ws.display(&ws.root.join("other.rs"));
+        assert!(Path::new(&outside).is_absolute());
+        assert_eq!(ws.resolve(&outside), ws.root.join("other.rs"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_preserves_literal_backslashes_in_unix_file_names() {
+        let ws = Workspace::new(&tmp("display-backslash")).unwrap();
+        let name = r"dir/file\name.rs";
+        assert_eq!(ws.display(&ws.root.join(name)), name);
+        assert_eq!(ws.resolve(&ws.display(&ws.root.join(name))), ws.root.join(name));
     }
 
     #[test]
@@ -411,6 +428,24 @@ mod tests {
             assert!(matches!(ws.shorten(&other), Cow::Borrowed(_)), "{other}");
         }
         assert!(matches!(ws.shorten("3 passed in 0.12s"), Cow::Borrowed(_)), "nothing to cut, nothing copied");
+    }
+
+    #[test]
+    fn shortening_matches_windows_separators_without_rewriting_output() {
+        let dir = r"C:\work\prøject\pkg";
+        for prefix in [r"C:\work\prøject\pkg", "C:/work/prøject/pkg", r"C:\work/prøject\pkg"] {
+            assert_eq!(cut_dir(&format!("{prefix}/a.py:3"), dir, true), Some("a.py:3".to_string()));
+            assert_eq!(cut_dir(&format!(r"{prefix}\deep\a.py:3"), dir, true), Some(r"deep\a.py:3".to_string()));
+            assert_eq!(cut_dir(&format!(r"cd {prefix}\ && echo '\n'"), dir, true), Some(r"cd ./ && echo '\n'".to_string()));
+            assert_eq!(cut_dir(prefix, dir, true), Some(".".to_string()));
+            for other in [format!("{prefix}-old/a.py"), format!("{prefix}.bak"), format!(r"D:\parent\{prefix}\a.py"), format!("file://{prefix}/a.py")] {
+                assert_eq!(cut_dir(&other, dir, true), None, "{other}");
+            }
+        }
+        assert_eq!(cut_dir(r"\\host/share\project/pkg\a.py", r"\\host\share\project\pkg", true), Some("a.py".to_string()));
+        // On Unix a backslash can be a literal part of a file name, not a separator.
+        assert_eq!(cut_dir(r"/work/pkg\a.py", "/work/pkg", false), None);
+        assert_eq!(cut_dir(r"/work/pkg/a.py", r"/work\pkg", false), None);
     }
 
     #[test]
