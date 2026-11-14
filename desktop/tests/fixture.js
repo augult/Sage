@@ -3,7 +3,7 @@
 (() => {
   const params = new URLSearchParams(location.search);
   const initialView = params.get('view') === 'session' ? 'session' : 'new';
-  const session = { id: 'fixture-hello', title: 'Hello', cwd: '/home/user/Novel', provider: 'fixture', model: 'fixture-model', mode: 'ecosage', effort: 'medium', autonomy: 'auto', simulated: false, created: 1730000000000, updated: 1730000000000, status: 'closed', outcome: null, verified: false, stats: {}, skills: [] };
+  const session = { id: 'fixture-hello', title: 'Hello', cwd: '/home/user/Novel', provider: 'fixture', model: 'fixture-model', mode: 'ecosage', effort: 'medium', autonomy: 'auto', simulated: false, created: 1730000000000, updated: 1730000000000, status: 'resumable', outcome: null, verified: false, stats: {}, skills: [] };
   const events = [{ type: 'session_start', seq: 1, ts: session.created, title: session.title, cwd: session.cwd, provider: session.provider, model: session.model, mode: session.mode }, { type: 'user', seq: 2, ts: session.created + 1, text: 'Hello', files: [] }];
   const state = { version: 'browser-fixture', home: '/home/user', data_dir: '/home/user/.sage', provider: 'fixture', model: 'fixture-model', effort: 'medium', auto_retry: false, providers: [{ id: 'fixture', name: 'Fixture provider', serves: 'Synthetic browser fixture', base_url: 'https://example.invalid', key_env: '', has_key: true, models: ['fixture-model'], note: 'Not a real connection', custom: false }] };
   const calls = [];
@@ -53,6 +53,25 @@
     await settle();
     if (document.documentElement.dataset.inspector !== 'on') { document.querySelector('#toggle-inspector').click(); await settle(); }
     await go('#new-session', 'new');
+    await check('New-session settings show only their selected values', async () => {
+      for (const [key, name, next] of [['mode', 'Mode', 'default'], ['autonomy', 'Autonomy', 'ask'], ['effort', 'Effort', 'high']]) {
+        const button = document.querySelector(`#pick-${key}`);
+        const original = document.querySelector(`#pick-${key}-menu [aria-selected="true"]`).dataset.value;
+        const assertValueOnly = () => {
+          const value = button.querySelector('.pick-value').textContent;
+          expect(button.textContent.trim() === value, `${name} includes a visible prefix: ${button.textContent}`);
+          expect(button.getAttribute('aria-label') === `${name}: ${value}`, `${name} lost its accessible label`);
+        };
+        assertValueOnly();
+        for (const value of [next, original]) {
+          button.click(); await settle();
+          document.querySelector(`#pick-${key}-menu [data-value="${value}"]`).click(); await settle();
+          assertValueOnly();
+          expect(document.querySelector(`#pick-${key}-menu [aria-selected="true"]`).dataset.value === value, `${name} did not update`);
+        }
+      }
+      return 'Mode, Autonomy and Effort are value-only, accessible, and still selectable';
+    });
     await check('No-session inspector has one complete panel', () => JSON.stringify(expectOnePanel()));
     for (const id of ['economy', 'code', 'github']) await check(`No-session ${id} tab is clickable and empty`, async () => {
       const button = document.querySelector(`#tab-${id}`);
@@ -79,6 +98,14 @@
     await go('[data-session="fixture-hello"]', 'session');
     await waitFor(() => document.querySelector('.timeline .user-text'), 'Hello user bubble');
     await settle();
+    await check('Active-session settings show only their selected values', () => {
+      for (const [key, name] of [['autonomy', 'Autonomy'], ['effort', 'Effort']]) {
+        const button = document.querySelector(`#pick-${key}`), value = button.querySelector('.pick-value').textContent;
+        expect(button.textContent.trim() === value, `${name} includes a visible prefix: ${button.textContent}`);
+        expect(button.getAttribute('aria-label') === `${name}: ${value}`, `${name} lost its accessible label`);
+      }
+      return 'Autonomy and Effort are value-only with named accessible controls';
+    });
     await check('Active-session tabs still render their own content', async () => {
       for (const id of ['economy', 'code', 'github', 'economy']) {
         const button = document.querySelector(`#tab-${id}`);

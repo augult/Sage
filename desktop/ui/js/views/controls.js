@@ -68,6 +68,7 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
     shown.hidden = !shown.textContent;
     shown.classList.toggle('is-empty', !on);
     button.title = on ? `${name}: ${on.label}` : name;
+    button.setAttribute('aria-label', button.title);
     for (const item of menu.querySelectorAll('.menu-item')) item.setAttribute('aria-selected', String(chosen != null && item.dataset.value === String(chosen)));
   }
 
@@ -140,9 +141,9 @@ export const AUTONOMIES = [
   { value: 'ask', label: 'Ask' },
 ];
 
-/** A run setting in a chat bar or under it: its name, the current value, and a menu of the others. */
+/** A run setting shows only its value; its accessible label and tooltip retain the setting name. */
 export function settingPicker(key, name, options, value, onChange) {
-  return picker({ id: `pick-${key}`, name, prefix: name, groups: [{ options }], value, onChange });
+  return picker({ id: `pick-${key}`, name, groups: [{ options }], value, onChange });
 }
 
 /**
