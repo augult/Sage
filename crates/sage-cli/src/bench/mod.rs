@@ -44,6 +44,9 @@ OPTIONS
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
+      --tasks-dir <dir>    tasks kept outside the binary, e.g. a slice of a public benchmark: one
+                           directory each with task.json (prompt, verify; title, needs, check,
+                           restore, skill) beside workspace/, hidden/ and solution/
   -n, --repeats <n>        runs per task and variant (default 3)
   -e, --effort <level>     as for `sage run`
       --max-turns <n>      per run (default 30)
@@ -296,6 +299,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 opt.tasks = picked;
             }
+            "--tasks-dir" => opt.tasks = tasks::load_dir(Path::new(&value(a)?))?,
             "-n" | "--repeats" => opt.repeats = number(a, value(a)?)?,
             "-e" | "--effort" => opt.effort = Some(value(a)?),
             "--max-turns" => opt.max_turns = number(a, value(a)?)?,
@@ -1439,6 +1443,60 @@ mod tests {
 
     fn args(line: &str) -> Vec<String> {
         line.split_whitespace().map(String::from).collect()
+    }
+
+    #[tokio::test]
+    async fn tasks_kept_outside_the_binary_are_loaded_and_checked_like_the_built_in_ones() {
+        if !on_path("python3") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("sage-bench-tasks-{}", rand_hex(4)));
+        for (path, content) in [
+            (
+                "double/task.json",
+                r#"{"title": "a function that does not double", "prompt": "Fix `double.py`. Do not edit `README.md`.", "needs": ["python3"], "restore": ["README.md"], "verify": "python3 test/test_double.py"}"#,
+            ),
+            (
+                "double/workspace/double.py",
+                "def double(n):\n    return n\n",
+            ),
+            ("double/workspace/README.md", "`double(n)` is twice `n`.\n"),
+            (
+                "double/hidden/test/test_double.py",
+                "import sys\nsys.path.insert(0, '.')\nfrom double import double\nassert double(2) == 4\n",
+            ),
+            (
+                "double/solution/double.py",
+                "def double(n):\n    return 2 * n\n",
+            ),
+            ("notes.txt", "not a task: no task.json"),
+        ] {
+            write_file(&dir, path, content).unwrap();
+        }
+        let Ok(Command::Check(tasks)) =
+            parse(&args(&format!("--check --tasks-dir {}", dir.display())))
+        else {
+            panic!("the directory was not read");
+        };
+        assert_eq!(tasks.len(), 1);
+        let task = tasks[0];
+        assert_eq!(
+            (task.id, task.needs, task.restore, task.check, task.skill),
+            ("double", &["python3"][..], &["README.md"][..], "", "")
+        );
+        assert_eq!(
+            task.files.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+            ["README.md", "double.py"]
+        );
+        assert_eq!(task.hidden[0].0, "test/test_double.py");
+        assert_eq!(check(&tasks).await, [("double", Ok(()))]);
+
+        // A task without a prompt or a verification, and a directory without tasks, are refused.
+        write_file(&dir, "double/task.json", r#"{"prompt": "Fix it."}"#).unwrap();
+        for bad in [dir.clone(), dir.join("double")] {
+            assert!(parse(&args(&format!("--tasks-dir {}", bad.display()))).is_err());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
