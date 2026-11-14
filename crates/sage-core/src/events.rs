@@ -335,7 +335,23 @@ mod tests {
 
     #[test]
     fn events_serialise_flat_with_a_type_tag() {
-        let e = Event { seq: 7, ts: 1, kind: EventKind::StepEnd { turn: 2, idx: 0, call_id: "c".into(), tool: "shell".into(), status: StepStatus::Surprise, observation: "x".into(), ms: 5, hidden_bytes: 0, violations: vec![], explicit: true, change: None } };
+        let e = Event {
+            seq: 7,
+            ts: 1,
+            kind: EventKind::StepEnd {
+                turn: 2,
+                idx: 0,
+                call_id: "c".into(),
+                tool: "shell".into(),
+                status: StepStatus::Surprise,
+                observation: "x".into(),
+                ms: 5,
+                hidden_bytes: 0,
+                violations: vec![],
+                explicit: true,
+                change: None,
+            },
+        };
         let v: serde_json::Value = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "step_end");
         assert_eq!(v["seq"], 7);
@@ -343,9 +359,19 @@ mod tests {
         let back: Event = serde_json::from_value(v).unwrap();
         assert!(matches!(back.kind, EventKind::StepEnd { turn: 2, .. }));
 
-        let s = serde_json::to_value(EventKind::Stats { stats: Stats::default() }).unwrap();
+        let s = serde_json::to_value(EventKind::Stats {
+            stats: Stats::default(),
+        })
+        .unwrap();
         assert_eq!(s["type"], "stats");
         assert_eq!(s["stats"]["turns"], 0);
-        assert!(EventKind::Delta { turn: 1, channel: Channel::Reasoning, text: "t".into() }.transient());
+        assert!(
+            EventKind::Delta {
+                turn: 1,
+                channel: Channel::Reasoning,
+                text: "t".into()
+            }
+            .transient()
+        );
     }
 }

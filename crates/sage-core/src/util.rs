@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// FNV-1a, 64-bit. Used for change detection only, never for security.
@@ -65,7 +68,10 @@ pub fn home_dir() -> PathBuf {
 pub fn canonical(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let real = std::fs::canonicalize(path)?;
     #[cfg(windows)]
-    let real = real.to_str().map(|text| PathBuf::from(plain_path(text))).unwrap_or(real);
+    let real = real
+        .to_str()
+        .map(|text| PathBuf::from(plain_path(text)))
+        .unwrap_or(real);
     Ok(real)
 }
 
@@ -74,7 +80,10 @@ pub fn canonical(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
 pub fn plain_path(path: &str) -> String {
     if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{share}")
-    } else if let Some(rest) = path.strip_prefix(r"\\?\").filter(|rest| rest.as_bytes().get(1) == Some(&b':')) {
+    } else if let Some(rest) = path
+        .strip_prefix(r"\\?\")
+        .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+    {
         rest.to_string()
     } else {
         path.to_string()
@@ -103,7 +112,11 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
 
 /// First line of `s`, cut to `max` chars, for one-line summaries.
 pub fn one_line(s: &str, max: usize) -> String {
-    let first = s.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let first = s
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     match first.char_indices().nth(max) {
         None => first.to_string(),
         Some((idx, _)) => format!("{}…", &first[..idx]),
@@ -156,7 +169,10 @@ mod tests {
 
     #[test]
     fn verbatim_windows_paths_are_written_plainly() {
-        assert_eq!(plain_path(r"\\?\C:\Users\me\Desktop\Novel"), r"C:\Users\me\Desktop\Novel");
+        assert_eq!(
+            plain_path(r"\\?\C:\Users\me\Desktop\Novel"),
+            r"C:\Users\me\Desktop\Novel"
+        );
         assert_eq!(plain_path(r"\\?\UNC\host\share\dir"), r"\\host\share\dir");
         assert_eq!(plain_path(r"C:\work"), r"C:\work");
         assert_eq!(plain_path("/home/me/work"), "/home/me/work");

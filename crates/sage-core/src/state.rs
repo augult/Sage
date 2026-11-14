@@ -1,8 +1,8 @@
 //! Per-session mutable state shared by the tools and the script executor.
 
 use crate::anchors::History;
-use crate::economy::Prices;
 use crate::changes::Baseline;
+use crate::economy::Prices;
 use crate::tools::jobs::Jobs;
 use crate::watches::{WatchSpec, Watches};
 use crate::workspace::{Seen, Workspace, fingerprint};
@@ -114,22 +114,103 @@ impl Mode {
 impl Features {
     /// Ecosage and what `Features::OPTIONAL` holds back from it.
     pub fn prosage() -> Self {
-        Self { long_thought: true, unhurried: true, examiner: true, panel: true, referee: true, routing: true, ..Self::ecosage() }
+        Self {
+            long_thought: true,
+            unhurried: true,
+            examiner: true,
+            panel: true,
+            referee: true,
+            routing: true,
+            ..Self::ecosage()
+        }
     }
 
     pub fn ecosage() -> Self {
-        Self { scripts: true, receipts: true, expand: true, watches: true, auto_watch: true, preflight: true, gate: true, anchors: true, dedup: true, post_edit_check: true, bootstrap: true, attach: true, short_paths: true, survey: true, contract: true, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false }
+        Self {
+            scripts: true,
+            receipts: true,
+            expand: true,
+            watches: true,
+            auto_watch: true,
+            preflight: true,
+            gate: true,
+            anchors: true,
+            dedup: true,
+            post_edit_check: true,
+            bootstrap: true,
+            attach: true,
+            short_paths: true,
+            survey: true,
+            contract: true,
+            long_thought: false,
+            unhurried: false,
+            examiner: false,
+            panel: false,
+            referee: false,
+            routing: false,
+        }
     }
 
     pub fn classic() -> Self {
-        Self { scripts: false, receipts: false, expand: false, watches: false, auto_watch: false, preflight: false, gate: false, anchors: false, dedup: false, post_edit_check: false, bootstrap: false, attach: false, short_paths: false, survey: false, long_thought: false, unhurried: false, examiner: false, panel: false, referee: false, routing: false, contract: false }
+        Self {
+            scripts: false,
+            receipts: false,
+            expand: false,
+            watches: false,
+            auto_watch: false,
+            preflight: false,
+            gate: false,
+            anchors: false,
+            dedup: false,
+            post_edit_check: false,
+            bootstrap: false,
+            attach: false,
+            short_paths: false,
+            survey: false,
+            long_thought: false,
+            unhurried: false,
+            examiner: false,
+            panel: false,
+            referee: false,
+            routing: false,
+            contract: false,
+        }
     }
 
     /// The mechanisms `without` can switch off and `with` can switch on.
-    pub const NAMES: &'static [&'static str] = &["scripts", "receipts", "expand", "watches", "auto_watch", "preflight", "gate", "anchors", "dedup", "post_edit_check", "bootstrap", "attach", "short_paths", "survey", "long_thought", "unhurried", "examiner", "panel", "referee", "routing", "contract"];
+    pub const NAMES: &'static [&'static str] = &[
+        "scripts",
+        "receipts",
+        "expand",
+        "watches",
+        "auto_watch",
+        "preflight",
+        "gate",
+        "anchors",
+        "dedup",
+        "post_edit_check",
+        "bootstrap",
+        "attach",
+        "short_paths",
+        "survey",
+        "long_thought",
+        "unhurried",
+        "examiner",
+        "panel",
+        "referee",
+        "routing",
+        "contract",
+    ];
 
     /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &["long_thought", "unhurried", "examiner", "panel", "referee", "routing"];
+    pub const OPTIONAL: &'static [&'static str] = &[
+        "long_thought",
+        "unhurried",
+        "examiner",
+        "panel",
+        "referee",
+        "routing",
+    ];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
     pub fn without(self, name: &str) -> Option<Self> {
@@ -236,7 +317,11 @@ const FINGERPRINT_BUDGET: Duration = Duration::from_millis(400);
 
 impl Evidence {
     pub fn fresh(&self) -> bool {
-        self.epoch == 0 || self.verified.as_ref().is_some_and(|(e, _)| *e == self.epoch)
+        self.epoch == 0
+            || self
+                .verified
+                .as_ref()
+                .is_some_and(|(e, _)| *e == self.epoch)
     }
 
     /// What stands behind a `fresh` state, in words.
@@ -310,7 +395,19 @@ pub struct SessionState {
 
 /// The highest `N` of the `out/N.log` files a session directory holds.
 fn highest_spill(dir: &std::path::Path) -> u32 {
-    std::fs::read_dir(dir.join("out")).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.strip_suffix(".log")?.parse::<u32>().ok()).max().unwrap_or(0)
+    std::fs::read_dir(dir.join("out"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".log")?
+                .parse::<u32>()
+                .ok()
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 pub struct Session {
@@ -351,10 +448,16 @@ impl Drop for Session {
 }
 
 impl Session {
-    pub fn new(ws: Workspace, dir: PathBuf, features: Features, prices: Option<Prices>) -> std::io::Result<Self> {
+    pub fn new(
+        ws: Workspace,
+        dir: PathBuf,
+        features: Features,
+        prices: Option<Prices>,
+    ) -> std::io::Result<Self> {
         crate::util::private_dir(&dir)?;
         std::fs::create_dir_all(dir.join("out"))?;
-        let scratch = std::env::temp_dir().join(format!("sage-scratch-{}", crate::util::rand_hex(6)));
+        let scratch =
+            std::env::temp_dir().join(format!("sage-scratch-{}", crate::util::rand_hex(6)));
         let _ = std::fs::create_dir_all(&scratch);
         let mut shell_env = non_interactive_env();
         #[cfg(unix)]
@@ -390,7 +493,11 @@ impl Session {
     /// fail and it reads again), background jobs, the evidence (nothing is claimed about changes
     /// the harness has not seen) and the results of the watches.
     pub fn checkpoint(&self) -> SessionState {
-        let mut dialects: Vec<(String, bool)> = self.dialects.iter().map(|(path, already)| (path.to_string_lossy().into_owned(), *already)).collect();
+        let mut dialects: Vec<(String, bool)> = self
+            .dialects
+            .iter()
+            .map(|(path, already)| (path.to_string_lossy().into_owned(), *already))
+            .collect();
         dialects.sort();
         SessionState {
             step: self.step,
@@ -416,13 +523,20 @@ impl Session {
         self.touched = state.touched;
         self.baseline = state.baseline;
         self.watches.restore(state.watches);
-        self.dialects = state.dialects.into_iter().map(|(path, already)| (PathBuf::from(path), already)).collect();
+        self.dialects = state
+            .dialects
+            .into_iter()
+            .map(|(path, already)| (PathBuf::from(path), already))
+            .collect();
     }
 
     /// Allocates the next `out:N` handle and the file behind it.
     pub fn next_spill(&mut self) -> (String, PathBuf) {
         self.spill_seq += 1;
-        (format!("out:{}", self.spill_seq), self.dir.join("out").join(format!("{}.log", self.spill_seq)))
+        (
+            format!("out:{}", self.spill_seq),
+            self.dir.join("out").join(format!("{}.log", self.spill_seq)),
+        )
     }
 
     pub fn spill_path(&self, handle: &str) -> Option<PathBuf> {
@@ -522,16 +636,40 @@ mod tests {
     #[test]
     fn every_mechanism_can_be_switched_off_by_name() {
         for name in Features::NAMES {
-            let without = Features::ecosage().without(name).unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
+            let without = Features::ecosage()
+                .without(name)
+                .unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
             // One that is off unless asked for is switched on by name instead.
             let optional = Features::OPTIONAL.contains(name);
             assert_eq!(without == Features::ecosage(), optional, "{name}");
-            assert_eq!(Features::ecosage().with(name).unwrap() == Features::ecosage(), !optional, "{name}");
-            assert_eq!(Features::ecosage().with(name).unwrap().without(name), Some(without), "{name}, on and off again");
-            assert_eq!(Features::ecosage().without(&name.replace('_', "-")), Some(without), "{name}, spelled with dashes");
-            assert_eq!(Features::classic().without(name), Some(Features::classic()), "{name} is off in the baseline");
+            assert_eq!(
+                Features::ecosage().with(name).unwrap() == Features::ecosage(),
+                !optional,
+                "{name}"
+            );
+            assert_eq!(
+                Features::ecosage().with(name).unwrap().without(name),
+                Some(without),
+                "{name}, on and off again"
+            );
+            assert_eq!(
+                Features::ecosage().without(&name.replace('_', "-")),
+                Some(without),
+                "{name}, spelled with dashes"
+            );
+            assert_eq!(
+                Features::classic().without(name),
+                Some(Features::classic()),
+                "{name} is off in the baseline"
+            );
         }
-        assert!(!Features::ecosage().without("attach").unwrap().attach && !Features::ecosage().without("short-paths").unwrap().short_paths);
+        assert!(
+            !Features::ecosage().without("attach").unwrap().attach
+                && !Features::ecosage()
+                    .without("short-paths")
+                    .unwrap()
+                    .short_paths
+        );
         assert_eq!(Features::ecosage().without("telepathy"), None);
         assert!(Features::ecosage().with("telepathy").is_none());
     }
@@ -541,7 +679,10 @@ mod tests {
         let mut s = test_session("shown", Features::ecosage());
         let root = s.ws.root.display().to_string();
         let raw = format!("  File \"{root}/pager.py\", line 3\nrootdir: {root}\n");
-        assert_eq!(s.shown(raw.clone()), "  File \"pager.py\", line 3\nrootdir: .\n");
+        assert_eq!(
+            s.shown(raw.clone()),
+            "  File \"pager.py\", line 3\nrootdir: .\n"
+        );
         assert_eq!(s.shown("3 passed".to_string()), "3 passed");
 
         s.features = Features::ecosage().without("short_paths").unwrap();
@@ -553,11 +694,17 @@ mod tests {
     fn a_session_s_folder_is_closed_to_other_users() {
         use std::os::unix::fs::PermissionsExt;
         let s = test_session("private", Features::ecosage());
-        assert_eq!(std::fs::metadata(&s.dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(&s.dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         // One that was open, from before folders were made private, is closed when it is used again.
         std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let again = Session::new(s.ws.clone(), s.dir.clone(), Features::ecosage(), None).unwrap();
-        assert_eq!(std::fs::metadata(&again.dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(&again.dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
     }
 
     #[test]

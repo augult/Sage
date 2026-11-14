@@ -91,52 +91,102 @@ pub struct Variant {
 
 impl Variant {
     fn own(name: &str, mode: Mode, without: Vec<String>) -> Variant {
-        Variant { name: name.to_string(), mode, without, ..Variant::default() }
+        Variant {
+            name: name.to_string(),
+            mode,
+            without,
+            ..Variant::default()
+        }
     }
 
     pub fn parse(s: &str) -> Result<Variant, String> {
         let name = s.trim().to_string();
         if let Some(harness) = name.to_ascii_lowercase().strip_prefix("ext:") {
-            if harness.is_empty() || !harness.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-                return Err(format!("{s:?} does not name an external harness: use ext:<name>, with letters, digits, - and _"));
+            if harness.is_empty()
+                || !harness
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err(format!(
+                    "{s:?} does not name an external harness: use ext:<name>, with letters, digits, - and _"
+                ));
             }
-            return Ok(Variant { external: Some(harness.to_string()), ..Variant::own(&name.to_ascii_lowercase(), Mode::Ecosage, vec![]) });
+            return Ok(Variant {
+                external: Some(harness.to_string()),
+                ..Variant::own(&name.to_ascii_lowercase(), Mode::Ecosage, vec![])
+            });
         }
-        let optional = if Features::OPTIONAL.is_empty() { String::new() } else { format!(", +<mechanism> for {}", Features::OPTIONAL.join(", ")) };
-        let unknown = || format!("unknown variant {s:?}: use ecosage, default, prosage, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>{optional}", Features::NAMES.join(", "));
+        let optional = if Features::OPTIONAL.is_empty() {
+            String::new()
+        } else {
+            format!(", +<mechanism> for {}", Features::OPTIONAL.join(", "))
+        };
+        let unknown = || {
+            format!(
+                "unknown variant {s:?}: use ecosage, default, prosage, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>{optional}",
+                Features::NAMES.join(", ")
+            )
+        };
         let mechanism = |m: &str| -> Result<String, String> {
-            let mechanism = m.to_ascii_lowercase().strip_prefix("no-").ok_or_else(unknown)?.replace('-', "_");
-            Features::ecosage().without(&mechanism).ok_or_else(unknown)?;
+            let mechanism = m
+                .to_ascii_lowercase()
+                .strip_prefix("no-")
+                .ok_or_else(unknown)?
+                .replace('-', "_");
+            Features::ecosage()
+                .without(&mechanism)
+                .ok_or_else(unknown)?;
             Ok(mechanism)
         };
         let mut parts = name.split('+');
         let base = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut v = match base.as_str() {
             // `classic` is what `default` was called, and what earlier results name it.
-            "ecosage" | "default" | "classic" | "prosage" => Variant { mode: Mode::parse(&base).unwrap_or_default(), ..Variant::default() },
-            other => Variant { without: vec![mechanism(other)?], ..Variant::default() },
+            "ecosage" | "default" | "classic" | "prosage" => Variant {
+                mode: Mode::parse(&base).unwrap_or_default(),
+                ..Variant::default()
+            },
+            other => Variant {
+                without: vec![mechanism(other)?],
+                ..Variant::default()
+            },
         };
         for m in parts {
             if m == "skill" {
                 v.skill = true;
             } else if let Some(path) = m.strip_prefix("sys:") {
-                v.system = Some(std::fs::read_to_string(path).map_err(|e| format!("variant {s:?}: cannot read {path}: {e}"))?);
+                v.system = Some(
+                    std::fs::read_to_string(path)
+                        .map_err(|e| format!("variant {s:?}: cannot read {path}: {e}"))?,
+                );
             } else if let Some(level) = m.strip_prefix("effort:") {
                 v.effort = Some(level.to_string());
-            } else if let Some(optional) = Features::OPTIONAL.iter().find(|name| name.eq_ignore_ascii_case(&m.replace('-', "_"))) {
+            } else if let Some(optional) = Features::OPTIONAL
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(&m.replace('-', "_")))
+            {
                 v.with.push(optional.to_string());
             } else {
                 v.without.push(mechanism(m)?);
             }
         }
-        v.name = if v.system.is_some() { name } else { name.to_ascii_lowercase() };
+        v.name = if v.system.is_some() {
+            name
+        } else {
+            name.to_ascii_lowercase()
+        };
         Ok(v)
     }
 
     fn features(&self) -> Features {
         let base = self.mode.features();
-        let base = self.with.iter().fold(base, |f, name| f.with(name).unwrap_or(f));
-        self.without.iter().fold(base, |f, name| f.without(name).unwrap_or(f))
+        let base = self
+            .with
+            .iter()
+            .fold(base, |f, name| f.with(name).unwrap_or(f));
+        self.without
+            .iter()
+            .fold(base, |f, name| f.without(name).unwrap_or(f))
     }
 }
 
@@ -164,7 +214,10 @@ impl Default for Options {
         Self {
             provider: None,
             models: Vec::new(),
-            variants: vec![Variant::own("ecosage", Mode::Ecosage, vec![]), Variant::own("default", Mode::Plain, vec![])],
+            variants: vec![
+                Variant::own("ecosage", Mode::Ecosage, vec![]),
+                Variant::own("default", Mode::Plain, vec![]),
+            ],
             tasks: TASKS.iter().collect(),
             repeats: 3,
             effort: None,
@@ -189,11 +242,19 @@ enum Command {
 }
 
 fn list_of(value: &str) -> Vec<String> {
-    value.split(',').map(str::trim).filter(|v| !v.is_empty()).map(String::from).collect()
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 fn number<T: std::str::FromStr>(flag: &str, value: String) -> Result<T, String> {
-    value.trim().parse().map_err(|_| format!("{flag} needs a number, not {value:?}"))
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{flag} needs a number, not {value:?}"))
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -201,24 +262,36 @@ fn parse(args: &[String]) -> Result<Command, String> {
     let (mut list, mut check) = (false, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+        let mut value = |name: &str| {
+            it.next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value"))
+        };
         match a.as_str() {
             "-h" | "--help" | "help" => return Ok(Command::Help),
             "--list" => list = true,
             "--check" => check = true,
             "-p" | "--provider" => opt.provider = Some(value(a)?),
             "-m" | "--model" | "--models" => opt.models.extend(list_of(&value(a)?)),
-            "--variants" | "--variant" => opt.variants = list_of(&value(a)?).iter().map(|v| Variant::parse(v)).collect::<Result<_, _>>()?,
+            "--variants" | "--variant" => {
+                opt.variants = list_of(&value(a)?)
+                    .iter()
+                    .map(|v| Variant::parse(v))
+                    .collect::<Result<_, _>>()?
+            }
             "--tasks" | "--task" => {
                 // A name is a task id, a set (`easy`, `hard`, `skill`) or `all`.
                 let mut picked: Vec<&'static Task> = Vec::new();
                 for id in list_of(&value(a)?) {
                     if id == "all" {
                         picked.extend(tasks::all());
-                    } else if let Some((_, set)) = tasks::SETS.iter().find(|(name, _)| *name == id) {
+                    } else if let Some((_, set)) = tasks::SETS.iter().find(|(name, _)| *name == id)
+                    {
                         picked.extend(set.iter());
                     } else {
-                        picked.push(tasks::find(&id).ok_or_else(|| format!("unknown task {id:?}; `sage bench --list` shows them"))?);
+                        picked.push(tasks::find(&id).ok_or_else(|| {
+                            format!("unknown task {id:?}; `sage bench --list` shows them")
+                        })?);
                     }
                 }
                 opt.tasks = picked;
@@ -237,7 +310,12 @@ fn parse(args: &[String]) -> Result<Command, String> {
             other => return Err(format!("unknown option {other}; try `sage bench --help`")),
         }
     }
-    if opt.repeats == 0 || opt.jobs == 0 || opt.max_turns == 0 || opt.tasks.is_empty() || opt.variants.is_empty() {
+    if opt.repeats == 0
+        || opt.jobs == 0
+        || opt.max_turns == 0
+        || opt.tasks.is_empty()
+        || opt.variants.is_empty()
+    {
         return Err("--repeats, --jobs and --max-turns must be at least 1, and at least one task and one variant are needed".into());
     }
     Ok(if list {
@@ -372,14 +450,21 @@ struct Shared {
 }
 
 fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
 fn bench_id() -> String {
     let secs = now_ms() / 1000;
     let (y, m, d) = civil_date(secs);
     let t = secs % 86_400;
-    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{}", t / 3600, (t % 3600) / 60, t % 60, rand_hex(2))
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{}",
+        t / 3600,
+        (t % 3600) / 60,
+        t % 60,
+        rand_hex(2)
+    )
 }
 
 fn write_file(root: &Path, rel: &str, content: &str) -> std::io::Result<()> {
@@ -396,7 +481,16 @@ fn write_file(root: &Path, rel: &str, content: &str) -> std::io::Result<()> {
 fn baseline_commit(ws: &Path) {
     let git = |args: &[&str]| {
         std::process::Command::new("git")
-            .args(["-c", "user.name=bench", "-c", "user.email=bench@localhost", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.name=bench",
+                "-c",
+                "user.email=bench@localhost",
+                "-c",
+                "init.defaultBranch=main",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .current_dir(ws)
             .stdin(Stdio::null())
@@ -405,18 +499,25 @@ fn baseline_commit(ws: &Path) {
             .status()
             .is_ok_and(|s| s.success())
     };
-    let _ = git(&["init", "-q"]) && git(&["add", "-A"]) && git(&["commit", "-q", "-m", "task as shipped"]);
+    let _ = git(&["init", "-q"])
+        && git(&["add", "-A"])
+        && git(&["commit", "-q", "-m", "task as shipped"]);
 }
 
 fn materialize(root: &Path, files: &[(&str, &str)]) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
-    files.iter().try_for_each(|(path, content)| write_file(root, path, content))
+    files
+        .iter()
+        .try_for_each(|(path, content)| write_file(root, path, content))
 }
 
 /// Judges a workspace: puts back the files the agent was told to leave alone, adds the held-out
 /// checks and runs the task's verification. Returns whether it passed and, if not, its last lines.
 async fn verify(task: &Task, ws: &Path) -> (bool, String) {
-    let restored = task.restore.iter().filter_map(|path| task.files.iter().find(|(p, _)| p == path));
+    let restored = task
+        .restore
+        .iter()
+        .filter_map(|path| task.files.iter().find(|(p, _)| p == path));
     for (path, content) in restored.chain(task.hidden.iter()) {
         if let Err(e) = write_file(ws, path, content) {
             return (false, format!("could not write {path}: {e}"));
@@ -439,12 +540,22 @@ async fn verify(task: &Task, ws: &Path) -> (bool, String) {
     match tokio::time::timeout(VERIFY_TIMEOUT, child.wait_with_output()).await {
         Ok(Ok(out)) if out.status.success() => (true, String::new()),
         Ok(Ok(out)) => {
-            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
             let lines: Vec<&str> = text.lines().collect();
             (false, lines[lines.len().saturating_sub(12)..].join("\n"))
         }
         Ok(Err(e)) => (false, e.to_string()),
-        Err(_) => (false, format!("verification did not finish within {}s", VERIFY_TIMEOUT.as_secs())),
+        Err(_) => (
+            false,
+            format!(
+                "verification did not finish within {}s",
+                VERIFY_TIMEOUT.as_secs()
+            ),
+        ),
     }
 }
 
@@ -457,13 +568,19 @@ pub async fn check(tasks: &[&'static Task]) -> Vec<(&'static str, Result<(), Str
             let shipped = base.join(task.id).join("shipped");
             materialize(&shipped, task.files).map_err(|e| e.to_string())?;
             if verify(task, &shipped).await.0 {
-                return Err("passes its verification as shipped, so there is nothing to solve".to_string());
+                return Err(
+                    "passes its verification as shipped, so there is nothing to solve".to_string(),
+                );
             }
             let solved = base.join(task.id).join("solved");
-            materialize(&solved, task.files).and_then(|_| materialize(&solved, task.solution)).map_err(|e| e.to_string())?;
+            materialize(&solved, task.files)
+                .and_then(|_| materialize(&solved, task.solution))
+                .map_err(|e| e.to_string())?;
             match verify(task, &solved).await {
                 (true, _) => Ok(()),
-                (false, tail) => Err(format!("its reference solution fails verification:\n{tail}")),
+                (false, tail) => Err(format!(
+                    "its reference solution fails verification:\n{tail}"
+                )),
             }
         }
         .await;
@@ -475,10 +592,25 @@ pub async fn check(tasks: &[&'static Task]) -> Vec<(&'static str, Result<(), Str
 
 /// A stand-in model that writes the reference solution, runs the task's check and finishes.
 fn stand_in(task: &Task) -> MockProvider {
-    let mut calls: Vec<(&str, Value)> = task.solution.iter().map(|(path, content)| ("write", json!({"path": path, "content": content, "overwrite": true}))).collect();
+    let mut calls: Vec<(&str, Value)> = task
+        .solution
+        .iter()
+        .map(|(path, content)| {
+            (
+                "write",
+                json!({"path": path, "content": content, "overwrite": true}),
+            )
+        })
+        .collect();
     calls.push(("shell", json!({"cmd": task.check, "expect_exit": "0"})));
-    calls.push(("finish", json!({"summary": "Applied the reference solution."})));
-    MockProvider::scripted(vec![MockTurn::calls("Applying the reference solution.", calls)])
+    calls.push((
+        "finish",
+        json!({"summary": "Applied the reference solution."}),
+    ));
+    MockProvider::scripted(vec![MockTurn::calls(
+        "Applying the reference solution.",
+        calls,
+    )])
 }
 
 struct End {
@@ -509,18 +641,31 @@ async fn wait_for_end(h: &Harness, id: &str) -> Result<End, String> {
         match ev.kind {
             EventKind::Stats { stats: s } => stats = s,
             EventKind::Error { message } => error = Some(message),
-            EventKind::Finish { status, verified, .. } => end = Some((status, verified)),
+            EventKind::Finish {
+                status, verified, ..
+            } => end = Some((status, verified)),
             _ => {}
         }
     }
     let (status, verified) = end.ok_or("the session ended without a result")?;
-    Ok(End { status, verified, stats, error })
+    Ok(End {
+        status,
+        verified,
+        stats,
+        error,
+    })
 }
 
 /// Whether a failed run failed because the provider did rather than the model. Follows the wording
 /// of `ProviderError`.
 fn provider_failed(message: &str) -> bool {
-    ["provider returned HTTP", "network error", "unexpected provider response"].iter().any(|p| message.starts_with(p))
+    [
+        "provider returned HTTP",
+        "network error",
+        "unexpected provider response",
+    ]
+    .iter()
+    .any(|p| message.starts_with(p))
 }
 
 fn outcome_name(status: FinishStatus) -> &'static str {
@@ -551,7 +696,13 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         stats: Stats::default(),
         external: None,
     };
-    let label = format!("{}-{}-{}-{}", job.seq, job.task.id, job.variant.name.replace(':', "-"), retry);
+    let label = format!(
+        "{}-{}-{}-{}",
+        job.seq,
+        job.task.id,
+        job.variant.name.replace(':', "-"),
+        retry
+    );
     let ws = shared.dir.join("work").join(&label);
     if let Err(e) = materialize(&ws, job.task.files) {
         run.error = Some(format!("could not create the workspace: {e}"));
@@ -561,7 +712,17 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
     if let (Some(name), Some((dir, proxy))) = (&job.variant.external, &shared.external) {
         let script = external::script(dir, name);
         let home = shared.dir.join("external").join(&label);
-        let ext = external::Job { id: &label, script: &script, workspace: &ws, home: &home, prompt: job.task.prompt, model: &job.model, max_turns: shared.max_turns, time_budget: shared.time_budget, keep: shared.keep };
+        let ext = external::Job {
+            id: &label,
+            script: &script,
+            workspace: &ws,
+            home: &home,
+            prompt: job.task.prompt,
+            model: &job.model,
+            max_turns: shared.max_turns,
+            time_budget: shared.time_budget,
+            keep: shared.keep,
+        };
         let ran = external::run(proxy, &ext).await;
         let u = &ran.detail.usage;
         run.session = label;
@@ -598,10 +759,18 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         without: job.variant.without.clone(),
         with: job.variant.with.clone(),
         system_prompt: job.variant.system.clone(),
-        skills: if job.variant.skill && !job.task.skill.is_empty() { vec![job.task.skill.to_string()] } else { Vec::new() },
+        skills: if job.variant.skill && !job.task.skill.is_empty() {
+            vec![job.task.skill.to_string()]
+        } else {
+            Vec::new()
+        },
         ..Default::default()
     };
-    let started = if shared.scripted { shared.harness.start_scripted(req, stand_in(job.task)) } else { shared.harness.start(req) };
+    let started = if shared.scripted {
+        shared.harness.start_scripted(req, stand_in(job.task))
+    } else {
+        shared.harness.start(req)
+    };
     match started {
         Err(e) => run.error = Some(e),
         Ok(meta) => {
@@ -612,12 +781,19 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
                     run.outcome = outcome_name(end.status).to_string();
                     run.harness_verified = end.status == FinishStatus::Done && end.verified;
                     run.stats = end.stats;
-                    let refund = prices_for(&job.model).map_or(0.0, |p| run.stats.cached_tokens as f64 * (p.miss - p.hit) / 1e6);
-                    run.cost_uncached = run.stats.cost + refund * peak_multiplier(&job.model, now_ms() / 1000);
+                    let refund = prices_for(&job.model).map_or(0.0, |p| {
+                        run.stats.cached_tokens as f64 * (p.miss - p.hit) / 1e6
+                    });
+                    run.cost_uncached =
+                        run.stats.cost + refund * peak_multiplier(&job.model, now_ms() / 1000);
                     if end.status == FinishStatus::Error {
                         let message = end.error.unwrap_or_else(|| "the run failed".into());
                         // A provider that failed gave no result; a model that failed gave a bad one.
-                        if provider_failed(&message) { run.error = Some(message) } else { run.failure = Some(message) }
+                        if provider_failed(&message) {
+                            run.error = Some(message)
+                        } else {
+                            run.failure = Some(message)
+                        }
                     }
                 }
             }
@@ -642,7 +818,10 @@ async fn judged(shared: &Shared, job: &Job, ws: &Path, mut run: Run) -> Run {
 /// already been reached.
 async fn run_job(shared: Arc<Shared>, job: Job) -> Option<Run> {
     let _slot = shared.slots.acquire().await.ok()?;
-    if shared.max_cost.is_some_and(|limit| *shared.spent.lock().unwrap() >= limit) {
+    if shared
+        .max_cost
+        .is_some_and(|limit| *shared.spent.lock().unwrap() >= limit)
+    {
         return None;
     }
     let mut retry = 0;
@@ -663,9 +842,26 @@ async fn run_job(shared: Arc<Shared>, job: Job) -> Option<Run> {
         let verdict = match (&run.error, run.solved) {
             (Some(e), _) => format!("no result ({})", one_line(e, 90)),
             (None, true) => "solved".to_string(),
-            (None, false) => format!("NOT solved ({}{})", run.outcome, run.failure.as_ref().map(|f| format!(": {}", one_line(f, 90))).unwrap_or_default()),
+            (None, false) => format!(
+                "NOT solved ({}{})",
+                run.outcome,
+                run.failure
+                    .as_ref()
+                    .map(|f| format!(": {}", one_line(f, 90)))
+                    .unwrap_or_default()
+            ),
         };
-        eprintln!("[{n}/{}] {} · {} · {} #{}: {verdict} · {} turns · ${:.4} · {}", shared.total, job.model, job.task.id, job.variant.name, job.repeat, run.stats.turns, run.stats.cost, fmt_duration(run.stats.elapsed_ms));
+        eprintln!(
+            "[{n}/{}] {} · {} · {} #{}: {verdict} · {} turns · ${:.4} · {}",
+            shared.total,
+            job.model,
+            job.task.id,
+            job.variant.name,
+            job.repeat,
+            run.stats.turns,
+            run.stats.cost,
+            fmt_duration(run.stats.elapsed_ms)
+        );
     }
     Some(run)
 }
@@ -676,7 +872,11 @@ fn median(mut xs: Vec<f64>) -> f64 {
     }
     xs.sort_by(|a, b| a.total_cmp(b));
     let mid = xs.len() / 2;
-    if xs.len() % 2 == 1 { xs[mid] } else { (xs[mid - 1] + xs[mid]) / 2.0 }
+    if xs.len() % 2 == 1 {
+        xs[mid]
+    } else {
+        (xs[mid - 1] + xs[mid]) / 2.0
+    }
 }
 
 fn cell(model: &str, task: &str, variant: &str, runs: &[&Run]) -> Cell {
@@ -689,7 +889,10 @@ fn cell(model: &str, task: &str, variant: &str, runs: &[&Run]) -> Cell {
         runs: done.len(),
         errors: runs.len() - done.len(),
         solved: done.iter().filter(|r| r.solved).count(),
-        false_done: done.iter().filter(|r| r.outcome == "done" && !r.solved).count(),
+        false_done: done
+            .iter()
+            .filter(|r| r.outcome == "done" && !r.solved)
+            .count(),
         total_cost: done.iter().map(|r| r.stats.cost).sum(),
         median: Medians {
             turns: med(|s| s.turns as f64),
@@ -710,7 +913,14 @@ fn summarise(runs: &[Run], models: &[String], tasks: &[String], variants: &[Stri
     for model in models {
         for task in tasks.iter().map(String::as_str).chain([ALL]) {
             for variant in variants {
-                let of: Vec<&Run> = runs.iter().filter(|r| &r.model == model && &r.variant == variant && (task == ALL || r.task == task)).collect();
+                let of: Vec<&Run> = runs
+                    .iter()
+                    .filter(|r| {
+                        &r.model == model
+                            && &r.variant == variant
+                            && (task == ALL || r.task == task)
+                    })
+                    .collect();
                 cells.push(cell(model, task, variant, &of));
             }
         }
@@ -728,41 +938,80 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         (None, vec!["scripted stand-in".to_string()])
     } else {
         let id = opt.provider.clone().or_else(|| state.provider.clone()).ok_or("no provider has an API key yet: add one (see `sage providers`), or pass --scripted")?;
-        let info = state.providers.iter().find(|p| p.id == id).ok_or_else(|| format!("unknown provider {id:?}"))?;
+        let info = state
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("unknown provider {id:?}"))?;
         if !info.has_key {
-            return Err(format!("no API key for {}: set {} or run `sage key {}`", info.name, info.key_env, info.id));
+            return Err(format!(
+                "no API key for {}: set {} or run `sage key {}`",
+                info.name, info.key_env, info.id
+            ));
         }
-        let default = if opt.provider.is_none() { state.model.clone() } else { info.models.first().cloned() };
-        let models: Vec<String> = if opt.models.is_empty() { default.into_iter().collect() } else { opt.models.clone() };
+        let default = if opt.provider.is_none() {
+            state.model.clone()
+        } else {
+            info.models.first().cloned()
+        };
+        let models: Vec<String> = if opt.models.is_empty() {
+            default.into_iter().collect()
+        } else {
+            opt.models.clone()
+        };
         if models.is_empty() {
-            return Err(format!("no model given and {} has no default one", info.name));
+            return Err(format!(
+                "no model given and {} has no default one",
+                info.name
+            ));
         }
         (Some(id), models)
     };
-    let (tasks, skipped): (Vec<&'static Task>, Vec<&'static Task>) = opt.tasks.iter().copied().partition(|t| t.needs.iter().all(|p| on_path(p)));
+    let (tasks, skipped): (Vec<&'static Task>, Vec<&'static Task>) = opt
+        .tasks
+        .iter()
+        .copied()
+        .partition(|t| t.needs.iter().all(|p| on_path(p)));
     if tasks.is_empty() {
-        return Err("none of the chosen tasks can run here: a program they need is not installed".into());
+        return Err(
+            "none of the chosen tasks can run here: a program they need is not installed".into(),
+        );
     }
 
     let external = if let Some(first) = opt.variants.iter().find(|v| v.external.is_some()) {
-        let provider = provider.as_deref().ok_or_else(|| format!("{} needs a real model: drop --scripted", first.name))?;
-        let adapters = opt.external_dir.clone().unwrap_or_else(external::default_dir);
-        let adapters = adapters.canonicalize().map_err(|e| format!("no adapters at {}: {e}", adapters.display()))?;
+        let provider = provider
+            .as_deref()
+            .ok_or_else(|| format!("{} needs a real model: drop --scripted", first.name))?;
+        let adapters = opt
+            .external_dir
+            .clone()
+            .unwrap_or_else(external::default_dir);
+        let adapters = adapters
+            .canonicalize()
+            .map_err(|e| format!("no adapters at {}: {e}", adapters.display()))?;
         for name in opt.variants.iter().filter_map(|v| v.external.as_deref()) {
             let script = external::script(&adapters, name);
             if !script.is_file() {
-                return Err(format!("no adapter for ext:{name}: {} does not exist", script.display()));
+                return Err(format!(
+                    "no adapter for ext:{name}: {} does not exist",
+                    script.display()
+                ));
             }
         }
-        let endpoint = Config::load(&Path::new(&state.data_dir).join("config.json")).resolve(Some(provider), None)?;
-        Some((adapters, proxy::Proxy::start(&endpoint.base_url, &endpoint.key).await?))
+        let endpoint = Config::load(&Path::new(&state.data_dir).join("config.json"))
+            .resolve(Some(provider), None)?;
+        Some((
+            adapters,
+            proxy::Proxy::start(&endpoint.base_url, &endpoint.key).await?,
+        ))
     } else {
         None
     };
 
     let id = bench_id();
     let dir = PathBuf::from(&state.data_dir).join("bench").join(&id);
-    std::fs::create_dir_all(dir.join("work")).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(dir.join("work"))
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     let shared = Arc::new(Shared {
         harness: h.with_data_dir(dir.join("home")),
         dir: dir.clone(),
@@ -790,7 +1039,16 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         for repeat in 1..=opt.repeats {
             for &task in &tasks {
                 for variant in &opt.variants {
-                    set.spawn(run_job(shared.clone(), Job { seq, model: model.clone(), task, variant: variant.clone(), repeat }));
+                    set.spawn(run_job(
+                        shared.clone(),
+                        Job {
+                            seq,
+                            model: model.clone(),
+                            task,
+                            variant: variant.clone(),
+                            repeat,
+                        },
+                    ));
                     seq += 1;
                 }
             }
@@ -809,8 +1067,16 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
     let task_ids: Vec<String> = tasks.iter().map(|t| t.id.to_string()).collect();
     let variant_names: Vec<String> = opt.variants.iter().map(|v| v.name.clone()).collect();
     let first_prompt = |variant: &Variant| {
-        let sizes = runs.iter().filter(|r| r.variant == variant.name).filter_map(|r| r.external.as_ref()).map(|d| d.usage.first_prompt_tokens as f64).filter(|n| *n > 0.0);
-        Prefix { variant: variant.name.clone(), tokens: median(sizes.collect()) as u64 }
+        let sizes = runs
+            .iter()
+            .filter(|r| r.variant == variant.name)
+            .filter_map(|r| r.external.as_ref())
+            .map(|d| d.usage.first_prompt_tokens as f64)
+            .filter(|n| *n > 0.0);
+        Prefix {
+            variant: variant.name.clone(),
+            tokens: median(sizes.collect()) as u64,
+        }
     };
     let report = Report {
         id,
@@ -820,8 +1086,21 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         repeats: opt.repeats,
         simulated: opt.scripted,
         dir: dir.to_string_lossy().into_owned(),
-        prefix_tokens: opt.variants.iter().filter(|v| v.external.is_none()).map(|v| Prefix { variant: v.name.clone(), tokens: prefix_tokens(&v.features()) }).collect(),
-        first_prompt_tokens: opt.variants.iter().filter(|v| v.external.is_some()).map(first_prompt).collect(),
+        prefix_tokens: opt
+            .variants
+            .iter()
+            .filter(|v| v.external.is_none())
+            .map(|v| Prefix {
+                variant: v.name.clone(),
+                tokens: prefix_tokens(&v.features()),
+            })
+            .collect(),
+        first_prompt_tokens: opt
+            .variants
+            .iter()
+            .filter(|v| v.external.is_some())
+            .map(first_prompt)
+            .collect(),
         skipped_tasks: skipped.iter().map(|t| t.id.to_string()).collect(),
         not_started,
         summary: summarise(&runs, &models, &task_ids, &variant_names),
@@ -831,16 +1110,25 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         runs,
     };
     let body = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join("results.json"), body).map_err(|e| format!("could not write the results: {e}"))?;
+    std::fs::write(dir.join("results.json"), body)
+        .map_err(|e| format!("could not write the results: {e}"))?;
     Ok(report)
 }
 
 fn num(x: f64) -> String {
-    if x.fract() == 0.0 { format!("{x:.0}") } else { format!("{x:.1}") }
+    if x.fract() == 0.0 {
+        format!("{x:.0}")
+    } else {
+        format!("{x:.1}")
+    }
 }
 
 fn delta(new: f64, old: f64) -> String {
-    if old <= 0.0 { "n/a".to_string() } else { format!("{:+.0}%", (new / old - 1.0) * 100.0) }
+    if old <= 0.0 {
+        "n/a".to_string()
+    } else {
+        format!("{:+.0}%", (new / old - 1.0) * 100.0)
+    }
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -849,40 +1137,92 @@ fn plural(n: usize, word: &str) -> String {
 
 pub fn render(r: &Report) -> String {
     let mut out: Vec<String> = Vec::new();
-    out.push(format!("sage bench {} · {} · effort {} · {} per task and variant", r.id, r.provider, r.effort, plural(r.repeats as usize, "run")));
+    out.push(format!(
+        "sage bench {} · {} · effort {} · {} per task and variant",
+        r.id,
+        r.provider,
+        r.effort,
+        plural(r.repeats as usize, "run")
+    ));
     if r.simulated {
         out.push("SCRIPTED STAND-IN: every run replays the reference solution. Turns, tokens and costs are fabricated; this checks the benchmark and measures nothing.".into());
     }
-    let sizes = |of: &[Prefix]| of.iter().filter(|p| p.tokens > 0).map(|p| format!("{} ~{} tokens", p.variant, p.tokens)).collect::<Vec<_>>().join(", ");
+    let sizes = |of: &[Prefix]| {
+        of.iter()
+            .filter(|p| p.tokens > 0)
+            .map(|p| format!("{} ~{} tokens", p.variant, p.tokens))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     if !r.prefix_tokens.is_empty() {
-        out.push(format!("fixed prompt prefix, estimated: {}", sizes(&r.prefix_tokens)));
+        out.push(format!(
+            "fixed prompt prefix, estimated: {}",
+            sizes(&r.prefix_tokens)
+        ));
     }
     if r.first_prompt_tokens.iter().any(|p| p.tokens > 0) {
-        out.push(format!("first prompt with the task, measured: {}", sizes(&r.first_prompt_tokens)));
+        out.push(format!(
+            "first prompt with the task, measured: {}",
+            sizes(&r.first_prompt_tokens)
+        ));
     }
-    let details = || r.runs.iter().filter_map(|run| Some((run, run.external.as_ref()?)));
+    let details = || {
+        r.runs
+            .iter()
+            .filter_map(|run| Some((run, run.external.as_ref()?)))
+    };
     for variant in &r.variants {
-        let unmetered: u32 = details().filter(|(run, _)| &run.variant == variant).map(|(_, d)| d.usage.unmetered).sum();
+        let unmetered: u32 = details()
+            .filter(|(run, _)| &run.variant == variant)
+            .map(|(_, d)| d.usage.unmetered)
+            .sum();
         if unmetered > 0 {
             out.push(format!("{variant}: {} answered without a usage report; its tokens and cost are understated", plural(unmetered as usize, "request")));
         }
     }
     if !r.skipped_tasks.is_empty() {
-        out.push(format!("skipped, a program they need is not installed: {}", r.skipped_tasks.join(", ")));
+        out.push(format!(
+            "skipped, a program they need is not installed: {}",
+            r.skipped_tasks.join(", ")
+        ));
     }
     if r.not_started > 0 {
-        out.push(format!("{} not started: the --max-cost limit was reached", plural(r.not_started, "run")));
+        out.push(format!(
+            "{} not started: the --max-cost limit was reached",
+            plural(r.not_started, "run")
+        ));
     }
 
     for model in &r.models {
-        let cells = |task: &str, variant: &str| r.summary.iter().find(|c| &c.model == model && c.task == task && c.variant == variant).filter(|c| c.runs > 0);
+        let cells = |task: &str, variant: &str| {
+            r.summary
+                .iter()
+                .find(|c| &c.model == model && c.task == task && c.variant == variant)
+                .filter(|c| c.runs > 0)
+        };
         out.push(String::new());
         out.push(format!("{model}   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing"));
-        out.push(format!("{:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>9} {:>7}", "task", "variant", "solved", "turns", "in tok", "cached", "out tok", "cost", "no cache", "time"));
+        out.push(format!(
+            "{:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>9} {:>7}",
+            "task",
+            "variant",
+            "solved",
+            "turns",
+            "in tok",
+            "cached",
+            "out tok",
+            "cost",
+            "no cache",
+            "time"
+        ));
         let mut previous = "";
         for c in r.summary.iter().filter(|c| &c.model == model) {
             let m = &c.median;
-            let label = if c.task == previous { "" } else { c.task.as_str() };
+            let label = if c.task == previous {
+                ""
+            } else {
+                c.task.as_str()
+            };
             previous = &c.task;
             let mut line = format!(
                 "{label:<10} {:<16} {:>6} {:>5} {:>7} {:>6} {:>7} {:>9} {:>9} {:>7}",
@@ -897,22 +1237,43 @@ pub fn render(r: &Report) -> String {
                 fmt_duration(m.elapsed_ms as u64)
             );
             if c.task == ALL && c.solved > 0 {
-                line.push_str(&format!("   total ${:.3}, ${:.4} per solved task", c.total_cost, c.total_cost / c.solved as f64));
+                line.push_str(&format!(
+                    "   total ${:.3}, ${:.4} per solved task",
+                    c.total_cost,
+                    c.total_cost / c.solved as f64
+                ));
             }
             if c.false_done > 0 {
-                line.push_str(&format!("   {} declared done, then failed verification", c.false_done));
+                line.push_str(&format!(
+                    "   {} declared done, then failed verification",
+                    c.false_done
+                ));
             }
             if c.errors > 0 {
-                line.push_str(&format!("   {} lost to provider errors", plural(c.errors, "run")));
+                line.push_str(&format!(
+                    "   {} lost to provider errors",
+                    plural(c.errors, "run")
+                ));
             }
             out.push(line);
         }
 
         for variant in &r.variants {
             // Sage's variants are measured against the conventional loop, another harness against Sage.
-            let plain = if r.variants.iter().any(|v| v == "classic") { "classic" } else { "default" };
-            let against = if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "ecosage") { "ecosage" } else { plain };
-            let (Some(c), Some(base)) = (cells(ALL, variant), cells(ALL, against)) else { continue };
+            let plain = if r.variants.iter().any(|v| v == "classic") {
+                "classic"
+            } else {
+                "default"
+            };
+            let against =
+                if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "ecosage") {
+                    "ecosage"
+                } else {
+                    plain
+                };
+            let (Some(c), Some(base)) = (cells(ALL, variant), cells(ALL, against)) else {
+                continue;
+            };
             if variant == against {
                 continue;
             }
@@ -930,8 +1291,17 @@ pub fn render(r: &Report) -> String {
                 base.solved,
                 base.runs
             ));
-            let pairs: Vec<(&Cell, &Cell)> = r.tasks.iter().filter_map(|t| Some((cells(t, variant)?, cells(t, against)?))).collect();
-            let count = |better: fn(&Medians, &Medians) -> bool| pairs.iter().filter(|(x, y)| better(&x.median, &y.median)).count();
+            let pairs: Vec<(&Cell, &Cell)> = r
+                .tasks
+                .iter()
+                .filter_map(|t| Some((cells(t, variant)?, cells(t, against)?)))
+                .collect();
+            let count = |better: fn(&Medians, &Medians) -> bool| {
+                pairs
+                    .iter()
+                    .filter(|(x, y)| better(&x.median, &y.median))
+                    .count()
+            };
             out.push(format!(
                 "  by task ({}): fewer turns on {}, more on {}; cheaper on {}, dearer on {} (with no cache: {} and {})",
                 pairs.len(),
@@ -945,29 +1315,60 @@ pub fn render(r: &Report) -> String {
         }
     }
 
-    let unsolved: Vec<&Run> = r.runs.iter().filter(|run| run.error.is_some() || !run.solved).collect();
+    let unsolved: Vec<&Run> = r
+        .runs
+        .iter()
+        .filter(|run| run.error.is_some() || !run.solved)
+        .collect();
     if !unsolved.is_empty() {
         out.push(String::new());
-        out.push(format!("{} without a solution:", plural(unsolved.len(), "run")));
+        out.push(format!(
+            "{} without a solution:",
+            plural(unsolved.len(), "run")
+        ));
         for run in unsolved.iter().take(12) {
             let why = match (&run.error, &run.failure) {
                 (Some(e), _) => format!("no result: {}", one_line(e, 110)),
                 (None, Some(f)) => format!("{}: {}", run.outcome, one_line(f, 110)),
-                (None, None) => format!("{}; verification: {}", run.outcome, one_line(run.verify_tail.lines().last().unwrap_or(""), 110)),
+                (None, None) => format!(
+                    "{}; verification: {}",
+                    run.outcome,
+                    one_line(run.verify_tail.lines().last().unwrap_or(""), 110)
+                ),
             };
-            out.push(format!("  {} · {} · {} #{} · session {} · {why}", run.model, run.task, run.variant, run.repeat, if run.session.is_empty() { "–" } else { &run.session }));
+            out.push(format!(
+                "  {} · {} · {} #{} · session {} · {why}",
+                run.model,
+                run.task,
+                run.variant,
+                run.repeat,
+                if run.session.is_empty() {
+                    "–"
+                } else {
+                    &run.session
+                }
+            ));
         }
         if unsolved.len() > 12 {
-            out.push(format!("  … and {} more, all in results.json", unsolved.len() - 12));
+            out.push(format!(
+                "  … and {} more, all in results.json",
+                unsolved.len() - 12
+            ));
         }
     }
     out.push(String::new());
     out.push(format!("results: {}/results.json", r.dir));
     if !r.prefix_tokens.is_empty() {
-        out.push(format!("replay a run: SAGE_HOME={}/home sage show <session>", r.dir));
+        out.push(format!(
+            "replay a run: SAGE_HOME={}/home sage show <session>",
+            r.dir
+        ));
     }
     if !r.first_prompt_tokens.is_empty() {
-        out.push(format!("output of an external run: {}/external/<session>/output.log", r.dir));
+        out.push(format!(
+            "output of an external run: {}/external/<session>/output.log",
+            r.dir
+        ));
     }
     out.join("\n")
 }
@@ -995,21 +1396,29 @@ pub async fn command(h: &Harness, args: &[String]) -> ExitCode {
             let mut bad = 0;
             for (id, verdict) in check(&tasks).await {
                 match verdict {
-                    Ok(()) => println!("ok   {id}: fails as shipped, passes with its reference solution"),
+                    Ok(()) => {
+                        println!("ok   {id}: fails as shipped, passes with its reference solution")
+                    }
                     Err(e) => {
                         bad += 1;
                         println!("BAD  {id}: {e}");
                     }
                 }
             }
-            if bad == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) }
+            if bad == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
         }
         Ok(Command::Run(opt)) => match execute(h, &opt, true).await {
             Err(e) => fail(e),
             Ok(report) => {
                 println!("{}", render(&report));
                 if let Some(path) = &opt.out {
-                    let copied = serde_json::to_string_pretty(&report).map_err(|e| e.to_string()).and_then(|body| std::fs::write(path, body).map_err(|e| e.to_string()));
+                    let copied = serde_json::to_string_pretty(&report)
+                        .map_err(|e| e.to_string())
+                        .and_then(|body| std::fs::write(path, body).map_err(|e| e.to_string()));
                     if let Err(e) = copied {
                         return fail(format!("could not write {}: {e}", path.display()));
                     }
@@ -1051,25 +1460,71 @@ mod tests {
             return;
         }
         let h = harness("scripted");
-        let Ok(Command::Run(opt)) = parse(&args("--scripted --tasks pager,report --variants ecosage,classic,no-auto-watch -n 2 -j 3")) else { panic!("should parse") };
+        let Ok(Command::Run(opt)) = parse(&args(
+            "--scripted --tasks pager,report --variants ecosage,classic,no-auto-watch -n 2 -j 3",
+        )) else {
+            panic!("should parse")
+        };
         let report = execute(&h, &opt, false).await.unwrap();
         assert!(report.simulated);
         assert_eq!(report.runs.len(), 12);
-        assert!(report.runs.iter().all(|r| r.solved && r.error.is_none() && r.outcome == "done"), "{:?}", report.runs);
+        assert!(
+            report
+                .runs
+                .iter()
+                .all(|r| r.solved && r.error.is_none() && r.outcome == "done"),
+            "{:?}",
+            report.runs
+        );
         // Sage vouches for what it declares done; the baseline only claims.
-        assert!(report.runs.iter().all(|r| r.harness_verified == (r.variant != "classic")));
+        assert!(
+            report
+                .runs
+                .iter()
+                .all(|r| r.harness_verified == (r.variant != "classic"))
+        );
         // Runs come back in matrix order however they finished.
-        assert_eq!(report.runs.iter().take(3).map(|r| r.variant.as_str()).collect::<Vec<_>>(), ["ecosage", "classic", "no-auto-watch"]);
+        assert_eq!(
+            report
+                .runs
+                .iter()
+                .take(3)
+                .map(|r| r.variant.as_str())
+                .collect::<Vec<_>>(),
+            ["ecosage", "classic", "no-auto-watch"]
+        );
 
-        let all = report.summary.iter().find(|c| c.task == ALL && c.variant == "ecosage").unwrap();
-        assert_eq!((all.runs, all.solved, all.false_done, all.errors, all.median.turns), (4, 4, 0, 0, 1.0));
+        let all = report
+            .summary
+            .iter()
+            .find(|c| c.task == ALL && c.variant == "ecosage")
+            .unwrap();
+        assert_eq!(
+            (
+                all.runs,
+                all.solved,
+                all.false_done,
+                all.errors,
+                all.median.turns
+            ),
+            (4, 4, 0, 0, 1.0)
+        );
         let text = render(&report);
-        assert!(text.contains("SCRIPTED STAND-IN") && text.contains("no-auto-watch against classic"), "{text}");
+        assert!(
+            text.contains("SCRIPTED STAND-IN") && text.contains("no-auto-watch against classic"),
+            "{text}"
+        );
 
         let dir = PathBuf::from(&report.dir);
-        let stored: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("results.json")).unwrap()).unwrap();
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("results.json")).unwrap())
+                .unwrap();
         assert_eq!(stored["runs"].as_array().unwrap().len(), 12);
-        assert_eq!(std::fs::read_dir(dir.join("work")).unwrap().count(), 0, "workspaces are removed unless --keep");
+        assert_eq!(
+            std::fs::read_dir(dir.join("work")).unwrap().count(),
+            0,
+            "workspaces are removed unless --keep"
+        );
         // Each run's log is kept and can be replayed from the benchmark's own data directory.
         assert_eq!(h.with_data_dir(dir.join("home")).list().len(), 12);
     }
@@ -1084,10 +1539,20 @@ mod tests {
             *keep.lock().unwrap() = messages[1].content.clone();
             MockTurn::say("Looking into it.")
         });
-        let req = StartRequest { cwd: ws.to_string_lossy().into_owned(), task: task.prompt.to_string(), without: without.iter().map(|w| w.to_string()).collect(), ..Default::default() };
-        let meta = h.start_scripted(req, MockProvider::new(vec![turn])).unwrap();
+        let req = StartRequest {
+            cwd: ws.to_string_lossy().into_owned(),
+            task: task.prompt.to_string(),
+            without: without.iter().map(|w| w.to_string()).collect(),
+            ..Default::default()
+        };
+        let meta = h
+            .start_scripted(req, MockProvider::new(vec![turn]))
+            .unwrap();
         wait_for_end(h, &meta.id).await.unwrap();
-        let root = std::fs::canonicalize(&ws).unwrap().to_string_lossy().into_owned();
+        let root = std::fs::canonicalize(&ws)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let _ = std::fs::remove_dir_all(&ws);
         let first = received.lock().unwrap().clone();
         (root, first)
@@ -1104,21 +1569,54 @@ mod tests {
 
         let (root, first) = opening(&h, task, &[]).await;
         assert!(first.contains("\n</env>\n\nBudget: 80 replies") && first.contains("\n\n<files>\npager.py · 12 lines\n") && first.contains("\ntest_pager.py · ") && first.contains("\n</files>\nThis is `read` output for the files of this workspace that fit here"), "{first}");
-        assert!(first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\n") && first.ends_with(&format!("\n\n<task>\n{}\n</task>", task.prompt)), "{first}");
+        assert!(
+            first.contains("\n\n<tests>\nwatch tests: FAIL (expected exit 0, got exit 1)\n")
+                && first.ends_with(&format!("\n\n<task>\n{}\n</task>", task.prompt)),
+            "{first}"
+        );
         // The traceback names its file the way a tool call would, and still brings the lines along.
         // The traceback names its file the way a tool call would. Its lines are in the attached test file
         // already; without the survey they come along with the traceback.
-        assert!(first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n") && !first.contains("\n--- where "), "{first}");
+        assert!(
+            first.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n")
+                && !first.contains("\n--- where "),
+            "{first}"
+        );
         let (_, named) = opening(&h, task, &["survey"]).await;
-        assert!(named.contains("\n</files>\nThis is `read` output for the file the task names.") && named.contains("\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"), "{named}");
-        assert_eq!(first.matches(&root).count(), 1, "only the `cwd:` line names the workspace: {first}");
-        assert_eq!(first.matches("|def total_pages(count, per_page):").count(), 1, "{first}");
+        assert!(
+            named.contains("\n</files>\nThis is `read` output for the file the task names.")
+                && named.contains(
+                    "\n--- where (current file content; anchors work in edit) ---\ntest_pager.py\n"
+                ),
+            "{named}"
+        );
+        assert_eq!(
+            first.matches(&root).count(),
+            1,
+            "only the `cwd:` line names the workspace: {first}"
+        );
+        assert_eq!(
+            first.matches("|def total_pages(count, per_page):").count(),
+            1,
+            "{first}"
+        );
 
         // Each of the two mechanisms can be taken out on its own.
         let (_, plain) = opening(&h, task, &["attach"]).await;
-        assert!(!plain.contains("<files>") && !plain.contains("|def total_pages") && plain.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n"), "{plain}");
+        assert!(
+            !plain.contains("<files>")
+                && !plain.contains("|def total_pages")
+                && plain.contains("\n  File \"test_pager.py\", line 12, in test_first_page\n"),
+            "{plain}"
+        );
         let (root, long) = opening(&h, task, &["short-paths"]).await;
-        assert!(long.contains("\n<files>\npager.py · 12 lines\n") && long.contains(&format!("\n  File \"{root}/test_pager.py\", line 12, in test_first_page\n")), "{long}");
+        assert!(
+            long.contains("\n<files>\npager.py · 12 lines\n")
+                && long.contains(&format!(
+                    "\n  File \"{root}/test_pager.py\", line 12, in test_first_page\n"
+                )),
+            "{long}"
+        );
     }
 
     #[tokio::test]
@@ -1141,40 +1639,148 @@ mod tests {
 
     #[test]
     fn options_and_variants_parse() {
-        let Ok(Command::Run(opt)) = parse(&args("-p logfare -m glm-5.3,glm-5.3-flash -m other --variants classic,no-receipts -n 5 -j 2 --max-cost 1.5 --keep")) else { panic!("should parse") };
+        let Ok(Command::Run(opt)) = parse(&args(
+            "-p logfare -m glm-5.3,glm-5.3-flash -m other --variants classic,no-receipts -n 5 -j 2 --max-cost 1.5 --keep",
+        )) else {
+            panic!("should parse")
+        };
         assert_eq!(opt.models, ["glm-5.3", "glm-5.3-flash", "other"]);
-        assert_eq!((opt.repeats, opt.jobs, opt.max_cost, opt.keep, opt.tasks.len()), (5, 2, Some(1.5), true, TASKS.len()));
-        assert_eq!(opt.variants[1], Variant::own("no-receipts", Mode::Ecosage, vec!["receipts".into()]));
+        assert_eq!(
+            (
+                opt.repeats,
+                opt.jobs,
+                opt.max_cost,
+                opt.keep,
+                opt.tasks.len()
+            ),
+            (5, 2, Some(1.5), true, TASKS.len())
+        );
+        assert_eq!(
+            opt.variants[1],
+            Variant::own("no-receipts", Mode::Ecosage, vec!["receipts".into()])
+        );
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
         // Every mechanism has its variant, however its name is spelled.
-        let Ok(Command::Run(opt)) = parse(&args("--variants ecosage,no-attach,no-short-paths,no-short_paths")) else { panic!("should parse") };
-        assert_eq!((opt.variants[1].without.as_slice(), opt.variants[2].without.as_slice(), opt.variants[3].without.as_slice()), (&["attach".to_string()][..], &["short_paths".to_string()][..], &["short_paths".to_string()][..]));
-        assert!(!opt.variants[1].features().attach && opt.variants[1].features().short_paths && !opt.variants[2].features().short_paths && opt.variants[2].features().attach);
+        let Ok(Command::Run(opt)) = parse(&args(
+            "--variants ecosage,no-attach,no-short-paths,no-short_paths",
+        )) else {
+            panic!("should parse")
+        };
+        assert_eq!(
+            (
+                opt.variants[1].without.as_slice(),
+                opt.variants[2].without.as_slice(),
+                opt.variants[3].without.as_slice()
+            ),
+            (
+                &["attach".to_string()][..],
+                &["short_paths".to_string()][..],
+                &["short_paths".to_string()][..]
+            )
+        );
+        assert!(
+            !opt.variants[1].features().attach
+                && opt.variants[1].features().short_paths
+                && !opt.variants[2].features().short_paths
+                && opt.variants[2].features().attach
+        );
         // What Prosage adds is off in Ecosage unless asked for with `+<mechanism>`, and Prosage can
         // be run without any of it. `classic` is still read as `default`.
-        let Ok(Command::Run(opt)) = parse(&args("--variants ecosage+examiner,prosage,prosage+no-examiner+effort:low,default,classic")) else { panic!("should parse") };
-        let modes: Vec<(Mode, bool, bool)> = opt.variants.iter().map(|v| (v.mode, v.features().examiner, v.features().long_thought)).collect();
-        assert_eq!(modes, [(Mode::Ecosage, true, false), (Mode::Prosage, true, true), (Mode::Prosage, false, true), (Mode::Plain, false, false), (Mode::Plain, false, false)]);
-        assert!(Features::OPTIONAL.iter().all(|name| Features::ecosage().with(name) != Some(Features::ecosage()) && Features::prosage().with(name) == Some(Features::prosage())));
-        let Ok(Command::Run(opt)) = parse(&args("--variants ecosage,ecosage+no-survey,no-survey+no-attach")) else { panic!("should parse") };
-        assert_eq!(opt.variants.iter().map(|v| (v.name.as_str(), v.features().attach, v.features().survey)).collect::<Vec<_>>(), [("ecosage", true, true), ("ecosage+no-survey", true, false), ("no-survey+no-attach", false, false)]);
+        let Ok(Command::Run(opt)) = parse(&args(
+            "--variants ecosage+examiner,prosage,prosage+no-examiner+effort:low,default,classic",
+        )) else {
+            panic!("should parse")
+        };
+        let modes: Vec<(Mode, bool, bool)> = opt
+            .variants
+            .iter()
+            .map(|v| (v.mode, v.features().examiner, v.features().long_thought))
+            .collect();
+        assert_eq!(
+            modes,
+            [
+                (Mode::Ecosage, true, false),
+                (Mode::Prosage, true, true),
+                (Mode::Prosage, false, true),
+                (Mode::Plain, false, false),
+                (Mode::Plain, false, false)
+            ]
+        );
+        assert!(
+            Features::OPTIONAL
+                .iter()
+                .all(
+                    |name| Features::ecosage().with(name) != Some(Features::ecosage())
+                        && Features::prosage().with(name) == Some(Features::prosage())
+                )
+        );
+        let Ok(Command::Run(opt)) = parse(&args(
+            "--variants ecosage,ecosage+no-survey,no-survey+no-attach",
+        )) else {
+            panic!("should parse")
+        };
+        assert_eq!(
+            opt.variants
+                .iter()
+                .map(|v| (v.name.as_str(), v.features().attach, v.features().survey))
+                .collect::<Vec<_>>(),
+            [
+                ("ecosage", true, true),
+                ("ecosage+no-survey", true, false),
+                ("no-survey+no-attach", false, false)
+            ]
+        );
 
         assert!(matches!(parse(&args("--list")), Ok(Command::List)));
-        assert!(matches!(parse(&args("--check --tasks roman")), Ok(Command::Check(t)) if t.len() == 1));
-        for bad in ["--variants turbo", "--variants no-telepathy", "--variants ecosage+review", "--variants no-review", "--variants no-lessons", "--tasks nope", "-n 0", "-n many", "--frobnicate", "-m"] {
+        assert!(
+            matches!(parse(&args("--check --tasks roman")), Ok(Command::Check(t)) if t.len() == 1)
+        );
+        for bad in [
+            "--variants turbo",
+            "--variants no-telepathy",
+            "--variants ecosage+review",
+            "--variants no-review",
+            "--variants no-lessons",
+            "--tasks nope",
+            "-n 0",
+            "-n many",
+            "--frobnicate",
+            "-m",
+        ] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
         }
     }
 
     #[test]
     fn external_variants_parse() {
-        let Ok(Command::Run(opt)) = parse(&args("--variants ecosage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters")) else { panic!("should parse") };
-        let externals: Vec<(&str, Option<&str>)> = opt.variants.iter().map(|v| (v.name.as_str(), v.external.as_deref())).collect();
-        assert_eq!(externals, [("ecosage", None), ("ext:mini", Some("mini")), ("ext:open-code_2", Some("open-code_2"))]);
+        let Ok(Command::Run(opt)) = parse(&args(
+            "--variants ecosage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters",
+        )) else {
+            panic!("should parse")
+        };
+        let externals: Vec<(&str, Option<&str>)> = opt
+            .variants
+            .iter()
+            .map(|v| (v.name.as_str(), v.external.as_deref()))
+            .collect();
+        assert_eq!(
+            externals,
+            [
+                ("ecosage", None),
+                ("ext:mini", Some("mini")),
+                ("ext:open-code_2", Some("open-code_2"))
+            ]
+        );
         assert!(opt.variants[1].mode == Mode::Ecosage && opt.variants[1].without.is_empty());
         assert_eq!(opt.external_dir, Some(PathBuf::from("/tmp/adapters")));
         assert_eq!(Options::default().external_dir, None);
-        for bad in ["--variants ext:", "--variants ext:../mini", "--variants ext:a/b", "--variants external:mini", "--external-dir"] {
+        for bad in [
+            "--variants ext:",
+            "--variants ext:../mini",
+            "--variants ext:a/b",
+            "--variants external:mini",
+            "--external-dir",
+        ] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
         }
     }
@@ -1186,7 +1792,12 @@ mod tests {
 r = u.Request(os.environ["BENCH_BASE_URL"] + "/chat/completions", data=sys.argv[1].encode(), headers={"content-type": "application/json", "authorization": "Bearer " + os.environ["BENCH_API_KEY"]})
 u.urlopen(r).read()' "$1"; }"#;
         let path = dir.join(name).join("run.sh");
-        write_file(dir, &format!("{name}/run.sh"), &format!("#!/bin/sh\n{ask}\n{body}\n")).unwrap();
+        write_file(
+            dir,
+            &format!("{name}/run.sh"),
+            &format!("#!/bin/sh\n{ask}\n{body}\n"),
+        )
+        .unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
@@ -1201,58 +1812,206 @@ u.urlopen(r).read()' "$1"; }"#;
         let adapters = root.join("adapters");
         let roman = tasks::find("roman").unwrap();
         materialize(&root.join("solution"), roman.solution).unwrap();
-        let solve = format!("cp {}/solution/roman.py . && touch \"$BENCH_SCRATCH/state\"", root.display());
-        adapter(&adapters, "solver", &format!("ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}}' && ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"stream\":true,\"messages\":[]}}'; {solve}"));
+        let solve = format!(
+            "cp {}/solution/roman.py . && touch \"$BENCH_SCRATCH/state\"",
+            root.display()
+        );
+        adapter(
+            &adapters,
+            "solver",
+            &format!(
+                "ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}}' && ask '{{\"model\":\"'\"$BENCH_MODEL\"'\",\"stream\":true,\"messages\":[]}}'; {solve}"
+            ),
+        );
         adapter(&adapters, "idle", "echo 'no key configured' >&2");
-        adapter(&adapters, "looper", "while ask '{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}'; do :; done 2>/dev/null; echo gave up; exit 1");
+        adapter(
+            &adapters,
+            "looper",
+            "while ask '{\"model\":\"'\"$BENCH_MODEL\"'\",\"messages\":[]}'; do :; done 2>/dev/null; echo gave up; exit 1",
+        );
         write_file(&root, "home/config.json", &json!({"keys": {"custom": "real-key"}, "custom": {"base_url": upstream, "models": ["deepseek-chat"]}}).to_string()).unwrap();
         let h = Harness::at(root.join("home"));
 
-        let line = format!("-p custom -m deepseek-chat,broken --tasks roman --variants ext:solver,ext:idle,ext:looper -n 1 -j 3 --max-turns 3 --retries 0 --external-dir {}", adapters.display());
-        let Ok(Command::Run(opt)) = parse(&args(&line)) else { panic!("should parse") };
+        let line = format!(
+            "-p custom -m deepseek-chat,broken --tasks roman --variants ext:solver,ext:idle,ext:looper -n 1 -j 3 --max-turns 3 --retries 0 --external-dir {}",
+            adapters.display()
+        );
+        let Ok(Command::Run(opt)) = parse(&args(&line)) else {
+            panic!("should parse")
+        };
         let report = execute(&h, &opt, false).await.unwrap();
-        let run = |model: &str, variant: &str| report.runs.iter().find(|r| r.model == model && r.variant == variant).unwrap();
+        let run = |model: &str, variant: &str| {
+            report
+                .runs
+                .iter()
+                .find(|r| r.model == model && r.variant == variant)
+                .unwrap()
+        };
 
         // Two requests, one of them a stream that did not ask for its usage.
         let solver = run("deepseek-chat", "ext:solver");
         let detail = solver.external.as_ref().unwrap();
-        assert!(solver.solved && solver.error.is_none() && solver.failure.is_none(), "{solver:?}");
-        assert_eq!((solver.outcome.as_str(), detail.exit_code, detail.usage.usage_injected, detail.usage.unmetered), ("done", Some(0), 1, 0));
+        assert!(
+            solver.solved && solver.error.is_none() && solver.failure.is_none(),
+            "{solver:?}"
+        );
+        assert_eq!(
+            (
+                solver.outcome.as_str(),
+                detail.exit_code,
+                detail.usage.usage_injected,
+                detail.usage.unmetered
+            ),
+            ("done", Some(0), 1, 0)
+        );
         let s = &solver.stats;
-        assert_eq!((s.turns, s.prompt_tokens, s.cached_tokens, s.output_tokens, s.reasoning_tokens, s.context_tokens), (2, 2100, 1800, 80, 20, 900));
+        assert_eq!(
+            (
+                s.turns,
+                s.prompt_tokens,
+                s.cached_tokens,
+                s.output_tokens,
+                s.reasoning_tokens,
+                s.context_tokens
+            ),
+            (2, 2100, 1800, 80, 20, 900)
+        );
         assert!(s.priced && s.cost > 0.0 && solver.cost_uncached > s.cost && s.elapsed_ms > 0);
-        assert!(Path::new(&detail.log).is_file() && detail.log.ends_with(&format!("external/{}/output.log", solver.session)));
-        assert!(!Path::new(&report.dir).join("external").join(&solver.session).join("scratch").exists(), "the scratch directory goes with the run");
-        assert!(std::fs::read_dir(Path::new(&report.dir).join("work")).unwrap().next().is_none(), "workspaces are removed");
+        assert!(
+            Path::new(&detail.log).is_file()
+                && detail
+                    .log
+                    .ends_with(&format!("external/{}/output.log", solver.session))
+        );
+        assert!(
+            !Path::new(&report.dir)
+                .join("external")
+                .join(&solver.session)
+                .join("scratch")
+                .exists(),
+            "the scratch directory goes with the run"
+        );
+        assert!(
+            std::fs::read_dir(Path::new(&report.dir).join("work"))
+                .unwrap()
+                .next()
+                .is_none(),
+            "workspaces are removed"
+        );
 
         let idle = run("deepseek-chat", "ext:idle");
-        assert_eq!((idle.solved, idle.outcome.as_str(), idle.failure.as_deref(), idle.stats.turns), (false, "error", Some("made no model request: no key configured"), 0));
-        assert!(idle.error.is_none() && idle.verify_tail.contains("roman"), "an adapter that does nothing is judged, and fails: {idle:?}");
+        assert_eq!(
+            (
+                idle.solved,
+                idle.outcome.as_str(),
+                idle.failure.as_deref(),
+                idle.stats.turns
+            ),
+            (
+                false,
+                "error",
+                Some("made no model request: no key configured"),
+                0
+            )
+        );
+        assert!(
+            idle.error.is_none() && idle.verify_tail.contains("roman"),
+            "an adapter that does nothing is judged, and fails: {idle:?}"
+        );
 
         let looper = run("deepseek-chat", "ext:looper");
-        assert_eq!((looper.solved, looper.outcome.as_str(), looper.failure.as_deref(), looper.stats.turns), (false, "budget", Some("stopped at the limit of 3 model requests"), 3));
+        assert_eq!(
+            (
+                looper.solved,
+                looper.outcome.as_str(),
+                looper.failure.as_deref(),
+                looper.stats.turns
+            ),
+            (
+                false,
+                "budget",
+                Some("stopped at the limit of 3 model requests"),
+                3
+            )
+        );
         assert!(looper.external.as_ref().unwrap().usage.refused >= 1);
 
         // A provider that fails leaves no result, as for Sage's own runs.
         let lost = run("broken", "ext:solver");
-        assert!(lost.error.as_deref().is_some_and(provider_failed) && !lost.solved, "{lost:?}");
-        let all = |variant: &str| report.summary.iter().find(|c| c.model == "deepseek-chat" && c.task == ALL && c.variant == variant).unwrap();
-        assert_eq!((all("ext:solver").solved, all("ext:solver").runs, all("ext:idle").solved, all("ext:idle").runs), (1, 1, 0, 1));
-        assert_eq!(report.summary.iter().find(|c| c.model == "broken" && c.task == ALL && c.variant == "ext:solver").map(|c| (c.runs, c.errors)), Some((0, 1)));
+        assert!(
+            lost.error.as_deref().is_some_and(provider_failed) && !lost.solved,
+            "{lost:?}"
+        );
+        let all = |variant: &str| {
+            report
+                .summary
+                .iter()
+                .find(|c| c.model == "deepseek-chat" && c.task == ALL && c.variant == variant)
+                .unwrap()
+        };
+        assert_eq!(
+            (
+                all("ext:solver").solved,
+                all("ext:solver").runs,
+                all("ext:idle").solved,
+                all("ext:idle").runs
+            ),
+            (1, 1, 0, 1)
+        );
+        assert_eq!(
+            report
+                .summary
+                .iter()
+                .find(|c| c.model == "broken" && c.task == ALL && c.variant == "ext:solver")
+                .map(|c| (c.runs, c.errors)),
+            Some((0, 1))
+        );
 
         let seen = seen.lock().unwrap().clone();
-        assert!(!seen.is_empty() && seen.iter().all(|(_, _, auth, _)| auth == "Bearer real-key"), "{seen:?}");
+        assert!(
+            !seen.is_empty() && seen.iter().all(|(_, _, auth, _)| auth == "Bearer real-key"),
+            "{seen:?}"
+        );
         assert!(report.prefix_tokens.is_empty());
-        assert_eq!(report.first_prompt_tokens.iter().map(|p| (p.variant.as_str(), p.tokens)).collect::<Vec<_>>(), [("ext:solver", 1200), ("ext:idle", 0), ("ext:looper", 1200)]);
+        assert_eq!(
+            report
+                .first_prompt_tokens
+                .iter()
+                .map(|p| (p.variant.as_str(), p.tokens))
+                .collect::<Vec<_>>(),
+            [("ext:solver", 1200), ("ext:idle", 0), ("ext:looper", 1200)]
+        );
         let text = render(&report);
-        for expected in ["first prompt with the task, measured: ext:solver ~1200 tokens", "ext:idle", "made no model request: no key configured", "stopped at the limit of 3 model requests", "no result: provider returned HTTP 503", "/external/<session>/output.log"] {
-            assert!(text.contains(expected), "{expected:?} missing from:\n{text}");
+        for expected in [
+            "first prompt with the task, measured: ext:solver ~1200 tokens",
+            "ext:idle",
+            "made no model request: no key configured",
+            "stopped at the limit of 3 model requests",
+            "no result: provider returned HTTP 503",
+            "/external/<session>/output.log",
+        ] {
+            assert!(
+                text.contains(expected),
+                "{expected:?} missing from:\n{text}"
+            );
         }
 
-        let Ok(Command::Run(scripted)) = parse(&args(&format!("{line} --scripted"))) else { panic!("should parse") };
-        assert!(execute(&h, &scripted, false).await.is_err_and(|e| e.contains("needs a real model")));
-        let Ok(Command::Run(unknown)) = parse(&args(&line.replace("ext:idle", "ext:nope"))) else { panic!("should parse") };
-        assert!(execute(&h, &unknown, false).await.is_err_and(|e| e.contains("no adapter for ext:nope")));
+        let Ok(Command::Run(scripted)) = parse(&args(&format!("{line} --scripted"))) else {
+            panic!("should parse")
+        };
+        assert!(
+            execute(&h, &scripted, false)
+                .await
+                .is_err_and(|e| e.contains("needs a real model"))
+        );
+        let Ok(Command::Run(unknown)) = parse(&args(&line.replace("ext:idle", "ext:nope"))) else {
+            panic!("should parse")
+        };
+        assert!(
+            execute(&h, &unknown, false)
+                .await
+                .is_err_and(|e| e.contains("no adapter for ext:nope"))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1272,21 +2031,47 @@ u.urlopen(r).read()' "$1"; }"#;
             verify_tail: String::new(),
             error: error.map(String::from),
             cost_uncached: cost * 2.0,
-            stats: Stats { turns, cost, ..Stats::default() },
+            stats: Stats {
+                turns,
+                cost,
+                ..Stats::default()
+            },
             external: None,
         };
-        let runs = [run(3, 0.01, true, None), run(5, 0.03, false, None), run(4, 0.02, true, None), run(0, 0.0, false, Some("provider returned HTTP 502: overloaded"))];
+        let runs = [
+            run(3, 0.01, true, None),
+            run(5, 0.03, false, None),
+            run(4, 0.02, true, None),
+            run(
+                0,
+                0.0,
+                false,
+                Some("provider returned HTTP 502: overloaded"),
+            ),
+        ];
         let c = cell("m", "t", "ecosage", &runs.iter().collect::<Vec<_>>());
         assert_eq!((c.runs, c.errors, c.solved, c.false_done), (3, 1, 2, 1));
-        assert_eq!((c.median.turns, c.median.cost, c.median.cost_uncached), (4.0, 0.02, 0.04));
+        assert_eq!(
+            (c.median.turns, c.median.cost, c.median.cost_uncached),
+            (4.0, 0.02, 0.04)
+        );
         assert!((c.total_cost - 0.06).abs() < 1e-12);
         assert_eq!(median(vec![1.0, 9.0, 2.0, 4.0]), 3.0);
-        assert_eq!((delta(3.0, 5.0), delta(1.0, 0.0), num(2.5), num(3.0)), ("-40%".into(), "n/a".into(), "2.5".into(), "3".into()));
-        assert!(provider_failed("provider returned HTTP 429: slow down") && !provider_failed("the model returned neither a tool call nor an answer three times in a row"));
+        assert_eq!(
+            (delta(3.0, 5.0), delta(1.0, 0.0), num(2.5), num(3.0)),
+            ("-40%".into(), "n/a".into(), "2.5".into(), "3".into())
+        );
+        assert!(
+            provider_failed("provider returned HTTP 429: slow down")
+                && !provider_failed(
+                    "the model returned neither a tool call nor an answer three times in a row"
+                )
+        );
     }
 
     #[test]
-    fn contract_has_zero_false_positives_and_catches_forbidden_and_missing_files_across_all_24_tasks() {
+    fn contract_has_zero_false_positives_and_catches_forbidden_and_missing_files_across_all_24_tasks()
+     {
         use sage_core::contract::Contract;
         use sage_core::workspace::Workspace;
 
@@ -1315,7 +2100,11 @@ u.urlopen(r).read()' "$1"; }"#;
             // 2. Applying the reference solution produces zero contract violations on all 24 tasks.
             materialize(&root, task.solution).unwrap();
             let v = contract.violations(&ws.root);
-            assert!(v.is_empty(), "task {}: false-positive contract violation on reference solution: {v:?}", task.id);
+            assert!(
+                v.is_empty(),
+                "task {}: false-positive contract violation on reference solution: {v:?}",
+                task.id
+            );
 
             // 3. Touching any protected `task.restore` file is caught on every task.
             for &protected in task.restore {
@@ -1350,8 +2139,11 @@ u.urlopen(r).read()' "$1"; }"#;
         let noop_aside = || -> sage_core::provider::mock::AsideFn {
             Box::new(|msgs| {
                 let sys = msgs.first()?.content.as_str();
-                (sys.starts_with("You route coding tasks") || sys.starts_with("You are the examiner") || sys.starts_with("You are the second examiner") || sys.starts_with("You are a referee"))
-                    .then(|| MockTurn::say("NONE"))
+                (sys.starts_with("You route coding tasks")
+                    || sys.starts_with("You are the examiner")
+                    || sys.starts_with("You are the second examiner")
+                    || sys.starts_with("You are a referee"))
+                .then(|| MockTurn::say("NONE"))
             })
         };
         let eval_ws = |task: &Task, ws: &Path| {
@@ -1371,25 +2163,52 @@ u.urlopen(r).read()' "$1"; }"#;
         let audit_sol = audit.solution[0].1;
         for (label, mode, without, expect_solved) in [
             ("default", "default", vec![], false),
-            ("ecosage-no-contract", "ecosage", vec!["contract".to_string()], false),
+            (
+                "ecosage-no-contract",
+                "ecosage",
+                vec!["contract".to_string()],
+                false,
+            ),
             ("ecosage", "ecosage", vec![], true),
-            ("prosage-no-contract", "prosage", vec!["contract".to_string()], false),
+            (
+                "prosage-no-contract",
+                "prosage",
+                vec!["contract".to_string()],
+                false,
+            ),
             ("prosage", "prosage", vec![], true),
         ] {
             let h = Harness::at(base.join(format!("s1-{label}")));
             let ws = base.join(format!("ws-s1-{label}"));
             materialize(&ws, audit.files).unwrap();
             let turns: Vec<TurnFn> = vec![
-                Box::new(|_| MockTurn::calls("", vec![("finish", json!({"summary": "Audited notesvc; found 6 vulnerabilities."}))])),
+                Box::new(|_| {
+                    MockTurn::calls(
+                        "",
+                        vec![(
+                            "finish",
+                            json!({"summary": "Audited notesvc; found 6 vulnerabilities."}),
+                        )],
+                    )
+                }),
                 Box::new(move |msgs: &[Message]| {
                     let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
                     assert!(last.contains("findings.json"), "{last}");
                     MockTurn::calls(
                         "",
                         vec![
-                            ("write", json!({"path": "findings.json", "content": audit_sol, "overwrite": true})),
-                            ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
-                            ("finish", json!({"summary": "Wrote findings.json at workspace root."})),
+                            (
+                                "write",
+                                json!({"path": "findings.json", "content": audit_sol, "overwrite": true}),
+                            ),
+                            (
+                                "shell",
+                                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
+                            ),
+                            (
+                                "finish",
+                                json!({"summary": "Wrote findings.json at workspace root."}),
+                            ),
                         ],
                     )
                 }),
@@ -1397,20 +2216,35 @@ u.urlopen(r).read()' "$1"; }"#;
             let provider = MockProvider::new(turns).with_aside(noop_aside());
             let meta = h
                 .start_scripted(
-                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit.prompt.into(), mode: Some(mode.into()), without, max_turns: Some(10), ..Default::default() },
+                    StartRequest {
+                        cwd: ws.to_string_lossy().into_owned(),
+                        task: audit.prompt.into(),
+                        mode: Some(mode.into()),
+                        without,
+                        max_turns: Some(10),
+                        ..Default::default()
+                    },
                     provider,
                 )
                 .unwrap();
             let end = wait_for_end(&h, &meta.id).await.unwrap();
             eval_ws(audit, &ws);
             let (solved, tail) = verify(audit, &ws).await;
-            assert_eq!(solved, expect_solved, "s1 audit ({label}): end={:?}, tail={tail}", end.status);
+            assert_eq!(
+                solved, expect_solved,
+                "s1 audit ({label}): end={:?}, tail={tail}",
+                end.status
+            );
         }
 
         // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
         // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
         let audit_clean = tasks::find("audit-clean").unwrap();
-        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", true), ("prosage", "prosage", true)] {
+        for (label, mode, expect_solved) in [
+            ("default", "default", false),
+            ("ecosage", "ecosage", true),
+            ("prosage", "prosage", true),
+        ] {
             let h = Harness::at(base.join(format!("s2-{label}")));
             let ws = base.join(format!("ws-s2-{label}"));
             materialize(&ws, audit_clean.files).unwrap();
@@ -1419,8 +2253,14 @@ u.urlopen(r).read()' "$1"; }"#;
                     MockTurn::calls(
                         "",
                         vec![
-                            ("write", json!({"path": "shelf/findings.json", "content": "[]\n", "overwrite": true})),
-                            ("shell", json!({"cmd": "test -f shelf/findings.json", "expect_exit": "0"})),
+                            (
+                                "write",
+                                json!({"path": "shelf/findings.json", "content": "[]\n", "overwrite": true}),
+                            ),
+                            (
+                                "shell",
+                                json!({"cmd": "test -f shelf/findings.json", "expect_exit": "0"}),
+                            ),
                             ("finish", json!({"summary": "No vulnerabilities found."})),
                         ],
                     )
@@ -1431,8 +2271,14 @@ u.urlopen(r).read()' "$1"; }"#;
                     MockTurn::calls(
                         "",
                         vec![
-                            ("shell", json!({"cmd": "mv shelf/findings.json findings.json && test -f findings.json", "expect_exit": "0"})),
-                            ("finish", json!({"summary": "Moved findings.json to workspace root."})),
+                            (
+                                "shell",
+                                json!({"cmd": "mv shelf/findings.json findings.json && test -f findings.json", "expect_exit": "0"}),
+                            ),
+                            (
+                                "finish",
+                                json!({"summary": "Moved findings.json to workspace root."}),
+                            ),
                         ],
                     )
                 }),
@@ -1440,14 +2286,23 @@ u.urlopen(r).read()' "$1"; }"#;
             let provider = MockProvider::new(turns).with_aside(noop_aside());
             let meta = h
                 .start_scripted(
-                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit_clean.prompt.into(), mode: Some(mode.into()), max_turns: Some(10), ..Default::default() },
+                    StartRequest {
+                        cwd: ws.to_string_lossy().into_owned(),
+                        task: audit_clean.prompt.into(),
+                        mode: Some(mode.into()),
+                        max_turns: Some(10),
+                        ..Default::default()
+                    },
                     provider,
                 )
                 .unwrap();
             let _ = wait_for_end(&h, &meta.id).await.unwrap();
             eval_ws(audit_clean, &ws);
             let (solved, tail) = verify(audit_clean, &ws).await;
-            assert_eq!(solved, expect_solved, "s2 audit-clean ({label}): tail={tail}");
+            assert_eq!(
+                solved, expect_solved,
+                "s2 audit-clean ({label}): tail={tail}"
+            );
         }
 
         // Scenario 3 (`restyle` — watchless UI task, unpredicted shell inspection, split GAP/OPEN referee):
@@ -1457,10 +2312,19 @@ u.urlopen(r).read()' "$1"; }"#;
         // page and finish verified (even with no `expect_exit` on `finish`!).
         let restyle = tasks::find("restyle").unwrap();
         let (restyle_html, restyle_css) = (restyle.solution[0].1, restyle.solution[1].1);
-        let shipped_css = restyle.files.iter().find(|(p, _)| *p == "styles.css").unwrap().1;
+        let shipped_css = restyle
+            .files
+            .iter()
+            .find(|(p, _)| *p == "styles.css")
+            .unwrap()
+            .1;
         let flawed_html = restyle_html.replacen("<main", "<main style=\"margin: 4px\"", 1);
         let exam_restyle = "COMMAND: python3 {file}\n```python\nimport sys\nhtml = open('index.html', encoding='utf-8').read()\nif 'style=' in html:\n    print('FAIL no_inline_style\\n  clause: no inline styles\\n  got: style attribute present')\n    print('EXAM: 0 passed, 1 failed')\n    sys.exit(1)\nprint('EXAM: 1 passed, 0 failed')\n```";
-        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+        for (label, mode, expect_solved) in [
+            ("default", "default", false),
+            ("ecosage", "ecosage", false),
+            ("prosage", "prosage", true),
+        ] {
             let h = Harness::at(base.join(format!("s3-{label}")));
             let ws = base.join(format!("ws-s3-{label}"));
             materialize(&ws, restyle.files).unwrap();
@@ -1526,16 +2390,33 @@ u.urlopen(r).read()' "$1"; }"#;
             }));
             let meta = h
                 .start_scripted(
-                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: restyle.prompt.into(), mode: Some(mode.into()), max_turns: Some(12), ..Default::default() },
+                    StartRequest {
+                        cwd: ws.to_string_lossy().into_owned(),
+                        task: restyle.prompt.into(),
+                        mode: Some(mode.into()),
+                        max_turns: Some(12),
+                        ..Default::default()
+                    },
                     provider,
                 )
                 .unwrap();
             let end = wait_for_end(&h, &meta.id).await.unwrap();
             eval_ws(restyle, &ws);
             let (solved, tail) = verify(restyle, &ws).await;
-            assert_eq!(solved, expect_solved, "s3 restyle ({label}): end={:?}, verified={}, tail={tail}", end.status, end.verified);
+            assert_eq!(
+                solved, expect_solved,
+                "s3 restyle ({label}): end={:?}, verified={}, tail={tail}",
+                end.status, end.verified
+            );
             if label == "prosage" {
-                assert!(end.verified && end.status == FinishStatus::Done && (2..=3).contains(&end.stats.turns), "{:?} turns={}", end.status, end.stats.turns);
+                assert!(
+                    end.verified
+                        && end.status == FinishStatus::Done
+                        && (2..=3).contains(&end.stats.turns),
+                    "{:?} turns={}",
+                    end.status,
+                    end.stats.turns
+                );
             }
         }
 
@@ -1544,8 +2425,17 @@ u.urlopen(r).read()' "$1"; }"#;
         // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
-        let pager_orig_test = pager.files.iter().find(|(p, _)| *p == "test_pager.py").unwrap().1;
-        for (label, mode, expect_solved) in [("default", "default", false), ("ecosage", "ecosage", true), ("prosage", "prosage", true)] {
+        let pager_orig_test = pager
+            .files
+            .iter()
+            .find(|(p, _)| *p == "test_pager.py")
+            .unwrap()
+            .1;
+        for (label, mode, expect_solved) in [
+            ("default", "default", false),
+            ("ecosage", "ecosage", true),
+            ("prosage", "prosage", true),
+        ] {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
             materialize(&ws, pager.files).unwrap();
@@ -1554,8 +2444,14 @@ u.urlopen(r).read()' "$1"; }"#;
                     MockTurn::calls(
                         "",
                         vec![
-                            ("write", json!({"path": "test_pager.py", "content": "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", "overwrite": true})),
-                            ("shell", json!({"cmd": "python3 -m unittest", "expect_exit": "0"})),
+                            (
+                                "write",
+                                json!({"path": "test_pager.py", "content": "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", "overwrite": true}),
+                            ),
+                            (
+                                "shell",
+                                json!({"cmd": "python3 -m unittest", "expect_exit": "0"}),
+                            ),
                             ("finish", json!({"summary": "Tests pass."})),
                         ],
                     )
@@ -1566,10 +2462,22 @@ u.urlopen(r).read()' "$1"; }"#;
                     MockTurn::calls(
                         "",
                         vec![
-                            ("write", json!({"path": "test_pager.py", "content": pager_orig_test, "overwrite": true})),
-                            ("write", json!({"path": "pager.py", "content": pager_sol, "overwrite": true})),
-                            ("shell", json!({"cmd": "python3 -m unittest", "expect_exit": "0"})),
-                            ("finish", json!({"summary": "Restored test_pager.py and fixed pager.py."})),
+                            (
+                                "write",
+                                json!({"path": "test_pager.py", "content": pager_orig_test, "overwrite": true}),
+                            ),
+                            (
+                                "write",
+                                json!({"path": "pager.py", "content": pager_sol, "overwrite": true}),
+                            ),
+                            (
+                                "shell",
+                                json!({"cmd": "python3 -m unittest", "expect_exit": "0"}),
+                            ),
+                            (
+                                "finish",
+                                json!({"summary": "Restored test_pager.py and fixed pager.py."}),
+                            ),
                         ],
                     )
                 }),
@@ -1577,7 +2485,13 @@ u.urlopen(r).read()' "$1"; }"#;
             let provider = MockProvider::new(turns).with_aside(noop_aside());
             let meta = h
                 .start_scripted(
-                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: pager.prompt.into(), mode: Some(mode.into()), max_turns: Some(10), ..Default::default() },
+                    StartRequest {
+                        cwd: ws.to_string_lossy().into_owned(),
+                        task: pager.prompt.into(),
+                        mode: Some(mode.into()),
+                        max_turns: Some(10),
+                        ..Default::default()
+                    },
                     provider,
                 )
                 .unwrap();
@@ -1592,8 +2506,13 @@ u.urlopen(r).read()' "$1"; }"#;
         // `settling` cutting the run short when a bug is discovered on turn 12 and fixed on turn 13).
         let conf = tasks::find("confdialect").unwrap();
         let conf_sol = conf.solution[0].1;
-        let partial_conf = conf_sol.replace("raise ConfError(\"continuation at the end of the file\", number)", "break");
-        for (label, mode, expect_solved) in [("ecosage", "ecosage", false), ("prosage", "prosage", true)] {
+        let partial_conf = conf_sol.replace(
+            "raise ConfError(\"continuation at the end of the file\", number)",
+            "break",
+        );
+        for (label, mode, expect_solved) in
+            [("ecosage", "ecosage", false), ("prosage", "prosage", true)]
+        {
             let h = Harness::at(base.join(format!("s5-{label}")));
             let ws = base.join(format!("ws-s5-{label}"));
             materialize(&ws, conf.files).unwrap();
@@ -1631,14 +2550,24 @@ u.urlopen(r).read()' "$1"; }"#;
             let provider = MockProvider::new(turns).with_aside(noop_aside());
             let meta = h
                 .start_scripted(
-                    StartRequest { cwd: ws.to_string_lossy().into_owned(), task: conf.prompt.into(), mode: Some(mode.into()), max_turns: Some(30), ..Default::default() },
+                    StartRequest {
+                        cwd: ws.to_string_lossy().into_owned(),
+                        task: conf.prompt.into(),
+                        mode: Some(mode.into()),
+                        max_turns: Some(30),
+                        ..Default::default()
+                    },
                     provider,
                 )
                 .unwrap();
             let end = wait_for_end(&h, &meta.id).await.unwrap();
             eval_ws(conf, &ws);
             let (solved, tail) = verify(conf, &ws).await;
-            assert_eq!(solved, expect_solved, "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}", end.status, end.stats.turns);
+            assert_eq!(
+                solved, expect_solved,
+                "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}",
+                end.status, end.stats.turns
+            );
             if label == "prosage" {
                 assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 20));
             }
@@ -1659,8 +2588,14 @@ u.urlopen(r).read()' "$1"; }"#;
                 MockTurn::calls(
                     "",
                     vec![
-                        ("write", json!({"path": "findings.json", "content": partial_findings, "overwrite": true})),
-                        ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
+                        (
+                            "write",
+                            json!({"path": "findings.json", "content": partial_findings, "overwrite": true}),
+                        ),
+                        (
+                            "shell",
+                            json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
+                        ),
                         ("finish", json!({"summary": "Reported 4 issues."})),
                     ],
                 )
@@ -1669,8 +2604,14 @@ u.urlopen(r).read()' "$1"; }"#;
                 MockTurn::calls(
                     "",
                     vec![
-                        ("write", json!({"path": "findings.json", "content": audit_sol, "overwrite": true})),
-                        ("shell", json!({"cmd": "test -f findings.json", "expect_exit": "0"})),
+                        (
+                            "write",
+                            json!({"path": "findings.json", "content": audit_sol, "overwrite": true}),
+                        ),
+                        (
+                            "shell",
+                            json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
+                        ),
                         ("finish", json!({"summary": "Reported all 6 issues."})),
                     ],
                 )
@@ -1689,20 +2630,31 @@ u.urlopen(r).read()' "$1"; }"#;
             } else if sys.starts_with("You are the second examiner") {
                 Some(MockTurn::say("NONE"))
             } else if sys.starts_with("You are a referee") {
-                Some(MockTurn::say("missing_vulns: GAP: \"one object per real vulnerability\""))
+                Some(MockTurn::say(
+                    "missing_vulns: GAP: \"one object per real vulnerability\"",
+                ))
             } else {
                 None
             }
         }));
         let meta = h
             .start_scripted(
-                StartRequest { cwd: ws.to_string_lossy().into_owned(), task: audit.prompt.into(), mode: Some("prosage".into()), max_turns: Some(10), ..Default::default() },
+                StartRequest {
+                    cwd: ws.to_string_lossy().into_owned(),
+                    task: audit.prompt.into(),
+                    mode: Some("prosage".into()),
+                    max_turns: Some(10),
+                    ..Default::default()
+                },
                 provider,
             )
             .unwrap();
         let end = wait_for_end(&h, &meta.id).await.unwrap();
         eval_ws(audit, &ws);
-        assert!(saw_app_py.load(std::sync::atomic::Ordering::SeqCst), "examiner must see 262-line notesvc/app.py in <more_files>");
+        assert!(
+            saw_app_py.load(std::sync::atomic::Ordering::SeqCst),
+            "examiner must see 262-line notesvc/app.py in <more_files>"
+        );
         assert!(verify(audit, &ws).await.0 && end.verified);
 
         let _ = std::fs::remove_dir_all(&base);

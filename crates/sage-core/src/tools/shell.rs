@@ -4,7 +4,9 @@
 //! knows what happened). An unpredicted success gets a bounded view. A failure gets the most: the
 //! tail-biased output and the source locations it names with edit anchors.
 
-use super::jobs::{Exit, Running, StateMode, Waited, drain, kill_group, masked_failure, spawn, wait_exit};
+use super::jobs::{
+    Exit, Running, StateMode, Waited, drain, kill_group, masked_failure, spawn, wait_exit,
+};
 use super::{Completed, ShellMeta, StepOutput, StepStatus, bool_arg, str_arg, u64_arg};
 use crate::guard::{self, Expect};
 use crate::locate;
@@ -43,7 +45,14 @@ pub enum StateKind {
 }
 
 /// Runs a command to completion or timeout and captures its cleaned output.
-pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, timeout: Duration, cancel: &CancellationToken) -> std::io::Result<Exec> {
+pub async fn exec(
+    sess: &mut Session,
+    cmd: &str,
+    cwd: &Path,
+    state: StateKind,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> std::io::Result<Exec> {
     let (spill, spill_path) = sess.next_spill();
     let state_path = sess.shell_state();
     let mode = match state {
@@ -75,13 +84,27 @@ pub async fn exec(sess: &mut Session, cmd: &str, cwd: &Path, state: StateKind, t
             super::jobs::detach(&spill_path);
             let (raw, _) = run.buf.lock().unwrap().snapshot();
             let total_bytes = run.buf.lock().unwrap().total;
-            return Ok(Exec { end: ExecEnd::TimedOut(run), text: sess.shown(clean(&raw)), total_bytes, ms, spill, masked: false });
+            return Ok(Exec {
+                end: ExecEnd::TimedOut(run),
+                text: sess.shown(clean(&raw)),
+                total_bytes,
+                ms,
+                spill,
+                masked: false,
+            });
         }
     };
     let (raw, _) = run.buf.lock().unwrap().snapshot();
     let total_bytes = run.buf.lock().unwrap().total;
     // After a `cd` has been followed, so that paths come out relative to where the next call runs.
-    Ok(Exec { end, text: sess.shown(clean(&raw)), total_bytes, ms, spill, masked })
+    Ok(Exec {
+        end,
+        text: sess.shown(clean(&raw)),
+        total_bytes,
+        ms,
+        spill,
+        masked,
+    })
 }
 
 /// Follows a `cd` the command performed, if it left the shell in a directory that still exists.
@@ -122,21 +145,40 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
     let whole = |prefix: &str| {
         c.match_indices(prefix).any(|(i, _)| {
             let rest = &c[i + prefix.len()..];
-            rest.is_empty() || rest.starts_with([' ', ';', '&', '|', '*']) || prefix.ends_with("root")
+            rest.is_empty()
+                || rest.starts_with([' ', ';', '&', '|', '*'])
+                || prefix.ends_with("root")
         })
     };
-    let rm_root = ["rm -rf /", "rm -fr /", "rm -rf ~", "rm -fr ~", "rm -rf $home", "rm -rf /*", "rm -rf --no-preserve-root"];
+    let rm_root = [
+        "rm -rf /",
+        "rm -fr /",
+        "rm -rf ~",
+        "rm -fr ~",
+        "rm -rf $home",
+        "rm -rf /*",
+        "rm -rf --no-preserve-root",
+    ];
     if rm_root.iter().any(|p| whole(p)) {
         return Some("recursive delete of the filesystem root or home directory");
     }
-    if c.contains("mkfs") || c.contains("dd of=/dev/") || c.contains("> /dev/sd") || c.contains("> /dev/nvme") {
+    if c.contains("mkfs")
+        || c.contains("dd of=/dev/")
+        || c.contains("> /dev/sd")
+        || c.contains("> /dev/nvme")
+    {
         return Some("writes directly to a disk device");
     }
     if c.contains(":(){") || c.contains(":() {") {
         return Some("fork bomb");
     }
     // The command word, not the same word inside a quoted pattern: `grep 'startup|shutdown'`.
-    if commands(&c).iter().any(|part| matches!(part.trim().split(' ').next(), Some("shutdown" | "reboot" | "halt" | "poweroff"))) {
+    if commands(&c).iter().any(|part| {
+        matches!(
+            part.trim().split(' ').next(),
+            Some("shutdown" | "reboot" | "halt" | "poweroff")
+        )
+    }) {
         return Some("shuts the machine down");
     }
     if whole("chmod -r 777 /") {
@@ -147,7 +189,9 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
 
 fn exit_text(exit: Exit, masked: bool) -> String {
     match (exit.code, exit.signal) {
-        (Some(c), _) if masked => format!("exit {c} (from an earlier command of the pipeline; the last one exited 0)"),
+        (Some(c), _) if masked => {
+            format!("exit {c} (from an earlier command of the pipeline; the last one exited 0)")
+        }
         (Some(c), _) => format!("exit {c}"),
         (None, Some(s)) => format!("killed by signal {s}"),
         _ => "no exit status".to_string(),
@@ -155,14 +199,29 @@ fn exit_text(exit: Exit, masked: bool) -> String {
 }
 
 pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -> StepOutput {
-    let Some(cmd) = str_arg(args, "cmd").map(str::trim).filter(|c| !c.is_empty()) else {
+    let Some(cmd) = str_arg(args, "cmd")
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    else {
         return StepOutput::error("`cmd` is required: the bash command to run");
     };
     let cmd = cmd.to_string();
-    let expect = if sess.features.receipts { Expect::from_args(args) } else { None };
+    let expect = if sess.features.receipts {
+        Expect::from_args(args)
+    } else {
+        None
+    };
     // More seconds than a command is ever given is a number of milliseconds, as other harnesses take it.
-    let timeout = u64_arg(args, "timeout").map(|t| if t > sess.limits.max_timeout_secs { t.div_ceil(1000) } else { t });
-    let timeout = timeout.unwrap_or(sess.limits.default_timeout_secs).clamp(1, sess.limits.max_timeout_secs);
+    let timeout = u64_arg(args, "timeout").map(|t| {
+        if t > sess.limits.max_timeout_secs {
+            t.div_ceil(1000)
+        } else {
+            t
+        }
+    });
+    let timeout = timeout
+        .unwrap_or(sess.limits.default_timeout_secs)
+        .clamp(1, sess.limits.max_timeout_secs);
     let cwd = sess.ws.cwd.clone();
 
     if bool_arg(args, "background") {
@@ -170,7 +229,16 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     }
 
     sess.evidence.before_command(&sess.ws);
-    let ex = match exec(sess, &cmd, &cwd, StateKind::Session, Duration::from_secs(timeout), cancel).await {
+    let ex = match exec(
+        sess,
+        &cmd,
+        &cwd,
+        StateKind::Session,
+        Duration::from_secs(timeout),
+        cancel,
+    )
+    .await
+    {
         Ok(ex) => ex,
         Err(e) => return StepOutput::error(format!("could not start the shell: {e}")),
     };
@@ -190,7 +258,11 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             let view = bound(&lines, 5, 25, 3_000, Some(&ex.spill));
             let observation = format!(
                 "[running] no exit after {timeout}s, so it now runs in the background as {id}. Use job {{\"id\":\"{id}\",\"wait\":…}} to wait for it or {{\"id\":\"{id}\",\"kill\":true}} to stop it. Output so far:\n{}",
-                if lines.is_empty() { "(none)\n".to_string() } else { view.text }
+                if lines.is_empty() {
+                    "(none)\n".to_string()
+                } else {
+                    view.text
+                }
             );
             StepOutput {
                 status: StepStatus::Running,
@@ -198,7 +270,12 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 observation,
                 violations: vec![format!("did not finish within {timeout}s")],
                 explicit: expect.is_some(),
-                shell: Some(ShellMeta { cmd, ok: false, held_explicit: false, completed: None }),
+                shell: Some(ShellMeta {
+                    cmd,
+                    ok: false,
+                    held_explicit: false,
+                    completed: None,
+                }),
                 ..Default::default()
             }
         }
@@ -209,15 +286,38 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             let mut out = StepOutput {
                 explicit: verdict.explicit,
                 violations: verdict.violations.clone(),
-                shell: Some(ShellMeta { cmd: cmd.clone(), ok, held_explicit: verdict.explicit && verdict.held, completed: None }),
+                shell: Some(ShellMeta {
+                    cmd: cmd.clone(),
+                    ok,
+                    held_explicit: verdict.explicit && verdict.held,
+                    completed: None,
+                }),
                 ..Default::default()
             };
 
             if !sess.features.receipts {
                 // Conventional rendering: status line plus a bounded view, success or not.
-                let view = bound(&lines, sess.limits.ok_head, sess.limits.ok_tail, sess.limits.ok_chars, Some(&ex.spill));
-                out.status = if ok { StepStatus::Ok } else { StepStatus::Error };
-                out.observation = format!("{} · {dur}\n{}", exit_text(exit, ex.masked), if lines.is_empty() { "(no output)\n".into() } else { view.text });
+                let view = bound(
+                    &lines,
+                    sess.limits.ok_head,
+                    sess.limits.ok_tail,
+                    sess.limits.ok_chars,
+                    Some(&ex.spill),
+                );
+                out.status = if ok {
+                    StepStatus::Ok
+                } else {
+                    StepStatus::Error
+                };
+                out.observation = format!(
+                    "{} · {dur}\n{}",
+                    exit_text(exit, ex.masked),
+                    if lines.is_empty() {
+                        "(no output)\n".into()
+                    } else {
+                        view.text
+                    }
+                );
                 out.stub = format!("{} ({})", exit_text(exit, ex.masked), ex.spill);
                 out.hidden_bytes = shown_all.saturating_sub(out.observation.len() as u64);
                 return out;
@@ -232,10 +332,24 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 } else if verdict.explicit && !small && ok {
                     // Only a predicted *success* is reduced to a receipt. A predicted failure (the
                     // model reproducing a bug) is something it still has to read.
-                    let last = tail(&lines, 5).iter().map(|l| one_line(l, 200)).collect::<Vec<_>>().join("\n");
-                    format!("{head} · {} lines not shown, your prediction held (read path \"{}\" shows them)\n…\n{last}", lines.len(), ex.spill)
+                    let last = tail(&lines, 5)
+                        .iter()
+                        .map(|l| one_line(l, 200))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "{head} · {} lines not shown, your prediction held (read path \"{}\" shows them)\n…\n{last}",
+                        lines.len(),
+                        ex.spill
+                    )
                 } else {
-                    let view = bound(&lines, sess.limits.ok_head, sess.limits.ok_tail, sess.limits.ok_chars, Some(&ex.spill));
+                    let view = bound(
+                        &lines,
+                        sess.limits.ok_head,
+                        sess.limits.ok_tail,
+                        sess.limits.ok_chars,
+                        Some(&ex.spill),
+                    );
                     format!("{head}\n{}", view.text.trim_end())
                 };
                 out.stub = format!("{head} ({})", ex.spill);
@@ -245,14 +359,41 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 } else {
                     format!("[FAILED] {} · {dur}", exit_text(exit, ex.masked))
                 };
-                let view = bound(&lines, sess.limits.fail_head, sess.limits.fail_tail, sess.limits.fail_chars, Some(&ex.spill));
-                let mut obs = format!("{head}\n{}", if lines.is_empty() { "(no output)".into() } else { view.text.trim_end().to_string() });
+                let view = bound(
+                    &lines,
+                    sess.limits.fail_head,
+                    sess.limits.fail_tail,
+                    sess.limits.fail_chars,
+                    Some(&ex.spill),
+                );
+                let mut obs = format!(
+                    "{head}\n{}",
+                    if lines.is_empty() {
+                        "(no output)".into()
+                    } else {
+                        view.text.trim_end().to_string()
+                    }
+                );
                 if sess.features.expand {
-                    let budget = sess.prices.map(|p| p.speculation_budget(0.5, 1500.0) as usize * 4).unwrap_or(usize::MAX).min(sess.limits.expand_chars);
+                    let budget = sess
+                        .prices
+                        .map(|p| p.speculation_budget(0.5, 1500.0) as usize * 4)
+                        .unwrap_or(usize::MAX)
+                        .min(sess.limits.expand_chars);
                     let step = sess.step;
-                    let block = locate::expand(&ex.text, &sess.ws, &mut sess.seen, step, sess.limits.expand_radius, sess.limits.expand_windows, budget);
+                    let block = locate::expand(
+                        &ex.text,
+                        &sess.ws,
+                        &mut sess.seen,
+                        step,
+                        sess.limits.expand_radius,
+                        sess.limits.expand_windows,
+                        budget,
+                    );
                     if !block.is_empty() {
-                        obs.push_str("\n--- where (current file content; anchors work in edit) ---\n");
+                        obs.push_str(
+                            "\n--- where (current file content; anchors work in edit) ---\n",
+                        );
                         obs.push_str(block.trim_end());
                     }
                 }
@@ -262,17 +403,33 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             }
             out.hidden_bytes = shown_all.saturating_sub(out.observation.len() as u64);
             if let (true, Some(meta)) = (sess.features.watches, out.shell.as_mut()) {
-                meta.completed = Some(Completed { cwd, code: exit.code, ms: ex.ms, text: ex.text });
+                meta.completed = Some(Completed {
+                    cwd,
+                    code: exit.code,
+                    ms: ex.ms,
+                    text: ex.text,
+                });
             }
             out
         }
     }
 }
 
-async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &CancellationToken) -> StepOutput {
+async fn start_background(
+    sess: &mut Session,
+    cmd: &str,
+    cwd: &Path,
+    cancel: &CancellationToken,
+) -> StepOutput {
     let (spill, spill_path) = sess.next_spill();
     let state_path = sess.shell_state();
-    let mut running = match spawn(cmd, cwd, &sess.shell_env, StateMode::ReadOnly(&state_path), &spill_path) {
+    let mut running = match spawn(
+        cmd,
+        cwd,
+        &sess.shell_env,
+        StateMode::ReadOnly(&state_path),
+        &spill_path,
+    ) {
         Ok(r) => r,
         Err(e) => return StepOutput::error(format!("could not start the shell: {e}")),
     };
@@ -285,28 +442,59 @@ async fn start_background(sess: &mut Session, cmd: &str, cwd: &Path, cancel: &Ca
     let total = running.buf.lock().unwrap().total;
     let lines = squeeze(&sess.shown(clean(&raw)));
     let view = bound(&lines, 10, 20, 2_500, Some(&spill));
-    let shown = if lines.is_empty() { "(no output yet)".to_string() } else { view.text.trim_end().to_string() };
+    let shown = if lines.is_empty() {
+        "(no output yet)".to_string()
+    } else {
+        view.text.trim_end().to_string()
+    };
     match early {
         Waited::Exited(exit) => {
             let ok = exit.code == Some(0);
-            let observation = format!("[{}] the background command ended immediately: {}\n{shown}", if ok { "ok" } else { "FAILED" }, exit_text(exit, false));
+            let observation = format!(
+                "[{}] the background command ended immediately: {}\n{shown}",
+                if ok { "ok" } else { "FAILED" },
+                exit_text(exit, false)
+            );
             StepOutput {
-                status: if ok { StepStatus::Ok } else { StepStatus::Surprise },
+                status: if ok {
+                    StepStatus::Ok
+                } else {
+                    StepStatus::Surprise
+                },
                 stub: one_line(&observation, 160),
                 observation,
-                shell: Some(ShellMeta { cmd: cmd.to_string(), ok, held_explicit: false, completed: None }),
+                shell: Some(ShellMeta {
+                    cmd: cmd.to_string(),
+                    ok,
+                    held_explicit: false,
+                    completed: None,
+                }),
                 ..Default::default()
             }
         }
         Waited::Cancelled => {
             kill_group(running.pid);
-            StepOutput { status: StepStatus::Error, observation: "[cancelled] stopped by the user".into(), stub: "[cancelled]".into(), ..Default::default() }
+            StepOutput {
+                status: StepStatus::Error,
+                observation: "[cancelled] stopped by the user".into(),
+                stub: "[cancelled]".into(),
+                ..Default::default()
+            }
         }
         Waited::TimedOut => {
-            let pid = running.pid.map(|p| format!(" (pid {p})")).unwrap_or_default();
+            let pid = running
+                .pid
+                .map(|p| format!(" (pid {p})"))
+                .unwrap_or_default();
             let id = sess.jobs.add(&spill, running, total);
-            let observation = format!("[started] {id}{pid} keeps running in the background. Use job {{\"id\":\"{id}\",\"until\":\"text\"}} to wait for output, {{\"id\":\"{id}\",\"kill\":true}} to stop it.\n{shown}");
-            StepOutput { stub: format!("[started] {id}"), observation, ..Default::default() }
+            let observation = format!(
+                "[started] {id}{pid} keeps running in the background. Use job {{\"id\":\"{id}\",\"until\":\"text\"}} to wait for output, {{\"id\":\"{id}\",\"kill\":true}} to stop it.\n{shown}"
+            );
+            StepOutput {
+                stub: format!("[started] {id}"),
+                observation,
+                ..Default::default()
+            }
         }
     }
 }
@@ -327,10 +515,20 @@ mod tests {
         let out = sh(&mut s, json!({"cmd": "for i in $(seq 1 200); do echo \"test_$i passed\"; done; echo '200 passed in 1.2s'", "expect": {"exit": "0", "has": "passed"}})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.explicit);
-        assert!(out.observation.starts_with("[ok] exit 0 · "), "{}", out.observation);
-        assert!(out.observation.contains("201 lines not shown, your prediction held (read path \"out:1\" shows them)"));
+        assert!(
+            out.observation.starts_with("[ok] exit 0 · "),
+            "{}",
+            out.observation
+        );
+        assert!(out.observation.contains(
+            "201 lines not shown, your prediction held (read path \"out:1\" shows them)"
+        ));
         assert!(out.observation.ends_with("200 passed in 1.2s"));
-        assert!(out.observation.len() < 300, "a receipt, not the log: {}", out.observation.len());
+        assert!(
+            out.observation.len() < 300,
+            "a receipt, not the log: {}",
+            out.observation.len()
+        );
         assert!(out.hidden_bytes > 2_000);
         assert!(out.shell.as_ref().unwrap().held_explicit);
         // The full output is still one read away.
@@ -344,10 +542,19 @@ mod tests {
         let out = sh(&mut s, json!({"cmd": "seq 1 500"})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(!out.explicit);
-        assert!(out.observation.contains("\n1\n2\n") && out.observation.contains("lines hidden · read path \"out:1\""));
+        assert!(
+            out.observation.contains("\n1\n2\n")
+                && out
+                    .observation
+                    .contains("lines hidden · read path \"out:1\"")
+        );
         assert!(out.observation.trim_end().ends_with("500"));
 
-        let small = sh(&mut s, json!({"cmd": "echo hello", "expect": {"has": "hello"}})).await;
+        let small = sh(
+            &mut s,
+            json!({"cmd": "echo hello", "expect": {"has": "hello"}}),
+        )
+        .await;
         assert_eq!(small.observation.lines().nth(1), Some("hello"));
     }
 
@@ -358,10 +565,21 @@ mod tests {
         std::fs::write(s.ws.root.join("calc.py"), body).unwrap();
         let out = sh(&mut s, json!({"cmd": "echo 'Traceback (most recent call last):'; echo '  File \"calc.py\", line 12, in f'; echo 'ZeroDivisionError'; exit 1", "expect": {"exit": "0"}})).await;
         assert_eq!(out.status, StepStatus::Surprise);
-        assert!(out.observation.starts_with("[SURPRISE] expected exit 0, got exit 1 · "), "{}", out.observation);
+        assert!(
+            out.observation
+                .starts_with("[SURPRISE] expected exit 0, got exit 1 · "),
+            "{}",
+            out.observation
+        );
         assert!(out.observation.contains("ZeroDivisionError"));
-        assert!(out.observation.contains("--- where (current file content; anchors work in edit) ---\ncalc.py\n"));
-        assert!(out.observation.contains(&format!("> {}|line_12 = 12", crate::anchors::anchor(12, "line_12 = 12"))));
+        assert!(
+            out.observation
+                .contains("--- where (current file content; anchors work in edit) ---\ncalc.py\n")
+        );
+        assert!(out.observation.contains(&format!(
+            "> {}|line_12 = 12",
+            crate::anchors::anchor(12, "line_12 = 12")
+        )));
         assert_eq!(out.violations, vec!["expected exit 0, got exit 1"]);
         assert!(!out.shell.unwrap().ok);
     }
@@ -377,21 +595,38 @@ mod tests {
         let out = sh(&mut s, json!({"cmd": "echo 'AssertionError'; exit 1", "expect": {"exit": "nonzero", "has": "AssertionError"}})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.observation.starts_with("[ok] exit 1 · "));
-        assert!(!out.shell.unwrap().ok, "exit 1 is not a passing check even though the prediction held");
+        assert!(
+            !out.shell.unwrap().ok,
+            "exit 1 is not a passing check even though the prediction held"
+        );
     }
 
     #[tokio::test]
     async fn a_test_run_piped_through_tail_cannot_pass_as_success() {
         let mut s = test_session("masked", Features::ecosage());
-        let out = sh(&mut s, json!({"cmd": "sh -c 'echo FAILED 2 tests; exit 1' | tail -5", "expect_exit": "0"})).await;
+        let out = sh(
+            &mut s,
+            json!({"cmd": "sh -c 'echo FAILED 2 tests; exit 1' | tail -5", "expect_exit": "0"}),
+        )
+        .await;
         assert_eq!(out.status, StepStatus::Surprise);
-        assert!(out.observation.contains("expected exit 0, got exit 1"), "{}", out.observation);
+        assert!(
+            out.observation.contains("expected exit 0, got exit 1"),
+            "{}",
+            out.observation
+        );
         assert!(!out.shell.unwrap().held_explicit);
 
         // The same shape, predicted correctly: the model said it would fail.
         let out = sh(&mut s, json!({"cmd": "sh -c 'echo FAILED; exit 1' | tail -5", "expect_exit": "nonzero", "expect_has": "FAILED"})).await;
         assert_eq!(out.status, StepStatus::Ok);
-        assert!(out.observation.starts_with("[ok] exit 1 (from an earlier command of the pipeline; the last one exited 0)"), "{}", out.observation);
+        assert!(
+            out.observation.starts_with(
+                "[ok] exit 1 (from an earlier command of the pipeline; the last one exited 0)"
+            ),
+            "{}",
+            out.observation
+        );
     }
 
     #[tokio::test]
@@ -400,8 +635,16 @@ mod tests {
         std::fs::create_dir_all(s.ws.root.join("pkg")).unwrap();
         sh(&mut s, json!({"cmd": "cd pkg && export STAGE=two"})).await;
         assert!(s.ws.cwd.ends_with("pkg"));
-        let out = sh(&mut s, json!({"cmd": "echo \"$STAGE in $(basename \"$PWD\")\""})).await;
-        assert!(out.observation.contains("two in pkg"), "{}", out.observation);
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo \"$STAGE in $(basename \"$PWD\")\""}),
+        )
+        .await;
+        assert!(
+            out.observation.contains("two in pkg"),
+            "{}",
+            out.observation
+        );
     }
 
     #[tokio::test]
@@ -413,18 +656,30 @@ mod tests {
         // The job ends now, with the environment it started in.
         tokio::time::sleep(Duration::from_millis(1800)).await;
         let out = sh(&mut s, json!({"cmd": "echo \"stage=[$STAGE]\""})).await;
-        assert!(out.observation.contains("stage=[later]"), "{}", out.observation);
+        assert!(
+            out.observation.contains("stage=[later]"),
+            "{}",
+            out.observation
+        );
 
         // A syntax error is reported on the line the model wrote it on.
         let out = sh(&mut s, json!({"cmd": "echo one\necho two\nif then"})).await;
-        assert!(out.observation.contains("line 3: syntax error"), "{}", out.observation);
+        assert!(
+            out.observation.contains("line 3: syntax error"),
+            "{}",
+            out.observation
+        );
         s.jobs.kill_all();
     }
 
     #[tokio::test]
     async fn timeout_hands_the_command_over_as_a_job_instead_of_killing_it() {
         let mut s = test_session("timeout", Features::ecosage());
-        let out = sh(&mut s, json!({"cmd": "echo warming up; sleep 20; echo done", "timeout": 1})).await;
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo warming up; sleep 20; echo done", "timeout": 1}),
+        )
+        .await;
         assert_eq!(out.status, StepStatus::Running);
         assert!(out.observation.contains("runs in the background as bg:1"));
         assert!(out.observation.contains("warming up"));
@@ -435,11 +690,22 @@ mod tests {
     #[tokio::test]
     async fn background_start_reports_immediate_crashes() {
         let mut s = test_session("bg", Features::ecosage());
-        let out = sh(&mut s, json!({"cmd": "echo 'port in use' >&2; exit 1", "background": true})).await;
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo 'port in use' >&2; exit 1", "background": true}),
+        )
+        .await;
         assert_eq!(out.status, StepStatus::Surprise);
-        assert!(out.observation.contains("ended immediately: exit 1") && out.observation.contains("port in use"));
+        assert!(
+            out.observation.contains("ended immediately: exit 1")
+                && out.observation.contains("port in use")
+        );
 
-        let out = sh(&mut s, json!({"cmd": "echo listening; sleep 20", "background": true})).await;
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo listening; sleep 20", "background": true}),
+        )
+        .await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.observation.starts_with("[started] bg:1"));
         assert!(out.observation.contains("listening"));
@@ -449,7 +715,11 @@ mod tests {
     #[tokio::test]
     async fn classic_mode_always_shows_output_and_ignores_expect() {
         let mut s = test_session("classic", Features::classic());
-        let out = sh(&mut s, json!({"cmd": "seq 1 30; exit 1", "expect": {"exit": "0"}})).await;
+        let out = sh(
+            &mut s,
+            json!({"cmd": "seq 1 30; exit 1", "expect": {"exit": "0"}}),
+        )
+        .await;
         assert_eq!(out.status, StepStatus::Error);
         assert!(!out.explicit);
         assert!(out.observation.starts_with("exit 1 · "));
@@ -469,6 +739,8 @@ mod tests {
         assert!(danger("git push --force").is_none());
         // A word in a quoted pattern is not a command, and a directory below the root is not the root.
         assert!(danger("grep -E 'startup|shutdown|reload' log.txt").is_none());
-        assert!(danger("chmod -R 777 /workspace/out").is_none() && danger("chmod -R 777 /").is_some());
+        assert!(
+            danger("chmod -R 777 /workspace/out").is_none() && danger("chmod -R 777 /").is_some()
+        );
     }
 }

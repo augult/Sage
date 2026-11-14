@@ -17,7 +17,8 @@ const MAX_SNAPSHOT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_WALK_FILES: usize = 500;
 
 const CODE_EXTS: &[&str] = &[
-    "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "rs", "go", "sh", "bash", "rb", "php", "java", "c", "cc", "cpp", "h", "hpp",
+    "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "rs", "go", "sh", "bash", "rb", "php", "java",
+    "c", "cc", "cpp", "h", "hpp",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,15 +45,18 @@ static NO_EDIT_TESTS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static NO_EDIT_CODE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:do\s+not|don't|never)\s+(?:edit|change|modify|touch|alter)\s+any\s+code\b").expect("valid regex")
+    Regex::new(
+        r"(?i)\b(?:do\s+not|don't|never)\s+(?:edit|change|modify|touch|alter)\s+any\s+code\b",
+    )
+    .expect("valid regex")
 });
 
-static WRITE_CREATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:write|create)\s+`([^`\s]+)`").expect("valid regex")
-});
+static WRITE_CREATE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(?:write|create)\s+`([^`\s]+)`").expect("valid regex"));
 
 static ADD_IN_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\badd\s+(?:a\s+|an\s+|the\s+)?[a-z0-9 _-]{0,36}?\bin\s+`([^`\s]+)`").expect("valid regex")
+    Regex::new(r"(?i)\badd\s+(?:a\s+|an\s+|the\s+)?[a-z0-9 _-]{0,36}?\bin\s+`([^`\s]+)`")
+        .expect("valid regex")
 });
 
 /// Splits `task` into sentence-sized clauses without cutting inside filenames (`app.conf`, `a.py`).
@@ -92,8 +96,12 @@ fn clauses(task: &str) -> Vec<&str> {
 
 fn bare_token(word: &str) -> &str {
     const QUOTES: [char; 7] = ['"', '\'', '“', '”', '‘', '’', '*'];
-    let w = word.trim_start_matches(QUOTES).trim_end_matches(|c: char| QUOTES.contains(&c) || matches!(c, '.' | ':' | '!' | '?' | '…' | ',' | ';'));
-    w.strip_suffix("'s").or_else(|| w.strip_suffix("’s")).unwrap_or(w)
+    let w = word.trim_start_matches(QUOTES).trim_end_matches(|c: char| {
+        QUOTES.contains(&c) || matches!(c, '.' | ':' | '!' | '?' | '…' | ',' | ';')
+    });
+    w.strip_suffix("'s")
+        .or_else(|| w.strip_suffix("’s"))
+        .unwrap_or(w)
 }
 
 /// Candidate path tokens inside a clause: single-word backtick spans and plain words.
@@ -107,7 +115,13 @@ fn tokens(clause: &str) -> Vec<&str> {
                 out.push(bare_token(span));
             }
         } else {
-            out.extend(part.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';')).map(bare_token));
+            out.extend(
+                part.split(|c: char| {
+                    c.is_whitespace()
+                        || matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';')
+                })
+                .map(bare_token),
+            );
         }
     }
     out.retain(|w| !w.is_empty());
@@ -119,12 +133,20 @@ fn snapshot_file(root: &Path, path: &Path) -> Option<Protected> {
     if !md.is_file() || md.len() > MAX_SNAPSHOT_BYTES {
         return None;
     }
-    let rel = path.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/");
+    let rel = path
+        .strip_prefix(root)
+        .ok()?
+        .to_string_lossy()
+        .replace('\\', "/");
     if rel.is_empty() || derived(&rel) {
         return None;
     }
     let bytes = std::fs::read(path).ok()?;
-    Some(Protected { rel, len: bytes.len() as u64, hash: fnv64(&bytes) })
+    Some(Protected {
+        rel,
+        len: bytes.len() as u64,
+        hash: fnv64(&bytes),
+    })
 }
 
 fn walk_files(under: &Path) -> Vec<PathBuf> {
@@ -136,7 +158,22 @@ fn walk_files(under: &Path) -> Vec<PathBuf> {
         .git_exclude(false)
         .parents(false)
         .follow_links(false)
-        .filter_entry(|e| !e.file_name().to_str().is_some_and(|n| matches!(n, ".git" | "node_modules" | "target" | ".venv" | "venv" | "__pycache__" | ".pytest_cache" | ".mypy_cache" | ".ruff_cache")))
+        .filter_entry(|e| {
+            !e.file_name().to_str().is_some_and(|n| {
+                matches!(
+                    n,
+                    ".git"
+                        | "node_modules"
+                        | "target"
+                        | ".venv"
+                        | "venv"
+                        | "__pycache__"
+                        | ".pytest_cache"
+                        | ".mypy_cache"
+                        | ".ruff_cache"
+                )
+            })
+        })
         .build();
     let mut out = Vec::new();
     for entry in walker.flatten() {
@@ -153,16 +190,25 @@ fn walk_files(under: &Path) -> Vec<PathBuf> {
 
 fn is_test_rel(rel: &str) -> bool {
     let lower = rel.to_ascii_lowercase();
-    if lower.split('/').any(|seg| matches!(seg, "test" | "tests" | "__tests__")) {
+    if lower
+        .split('/')
+        .any(|seg| matches!(seg, "test" | "tests" | "__tests__"))
+    {
         return true;
     }
     let name = lower.rsplit('/').next().unwrap_or(&lower);
     let stem = name.split('.').next().unwrap_or(name);
-    stem.starts_with("test_") || stem.ends_with("_test") || name.contains(".test.") || name.contains(".spec.")
+    stem.starts_with("test_")
+        || stem.ends_with("_test")
+        || name.contains(".test.")
+        || name.contains(".spec.")
 }
 
 fn is_code_rel(rel: &str) -> bool {
-    Path::new(rel).extension().and_then(|e| e.to_str()).is_some_and(|ext| CODE_EXTS.iter().any(|c| ext.eq_ignore_ascii_case(c)))
+    Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| CODE_EXTS.iter().any(|c| ext.eq_ignore_ascii_case(c)))
 }
 
 fn valid_deliverable(ws: &Workspace, raw: &str) -> Option<String> {
@@ -172,17 +218,25 @@ fn valid_deliverable(ws: &Workspace, raw: &str) -> Option<String> {
         || cleaned.starts_with('-')
         || cleaned.ends_with('/')
         || cleaned.contains("..")
-        || cleaned.contains(|c: char| c.is_whitespace() || matches!(c, '*' | '?' | '[' | ']' | ':' | '\\'))
+        || cleaned.contains(|c: char| {
+            c.is_whitespace() || matches!(c, '*' | '?' | '[' | ']' | ':' | '\\')
+        })
     {
         return None;
     }
     let path = Path::new(cleaned);
-    path.extension().and_then(|e| e.to_str()).filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))?;
+    path.extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))?;
     let abs = ws.resolve(cleaned);
     if !abs.starts_with(&ws.root) || abs.is_dir() {
         return None;
     }
-    let rel = abs.strip_prefix(&ws.root).ok()?.to_string_lossy().replace('\\', "/");
+    let rel = abs
+        .strip_prefix(&ws.root)
+        .ok()?
+        .to_string_lossy()
+        .replace('\\', "/");
     (!rel.is_empty() && !derived(&rel)).then_some(rel)
 }
 
@@ -211,7 +265,9 @@ impl Contract {
                         continue;
                     }
                     let candidate = ws.resolve(trimmed);
-                    let Ok(real) = crate::util::canonical(&candidate) else { continue };
+                    let Ok(real) = crate::util::canonical(&candidate) else {
+                        continue;
+                    };
                     if !real.starts_with(root) || real == *root {
                         continue;
                     }
@@ -250,7 +306,10 @@ impl Contract {
             }
         }
         required.retain(|rel| !seen_protected.contains(rel));
-        Self { protected, required }
+        Self {
+            protected,
+            required,
+        }
     }
 
     fn collect_required(ws: &Workspace, text: &str, required: &mut Vec<String>) {
@@ -280,9 +339,15 @@ impl Contract {
         for p in &self.protected {
             let path = root.join(&p.rel);
             match std::fs::read(&path) {
-                Err(_) => out.push(format!("`{}` was deleted, though the task says not to change it", p.rel)),
+                Err(_) => out.push(format!(
+                    "`{}` was deleted, though the task says not to change it",
+                    p.rel
+                )),
                 Ok(bytes) if bytes.len() as u64 != p.len || fnv64(&bytes) != p.hash => {
-                    out.push(format!("`{}` was modified, though the task says not to change it", p.rel));
+                    out.push(format!(
+                        "`{}` was modified, though the task says not to change it",
+                        p.rel
+                    ));
                 }
                 Ok(_) => {}
             }
@@ -372,24 +437,41 @@ mod tests {
         let v = c.violations(&ws.root);
         assert_eq!(v.len(), 2, "{v:?}");
         assert!(v.iter().any(|m| m.contains("`SPEC.md` was deleted")));
-        assert!(v.iter().any(|m| m.contains("`tests/sub/test_more.py` was modified")));
+        assert!(
+            v.iter()
+                .any(|m| m.contains("`tests/sub/test_more.py` was modified"))
+        );
         let _ = std::fs::remove_dir_all(&ws.root);
     }
 
     #[test]
     fn audit_and_regression_prompts_require_deliverables_and_protect_existing_files() {
-        let ws = temp_ws("audit", &[("notesvc/app.py", "def run(): pass\n"), ("README.md", "# Notes\n")]);
+        let ws = temp_ws(
+            "audit",
+            &[
+                ("notesvc/app.py", "def run(): pass\n"),
+                ("README.md", "# Notes\n"),
+            ],
+        );
         let prompt = "Audit `notesvc/` for security vulnerabilities. Write `findings.json` in this folder: a JSON list. Do not change any code.";
         let c = Contract::capture(&ws, prompt);
 
         // Missing findings.json is caught even with zero edits to existing files.
         let v = c.violations(&ws.root);
-        assert_eq!(v, ["the task asks for `findings.json`, which has not been created"]);
+        assert_eq!(
+            v,
+            ["the task asks for `findings.json`, which has not been created"]
+        );
 
         // Writing it inside notesvc/ instead of the root names the misplaced copy.
         std::fs::write(ws.root.join("notesvc/findings.json"), "[]\n").unwrap();
         let v = c.violations(&ws.root);
-        assert_eq!(v, ["the task asks for `findings.json`, which does not exist (`notesvc/findings.json` exists instead — write it at `findings.json`)"]);
+        assert_eq!(
+            v,
+            [
+                "the task asks for `findings.json`, which does not exist (`notesvc/findings.json` exists instead — write it at `findings.json`)"
+            ]
+        );
 
         // Invalid JSON is caught; valid JSON passes; editing code is caught.
         std::fs::write(ws.root.join("findings.json"), "{bad").unwrap();
@@ -397,17 +479,35 @@ mod tests {
         std::fs::write(ws.root.join("findings.json"), "[]\n").unwrap();
         assert!(c.violations(&ws.root).is_empty());
         std::fs::write(ws.root.join("notesvc/app.py"), "def run(): return 1\n").unwrap();
-        assert_eq!(c.violations(&ws.root), ["`notesvc/app.py` was modified, though the task says not to change it"]);
+        assert_eq!(
+            c.violations(&ws.root),
+            ["`notesvc/app.py` was modified, though the task says not to change it"]
+        );
         let _ = std::fs::remove_dir_all(&ws.root);
 
         // "Add a regression test in `test_regression.py`. Do not edit the existing tests."
-        let ws2 = temp_ws("heisenbug", &[("pricing.py", "p = 1\n"), ("test_catalog.py", "assert 1\n")]);
-        let c2 = Contract::capture(&ws2, "Fix the bug. Add a regression test in `test_regression.py` that fails now and passes after. Do not edit the existing tests.");
-        assert_eq!(c2.violations(&ws2.root), ["the task asks for `test_regression.py`, which has not been created"]);
+        let ws2 = temp_ws(
+            "heisenbug",
+            &[("pricing.py", "p = 1\n"), ("test_catalog.py", "assert 1\n")],
+        );
+        let c2 = Contract::capture(
+            &ws2,
+            "Fix the bug. Add a regression test in `test_regression.py` that fails now and passes after. Do not edit the existing tests.",
+        );
+        assert_eq!(
+            c2.violations(&ws2.root),
+            ["the task asks for `test_regression.py`, which has not been created"]
+        );
         std::fs::write(ws2.root.join("test_regression.py"), "def test_it(): pass\n").unwrap();
-        assert!(c2.violations(&ws2.root).is_empty(), "new test file is required, existing test_catalog.py is protected");
+        assert!(
+            c2.violations(&ws2.root).is_empty(),
+            "new test file is required, existing test_catalog.py is protected"
+        );
         std::fs::write(ws2.root.join("test_catalog.py"), "assert 2\n").unwrap();
-        assert_eq!(c2.violations(&ws2.root), ["`test_catalog.py` was modified, though the task says not to change it"]);
+        assert_eq!(
+            c2.violations(&ws2.root),
+            ["`test_catalog.py` was modified, though the task says not to change it"]
+        );
         let _ = std::fs::remove_dir_all(&ws2.root);
     }
 }

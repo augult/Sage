@@ -93,10 +93,38 @@ pub fn clean(raw: &[u8]) -> String {
 }
 
 const NOISE_VERBS: &[&str] = &[
-    "downloading", "downloaded", "collecting", "compiling", "fetching", "fetched", "installing", "resolving",
-    "building", "extracting", "unpacking", "preparing", "selecting", "setting up", "get:", "hit:", "receiving",
-    "remote:", "progress", "requirement already satisfied", "using cached", "checking", "adding", "locking",
-    "updating", "reading", "processing triggers", "added", "reused", "copying", "creating", "linking",
+    "downloading",
+    "downloaded",
+    "collecting",
+    "compiling",
+    "fetching",
+    "fetched",
+    "installing",
+    "resolving",
+    "building",
+    "extracting",
+    "unpacking",
+    "preparing",
+    "selecting",
+    "setting up",
+    "get:",
+    "hit:",
+    "receiving",
+    "remote:",
+    "progress",
+    "requirement already satisfied",
+    "using cached",
+    "checking",
+    "adding",
+    "locking",
+    "updating",
+    "reading",
+    "processing triggers",
+    "added",
+    "reused",
+    "copying",
+    "creating",
+    "linking",
 ];
 
 fn is_progress_like(line: &str) -> bool {
@@ -154,7 +182,10 @@ pub fn squeeze(text: &str) -> Vec<String> {
         }
         if j - i >= 4 {
             out.push(line.to_string());
-            out.push(format!("  … (previous line repeated {} more times)", j - i - 1));
+            out.push(format!(
+                "  … (previous line repeated {} more times)",
+                j - i - 1
+            ));
             i = j;
             continue;
         }
@@ -194,15 +225,23 @@ const MAX_COLS: usize = 400;
 fn cut_cols(line: &str) -> std::borrow::Cow<'_, str> {
     match line.char_indices().nth(MAX_COLS) {
         None => std::borrow::Cow::Borrowed(line),
-        Some((idx, _)) => {
-            std::borrow::Cow::Owned(format!("{}…[+{} chars]", &line[..idx], line[idx..].chars().count()))
-        }
+        Some((idx, _)) => std::borrow::Cow::Owned(format!(
+            "{}…[+{} chars]",
+            &line[..idx],
+            line[idx..].chars().count()
+        )),
     }
 }
 
 /// Keeps the first `head` and last `tail` lines within `max_chars`, replacing the middle with a marker
 /// that says how much is hidden and where the full text can be read.
-pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill: Option<&str>) -> Bounded {
+pub fn bound(
+    lines: &[String],
+    head: usize,
+    tail: usize,
+    max_chars: usize,
+    spill: Option<&str>,
+) -> Bounded {
     let total = lines.len();
     let (mut head, mut tail) = (head.min(total), tail.min(total));
     // Everything fits by line count: still two ends, so that a cut for size comes out of the middle
@@ -212,7 +251,11 @@ pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill
         tail = total - head;
     }
     loop {
-        let shown: usize = lines[..head].iter().chain(lines[total - tail..].iter()).map(|l| l.len().min(MAX_COLS * 4) + 1).sum();
+        let shown: usize = lines[..head]
+            .iter()
+            .chain(lines[total - tail..].iter())
+            .map(|l| l.len().min(MAX_COLS * 4) + 1)
+            .sum();
         if shown <= max_chars || head + tail <= 2 {
             break;
         }
@@ -231,7 +274,9 @@ pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill
     }
     if hidden > 0 {
         match spill {
-            Some(name) => text.push_str(&format!("… [{hidden} lines hidden · read path \"{name}\" for all of it] …\n")),
+            Some(name) => text.push_str(&format!(
+                "… [{hidden} lines hidden · read path \"{name}\" for all of it] …\n"
+            )),
             None => text.push_str(&format!("… [{hidden} lines hidden] …\n")),
         }
     }
@@ -239,12 +284,21 @@ pub fn bound(lines: &[String], head: usize, tail: usize, max_chars: usize, spill
         text.push_str(&cut_cols(l));
         text.push('\n');
     }
-    Bounded { text, hidden_lines: hidden }
+    Bounded {
+        text,
+        hidden_lines: hidden,
+    }
 }
 
 /// The last `n` non-empty lines, for receipts.
 pub fn tail(lines: &[String], n: usize) -> Vec<&str> {
-    let mut picked: Vec<&str> = lines.iter().rev().filter(|l| !l.trim().is_empty()).take(n).map(String::as_str).collect();
+    let mut picked: Vec<&str> = lines
+        .iter()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .take(n)
+        .map(String::as_str)
+        .collect();
     picked.reverse();
     picked
 }
@@ -279,7 +333,9 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(out[1].contains("repeated 5 more times"));
 
-        let progress: Vec<String> = (1..=10).map(|i| format!("Downloading pkg-{i}.whl ({i}0%)")).collect();
+        let progress: Vec<String> = (1..=10)
+            .map(|i| format!("Downloading pkg-{i}.whl ({i}0%)"))
+            .collect();
         let out = squeeze(&progress.join("\n"));
         assert_eq!(out.len(), 3, "{out:?}");
         assert!(out[1].contains("8 similar progress lines"));
@@ -308,7 +364,9 @@ mod tests {
 
     #[test]
     fn bound_respects_char_budget() {
-        let lines: Vec<String> = (1..=200).map(|i| format!("{i:03} {}", "x".repeat(96))).collect();
+        let lines: Vec<String> = (1..=200)
+            .map(|i| format!("{i:03} {}", "x".repeat(96)))
+            .collect();
         let b = bound(&lines, 60, 60, 2_000, None);
         assert!(b.text.len() < 2_400, "{}", b.text.len());
         assert!(b.hidden_lines > 150);
@@ -318,27 +376,53 @@ mod tests {
     #[test]
     fn a_cut_for_size_never_takes_the_last_lines() {
         // Few enough lines to show them all, but too long: what goes is the middle, not the verdict.
-        let mut lines: Vec<String> = (1..=60).map(|i| format!("step {i:02} {}", "x".repeat(200))).collect();
+        let mut lines: Vec<String> = (1..=60)
+            .map(|i| format!("step {i:02} {}", "x".repeat(200)))
+            .collect();
         lines.push("AssertionError: expected 3 got 4".into());
         let b = bound(&lines, 20, 80, 10_000, Some("out:1"));
-        assert!(b.text.ends_with("AssertionError: expected 3 got 4\n") && b.text.starts_with("step 01 "), "{}", b.text);
+        assert!(
+            b.text.ends_with("AssertionError: expected 3 got 4\n")
+                && b.text.starts_with("step 01 "),
+            "{}",
+            b.text
+        );
         assert!(b.hidden_lines > 0 && b.text.contains("lines hidden · read path \"out:1\""));
         // Fewer lines than the head alone may take, and still too long: the same holds.
-        let mut wide: Vec<String> = (1..=14).map(|i| format!("row {i:02} {}", "x".repeat(1000))).collect();
+        let mut wide: Vec<String> = (1..=14)
+            .map(|i| format!("row {i:02} {}", "x".repeat(1000)))
+            .collect();
         wide.push("AssertionError: expected 3 got 4".into());
         for (head, tail, chars) in [(20, 80, 10_000), (60, 60, 8_000)] {
             let b = bound(&wide, head, tail, chars, Some("out:2"));
-            assert!(b.text.ends_with("AssertionError: expected 3 got 4\n") && b.text.starts_with("row 01 ") && b.hidden_lines > 0, "{}", b.text);
+            assert!(
+                b.text.ends_with("AssertionError: expected 3 got 4\n")
+                    && b.text.starts_with("row 01 ")
+                    && b.hidden_lines > 0,
+                "{}",
+                b.text
+            );
         }
         // Output that fits is shown once, whole.
         let short: Vec<String> = (1..=5).map(|i| format!("l{i}")).collect();
-        assert_eq!(bound(&short, 20, 80, 10_000, None).text, "l1\nl2\nl3\nl4\nl5\n");
-        assert_eq!(bound(&short, 2, 80, 10_000, None).text, "l1\nl2\nl3\nl4\nl5\n");
+        assert_eq!(
+            bound(&short, 20, 80, 10_000, None).text,
+            "l1\nl2\nl3\nl4\nl5\n"
+        );
+        assert_eq!(
+            bound(&short, 2, 80, 10_000, None).text,
+            "l1\nl2\nl3\nl4\nl5\n"
+        );
     }
 
     #[test]
     fn tail_skips_blank_lines() {
-        let lines = vec!["a".to_string(), "".to_string(), "b".to_string(), "  ".to_string()];
+        let lines = vec![
+            "a".to_string(),
+            "".to_string(),
+            "b".to_string(),
+            "  ".to_string(),
+        ];
         assert_eq!(tail(&lines, 2), vec!["a", "b"]);
     }
 }

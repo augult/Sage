@@ -38,7 +38,11 @@ pub mod hard;
 pub mod skilled;
 
 /// The task sets `--tasks` accepts by name.
-pub const SETS: &[(&str, &[Task])] = &[("easy", TASKS), ("hard", hard::TASKS), ("skill", skilled::TASKS)];
+pub const SETS: &[(&str, &[Task])] = &[
+    ("easy", TASKS),
+    ("hard", hard::TASKS),
+    ("skill", skilled::TASKS),
+];
 
 pub fn all() -> impl Iterator<Item = &'static Task> {
     SETS.iter().flat_map(|(_, tasks)| tasks.iter())
