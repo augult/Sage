@@ -23,31 +23,49 @@ fn parse_window(spec: &str, total: usize, window: usize) -> Result<(usize, usize
         let t = t.trim().trim_start_matches(['L', 'l', '#']);
         let digits = t.bytes().take_while(u8::is_ascii_digit).count();
         let hash = &t[digits..];
-        (hash.is_empty() || (hash.len() == 2 && hash.bytes().all(|b| b.is_ascii_alphabetic()))).then(|| t[..digits].parse::<usize>().ok()).flatten()
+        (hash.is_empty() || (hash.len() == 2 && hash.bytes().all(|b| b.is_ascii_alphabetic())))
+            .then(|| t[..digits].parse::<usize>().ok())
+            .flatten()
     };
     let (from, to) = if let Some(n) = s.strip_prefix('-').and_then(num) {
         (total.saturating_sub(n.saturating_sub(1)).max(1), total)
-    } else if let Some((a, b)) = s.split_once("..").or_else(|| s.split_once('-')).or_else(|| s.split_once(':')).or_else(|| s.split_once(',')) {
+    } else if let Some((a, b)) = s
+        .split_once("..")
+        .or_else(|| s.split_once('-'))
+        .or_else(|| s.split_once(':'))
+        .or_else(|| s.split_once(','))
+    {
         match (num(a), num(b)) {
             (Some(a), Some(b)) => (a, b),
             (Some(a), None) if b.trim().is_empty() => (a, a + window - 1),
-            _ => return Err(format!("could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\"")),
+            _ => {
+                return Err(format!(
+                    "could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\""
+                ));
+            }
         }
     } else if let Some(a) = num(s.trim_end_matches('+')) {
         (a, a + window - 1)
     } else {
-        return Err(format!("could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\""));
+        return Err(format!(
+            "could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\""
+        ));
     };
     let from = from.max(1);
     if from > total {
-        return Err(format!("line {from} is past the end (the file has {total} lines)"));
+        return Err(format!(
+            "line {from} is past the end (the file has {total} lines)"
+        ));
     }
     Ok((from, to.clamp(from, total)))
 }
 
 fn not_found(sess: &Session, abs: &Path, shown: &str) -> StepOutput {
     let mut msg = format!("no such file or directory: {shown}");
-    let (Some(parent), Some(name)) = (abs.parent(), abs.file_name().and_then(|n| n.to_str())) else { return StepOutput::error(msg) };
+    let (Some(parent), Some(name)) = (abs.parent(), abs.file_name().and_then(|n| n.to_str()))
+    else {
+        return StepOutput::error(msg);
+    };
     if !parent.is_dir() {
         let mut existing = parent;
         while !existing.is_dir() {
@@ -56,7 +74,10 @@ fn not_found(sess: &Session, abs: &Path, shown: &str) -> StepOutput {
                 None => break,
             }
         }
-        msg.push_str(&format!(" (the nearest existing directory is {})", sess.ws.display(existing)));
+        msg.push_str(&format!(
+            " (the nearest existing directory is {})",
+            sess.ws.display(existing)
+        ));
         return StepOutput::error(msg);
     }
     let lower = name.to_ascii_lowercase();
@@ -70,7 +91,9 @@ fn not_found(sess: &Session, abs: &Path, shown: &str) -> StepOutput {
             let l = n.to_ascii_lowercase();
             // A dotfile has no stem to compare by: it would be "contained" in every name.
             let theirs = l.split('.').next().unwrap_or("");
-            l == lower || (stem.len() >= 3 && (l.starts_with(&stem) || l.contains(&stem))) || (theirs.len() >= 3 && lower.contains(theirs))
+            l == lower
+                || (stem.len() >= 3 && (l.starts_with(&stem) || l.contains(&stem)))
+                || (theirs.len() >= 3 && lower.contains(theirs))
         })
         .take(5)
         .collect();
@@ -90,14 +113,18 @@ fn list_dir(sess: &Session, abs: &Path) -> StepOutput {
         Err(e) => return StepOutput::error(format!("cannot list {}: {e}", sess.ws.display(abs))),
     };
     for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
         if name == ".git" {
             continue;
         }
         total += 1;
         match entry.metadata() {
             Ok(md) if md.is_dir() => {
-                let count = std::fs::read_dir(entry.path()).map(|d| d.take(1000).count()).unwrap_or(0);
+                let count = std::fs::read_dir(entry.path())
+                    .map(|d| d.take(1000).count())
+                    .unwrap_or(0);
                 dirs.push(format!("{name}/  ({count} items)"));
             }
             Ok(md) => files.push(format!("{name}  ({})", fmt_bytes(md.len()))),
@@ -107,23 +134,39 @@ fn list_dir(sess: &Session, abs: &Path) -> StepOutput {
     dirs.sort();
     files.sort();
     let all: Vec<String> = dirs.into_iter().chain(files).collect();
-    let mut out = format!("{}/ · {total} entries\n", sess.ws.display(abs).trim_end_matches('/'));
+    let mut out = format!(
+        "{}/ · {total} entries\n",
+        sess.ws.display(abs).trim_end_matches('/')
+    );
     for line in all.iter().take(MAX_DIR_ENTRIES) {
         out.push_str("  ");
         out.push_str(line);
         out.push('\n');
     }
     if all.len() > MAX_DIR_ENTRIES {
-        out.push_str(&format!("  … {} more (use search with a glob to list them)\n", all.len() - MAX_DIR_ENTRIES));
+        out.push_str(&format!(
+            "  … {} more (use search with a glob to list them)\n",
+            all.len() - MAX_DIR_ENTRIES
+        ));
     }
     StepOutput::ok(out.trim_end())
 }
 
 fn read_spill(sess: &Session, handle: &str, lines_arg: Option<&str>) -> StepOutput {
-    let Some(path) = sess.spill_path(handle) else { return StepOutput::error(format!("{handle:?} is not an output handle (they look like out:3)")) };
-    let Ok(md) = std::fs::metadata(&path) else { return StepOutput::error(format!("no saved output {handle}")) };
+    let Some(path) = sess.spill_path(handle) else {
+        return StepOutput::error(format!(
+            "{handle:?} is not an output handle (they look like out:3)"
+        ));
+    };
+    let Ok(md) = std::fs::metadata(&path) else {
+        return StepOutput::error(format!("no saved output {handle}"));
+    };
     if md.len() > 4 * MAX_FILE_BYTES {
-        return StepOutput::error(format!("{handle} is {}; filter it with shell tools instead: {}", fmt_bytes(md.len()), path.display()));
+        return StepOutput::error(format!(
+            "{handle} is {}; filter it with shell tools instead: {}",
+            fmt_bytes(md.len()),
+            path.display()
+        ));
     }
     // The file keeps what the command printed; the model is shown it as it was shown the excerpt.
     let text = sess.shown(clean(&std::fs::read(&path).unwrap_or_default()));
@@ -151,9 +194,17 @@ fn read_spill(sess: &Session, handle: &str, lines_arg: Option<&str>) -> StepOutp
         last = ln;
     }
     if last < lines.len() {
-        out.push_str(&format!("… {} more lines · next: lines \"{}-{}\"\n", lines.len() - last, last + 1, (last + sess.limits.read_lines).min(lines.len())));
+        out.push_str(&format!(
+            "… {} more lines · next: lines \"{}-{}\"\n",
+            lines.len() - last,
+            last + 1,
+            (last + sess.limits.read_lines).min(lines.len())
+        ));
     }
-    StepOutput { stub: format!("[{handle} lines {from}-{last} were shown here]"), ..StepOutput::ok(out.trim_end()) }
+    StepOutput {
+        stub: format!("[{handle} lines {from}-{last} were shown here]"),
+        ..StepOutput::ok(out.trim_end())
+    }
 }
 
 /// Finds definitions of `name` and the extent of each (by braces, else by indentation).
@@ -165,7 +216,9 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
             r"^\s*(?:(?:export|default|pub(?:\([^)]*\))?|public|private|protected|internal|static|async|abstract|final|unsafe|extern|inline|virtual|override|declare)\s+)*(?:def|class|function\*?|fn|func|struct|enum|trait|interface|type|module|namespace|const|let|var|val|object|macro_rules!|sub|proc|impl(?:<[^>]*>)?)\s+(?:\([^)]*\)\s*)?{n}\b"
         ),
         format!(r"^\s*(?:[\w:<>\[\],*&]+\s+)+\*?{n}\s*\([^;]*$"),
-        format!(r"^\s*(?:async\s+|static\s+|get\s+|set\s+)*{n}\s*(?:=\s*(?:async\s*)?(?:function|\(|[\w$]+\s*=>)|\([^)]*\)\s*(?::\s*[^{{]+)?\{{\s*$|:\s*(?:async\s*)?(?:function|\())"),
+        format!(
+            r"^\s*(?:async\s+|static\s+|get\s+|set\s+)*{n}\s*(?:=\s*(?:async\s*)?(?:function|\(|[\w$]+\s*=>)|\([^)]*\)\s*(?::\s*[^{{]+)?\{{\s*$|:\s*(?:async\s*)?(?:function|\())"
+        ),
     ];
     let res: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
     let control = Regex::new(r"^\s*(?:if|elif|else|for|while|switch|case|match|return|catch|except|await|yield|throw|raise|new|with|assert|del|not|defer|go|do|typeof|delete|print)\b").unwrap();
@@ -177,7 +230,10 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
         let indent = line.len() - line.trim_start().len();
         // A definition that ends in a colon has an indented body, whatever braces its lines hold (an
         // f-string, a dict).
-        let opens_brace = !line.trim_end().ends_with(':') && lines[i..lines.len().min(i + 3)].iter().any(|l| l.contains('{'));
+        let opens_brace = !line.trim_end().ends_with(':')
+            && lines[i..lines.len().min(i + 3)]
+                .iter()
+                .any(|l| l.contains('{'));
         let mut end = i;
         if opens_brace {
             let mut depth = 0i32;
@@ -220,10 +276,21 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
 }
 
 pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
-    let Some(path_arg) = str_arg(args, "path").map(str::trim).filter(|p| !p.is_empty()) else {
+    let Some(path_arg) = str_arg(args, "path")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    else {
         return StepOutput::error("`path` is required");
     };
-    let lines_arg = str_arg(args, "lines").map(str::trim).filter(|l| !l.is_empty()).map(String::from).or_else(|| args.get("lines").and_then(Value::as_u64).map(|n| n.to_string()));
+    let lines_arg = str_arg(args, "lines")
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .or_else(|| {
+            args.get("lines")
+                .and_then(Value::as_u64)
+                .map(|n| n.to_string())
+        });
     if path_arg.starts_with("out:") {
         return read_spill(sess, path_arg, lines_arg.as_deref());
     }
@@ -238,17 +305,25 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
     }
     // A device or a pipe has no end to read to.
     if !md.is_file() {
-        return StepOutput::error(format!("{shown} is not a regular file; look at it with shell tools"));
+        return StepOutput::error(format!(
+            "{shown} is not a regular file; look at it with shell tools"
+        ));
     }
     if md.len() > MAX_FILE_BYTES {
-        return StepOutput::error(format!("{shown} is {}; look at parts of it with search, or shell (head, tail, sed -n)", fmt_bytes(md.len())));
+        return StepOutput::error(format!(
+            "{shown} is {}; look at parts of it with search, or shell (head, tail, sed -n)",
+            fmt_bytes(md.len())
+        ));
     }
     let bytes = match std::fs::read(&abs) {
         Ok(b) => b,
         Err(e) => return StepOutput::error(format!("cannot read {shown}: {e}")),
     };
     if bytes.iter().take(8192).any(|b| *b == 0) {
-        return StepOutput::ok(format!("[binary] {shown} is a binary file ({}); inspect it with shell tools (file, xxd, strings)", fmt_bytes(md.len())));
+        return StepOutput::ok(format!(
+            "[binary] {shown} is a binary file ({}); inspect it with shell tools (file, xxd, strings)",
+            fmt_bytes(md.len())
+        ));
     }
     let content = String::from_utf8_lossy(&bytes);
     // A byte-order mark is not part of the first line: `edit` keeps it apart as well.
@@ -264,28 +339,45 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
         if anchors {
             push_anchored(out, "", ln, text, MAX_COLS);
         } else {
-            out.push_str(&format!("{ln:>6}\t{}\n", crate::util::truncate_chars(text, MAX_COLS)));
+            out.push_str(&format!(
+                "{ln:>6}\t{}\n",
+                crate::util::truncate_chars(text, MAX_COLS)
+            ));
         }
     };
 
-    if let Some(symbol) = str_arg(args, "symbol").map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(symbol) = str_arg(args, "symbol")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let blocks = find_symbol(&lines, symbol);
         if blocks.is_empty() {
-            return StepOutput::error(format!("no definition of `{symbol}` found in {shown}; try search for it"));
+            return StepOutput::error(format!(
+                "no definition of `{symbol}` found in {shown}; try search for it"
+            ));
         }
         let mut out = String::new();
         for (from, to) in &blocks {
-            out.push_str(&format!("{shown} · `{symbol}` · lines {from}-{to} of {total}\n"));
+            out.push_str(&format!(
+                "{shown} · `{symbol}` · lines {from}-{to} of {total}\n"
+            ));
             for ln in *from..=*to {
                 push(&mut out, ln, lines[ln - 1]);
             }
             // A long definition is shown up to a limit: say so, rather than let it look complete.
             if to - from + 1 >= MAX_SYMBOL_LINES && *to < total {
-                out.push_str(&format!("… `{symbol}` goes on past line {to}: read lines \"{}-{}\" for more\n", to + 1, (to + sess.limits.read_lines).min(total)));
+                out.push_str(&format!(
+                    "… `{symbol}` goes on past line {to}: read lines \"{}-{}\" for more\n",
+                    to + 1,
+                    (to + sess.limits.read_lines).min(total)
+                ));
             }
             sess.seen.mark(&abs, hash, *from, *to, sess.step);
         }
-        return StepOutput { stub: format!("[read {shown} `{symbol}` — dropped from context, read again if needed]"), ..StepOutput::ok(out.trim_end()) };
+        return StepOutput {
+            stub: format!("[read {shown} `{symbol}` — dropped from context, read again if needed]"),
+            ..StepOutput::ok(out.trim_end())
+        };
     }
 
     let (from, mut to) = match &lines_arg {
@@ -306,25 +398,50 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
     }
 
     if sess.features.dedup {
-        if let SeenCheck::AlreadyShown { step } = sess.seen.observe(&abs, hash, from, to, sess.step) {
+        if let SeenCheck::AlreadyShown { step } = sess.seen.observe(&abs, hash, from, to, sess.step)
+        {
             // Step 0 is before the first reply: what the harness put in the first message.
-            let when = if step == 0 { "in the first message".to_string() } else { format!("at step {step}") };
-            let msg = format!("[unchanged] {shown} lines {from}-{to} are already in your context (shown {when}) and the file has not changed since. Ask again if you need them re-printed.");
-            return StepOutput { stub: msg.clone(), observation: msg, ..Default::default() };
+            let when = if step == 0 {
+                "in the first message".to_string()
+            } else {
+                format!("at step {step}")
+            };
+            let msg = format!(
+                "[unchanged] {shown} lines {from}-{to} are already in your context (shown {when}) and the file has not changed since. Ask again if you need them re-printed."
+            );
+            return StepOutput {
+                stub: msg.clone(),
+                observation: msg,
+                ..Default::default()
+            };
         }
     } else {
         // Still on record: `edit` reads an anchor by what the model has been shown.
         sess.seen.mark(&abs, hash, from, to, sess.step);
     }
 
-    let mut out = if from == 1 && to == total { format!("{shown} · {total} lines\n") } else { format!("{shown} · lines {from}-{to} of {total}\n") };
+    let mut out = if from == 1 && to == total {
+        format!("{shown} · {total} lines\n")
+    } else {
+        format!("{shown} · lines {from}-{to} of {total}\n")
+    };
     for ln in from..=to {
         push(&mut out, ln, lines[ln - 1]);
     }
     if to < total {
-        out.push_str(&format!("… {} more lines · next: lines \"{}-{}\"\n", total - to, to + 1, (to + sess.limits.read_lines).min(total)));
+        out.push_str(&format!(
+            "… {} more lines · next: lines \"{}-{}\"\n",
+            total - to,
+            to + 1,
+            (to + sess.limits.read_lines).min(total)
+        ));
     }
-    StepOutput { stub: format!("[read {shown} lines {from}-{to} — dropped from context, read again if needed]"), ..StepOutput::ok(out.trim_end()) }
+    StepOutput {
+        stub: format!(
+            "[read {shown} lines {from}-{to} — dropped from context, read again if needed]"
+        ),
+        ..StepOutput::ok(out.trim_end())
+    }
 }
 
 #[cfg(test)]
@@ -346,17 +463,36 @@ mod tests {
         std::fs::write(s.ws.root.join("big.txt"), numbered(1000)).unwrap();
 
         let out = run(&mut s, &json!({"path": "a.txt"}));
-        assert_eq!(out.observation, format!("a.txt · 2 lines\n{}|alpha\n{}|beta", anchor(1, "alpha"), anchor(2, "beta")));
+        assert_eq!(
+            out.observation,
+            format!(
+                "a.txt · 2 lines\n{}|alpha\n{}|beta",
+                anchor(1, "alpha"),
+                anchor(2, "beta")
+            )
+        );
 
         let out = run(&mut s, &json!({"path": "big.txt"}));
-        assert!(out.observation.starts_with("big.txt · lines 1-250 of 1000\n"));
-        assert!(out.observation.ends_with("… 750 more lines · next: lines \"251-500\""));
+        assert!(
+            out.observation
+                .starts_with("big.txt · lines 1-250 of 1000\n")
+        );
+        assert!(
+            out.observation
+                .ends_with("… 750 more lines · next: lines \"251-500\"")
+        );
 
         let out = run(&mut s, &json!({"path": "big.txt", "lines": "-3"}));
-        assert!(out.observation.starts_with("big.txt · lines 998-1000 of 1000\n"));
+        assert!(
+            out.observation
+                .starts_with("big.txt · lines 998-1000 of 1000\n")
+        );
         let out = run(&mut s, &json!({"path": "big.txt", "lines": "400-402"}));
         assert_eq!(out.observation.lines().count(), 5, "{}", out.observation);
-        assert_eq!(run(&mut s, &json!({"path": "big.txt", "lines": "5000-6000"})).status, StepStatus::Error);
+        assert_eq!(
+            run(&mut s, &json!({"path": "big.txt", "lines": "5000-6000"})).status,
+            StepStatus::Error
+        );
     }
 
     #[test]
@@ -365,14 +501,29 @@ mod tests {
         let p = s.ws.root.join("a.txt");
         std::fs::write(&p, numbered(20)).unwrap();
         s.step = 3;
-        assert!(run(&mut s, &json!({"path": "a.txt"})).observation.contains("line 20"));
+        assert!(
+            run(&mut s, &json!({"path": "a.txt"}))
+                .observation
+                .contains("line 20")
+        );
         s.step = 9;
         let again = run(&mut s, &json!({"path": "a.txt", "lines": "5-10"}));
-        assert!(again.observation.starts_with("[unchanged] a.txt lines 5-10 are already in your context (shown at step 3)"));
-        assert!(run(&mut s, &json!({"path": "a.txt", "lines": "5-10"})).observation.contains("line 7"), "asking twice prints it");
+        assert!(again.observation.starts_with(
+            "[unchanged] a.txt lines 5-10 are already in your context (shown at step 3)"
+        ));
+        assert!(
+            run(&mut s, &json!({"path": "a.txt", "lines": "5-10"}))
+                .observation
+                .contains("line 7"),
+            "asking twice prints it"
+        );
 
         std::fs::write(&p, numbered(21)).unwrap();
-        assert!(run(&mut s, &json!({"path": "a.txt"})).observation.contains("line 21"));
+        assert!(
+            run(&mut s, &json!({"path": "a.txt"}))
+                .observation
+                .contains("line 21")
+        );
     }
 
     #[test]
@@ -384,17 +535,38 @@ mod tests {
         std::fs::write(s.ws.root.join("src/empty.txt"), "").unwrap();
 
         let dir = run(&mut s, &json!({"path": "src"}));
-        assert!(dir.observation.starts_with("src/ · 4 entries\n  util/  (0 items)\n"), "{}", dir.observation);
+        assert!(
+            dir.observation
+                .starts_with("src/ · 4 entries\n  util/  (0 items)\n"),
+            "{}",
+            dir.observation
+        );
         assert!(dir.observation.contains("main.rs  (13 B)"));
 
         let missing = run(&mut s, &json!({"path": "src/main.py"}));
         assert_eq!(missing.status, StepStatus::Error);
-        assert!(missing.observation.contains("in that directory: main.rs"), "{}", missing.observation);
+        assert!(
+            missing.observation.contains("in that directory: main.rs"),
+            "{}",
+            missing.observation
+        );
         let deep = run(&mut s, &json!({"path": "nope/deeper/x.rs"}));
-        assert!(deep.observation.contains("nearest existing directory is ."), "{}", deep.observation);
+        assert!(
+            deep.observation.contains("nearest existing directory is ."),
+            "{}",
+            deep.observation
+        );
 
-        assert!(run(&mut s, &json!({"path": "src/blob.bin"})).observation.starts_with("[binary]"));
-        assert!(run(&mut s, &json!({"path": "src/empty.txt"})).observation.starts_with("[empty]"));
+        assert!(
+            run(&mut s, &json!({"path": "src/blob.bin"}))
+                .observation
+                .starts_with("[binary]")
+        );
+        assert!(
+            run(&mut s, &json!({"path": "src/empty.txt"}))
+                .observation
+                .starts_with("[empty]")
+        );
     }
 
     #[test]
@@ -403,29 +575,62 @@ mod tests {
         let py = "import os\n\ndef helper(x):\n    return x\n\nclass Calc:\n    def divide(self, a, b):\n        if b == 0:\n            raise ValueError\n        return a / b\n\n    def add(self, a, b):\n        return a + b\n";
         std::fs::write(s.ws.root.join("calc.py"), py).unwrap();
         let out = run(&mut s, &json!({"path": "calc.py", "symbol": "Calc.divide"}));
-        assert!(out.observation.starts_with("calc.py · `Calc.divide` · lines 7-10 of 13\n"), "{}", out.observation);
+        assert!(
+            out.observation
+                .starts_with("calc.py · `Calc.divide` · lines 7-10 of 13\n"),
+            "{}",
+            out.observation
+        );
         assert!(!out.observation.contains("def add"));
 
         let rs = "use std::fmt;\n\npub fn parse(input: &str) -> Result<u32, String> {\n    let n = input.trim();\n    n.parse().map_err(|e| format!(\"{e}\"))\n}\n\nfn other() {}\n";
         std::fs::write(s.ws.root.join("lib.rs"), rs).unwrap();
         let out = run(&mut s, &json!({"path": "lib.rs", "symbol": "parse"}));
-        assert!(out.observation.contains("lines 3-6 of 8"), "{}", out.observation);
-        assert_eq!(run(&mut s, &json!({"path": "lib.rs", "symbol": "missing"})).status, StepStatus::Error);
+        assert!(
+            out.observation.contains("lines 3-6 of 8"),
+            "{}",
+            out.observation
+        );
+        assert_eq!(
+            run(&mut s, &json!({"path": "lib.rs", "symbol": "missing"})).status,
+            StepStatus::Error
+        );
 
         // Braces in a Python body are not its extent, and a statement that calls the function is
         // not its definition.
         let py = "def make(x):\n    return x\n\nwith make(1) as m:\n    pass\nassert make(2)\n\ndef greet(name):\n    text = f\"Hello {name}\"\n    print(text)\n    return text\n\nx = 1\n";
         std::fs::write(s.ws.root.join("fstr.py"), py).unwrap();
         let out = run(&mut s, &json!({"path": "fstr.py", "symbol": "greet"}));
-        assert!(out.observation.starts_with("fstr.py · `greet` · lines 8-11 of 13\n") && out.observation.contains("return text"), "{}", out.observation);
+        assert!(
+            out.observation
+                .starts_with("fstr.py · `greet` · lines 8-11 of 13\n")
+                && out.observation.contains("return text"),
+            "{}",
+            out.observation
+        );
         let out = run(&mut s, &json!({"path": "fstr.py", "symbol": "make"}));
-        assert!(out.observation.starts_with("fstr.py · `make` · lines 1-2 of 13\n") && !out.observation.contains("with make") && !out.observation.contains("assert"), "{}", out.observation);
+        assert!(
+            out.observation
+                .starts_with("fstr.py · `make` · lines 1-2 of 13\n")
+                && !out.observation.contains("with make")
+                && !out.observation.contains("assert"),
+            "{}",
+            out.observation
+        );
 
         // A definition longer than is shown says that it goes on.
-        let long = format!("fn big() {{\n{}}}\nfn after() {{}}\n", "    step();\n".repeat(200));
+        let long = format!(
+            "fn big() {{\n{}}}\nfn after() {{}}\n",
+            "    step();\n".repeat(200)
+        );
         std::fs::write(s.ws.root.join("long.rs"), long).unwrap();
         let out = run(&mut s, &json!({"path": "long.rs", "symbol": "big"}));
-        assert!(out.observation.ends_with("… `big` goes on past line 150: read lines \"151-203\" for more"), "{}", &out.observation[out.observation.len().saturating_sub(200)..]);
+        assert!(
+            out.observation
+                .ends_with("… `big` goes on past line 150: read lines \"151-203\" for more"),
+            "{}",
+            &out.observation[out.observation.len().saturating_sub(200)..]
+        );
     }
 
     #[test]
@@ -434,7 +639,9 @@ mod tests {
         assert_eq!(parse_window("400kq-402ab", 1000, 250), Ok((400, 402)));
         assert_eq!(parse_window("-80", 1000, 250), Ok((921, 1000)));
         assert_eq!(parse_window("L12..L20", 1000, 250), Ok((12, 20)));
-        assert!(parse_window("400-abc", 1000, 250).is_err() && parse_window("kq", 1000, 250).is_err());
+        assert!(
+            parse_window("400-abc", 1000, 250).is_err() && parse_window("kq", 1000, 250).is_err()
+        );
     }
 
     #[test]
@@ -443,17 +650,31 @@ mod tests {
         let (handle, path) = s.next_spill();
         std::fs::write(&path, numbered(600)).unwrap();
         let out = run(&mut s, &json!({"path": handle}));
-        assert!(out.observation.starts_with("out:1 · lines 1-250 of 600\n1|line 1\n"));
+        assert!(
+            out.observation
+                .starts_with("out:1 · lines 1-250 of 600\n1|line 1\n")
+        );
         let out = run(&mut s, &json!({"path": "out:1", "lines": "598-600"}));
         assert!(out.observation.ends_with("600|line 600"));
-        assert_eq!(run(&mut s, &json!({"path": "out:77"})).status, StepStatus::Error);
+        assert_eq!(
+            run(&mut s, &json!({"path": "out:77"})).status,
+            StepStatus::Error
+        );
     }
 
     #[test]
     fn classic_mode_prints_plain_line_numbers() {
         let mut s = test_session("read-classic", Features::classic());
         std::fs::write(s.ws.root.join("a.txt"), "alpha\n").unwrap();
-        assert_eq!(run(&mut s, &json!({"path": "a.txt"})).observation, "a.txt · 1 lines\n     1\talpha");
-        assert!(run(&mut s, &json!({"path": "a.txt"})).observation.contains("alpha"), "no dedup in classic mode");
+        assert_eq!(
+            run(&mut s, &json!({"path": "a.txt"})).observation,
+            "a.txt · 1 lines\n     1\talpha"
+        );
+        assert!(
+            run(&mut s, &json!({"path": "a.txt"}))
+                .observation
+                .contains("alpha"),
+            "no dedup in classic mode"
+        );
     }
 }

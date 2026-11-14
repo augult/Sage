@@ -12,7 +12,20 @@ use std::time::{Duration, Instant};
 /// How long a harness gets to wind down once its turns are used up.
 const GRACE: Duration = Duration::from_secs(20);
 /// What an adapter inherits from the environment. Everything else, API keys above all, is withheld.
-const INHERITED: &[&str] = &["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", "BENCH_EXT_HOME"];
+const INHERITED: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TZ",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "BENCH_EXT_HOME",
+];
 /// Exit code by which an adapter says that its harness ran into its own step limit.
 const STEP_LIMIT: i32 = 124;
 /// The harness never holds the real key: the proxy adds it.
@@ -21,7 +34,11 @@ const PLACEHOLDER_KEY: &str = "sk-bench-proxy";
 /// The adapters shipped with the source, unless the working directory has its own.
 pub fn default_dir() -> PathBuf {
     let local = PathBuf::from("scripts/external");
-    if local.is_dir() { local } else { Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/external") }
+    if local.is_dir() {
+        local
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/external")
+    }
 }
 
 pub fn script(dir: &Path, name: &str) -> PathBuf {
@@ -71,33 +88,68 @@ fn kill_group(pid: u32) {
     // Windows has no process groups of this kind: the process is ended with what it started.
     #[cfg(not(unix))]
     {
-        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
     }
 }
 
 fn last_lines(path: &Path, n: usize) -> String {
-    let text = std::fs::read(path).map(|bytes| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default();
+    let text = std::fs::read(path)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default();
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
 /// Sorts out how a run ended: (outcome, failure, error).
-fn classify(exit: Option<i32>, timed_out: bool, job: &Job<'_>, usage: &Metered, said: &str) -> (&'static str, Option<String>, Option<String>) {
-    let hint = usage.last_error.clone().unwrap_or_else(|| one_line(said.lines().last().unwrap_or("it printed nothing"), 200));
-    let provider_down = usage.last_error.is_some() && (usage.last_status == 0 || usage.last_status == 429 || usage.last_status >= 500);
+fn classify(
+    exit: Option<i32>,
+    timed_out: bool,
+    job: &Job<'_>,
+    usage: &Metered,
+    said: &str,
+) -> (&'static str, Option<String>, Option<String>) {
+    let hint = usage
+        .last_error
+        .clone()
+        .unwrap_or_else(|| one_line(said.lines().last().unwrap_or("it printed nothing"), 200));
+    let provider_down = usage.last_error.is_some()
+        && (usage.last_status == 0 || usage.last_status == 429 || usage.last_status >= 500);
     if usage.refused > 0 {
-        ("budget", Some(format!("stopped at the limit of {} model requests", job.max_turns)), None)
+        (
+            "budget",
+            Some(format!(
+                "stopped at the limit of {} model requests",
+                job.max_turns
+            )),
+            None,
+        )
     } else if provider_down {
         ("error", None, usage.last_error.clone())
     } else if timed_out {
-        ("budget", Some(format!("killed at the time budget of {}s", job.time_budget)), None)
+        (
+            "budget",
+            Some(format!("killed at the time budget of {}s", job.time_budget)),
+            None,
+        )
     } else if exit == Some(STEP_LIMIT) {
-        ("budget", Some("stopped at its own step limit".to_string()), None)
+        (
+            "budget",
+            Some("stopped at its own step limit".to_string()),
+            None,
+        )
     } else if exit != Some(0) {
-        let how = exit.map_or("killed by a signal".to_string(), |code| format!("exit code {code}"));
+        let how = exit.map_or("killed by a signal".to_string(), |code| {
+            format!("exit code {code}")
+        });
         ("error", Some(format!("{how}: {hint}")), None)
     } else if usage.turns == 0 {
-        ("error", Some(format!("made no model request: {hint}")), None)
+        (
+            "error",
+            Some(format!("made no model request: {hint}")),
+            None,
+        )
     } else {
         ("done", None, None)
     }
@@ -141,7 +193,17 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
         Err(e) => {
             let usage = proxy.close(job.id).await;
             let failure = Some(format!("could not start {}: {e}", job.script.display()));
-            return Ran { outcome: "error", failure, error: None, elapsed_ms: 0, detail: Detail { exit_code: None, log: log.to_string_lossy().into_owned(), usage } };
+            return Ran {
+                outcome: "error",
+                failure,
+                error: None,
+                elapsed_ms: 0,
+                detail: Detail {
+                    exit_code: None,
+                    log: log.to_string_lossy().into_owned(),
+                    usage,
+                },
+            };
         }
     };
     let pid = child.id();
@@ -167,7 +229,17 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
     if !job.keep {
         let _ = std::fs::remove_dir_all(&scratch);
     }
-    Ran { outcome, failure, error, elapsed_ms: started.elapsed().as_millis() as u64, detail: Detail { exit_code: exit, log: log.to_string_lossy().into_owned(), usage } }
+    Ran {
+        outcome,
+        failure,
+        error,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        detail: Detail {
+            exit_code: exit,
+            log: log.to_string_lossy().into_owned(),
+            usage,
+        },
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -177,28 +249,95 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn job<'a>(script: &'a Path, root: &'a Path) -> Job<'a> {
-        Job { id: "t", script, workspace: root, home: root, prompt: "p", model: "m", max_turns: 3, time_budget: 600, keep: false }
+        Job {
+            id: "t",
+            script,
+            workspace: root,
+            home: root,
+            prompt: "p",
+            model: "m",
+            max_turns: 3,
+            time_budget: 600,
+            keep: false,
+        }
     }
 
     #[test]
     fn a_run_is_sorted_by_how_it_ended() {
         let (script, root) = (PathBuf::from("run.sh"), PathBuf::from("."));
         let job = job(&script, &root);
-        let ok = Metered { turns: 4, ..Metered::default() };
-        assert_eq!(classify(Some(0), false, &job, &ok, "bye"), ("done", None, None));
-        assert_eq!(classify(Some(3), false, &job, &ok, "a\nTraceback: boom"), ("error", Some("exit code 3: Traceback: boom".into()), None));
-        assert_eq!(classify(None, false, &job, &ok, ""), ("error", Some("killed by a signal: it printed nothing".into()), None));
+        let ok = Metered {
+            turns: 4,
+            ..Metered::default()
+        };
+        assert_eq!(
+            classify(Some(0), false, &job, &ok, "bye"),
+            ("done", None, None)
+        );
+        assert_eq!(
+            classify(Some(3), false, &job, &ok, "a\nTraceback: boom"),
+            ("error", Some("exit code 3: Traceback: boom".into()), None)
+        );
+        assert_eq!(
+            classify(None, false, &job, &ok, ""),
+            (
+                "error",
+                Some("killed by a signal: it printed nothing".into()),
+                None
+            )
+        );
         assert_eq!(classify(None, true, &job, &ok, "").0, "budget");
-        assert_eq!(classify(Some(124), false, &job, &ok, ""), ("budget", Some("stopped at its own step limit".into()), None));
-        assert_eq!(classify(Some(0), false, &job, &Metered::default(), "no key").1, Some("made no model request: no key".into()));
-        let capped = Metered { turns: 3, refused: 1, ..Metered::default() };
-        assert_eq!(classify(Some(1), false, &job, &capped, ""), ("budget", Some("stopped at the limit of 3 model requests".into()), None));
+        assert_eq!(
+            classify(Some(124), false, &job, &ok, ""),
+            ("budget", Some("stopped at its own step limit".into()), None)
+        );
+        assert_eq!(
+            classify(Some(0), false, &job, &Metered::default(), "no key").1,
+            Some("made no model request: no key".into())
+        );
+        let capped = Metered {
+            turns: 3,
+            refused: 1,
+            ..Metered::default()
+        };
+        assert_eq!(
+            classify(Some(1), false, &job, &capped, ""),
+            (
+                "budget",
+                Some("stopped at the limit of 3 model requests".into()),
+                None
+            )
+        );
 
         // The provider failing is no result; the provider rejecting what the harness sent is the harness's failure.
-        let down = Metered { failed: 2, last_error: Some("provider returned HTTP 503: overloaded".into()), last_status: 503, ..Metered::default() };
-        assert_eq!(classify(Some(1), false, &job, &down, "x"), ("error", None, Some("provider returned HTTP 503: overloaded".into())));
-        let rejected = Metered { failed: 1, last_error: Some("provider returned HTTP 400: unknown parameter".into()), last_status: 400, ..Metered::default() };
-        assert_eq!(classify(Some(1), false, &job, &rejected, "x"), ("error", Some("exit code 1: provider returned HTTP 400: unknown parameter".into()), None));
+        let down = Metered {
+            failed: 2,
+            last_error: Some("provider returned HTTP 503: overloaded".into()),
+            last_status: 503,
+            ..Metered::default()
+        };
+        assert_eq!(
+            classify(Some(1), false, &job, &down, "x"),
+            (
+                "error",
+                None,
+                Some("provider returned HTTP 503: overloaded".into())
+            )
+        );
+        let rejected = Metered {
+            failed: 1,
+            last_error: Some("provider returned HTTP 400: unknown parameter".into()),
+            last_status: 400,
+            ..Metered::default()
+        };
+        assert_eq!(
+            classify(Some(1), false, &job, &rejected, "x"),
+            (
+                "error",
+                Some("exit code 1: provider returned HTTP 400: unknown parameter".into()),
+                None
+            )
+        );
     }
 
     fn adapter(root: &Path, body: &str) -> PathBuf {
@@ -213,30 +352,89 @@ mod tests {
         let root = std::env::temp_dir().join(format!("sage-ext-{}", rand_hex(4)));
         let (ws, home) = (root.join("ws"), root.join("home"));
         std::fs::create_dir_all(&ws).unwrap();
-        assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some(), "cargo sets this for tests; the adapter must not see it");
-        let proxy = Proxy::start("http://127.0.0.1:1/v1", "real-key").await.unwrap();
+        assert!(
+            std::env::var_os("CARGO_MANIFEST_DIR").is_some(),
+            "cargo sets this for tests; the adapter must not see it"
+        );
+        let proxy = Proxy::start("http://127.0.0.1:1/v1", "real-key")
+            .await
+            .unwrap();
 
-        let script = adapter(&root, r#"echo "$BENCH_PROMPT|$BENCH_MODEL|$BENCH_MAX_TURNS|$BENCH_TIME_BUDGET|$BENCH_API_KEY|${CARGO_MANIFEST_DIR:-withheld}" > seen.txt
-echo "$BENCH_BASE_URL" > "$BENCH_SCRATCH/url"; ls -A "$BENCH_SCRATCH" > scratch.txt; echo "no key configured" >&2; exit 0"#);
-        let quick = Job { id: "quick", script: &script, workspace: &ws, home: &home, prompt: "fix `it`", model: "glm-5.3", max_turns: 7, time_budget: 30, keep: false };
+        let script = adapter(
+            &root,
+            r#"echo "$BENCH_PROMPT|$BENCH_MODEL|$BENCH_MAX_TURNS|$BENCH_TIME_BUDGET|$BENCH_API_KEY|${CARGO_MANIFEST_DIR:-withheld}" > seen.txt
+echo "$BENCH_BASE_URL" > "$BENCH_SCRATCH/url"; ls -A "$BENCH_SCRATCH" > scratch.txt; echo "no key configured" >&2; exit 0"#,
+        );
+        let quick = Job {
+            id: "quick",
+            script: &script,
+            workspace: &ws,
+            home: &home,
+            prompt: "fix `it`",
+            model: "glm-5.3",
+            max_turns: 7,
+            time_budget: 30,
+            keep: false,
+        };
         let ran = run(&proxy, &quick).await;
-        assert_eq!((ran.outcome, ran.failure.as_deref(), ran.error), ("error", Some("made no model request: no key configured"), None));
-        assert_eq!(std::fs::read_to_string(ws.join("seen.txt")).unwrap().trim(), "fix `it`|glm-5.3|7|30|sk-bench-proxy|withheld");
-        assert_eq!(std::fs::read_to_string(ws.join("scratch.txt")).unwrap().trim(), "url", "the scratch directory starts empty");
+        assert_eq!(
+            (ran.outcome, ran.failure.as_deref(), ran.error),
+            (
+                "error",
+                Some("made no model request: no key configured"),
+                None
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(ws.join("seen.txt")).unwrap().trim(),
+            "fix `it`|glm-5.3|7|30|sk-bench-proxy|withheld"
+        );
+        assert_eq!(
+            std::fs::read_to_string(ws.join("scratch.txt"))
+                .unwrap()
+                .trim(),
+            "url",
+            "the scratch directory starts empty"
+        );
         assert!(!home.join("scratch").exists() && home.join("output.log").is_file());
 
         let script = adapter(&root, "sleep 300 &\necho $! > child.pid\nwait");
-        let slow = Job { id: "slow", script: &script, time_budget: 1, ..quick };
+        let slow = Job {
+            id: "slow",
+            script: &script,
+            time_budget: 1,
+            ..quick
+        };
         let ran = run(&proxy, &slow).await;
-        assert_eq!((ran.outcome, ran.failure.as_deref()), ("budget", Some("killed at the time budget of 1s")));
+        assert_eq!(
+            (ran.outcome, ran.failure.as_deref()),
+            ("budget", Some("killed at the time budget of 1s"))
+        );
         assert!(ran.elapsed_ms < 10_000);
-        let pid = std::fs::read_to_string(ws.join("child.pid")).unwrap().trim().to_string();
+        let pid = std::fs::read_to_string(ws.join("child.pid"))
+            .unwrap()
+            .trim()
+            .to_string();
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let alive = std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| !stat.contains(") Z "));
-        assert!(!alive || !Path::new("/proc").is_dir(), "the harness's child {pid} outlived it");
+        let alive = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|stat| !stat.contains(") Z "));
+        assert!(
+            !alive || !Path::new("/proc").is_dir(),
+            "the harness's child {pid} outlived it"
+        );
 
-        let missing = Job { id: "missing", script: Path::new("/nonexistent/run.sh"), ..quick };
-        assert!(run(&proxy, &missing).await.failure.unwrap().starts_with("could not start /nonexistent/run.sh"));
+        let missing = Job {
+            id: "missing",
+            script: Path::new("/nonexistent/run.sh"),
+            ..quick
+        };
+        assert!(
+            run(&proxy, &missing)
+                .await
+                .failure
+                .unwrap()
+                .starts_with("could not start /nonexistent/run.sh")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

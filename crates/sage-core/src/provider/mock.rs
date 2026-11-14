@@ -2,7 +2,9 @@
 //! be exercised without a key. Its token counts are fabricated from text lengths and are labelled as
 //! simulated everywhere they surface.
 
-use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, ToolCall, Usage};
+use super::{
+    ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, ToolCall, Usage,
+};
 use crate::text::est_tokens;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -34,14 +36,29 @@ pub struct Shape {
 
 impl MockTurn {
     pub fn calls(reasoning: &str, calls: Vec<(&str, Value)>) -> Self {
-        Self { reasoning: reasoning.into(), content: String::new(), calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(), finish: None, error: None }
+        Self {
+            reasoning: reasoning.into(),
+            content: String::new(),
+            calls: calls.into_iter().map(|(n, a)| (n.to_string(), a)).collect(),
+            finish: None,
+            error: None,
+        }
     }
     pub fn say(content: &str) -> Self {
-        Self { reasoning: String::new(), content: content.into(), calls: vec![], finish: None, error: None }
+        Self {
+            reasoning: String::new(),
+            content: content.into(),
+            calls: vec![],
+            finish: None,
+            error: None,
+        }
     }
     /// A request that fails.
     pub fn fail(error: ProviderError) -> Self {
-        Self { error: Some(error), ..Self::default() }
+        Self {
+            error: Some(error),
+            ..Self::default()
+        }
     }
 }
 
@@ -68,11 +85,24 @@ pub struct MockProvider {
 
 impl MockProvider {
     pub fn new(turns: Vec<TurnFn>) -> Self {
-        Self { turns, aside: None, cursor: AtomicUsize::new(0), prev_prompt: AtomicU64::new(0), chunk_delay_ms: 0, requests: Mutex::new(Vec::new()), shapes: Mutex::new(Vec::new()) }
+        Self {
+            turns,
+            aside: None,
+            cursor: AtomicUsize::new(0),
+            prev_prompt: AtomicU64::new(0),
+            chunk_delay_ms: 0,
+            requests: Mutex::new(Vec::new()),
+            shapes: Mutex::new(Vec::new()),
+        }
     }
 
     pub fn scripted(turns: Vec<MockTurn>) -> Self {
-        Self::new(turns.into_iter().map(|t| Box::new(move |_: &[Message]| t.clone()) as TurnFn).collect())
+        Self::new(
+            turns
+                .into_iter()
+                .map(|t| Box::new(move |_: &[Message]| t.clone()) as TurnFn)
+                .collect(),
+        )
     }
 
     pub fn has_aside(&self) -> bool {
@@ -85,11 +115,25 @@ impl MockProvider {
         self
     }
 
-    pub async fn chat(&self, req: ChatRequest<'_>, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
+    pub async fn chat(
+        &self,
+        req: ChatRequest<'_>,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<ChatResponse, ProviderError> {
         let beside = self.aside.as_ref().and_then(|answer| answer(req.messages));
-        let idx = if beside.is_some() { usize::MAX } else { self.cursor.fetch_add(1, Ordering::SeqCst) };
+        let idx = if beside.is_some() {
+            usize::MAX
+        } else {
+            self.cursor.fetch_add(1, Ordering::SeqCst)
+        };
         self.requests.lock().unwrap().push(req.messages.to_vec());
-        self.shapes.lock().unwrap().push(Shape { effort: req.effort, tools: req.tools.as_array().map_or(0, Vec::len), max_tokens: req.max_tokens, reasoning_cap: req.reasoning_cap });
+        self.shapes.lock().unwrap().push(Shape {
+            effort: req.effort,
+            tools: req.tools.as_array().map_or(0, Vec::len),
+            max_tokens: req.max_tokens,
+            reasoning_cap: req.reasoning_cap,
+        });
         let turn = match (beside, self.turns.get(idx)) {
             (Some(turn), _) => turn,
             (None, Some(f)) => f(req.messages),
@@ -106,7 +150,11 @@ impl MockProvider {
                     return Err(ProviderError::Cancelled);
                 }
                 let s: String = piece.iter().collect();
-                on_delta(if is_reasoning { Delta::Reasoning(s) } else { Delta::Content(s) });
+                on_delta(if is_reasoning {
+                    Delta::Reasoning(s)
+                } else {
+                    Delta::Content(s)
+                });
                 if self.chunk_delay_ms > 0 {
                     tokio::time::sleep(Duration::from_millis(self.chunk_delay_ms)).await;
                 }
@@ -117,22 +165,47 @@ impl MockProvider {
             .calls
             .iter()
             .enumerate()
-            .map(|(i, (name, args))| ToolCall { id: format!("mock_{idx}_{i}"), name: name.clone(), arguments: args.to_string() })
+            .map(|(i, (name, args))| ToolCall {
+                id: format!("mock_{idx}_{i}"),
+                name: name.clone(),
+                arguments: args.to_string(),
+            })
             .collect();
 
         // Simulate a provider with a perfect prefix cache: everything sent last time is a hit now.
-        let prompt = est_tokens(&serde_json::to_string(req.messages).unwrap_or_default()) + est_tokens(&req.tools.to_string());
+        let prompt = est_tokens(&serde_json::to_string(req.messages).unwrap_or_default())
+            + est_tokens(&req.tools.to_string());
         // A request beside the conversation shares no prefix with it.
-        let cached = if idx == usize::MAX { 0 } else { self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt) };
+        let cached = if idx == usize::MAX {
+            0
+        } else {
+            self.prev_prompt.swap(prompt, Ordering::SeqCst).min(prompt)
+        };
         let reasoning = est_tokens(&turn.reasoning);
-        let output = reasoning + est_tokens(&turn.content) + calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum::<u64>();
+        let output = reasoning
+            + est_tokens(&turn.content)
+            + calls
+                .iter()
+                .map(|c| est_tokens(&c.arguments) + 8)
+                .sum::<u64>();
 
         Ok(ChatResponse {
             content: turn.content,
             reasoning: turn.reasoning,
-            finish: turn.finish.clone().unwrap_or_else(|| if calls.is_empty() { "stop".into() } else { "tool_calls".into() }),
+            finish: turn.finish.clone().unwrap_or_else(|| {
+                if calls.is_empty() {
+                    "stop".into()
+                } else {
+                    "tool_calls".into()
+                }
+            }),
             calls,
-            usage: Usage { prompt, cached, output, reasoning },
+            usage: Usage {
+                prompt,
+                cached,
+                output,
+                reasoning,
+            },
             usage_reported: true,
             retries: 0,
         })

@@ -25,7 +25,11 @@ pub fn prices_for(model: &str) -> Option<Prices> {
     let m = model.to_ascii_lowercase();
     let p = |hit, miss, out| Some(Prices { hit, miss, out });
     if m.contains("deepseek") {
-        return if m.contains("pro") { p(0.022, 0.66, 1.98) } else { p(0.003, 0.15, 0.60) };
+        return if m.contains("pro") {
+            p(0.022, 0.66, 1.98)
+        } else {
+            p(0.003, 0.15, 0.60)
+        };
     }
     if m.contains("glm-5.3-flashx") {
         return p(0.075, 0.37, 1.25);
@@ -51,7 +55,11 @@ pub fn peak_multiplier(model: &str, unix_secs: u64) -> f64 {
         return 1.0;
     }
     let hour = (unix_secs % 86_400) / 3_600;
-    if (1..4).contains(&hour) || (6..10).contains(&hour) { 2.0 } else { 1.0 }
+    if (1..4).contains(&hour) || (6..10).contains(&hour) {
+        2.0
+    } else {
+        1.0
+    }
 }
 
 impl Prices {
@@ -87,8 +95,16 @@ impl Prices {
 mod tests {
     use super::*;
 
-    const DEEPSEEK: Prices = Prices { hit: 0.003, miss: 0.15, out: 0.60 };
-    const GLM: Prices = Prices { hit: 0.26, miss: 1.40, out: 4.40 };
+    const DEEPSEEK: Prices = Prices {
+        hit: 0.003,
+        miss: 0.15,
+        out: 0.60,
+    };
+    const GLM: Prices = Prices {
+        hit: 0.26,
+        miss: 1.40,
+        out: 4.40,
+    };
 
     #[test]
     fn known_models_resolve_and_unknown_do_not() {
@@ -103,7 +119,12 @@ mod tests {
 
     #[test]
     fn cost_splits_cached_and_fresh_input() {
-        let u = Usage { prompt: 100_000, cached: 90_000, output: 2_000, reasoning: 1_500 };
+        let u = Usage {
+            prompt: 100_000,
+            cached: 90_000,
+            output: 2_000,
+            reasoning: 1_500,
+        };
         let c = DEEPSEEK.cost(&u);
         let expect = (90_000.0 * 0.003 + 10_000.0 * 0.15 + 2_000.0 * 0.60) / 1e6;
         assert!((c - expect).abs() < 1e-12);
@@ -116,7 +137,10 @@ mod tests {
         assert_eq!(peak_multiplier("deepseek-flash", tue_0230), 2.0);
         assert_eq!(peak_multiplier("deepseek-flash", tue_0230 + 3 * 3600), 1.0); // 05:30
         assert_eq!(peak_multiplier("deepseek-flash", tue_0230 + 5 * 3600), 2.0); // 07:30
-        assert_eq!(peak_multiplier("deepseek-flash", tue_0230 + 4 * 86_400), 1.0); // Saturday
+        assert_eq!(
+            peak_multiplier("deepseek-flash", tue_0230 + 4 * 86_400),
+            1.0
+        ); // Saturday
         assert_eq!(peak_multiplier("glm-5.3", tue_0230), 1.0);
     }
 
@@ -130,8 +154,14 @@ mod tests {
     #[test]
     fn decay_never_pays_on_deepseek_but_does_on_glm() {
         // Drop 30k tokens of stale observations out of a 60k suffix.
-        assert!(!DEEPSEEK.decay_pays_off(30_000, 60_000, 40.0), "cached input is too cheap to bother");
+        assert!(
+            !DEEPSEEK.decay_pays_off(30_000, 60_000, 40.0),
+            "cached input is too cheap to bother"
+        );
         assert!(GLM.decay_pays_off(30_000, 60_000, 12.0));
-        assert!(!GLM.decay_pays_off(30_000, 60_000, 3.0), "too few turns left to recoup the cache bust");
+        assert!(
+            !GLM.decay_pays_off(30_000, 60_000, 3.0),
+            "too few turns left to recoup the cache bust"
+        );
     }
 }

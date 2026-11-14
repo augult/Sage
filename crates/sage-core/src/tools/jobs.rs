@@ -31,7 +31,14 @@ pub struct OutBuf {
 
 impl OutBuf {
     pub fn new(spill: &Path) -> Self {
-        Self { head: Vec::new(), tail: VecDeque::new(), dropped: false, total: 0, file: std::fs::File::create(spill).ok(), spill_cap: SPILL_CAP }
+        Self {
+            head: Vec::new(),
+            tail: VecDeque::new(),
+            dropped: false,
+            total: 0,
+            file: std::fs::File::create(spill).ok(),
+            spill_cap: SPILL_CAP,
+        }
     }
 
     pub fn push(&mut self, mut data: &[u8]) {
@@ -41,7 +48,13 @@ impl OutBuf {
                 let _ = f.write_all(data);
             } else {
                 let _ = f.write_all(&data[..room as usize]);
-                let _ = f.write_all(format!("\n[the output went on past {}: the rest was not kept]\n", crate::util::fmt_bytes(self.spill_cap)).as_bytes());
+                let _ = f.write_all(
+                    format!(
+                        "\n[the output went on past {}: the rest was not kept]\n",
+                        crate::util::fmt_bytes(self.spill_cap)
+                    )
+                    .as_bytes(),
+                );
                 self.file = None;
             }
         }
@@ -69,7 +82,11 @@ impl OutBuf {
             // Resume at a line boundary so the cut does not produce a half line.
             out.extend_from_slice(b"\n");
             let joined: Vec<u8> = a.iter().chain(b.iter()).copied().collect();
-            let start = joined.iter().position(|c| *c == b'\n').map(|p| p + 1).unwrap_or(0);
+            let start = joined
+                .iter()
+                .position(|c| *c == b'\n')
+                .map(|p| p + 1)
+                .unwrap_or(0);
             out.extend_from_slice(&joined[start..]);
         } else {
             out.extend_from_slice(a);
@@ -171,7 +188,11 @@ fn last_pipeline(cmd: &str) -> Vec<String> {
         }
         pipelines.last_mut().unwrap().last_mut().unwrap().push(c);
     }
-    pipelines.into_iter().rev().find(|p| p.iter().any(|stage| !stage.trim().is_empty())).unwrap_or_default()
+    pipelines
+        .into_iter()
+        .rev()
+        .find(|p| p.iter().any(|stage| !stage.trim().is_empty()))
+        .unwrap_or_default()
 }
 
 /// If the command's last pipeline exited 0 only because its final stage did (`pytest | tail`),
@@ -179,17 +200,27 @@ fn last_pipeline(cmd: &str) -> Vec<String> {
 /// Nor is the 1 of a stage that searches or compares: `grep -c x log | cat`, `diff a b | head`.
 pub fn masked_failure(spill: &Path, cmd: &str) -> Option<i32> {
     let text = std::fs::read_to_string(pipe_file(spill)).ok()?;
-    let codes: Vec<i32> = text.split_whitespace().filter_map(|c| c.parse().ok()).collect();
+    let codes: Vec<i32> = text
+        .split_whitespace()
+        .filter_map(|c| c.parse().ok())
+        .collect();
     let (last, earlier) = codes.split_last()?;
     if *last != 0 {
         return None;
     }
     let stages = last_pipeline(cmd);
     let answers = |i: usize| {
-        let program = stages.get(i).and_then(|stage| stage.split_whitespace().find(|word| !word.contains('='))).map(|word| word.rsplit('/').next().unwrap_or(word));
+        let program = stages
+            .get(i)
+            .and_then(|stage| stage.split_whitespace().find(|word| !word.contains('=')))
+            .map(|word| word.rsplit('/').next().unwrap_or(word));
         stages.len() == codes.len() && program.is_some_and(|p| ANSWERS_WITH_ONE.contains(&p))
     };
-    earlier.iter().enumerate().find(|(i, c)| **c != 0 && **c != 141 && !(**c == 1 && answers(*i))).map(|(_, c)| *c)
+    earlier
+        .iter()
+        .enumerate()
+        .find(|(i, c)| **c != 0 && **c != 141 && !(**c == 1 && answers(*i)))
+        .map(|(_, c)| *c)
 }
 
 fn pipe_file(spill: &Path) -> std::path::PathBuf {
@@ -232,7 +263,13 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<OutBuf>>) {
     }
 }
 
-pub fn spawn(cmd: &str, cwd: &Path, envs: &[(String, String)], state: StateMode<'_>, spill: &Path) -> std::io::Result<Running> {
+pub fn spawn(
+    cmd: &str,
+    cwd: &Path,
+    envs: &[(String, String)],
+    state: StateMode<'_>,
+    spill: &Path,
+) -> std::io::Result<Running> {
     let mut c = shell_command(cmd, state);
     c.env("SAGE_PIPE", pipe_file(spill));
     // `cd -` goes to $OLDPWD, and an inherited one is wherever Sage was launched from: a
@@ -262,13 +299,25 @@ pub fn spawn(cmd: &str, cwd: &Path, envs: &[(String, String)], state: StateMode<
                 let signal = std::os::unix::process::ExitStatusExt::signal(&status);
                 #[cfg(not(unix))]
                 let signal = None;
-                Exit { code: status.code(), signal }
+                Exit {
+                    code: status.code(),
+                    signal,
+                }
             }
-            Err(_) => Exit { code: None, signal: None },
+            Err(_) => Exit {
+                code: None,
+                signal: None,
+            },
         };
         let _ = tx.send(Some(exit));
     });
-    Ok(Running { pid, buf, exit: rx, readers, started: Instant::now() })
+    Ok(Running {
+        pid,
+        buf,
+        exit: rx,
+        readers,
+        started: Instant::now(),
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -278,7 +327,11 @@ pub enum Waited {
     Cancelled,
 }
 
-pub async fn wait_exit(rx: &mut watch::Receiver<Option<Exit>>, timeout: Duration, cancel: &CancellationToken) -> Waited {
+pub async fn wait_exit(
+    rx: &mut watch::Receiver<Option<Exit>>,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> Waited {
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
     loop {
@@ -301,7 +354,11 @@ pub async fn wait_exit(rx: &mut watch::Receiver<Option<Exit>>, timeout: Duration
 /// background may hold them open indefinitely, so this never waits long.
 pub async fn drain(readers: &mut Vec<JoinHandle<()>>) {
     let pending: Vec<JoinHandle<()>> = std::mem::take(readers);
-    let _ = tokio::time::timeout(Duration::from_millis(250), futures_util::future::join_all(pending)).await;
+    let _ = tokio::time::timeout(
+        Duration::from_millis(250),
+        futures_util::future::join_all(pending),
+    )
+    .await;
 }
 
 /// Terminates the whole process group: politely first, then for certain.
@@ -322,7 +379,9 @@ pub fn kill_group(pid: Option<u32>) {
     }
     #[cfg(not(unix))]
     {
-        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
     }
 }
 
@@ -344,7 +403,12 @@ impl Jobs {
     pub fn add(&mut self, spill: &str, run: Running, read_offset: u64) -> String {
         self.next += 1;
         let id = format!("bg:{}", self.next);
-        self.list.push(Job { id: id.clone(), spill: spill.to_string(), run, read_offset });
+        self.list.push(Job {
+            id: id.clone(),
+            spill: spill.to_string(),
+            run,
+            read_offset,
+        });
         id
     }
 
@@ -355,12 +419,17 @@ impl Jobs {
 
     pub fn get_mut(&mut self, id: &str) -> Option<&mut Job> {
         let wanted = id.trim().trim_start_matches("bg:");
-        self.list.iter_mut().find(|j| j.id.trim_start_matches("bg:") == wanted)
+        self.list
+            .iter_mut()
+            .find(|j| j.id.trim_start_matches("bg:") == wanted)
     }
 
     #[cfg(test)]
     pub fn running(&self) -> Vec<&Job> {
-        self.list.iter().filter(|j| j.run.exit.borrow().is_none()).collect()
+        self.list
+            .iter()
+            .filter(|j| j.run.exit.borrow().is_none())
+            .collect()
     }
 
     pub fn kill_all(&mut self) {
@@ -410,9 +479,16 @@ mod tests {
         assert!(dropped);
         assert!(snap.len() <= HEAD_CAP + TAIL_CAP + 1);
         assert_eq!(b.total, 500_000);
-        assert_eq!(std::fs::metadata(&path).unwrap().len(), 500_000, "nothing is lost on disk");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            500_000,
+            "nothing is lost on disk"
+        );
         assert!(snap.ends_with(line.as_bytes()));
-        assert_eq!(b.since(b.total - 200), [line.as_bytes(), line.as_bytes()].concat());
+        assert_eq!(
+            b.since(b.total - 200),
+            [line.as_bytes(), line.as_bytes()].concat()
+        );
     }
 
     #[test]
@@ -425,7 +501,10 @@ mod tests {
             b.push(line.as_bytes());
         }
         let kept = std::fs::read_to_string(&path).unwrap();
-        assert!(kept.starts_with(&line.repeat(2)) && kept.ends_with("the rest was not kept]\n"), "{kept}");
+        assert!(
+            kept.starts_with(&line.repeat(2)) && kept.ends_with("the rest was not kept]\n"),
+            "{kept}"
+        );
         assert!(kept.len() < 400, "{}", kept.len());
         // What the model is shown still follows the command to its end.
         assert_eq!(b.total, 5_000);
@@ -435,10 +514,28 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn captures_both_streams_and_exit_code() {
-        let mut run = spawn("echo out; echo err >&2; exit 3", &std::env::temp_dir(), &[], StateMode::None, &spill("a.log")).unwrap();
-        let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &CancellationToken::new()).await;
+        let mut run = spawn(
+            "echo out; echo err >&2; exit 3",
+            &std::env::temp_dir(),
+            &[],
+            StateMode::None,
+            &spill("a.log"),
+        )
+        .unwrap();
+        let waited = wait_exit(
+            &mut run.exit,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await;
         drain(&mut run.readers).await;
-        assert_eq!(waited, Waited::Exited(Exit { code: Some(3), signal: None }));
+        assert_eq!(
+            waited,
+            Waited::Exited(Exit {
+                code: Some(3),
+                signal: None
+            })
+        );
         let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         assert!(text.contains("out") && text.contains("err"));
     }
@@ -449,10 +546,28 @@ mod tests {
         // Without this an agent that runs `cd -` or `cd "$OLDPWD"` lands wherever Sage was started.
         let log = spill("d.log");
         let dir = log.parent().unwrap().to_path_buf();
-        let mut run = spawn("cd - >/dev/null && pwd && echo \"$OLDPWD\"", &dir, &[], StateMode::None, &log).unwrap();
-        let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &CancellationToken::new()).await;
+        let mut run = spawn(
+            "cd - >/dev/null && pwd && echo \"$OLDPWD\"",
+            &dir,
+            &[],
+            StateMode::None,
+            &log,
+        )
+        .unwrap();
+        let waited = wait_exit(
+            &mut run.exit,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await;
         drain(&mut run.readers).await;
-        assert_eq!(waited, Waited::Exited(Exit { code: Some(0), signal: None }));
+        assert_eq!(
+            waited,
+            Waited::Exited(Exit {
+                code: Some(0),
+                signal: None
+            })
+        );
         let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         let here = dir.to_str().unwrap();
         assert_eq!(text.lines().collect::<Vec<_>>(), [here, here], "{text}");
@@ -461,9 +576,19 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn timeout_leaves_the_process_running_and_kill_reaps_the_group() {
-        let mut run = spawn("sleep 30 & sleep 30", &std::env::temp_dir(), &[], StateMode::None, &spill("b.log")).unwrap();
+        let mut run = spawn(
+            "sleep 30 & sleep 30",
+            &std::env::temp_dir(),
+            &[],
+            StateMode::None,
+            &spill("b.log"),
+        )
+        .unwrap();
         let cancel = CancellationToken::new();
-        assert_eq!(wait_exit(&mut run.exit, Duration::from_millis(150), &cancel).await, Waited::TimedOut);
+        assert_eq!(
+            wait_exit(&mut run.exit, Duration::from_millis(150), &cancel).await,
+            Waited::TimedOut
+        );
         assert!(run.exit.borrow().is_none());
         kill_group(run.pid);
         match wait_exit(&mut run.exit, Duration::from_secs(5), &cancel).await {
@@ -476,11 +601,26 @@ mod tests {
     #[tokio::test]
     async fn returns_when_the_shell_exits_even_if_a_child_keeps_the_pipe_open() {
         let started = Instant::now();
-        let mut run = spawn("sleep 20 & echo started", &std::env::temp_dir(), &[], StateMode::None, &spill("c.log")).unwrap();
-        let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &CancellationToken::new()).await;
+        let mut run = spawn(
+            "sleep 20 & echo started",
+            &std::env::temp_dir(),
+            &[],
+            StateMode::None,
+            &spill("c.log"),
+        )
+        .unwrap();
+        let waited = wait_exit(
+            &mut run.exit,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await;
         drain(&mut run.readers).await;
         assert!(matches!(waited, Waited::Exited(Exit { code: Some(0), .. })));
-        assert!(started.elapsed() < Duration::from_secs(5), "must not wait for the backgrounded sleep");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "must not wait for the backgrounded sleep"
+        );
         kill_group(run.pid);
     }
 
@@ -499,8 +639,16 @@ mod tests {
             ("exit 5", Some(5), None),
             // No match and "they differ" are answers, not failures; a failed test run next to them still is.
             ("grep -c zzz /dev/null | cat", Some(0), None),
-            ("echo a > x.txt; echo b | diff x.txt - | head -5", Some(0), None),
-            ("sh -c 'exit 1' | grep -v PASSED | tail -1", Some(0), Some(1)),
+            (
+                "echo a > x.txt; echo b | diff x.txt - | head -5",
+                Some(0),
+                None,
+            ),
+            (
+                "sh -c 'exit 1' | grep -v PASSED | tail -1",
+                Some(0),
+                Some(1),
+            ),
             ("echo 'a|b' | grep -c zzz | cat", Some(0), None),
         ];
         for (i, (cmd, code, masked)) in cases.iter().enumerate() {
@@ -508,7 +656,14 @@ mod tests {
             for mode in [StateMode::ReadWrite(&state), StateMode::ReadOnly(&state)] {
                 let mut run = spawn(cmd, &dir, &[], mode, &log).unwrap();
                 let waited = wait_exit(&mut run.exit, Duration::from_secs(10), &cancel).await;
-                assert_eq!(waited, Waited::Exited(Exit { code: *code, signal: None }), "{cmd}");
+                assert_eq!(
+                    waited,
+                    Waited::Exited(Exit {
+                        code: *code,
+                        signal: None
+                    }),
+                    "{cmd}"
+                );
                 assert_eq!(masked_failure(&log, cmd), *masked, "{cmd}");
             }
         }
@@ -522,21 +677,62 @@ mod tests {
         let state = dir.join("shell");
         let cancel = CancellationToken::new();
 
-        let mut a = spawn("cd sub && export GREETING='hello world'", &dir, &[], StateMode::ReadWrite(&state), &dir.join("1.log")).unwrap();
+        let mut a = spawn(
+            "cd sub && export GREETING='hello world'",
+            &dir,
+            &[],
+            StateMode::ReadWrite(&state),
+            &dir.join("1.log"),
+        )
+        .unwrap();
         wait_exit(&mut a.exit, Duration::from_secs(10), &cancel).await;
         let cwd = std::fs::read_to_string(dir.join("shell.cwd")).unwrap();
         assert!(cwd.trim().ends_with("/sub"));
 
         // A read-only command sees the exported variable but cannot move the session.
-        let mut b = spawn("echo \"$GREETING\"; cd /; export OTHER=1", &dir.join("sub"), &[], StateMode::ReadOnly(&state), &dir.join("2.log")).unwrap();
+        let mut b = spawn(
+            "echo \"$GREETING\"; cd /; export OTHER=1",
+            &dir.join("sub"),
+            &[],
+            StateMode::ReadOnly(&state),
+            &dir.join("2.log"),
+        )
+        .unwrap();
         wait_exit(&mut b.exit, Duration::from_secs(10), &cancel).await;
         drain(&mut b.readers).await;
-        assert_eq!(String::from_utf8(b.buf.lock().unwrap().snapshot().0).unwrap().trim(), "hello world");
-        assert!(std::fs::read_to_string(dir.join("shell.cwd")).unwrap().trim().ends_with("/sub"));
-        assert!(!std::fs::read_to_string(dir.join("shell.env")).unwrap().contains("OTHER"));
+        assert_eq!(
+            String::from_utf8(b.buf.lock().unwrap().snapshot().0)
+                .unwrap()
+                .trim(),
+            "hello world"
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("shell.cwd"))
+                .unwrap()
+                .trim()
+                .ends_with("/sub")
+        );
+        assert!(
+            !std::fs::read_to_string(dir.join("shell.env"))
+                .unwrap()
+                .contains("OTHER")
+        );
 
         // The exit code of the user's command survives the state-saving trap.
-        let mut c = spawn("exit 7", &dir, &[], StateMode::ReadWrite(&state), &dir.join("3.log")).unwrap();
-        assert_eq!(wait_exit(&mut c.exit, Duration::from_secs(10), &cancel).await, Waited::Exited(Exit { code: Some(7), signal: None }));
+        let mut c = spawn(
+            "exit 7",
+            &dir,
+            &[],
+            StateMode::ReadWrite(&state),
+            &dir.join("3.log"),
+        )
+        .unwrap();
+        assert_eq!(
+            wait_exit(&mut c.exit, Duration::from_secs(10), &cancel).await,
+            Waited::Exited(Exit {
+                code: Some(7),
+                signal: None
+            })
+        );
     }
 }

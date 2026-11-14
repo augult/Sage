@@ -63,7 +63,10 @@ COMMAND: <the command that runs the script, with {file} where its path goes>
 <the script>
 ```";
 
-static SYSTEMS: LazyLock<[String; 2]> = LazyLock::new(|| [(RULES_INTRO, RULES_BRIEF), (EDGES_INTRO, EDGES_BRIEF)].map(|(intro, brief)| format!("{intro}\n\nHow to write it:\n{brief}\n{FORMAT}")));
+static SYSTEMS: LazyLock<[String; 2]> = LazyLock::new(|| {
+    [(RULES_INTRO, RULES_BRIEF), (EDGES_INTRO, EDGES_BRIEF)]
+        .map(|(intro, brief)| format!("{intro}\n\nHow to write it:\n{brief}\n{FORMAT}"))
+});
 
 /// An examiner's instructions.
 pub fn system(angle: Angle) -> &'static str {
@@ -77,7 +80,10 @@ const ASK: &str = "Write the check script for this task now.";
 
 /// An examiner's request: its instructions, then what the worker was shown at the start.
 pub fn brief(angle: Angle, opening: &str) -> Vec<Message> {
-    vec![Message::system(system(angle)), Message::user(format!("{opening}\n\n{ASK}"))]
+    vec![
+        Message::system(system(angle)),
+        Message::user(format!("{opening}\n\n{ASK}")),
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -94,7 +100,14 @@ pub fn parse(reply: &str) -> Option<Script> {
     let command = reply.lines().find_map(|l| {
         let cleaned = l.trim().trim_start_matches(['*', '_', '#', '>', '-', ' ']);
         let head = cleaned.get(..8)?;
-        head.eq_ignore_ascii_case("command:").then(|| cleaned[8..].trim_start_matches(['*', '_']).trim().trim_matches('`').trim().to_string())
+        head.eq_ignore_ascii_case("command:").then(|| {
+            cleaned[8..]
+                .trim_start_matches(['*', '_'])
+                .trim()
+                .trim_matches('`')
+                .trim()
+                .to_string()
+        })
     })?;
     if !command.contains("{file}") {
         return None;
@@ -112,7 +125,11 @@ pub fn parse(reply: &str) -> Option<Script> {
         "rust" | "rs" => "rs",
         _ => "txt",
     };
-    (!body.trim().is_empty()).then(|| Script { command, ext: ext.to_string(), body: body.to_string() })
+    (!body.trim().is_empty()).then(|| Script {
+        command,
+        ext: ext.to_string(),
+        body: body.to_string(),
+    })
 }
 
 /// True when `reply` tried to send a script (not `NONE`), even if `parse` refused its format.
@@ -139,13 +156,17 @@ impl Tally {
     }
 }
 
-static TALLY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"EXAM:\s*(\d+)\s+passed,\s*(\d+)\s+failed").expect("valid regex"));
+static TALLY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"EXAM:\s*(\d+)\s+passed,\s*(\d+)\s+failed").expect("valid regex"));
 
 /// The script's own count, from the last `EXAM:` line of its output. A script that did not get
 /// that far did not run to its end.
 pub fn tally(output: &str) -> Option<Tally> {
     let found = TALLY.captures_iter(output).last()?;
-    Some(Tally { passed: found[1].parse().ok()?, failed: found[2].parse().ok()? })
+    Some(Tally {
+        passed: found[1].parse().ok()?,
+        failed: found[2].parse().ok()?,
+    })
 }
 
 /// A failed case as its script reported it.
@@ -156,7 +177,8 @@ pub struct Case {
     pub text: String,
 }
 
-static FAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*FAIL(?:ED)?[:\s]\s*(\w\S*)").expect("valid regex"));
+static FAIL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*FAIL(?:ED)?[:\s]\s*(\w\S*)").expect("valid regex"));
 
 const CASE_LINES: usize = 14;
 const CASE_CHARS: usize = 1_200;
@@ -170,10 +192,27 @@ pub fn failed_cases(output: &str) -> Vec<Case> {
         if TALLY.is_match(line) {
             open = false;
         } else if let Some(found) = FAIL.captures(line) {
-            let name = found[1].trim_end_matches([':', ',', '`', '"', '\'', ')']).to_string();
+            let name = found[1]
+                .trim_end_matches([':', ',', '`', '"', '\'', ')'])
+                .to_string();
             // The same name twice is two cases to rule on.
-            let repeats = blocks.iter().filter(|(known, _)| *known == name || known.strip_prefix(name.as_str()).is_some_and(|rest| rest.starts_with('#'))).count();
-            blocks.push((if repeats == 0 { name } else { format!("{name}#{}", repeats + 1) }, vec![line]));
+            let repeats = blocks
+                .iter()
+                .filter(|(known, _)| {
+                    *known == name
+                        || known
+                            .strip_prefix(name.as_str())
+                            .is_some_and(|rest| rest.starts_with('#'))
+                })
+                .count();
+            blocks.push((
+                if repeats == 0 {
+                    name
+                } else {
+                    format!("{name}#{}", repeats + 1)
+                },
+                vec![line],
+            ));
             open = true;
         } else if open && let Some((_, lines)) = blocks.last_mut() {
             lines.push(line);
@@ -186,11 +225,19 @@ pub fn failed_cases(output: &str) -> Vec<Case> {
                 lines.pop();
             }
             let left_out = lines.len().saturating_sub(CASE_LINES);
-            let mut text = lines.iter().take(CASE_LINES).map(|l| l.trim_end()).collect::<Vec<_>>().join("\n");
+            let mut text = lines
+                .iter()
+                .take(CASE_LINES)
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n");
             if left_out > 0 {
                 text.push_str(&format!("\n[… {left_out} more lines …]"));
             }
-            Case { name, text: truncate_chars(&text, CASE_CHARS) }
+            Case {
+                name,
+                text: truncate_chars(&text, CASE_CHARS),
+            }
         })
         .collect()
 }
@@ -203,7 +250,12 @@ pub fn excerpt(output: &str) -> String {
     const CHARS: usize = 7_000;
     let lines: Vec<&str> = output.lines().collect();
     let mut text = if lines.len() > HEAD + TAIL {
-        format!("{}\n[… {} lines left out …]\n{}", lines[..HEAD].join("\n"), lines.len() - HEAD - TAIL, lines[lines.len() - TAIL..].join("\n"))
+        format!(
+            "{}\n[… {} lines left out …]\n{}",
+            lines[..HEAD].join("\n"),
+            lines.len() - HEAD - TAIL,
+            lines[lines.len() - TAIL..].join("\n")
+        )
     } else {
         lines.join("\n")
     };
@@ -212,7 +264,11 @@ pub fn excerpt(output: &str) -> String {
         while !text.is_char_boundary(cut) {
             cut -= 1;
         }
-        text = format!("{}\n[… cut …]\n{}", &text[..cut], lines.last().copied().unwrap_or_default());
+        text = format!(
+            "{}\n[… cut …]\n{}",
+            &text[..cut],
+            lines.last().copied().unwrap_or_default()
+        );
     }
     text
 }
@@ -227,7 +283,11 @@ pub const REPAIR_FORMAT: &str = "Your reply held a script, not in the required f
 
 /// What an examiner is told when its script did not get as far as its count.
 pub fn repair_broken(output: &str) -> String {
-    let shown = if output.trim().is_empty() { "(it printed nothing, or ran for too long)".to_string() } else { excerpt(output) };
+    let shown = if output.trim().is_empty() {
+        "(it printed nothing, or ran for too long)".to_string()
+    } else {
+        excerpt(output)
+    };
     format!(
         "Your script was run against the finished work and did not run to its end: it printed no `EXAM:` line. Its output:\n{shown}\n\nWhere the fault is in the script, correct it. Where the output shows that the work lacks something the task fixes by name (a file, a function, a command), keep the cases and let each of them fail on its own instead of stopping the script. {SAME_FORMAT}"
     )
@@ -284,7 +344,11 @@ Reply with one line for each failed case and nothing else:
 /// script and the cases to rule on.
 pub fn referee_brief(opening: &str, script: &str, cases: &[&Case]) -> Vec<Message> {
     let blocks: Vec<&str> = cases.iter().map(|c| c.text.as_str()).collect();
-    let user = format!("{opening}\n\n<script>\n{}\n</script>\n\n<failed_cases>\n{}\n</failed_cases>\n\nRule on each failed case now.", script.trim_end(), blocks.join("\n\n"));
+    let user = format!(
+        "{opening}\n\n<script>\n{}\n</script>\n\n<failed_cases>\n{}\n</failed_cases>\n\nRule on each failed case now.",
+        script.trim_end(),
+        blocks.join("\n\n")
+    );
     vec![Message::system(REFEREE_SYSTEM), Message::user(user)]
 }
 
@@ -300,30 +364,54 @@ const MAX_GROUND_CHARS: usize = 400;
 pub fn rulings(reply: &str, names: &[String]) -> HashMap<String, (Ruling, String)> {
     fn strip_label(s: &str) -> &str {
         for prefix in ["case ", "fail: ", "fail ", "failed: ", "failed "] {
-            if s.get(..prefix.len()).is_some_and(|h| h.eq_ignore_ascii_case(prefix)) {
+            if s.get(..prefix.len())
+                .is_some_and(|h| h.eq_ignore_ascii_case(prefix))
+            {
                 return bare(&s[prefix.len()..]);
             }
         }
         s
     }
     let named = |line: &str| -> Option<(String, usize)> {
-        names.iter().filter(|n| line.starts_with(n.as_str()) && !line[n.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')).max_by_key(|n| n.len()).map(|n| (n.clone(), n.len()))
+        names
+            .iter()
+            .filter(|n| {
+                line.starts_with(n.as_str())
+                    && !line[n.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
+            .max_by_key(|n| n.len())
+            .map(|n| (n.clone(), n.len()))
     };
     let verdict_in = |s: &str| -> Option<(Ruling, String)> {
-        let mut rest = s.trim_start_matches(|c: char| c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c));
+        let mut rest = s.trim_start_matches(|c: char| {
+            c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c)
+        });
         for label in ["ruling", "verdict"] {
-            if rest.get(..label.len()).is_some_and(|h| h.eq_ignore_ascii_case(label))
+            if rest
+                .get(..label.len())
+                .is_some_and(|h| h.eq_ignore_ascii_case(label))
                 && rest[label.len()..].starts_with(|c: char| !c.is_ascii_alphanumeric())
             {
-                rest = rest[label.len()..].trim_start_matches(|c: char| c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c));
+                rest = rest[label.len()..].trim_start_matches(|c: char| {
+                    c.is_whitespace() || "`*_\"':=>-\u{2013}\u{2014}([".contains(c)
+                });
             }
         }
         // ASCII case only, so that byte positions in `upper` are those of `rest`.
         let upper = rest.to_ascii_uppercase();
-        let (ruling, len) = [("GAP", Ruling::Gap), ("CASE", Ruling::Case), ("OPEN", Ruling::Open)]
-            .into_iter()
-            .find_map(|(word, ruling)| (upper.starts_with(word) && !upper[word.len()..].starts_with(|c: char| c.is_ascii_alphanumeric())).then_some((ruling, word.len())))?;
-        let ground = rest[len..].trim_matches(|c: char| c.is_whitespace() || "`*_:-)\u{2013}\u{2014}]".contains(c));
+        let (ruling, len) = [
+            ("GAP", Ruling::Gap),
+            ("CASE", Ruling::Case),
+            ("OPEN", Ruling::Open),
+        ]
+        .into_iter()
+        .find_map(|(word, ruling)| {
+            (upper.starts_with(word)
+                && !upper[word.len()..].starts_with(|c: char| c.is_ascii_alphanumeric()))
+            .then_some((ruling, word.len()))
+        })?;
+        let ground = rest[len..]
+            .trim_matches(|c: char| c.is_whitespace() || "`*_:-)\u{2013}\u{2014}]".contains(c));
         Some((ruling, truncate_chars(ground, MAX_GROUND_CHARS)))
     };
 
@@ -332,12 +420,21 @@ pub fn rulings(reply: &str, names: &[String]) -> HashMap<String, (Ruling, String
     for raw in reply.lines() {
         let line = strip_label(bare(raw));
         // A numbered list: but only where the number is not the start of a name.
-        let unnumbered = strip_label(bare(line.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ')'])));
-        if let Some((name, tail)) = named(line).map(|(n, len)| (n, &line[len..])).or_else(|| named(unnumbered).map(|(n, len)| (n, &unnumbered[len..]))) {
+        let unnumbered = strip_label(bare(
+            line.trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches(['.', ')']),
+        ));
+        if let Some((name, tail)) = named(line)
+            .map(|(n, len)| (n, &line[len..]))
+            .or_else(|| named(unnumbered).map(|(n, len)| (n, &unnumbered[len..])))
+        {
             if let Some(v) = verdict_in(tail) {
                 found.entry(name).or_insert(v);
                 pending = None;
-            } else if tail.trim_matches(|c: char| c.is_whitespace() || "`*_\"':-".contains(c)).is_empty() {
+            } else if tail
+                .trim_matches(|c: char| c.is_whitespace() || "`*_\"':-".contains(c))
+                .is_empty()
+            {
                 // Heading or bullet naming the case alone, with the ruling on the next line.
                 pending = Some(name);
             } else {
@@ -385,9 +482,24 @@ const HOLD_CHARS: usize = 9_000;
 /// What the worker is told when `finish` is held, the `nth` time (from 1). `examiners` is how many
 /// were asked; `refereed` says that the cases shown are the ones the referees confirmed.
 pub fn hold(nth: u8, examiners: usize, refereed: bool, sections: &[Section]) -> String {
-    let held: usize = sections.iter().map(|s| if s.raw.is_some() { s.tally.failed as usize } else { s.held.len() }).sum();
-    let (passed, failed) = sections.iter().fold((0, 0), |(p, f), s| (p + s.tally.passed, f + s.tally.failed));
-    let authors = if examiners == 1 { "A second engineer, who has not seen it," } else { "Two more engineers, who have not seen it," };
+    let held: usize = sections
+        .iter()
+        .map(|s| {
+            if s.raw.is_some() {
+                s.tally.failed as usize
+            } else {
+                s.held.len()
+            }
+        })
+        .sum();
+    let (passed, failed) = sections
+        .iter()
+        .fold((0, 0), |(p, f), s| (p + s.tally.passed, f + s.tally.failed));
+    let authors = if examiners == 1 {
+        "A second engineer, who has not seen it,"
+    } else {
+        "Two more engineers, who have not seen it,"
+    };
     let mut out = match (nth, refereed) {
         (1, true) => format!(
             "[examiner] The work is not accepted yet. {authors} wrote checks from the task and its documents alone. Of the cases that fail, {held} {} confirmed by two more readers of the text, each on their own: under each case is what they quote.",
@@ -398,8 +510,14 @@ pub fn hold(nth: u8, examiners: usize, refereed: bool, sections: &[Section]) -> 
     };
     let mut room = HOLD_CHARS;
     let mut left_out = 0usize;
-    for section in sections.iter().filter(|s| !s.held.is_empty() || s.raw.is_some()) {
-        out.push_str(&format!("\n\nScript {} (run it with `{}`; do not edit it):", section.path, section.cmd));
+    for section in sections
+        .iter()
+        .filter(|s| !s.held.is_empty() || s.raw.is_some())
+    {
+        out.push_str(&format!(
+            "\n\nScript {} (run it with `{}`; do not edit it):",
+            section.path, section.cmd
+        ));
         if let Some(raw) = section.raw {
             out.push('\n');
             out.push_str(&excerpt(raw));
@@ -425,7 +543,9 @@ pub fn hold(nth: u8, examiners: usize, refereed: bool, sections: &[Section]) -> 
         }
     }
     if left_out > 0 {
-        out.push_str(&format!("\n[… {left_out} more failing cases of this kind: run the scripts to see them …]"));
+        out.push_str(&format!(
+            "\n[… {left_out} more failing cases of this kind: run the scripts to see them …]"
+        ));
     }
     format!("{out}\n\n{}", if refereed { RULE_REFEREED } else { RULE })
 }
@@ -434,16 +554,32 @@ pub const ROUTER_SYSTEM: &str = "You route coding tasks to playbooks. You are gi
 
 /// The router's request for `task`, with the playbooks as `(name, description)`.
 pub fn route_brief(task: &str, playbooks: &[(&str, &str)]) -> Vec<Message> {
-    let list: Vec<String> = playbooks.iter().map(|(name, about)| format!("- {name}: {about}")).collect();
-    vec![Message::system(ROUTER_SYSTEM), Message::user(format!("Playbooks:\n{}\n\nTask:\n{task}", list.join("\n")))]
+    let list: Vec<String> = playbooks
+        .iter()
+        .map(|(name, about)| format!("- {name}: {about}"))
+        .collect();
+    vec![
+        Message::system(ROUTER_SYSTEM),
+        Message::user(format!("Playbooks:\n{}\n\nTask:\n{task}", list.join("\n"))),
+    ]
 }
 
 /// The name the router's answer picks out of `known`: the first one it names. One playbook, not
 /// several: in the first live runs a second one (writing tests, beside debugging) sent fixes off
 /// into test suites and mutation runs nobody had asked for.
 pub fn routed<'a>(answer: &str, known: &[&'a str]) -> Vec<&'a str> {
-    let words = answer.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).map(|w| w.to_ascii_lowercase());
-    words.filter_map(|w| known.iter().copied().find(|name| name.to_ascii_lowercase() == w)).take(1).collect()
+    let words = answer
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .map(|w| w.to_ascii_lowercase());
+    words
+        .filter_map(|w| {
+            known
+                .iter()
+                .copied()
+                .find(|name| name.to_ascii_lowercase() == w)
+        })
+        .take(1)
+        .collect()
 }
 
 #[cfg(test)]
@@ -454,40 +590,103 @@ mod tests {
     fn a_reply_is_a_command_and_a_script_or_nothing() {
         let reply = "COMMAND: python3 {file}\n```python\nimport os\nprint('EXAM: 1 passed, 0 failed')\n```\n";
         let script = parse(reply).unwrap();
-        assert_eq!((script.command.as_str(), script.ext.as_str()), ("python3 {file}", "py"));
+        assert_eq!(
+            (script.command.as_str(), script.ext.as_str()),
+            ("python3 {file}", "py")
+        );
         assert!(script.body.starts_with("import os") && script.body.ends_with("failed')"));
         assert_eq!(parse("NONE"), None);
-        assert_eq!(parse("COMMAND: python3 exam.py\n```python\nx\n```"), None, "a command that does not say where the file goes");
-        assert!(looks_like_script_attempt("COMMAND: python3 exam.py\n```python\nx\n```") && !looks_like_script_attempt("NONE"));
-        assert_eq!(parse("**Command:** `python3 {file}`\n```python\nx = 1\n```").unwrap().command, "python3 {file}");
+        assert_eq!(
+            parse("COMMAND: python3 exam.py\n```python\nx\n```"),
+            None,
+            "a command that does not say where the file goes"
+        );
+        assert!(
+            looks_like_script_attempt("COMMAND: python3 exam.py\n```python\nx\n```")
+                && !looks_like_script_attempt("NONE")
+        );
+        assert_eq!(
+            parse("**Command:** `python3 {file}`\n```python\nx = 1\n```")
+                .unwrap()
+                .command,
+            "python3 {file}"
+        );
         assert_eq!(parse("COMMAND: node {file}\n```js\n\n```"), None);
     }
 
     #[test]
     fn the_two_examiners_are_briefed_differently_and_report_alike() {
         let (rules, edges) = (system(Angle::Rules), system(Angle::Edges));
-        assert!(rules.starts_with("You are the examiner") && rules.contains("sentence by sentence"));
-        assert!(edges.starts_with("You are the second examiner") && edges.contains("The limits of each rule") && !edges.contains("sentence by sentence"));
+        assert!(
+            rules.starts_with("You are the examiner") && rules.contains("sentence by sentence")
+        );
+        assert!(
+            edges.starts_with("You are the second examiner")
+                && edges.contains("The limits of each rule")
+                && !edges.contains("sentence by sentence")
+        );
         for system in [rules, edges] {
-            assert!(system.contains("first a line `FAIL <name>`") && system.contains("EXAM: <passed> passed, <failed> failed") && system.ends_with("<the script>\n```"), "{system}");
+            assert!(
+                system.contains("first a line `FAIL <name>`")
+                    && system.contains("EXAM: <passed> passed, <failed> failed")
+                    && system.ends_with("<the script>\n```"),
+                "{system}"
+            );
         }
         let asked = brief(Angle::Edges, "<task>\nFix it.\n</task>");
-        assert_eq!((asked[0].content.as_str(), asked[1].content.as_str()), (edges, "<task>\nFix it.\n</task>\n\nWrite the check script for this task now."));
+        assert_eq!(
+            (asked[0].content.as_str(), asked[1].content.as_str()),
+            (
+                edges,
+                "<task>\nFix it.\n</task>\n\nWrite the check script for this task now."
+            )
+        );
     }
 
     #[test]
     fn the_count_is_the_last_one_the_script_printed() {
-        assert_eq!(tally("case a failed\nEXAM: 3 passed, 1 failed\n"), Some(Tally { passed: 3, failed: 1 }));
-        assert_eq!(tally("EXAM: 0 passed, 9 failed\nEXAM: 30 passed, 2 failed"), Some(Tally { passed: 30, failed: 2 }));
-        assert_eq!(tally("Traceback (most recent call last):\nImportError"), None);
-        assert!(Tally { passed: 3, failed: 7 }.mostly_failing() && !Tally { passed: 4, failed: 6 }.mostly_failing());
+        assert_eq!(
+            tally("case a failed\nEXAM: 3 passed, 1 failed\n"),
+            Some(Tally {
+                passed: 3,
+                failed: 1
+            })
+        );
+        assert_eq!(
+            tally("EXAM: 0 passed, 9 failed\nEXAM: 30 passed, 2 failed"),
+            Some(Tally {
+                passed: 30,
+                failed: 2
+            })
+        );
+        assert_eq!(
+            tally("Traceback (most recent call last):\nImportError"),
+            None
+        );
+        assert!(
+            Tally {
+                passed: 3,
+                failed: 7
+            }
+            .mostly_failing()
+                && !Tally {
+                    passed: 4,
+                    failed: 6
+                }
+                .mostly_failing()
+        );
     }
 
     #[test]
     fn a_long_output_keeps_its_start_and_its_count() {
-        let long: String = (0..400).map(|i| format!("line {i}\n")).collect::<String>() + "EXAM: 1 passed, 399 failed";
+        let long: String = (0..400).map(|i| format!("line {i}\n")).collect::<String>()
+            + "EXAM: 1 passed, 399 failed";
         let cut = excerpt(&long);
-        assert!(cut.starts_with("line 0\n") && cut.ends_with("EXAM: 1 passed, 399 failed") && cut.contains("lines left out"));
+        assert!(
+            cut.starts_with("line 0\n")
+                && cut.ends_with("EXAM: 1 passed, 399 failed")
+                && cut.contains("lines left out")
+        );
         assert!(cut.len() < 7_200);
     }
 
@@ -495,28 +694,59 @@ mod tests {
     fn failed_cases_are_the_blocks_that_open_with_fail() {
         let output = "loading\nFAIL s2_empty_name\n  clause: a name is not empty\n  input: []\n  expected: error\n  got: {}\n\nFAIL: s5_last_line,\n  got: ok\nEXAM: 7 passed, 2 failed\ntrailing noise";
         let cases = failed_cases(output);
-        assert_eq!(cases.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["s2_empty_name", "s5_last_line"]);
-        assert_eq!(cases[0].text, "FAIL s2_empty_name\n  clause: a name is not empty\n  input: []\n  expected: error\n  got: {}");
+        assert_eq!(
+            cases.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["s2_empty_name", "s5_last_line"]
+        );
+        assert_eq!(
+            cases[0].text,
+            "FAIL s2_empty_name\n  clause: a name is not empty\n  input: []\n  expected: error\n  got: {}"
+        );
         assert_eq!(cases[1].text, "FAIL: s5_last_line,\n  got: ok");
 
         // What a test runner prints of its own is read the same way; its summary is no case.
         let unittest = "FAIL: test_dollars (tests.Refs)\nAssertionError: '5$' != '5'\nFAILED (failures=1)\nEXAM: 3 passed, 1 failed";
-        assert_eq!(failed_cases(unittest).iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["test_dollars"]);
+        assert_eq!(
+            failed_cases(unittest)
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["test_dollars"]
+        );
         // A name used twice is two cases; a long block is cut; output without the marker has none.
         let twice = failed_cases("FAIL a\nFAIL a\nFAIL a\nEXAM: 0 passed, 3 failed");
-        assert_eq!(twice.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["a", "a#2", "a#3"]);
+        assert_eq!(
+            twice.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["a", "a#2", "a#3"]
+        );
         let long = format!("FAIL big\n{}EXAM: 0 passed, 1 failed", "x\n".repeat(40));
-        assert!(failed_cases(&long)[0].text.ends_with("[… 27 more lines …]"), "{}", failed_cases(&long)[0].text);
+        assert!(
+            failed_cases(&long)[0].text.ends_with("[… 27 more lines …]"),
+            "{}",
+            failed_cases(&long)[0].text
+        );
         assert!(failed_cases("case a failed\nEXAM: 1 passed, 1 failed").is_empty());
     }
 
     #[test]
     fn a_referee_rules_case_by_case() {
-        let names: Vec<String> = ["s5_last", "s5_last_line", "1_endings"].iter().map(|n| n.to_string()).collect();
+        let names: Vec<String> = ["s5_last", "s5_last_line", "1_endings"]
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
         let reply = "Here are my rulings.\n- `s5_last_line`: **GAP** — \"A backslash at the end of the last line of the file is an error.\"\n2. s5_last: open: the text does not say\n1_endings: CASE: the case passes a path where the task fixes a string\nunknown_case: GAP: x\ns5_last_line: CASE: a second line for the same case is not read";
         let ruled = rulings(reply, &names);
-        assert_eq!(ruled["s5_last_line"], (Ruling::Gap, "\"A backslash at the end of the last line of the file is an error.\"".to_string()));
-        assert_eq!(ruled["s5_last"], (Ruling::Open, "the text does not say".to_string()));
+        assert_eq!(
+            ruled["s5_last_line"],
+            (
+                Ruling::Gap,
+                "\"A backslash at the end of the last line of the file is an error.\"".to_string()
+            )
+        );
+        assert_eq!(
+            ruled["s5_last"],
+            (Ruling::Open, "the text does not say".to_string())
+        );
         assert_eq!(ruled["1_endings"].0, Ruling::Case);
         assert_eq!(ruled.len(), 3);
         // A line that rules nothing rules nothing: a word that only begins like a ruling, a name alone.
@@ -524,48 +754,164 @@ mod tests {
         // Parenthesised verdicts, leading `Case`/`FAIL` labels, and two-line blocks are understood too.
         let varied = "Case `s5_last` (GAP): \"Section 5.\"\n### `s5_last_line`\nVerdict: CASE — wrong signature\nFAIL 1_endings: [OPEN] left open";
         let varied = rulings(varied, &names);
-        assert_eq!(varied["s5_last"], (Ruling::Gap, "\"Section 5.\"".to_string()));
+        assert_eq!(
+            varied["s5_last"],
+            (Ruling::Gap, "\"Section 5.\"".to_string())
+        );
         assert_eq!(varied["s5_last_line"].0, Ruling::Case);
         assert_eq!(varied["1_endings"].0, Ruling::Open);
 
-        let cases = [Case { name: "a".into(), text: "FAIL a\n  got: 1".into() }, Case { name: "b".into(), text: "FAIL b".into() }];
-        let asked = referee_brief("<task>\nT\n</task>", "print(1)\n", &cases.iter().collect::<Vec<_>>());
+        let cases = [
+            Case {
+                name: "a".into(),
+                text: "FAIL a\n  got: 1".into(),
+            },
+            Case {
+                name: "b".into(),
+                text: "FAIL b".into(),
+            },
+        ];
+        let asked = referee_brief(
+            "<task>\nT\n</task>",
+            "print(1)\n",
+            &cases.iter().collect::<Vec<_>>(),
+        );
         assert_eq!(asked[0].content, REFEREE_SYSTEM);
-        assert_eq!(asked[1].content, "<task>\nT\n</task>\n\n<script>\nprint(1)\n</script>\n\n<failed_cases>\nFAIL a\n  got: 1\n\nFAIL b\n</failed_cases>\n\nRule on each failed case now.");
+        assert_eq!(
+            asked[1].content,
+            "<task>\nT\n</task>\n\n<script>\nprint(1)\n</script>\n\n<failed_cases>\nFAIL a\n  got: 1\n\nFAIL b\n</failed_cases>\n\nRule on each failed case now."
+        );
     }
 
     #[test]
     fn a_hold_shows_what_holds_it() {
-        let case = |name: &str| Case { name: name.into(), text: format!("FAIL {name}\n  got: nothing") };
+        let case = |name: &str| Case {
+            name: name.into(),
+            text: format!("FAIL {name}\n  got: nothing"),
+        };
         let (a, b) = (case("a"), case("b"));
         let grounds = ["\"It is an error.\"".to_string(), String::new()];
 
         // Unrefereed: every failing case, and the worker is to settle each by the text.
-        let section = Section { path: "/s/exam_rules.py", cmd: "python3 '/s/exam_rules.py'", tally: Tally { passed: 5, failed: 2 }, held: vec![Held { case: &a, grounds: &[], broken: false }, Held { case: &b, grounds: &[], broken: true }], raw: None, set_aside: vec![] };
+        let section = Section {
+            path: "/s/exam_rules.py",
+            cmd: "python3 '/s/exam_rules.py'",
+            tally: Tally {
+                passed: 5,
+                failed: 2,
+            },
+            held: vec![
+                Held {
+                    case: &a,
+                    grounds: &[],
+                    broken: false,
+                },
+                Held {
+                    case: &b,
+                    grounds: &[],
+                    broken: true,
+                },
+            ],
+            raw: None,
+            set_aside: vec![],
+        };
         let text = hold(1, 1, false, &[section]);
         assert!(text.starts_with("[examiner] The work is not accepted yet. A second engineer, who has not seen it, wrote checks from the task and its documents alone: 5 pass, 2 fail.\n\nScript /s/exam_rules.py (run it with `python3 '/s/exam_rules.py'`; do not edit it):\nFAIL a\n  got: nothing\nFAIL b\n  got: nothing\n  This case passed before your last changes.\n\nA failing case is either a gap"), "{text}");
 
         // Refereed: the confirmed ones with what was quoted, the others named as not to be acted on.
-        let section = Section { path: "/s/exam_edges.py", cmd: "python3 '/s/exam_edges.py'", tally: Tally { passed: 5, failed: 2 }, held: vec![Held { case: &a, grounds: &grounds, broken: false }], raw: None, set_aside: vec!["b"] };
-        let passing = Section { path: "/s/exam_rules.py", cmd: "x", tally: Tally { passed: 9, failed: 0 }, held: vec![], raw: None, set_aside: vec![] };
+        let section = Section {
+            path: "/s/exam_edges.py",
+            cmd: "python3 '/s/exam_edges.py'",
+            tally: Tally {
+                passed: 5,
+                failed: 2,
+            },
+            held: vec![Held {
+                case: &a,
+                grounds: &grounds,
+                broken: false,
+            }],
+            raw: None,
+            set_aside: vec!["b"],
+        };
+        let passing = Section {
+            path: "/s/exam_rules.py",
+            cmd: "x",
+            tally: Tally {
+                passed: 9,
+                failed: 0,
+            },
+            held: vec![],
+            raw: None,
+            set_aside: vec![],
+        };
         let text = hold(1, 2, true, &[passing, section]);
         assert!(text.starts_with("[examiner] The work is not accepted yet. Two more engineers, who have not seen it, wrote checks from the task and its documents alone. Of the cases that fail, 1 was confirmed by two more readers of the text, each on their own: under each case is what they quote.\n\nScript /s/exam_edges.py"), "{text}");
         assert!(text.contains("FAIL a\n  got: nothing\n  referee: \"It is an error.\"\nFailing too, but not confirmed against the text. Leave these alone; the script goes on reporting them: b.\n\nEach of these is taken to be a gap") && !text.contains("exam_rules"), "{text}");
 
         // Later holds say so; output whose cases cannot be told apart is shown as it is; too many cases are counted.
-        let raw = Section { path: "/s/e.sh", cmd: "sh '/s/e.sh'", tally: Tally { passed: 1, failed: 1 }, held: vec![], raw: Some("case x failed\nEXAM: 1 passed, 1 failed"), set_aside: vec![] };
+        let raw = Section {
+            path: "/s/e.sh",
+            cmd: "sh '/s/e.sh'",
+            tally: Tally {
+                passed: 1,
+                failed: 1,
+            },
+            held: vec![],
+            raw: Some("case x failed\nEXAM: 1 passed, 1 failed"),
+            set_aside: vec![],
+        };
         let text = hold(2, 1, false, &[raw]);
-        assert!(text.starts_with("[examiner] Still not accepted. Among the cases below") && text.contains("do not edit it):\ncase x failed\nEXAM: 1 passed, 1 failed\n\nA failing case"), "{text}");
-        let big = Case { name: "big".into(), text: "x".repeat(5_000) };
-        let many = Section { path: "p", cmd: "c", tally: Tally { passed: 0, failed: 3 }, held: (0..3).map(|_| Held { case: &big, grounds: &[], broken: false }).collect(), raw: None, set_aside: vec![] };
+        assert!(
+            text.starts_with("[examiner] Still not accepted. Among the cases below")
+                && text.contains(
+                    "do not edit it):\ncase x failed\nEXAM: 1 passed, 1 failed\n\nA failing case"
+                ),
+            "{text}"
+        );
+        let big = Case {
+            name: "big".into(),
+            text: "x".repeat(5_000),
+        };
+        let many = Section {
+            path: "p",
+            cmd: "c",
+            tally: Tally {
+                passed: 0,
+                failed: 3,
+            },
+            held: (0..3)
+                .map(|_| Held {
+                    case: &big,
+                    grounds: &[],
+                    broken: false,
+                })
+                .collect(),
+            raw: None,
+            set_aside: vec![],
+        };
         assert!(hold(1, 1, false, &[many]).contains("[… 2 more failing cases of this kind"));
     }
 
     #[test]
     fn an_examiner_is_told_what_came_of_its_script() {
-        assert!(repair_broken("Traceback\nImportError").contains("printed no `EXAM:` line. Its output:\nTraceback\nImportError\n\n") && repair_broken("").contains("(it printed nothing, or ran for too long)"));
-        let doubted = repair_doubted(Tally { passed: 1, failed: 4 }, "FAIL a\nEXAM: 1 passed, 4 failed");
-        assert!(doubted.contains("4 of your 5 cases fail") && doubted.contains("Do not change what a case expects in order to make it pass") && doubted.ends_with("with the whole script."));
+        assert!(
+            repair_broken("Traceback\nImportError")
+                .contains("printed no `EXAM:` line. Its output:\nTraceback\nImportError\n\n")
+                && repair_broken("").contains("(it printed nothing, or ran for too long)")
+        );
+        let doubted = repair_doubted(
+            Tally {
+                passed: 1,
+                failed: 4,
+            },
+            "FAIL a\nEXAM: 1 passed, 4 failed",
+        );
+        assert!(
+            doubted.contains("4 of your 5 cases fail")
+                && doubted.contains("Do not change what a case expects in order to make it pass")
+                && doubted.ends_with("with the whole script.")
+        );
         assert!(repair_unlabelled("x").contains("`FAIL <name>`"));
     }
 
@@ -573,7 +919,17 @@ mod tests {
     fn the_router_picks_known_names_only() {
         assert_eq!(routed("ui", &["ui", "debug"]), ["ui"]);
         assert_eq!(routed("NONE", &["ui", "debug"]), Vec::<&str>::new());
-        assert_eq!(routed("Debug, build-ui, tests.", &["ui", "debug", "tests", "security"]), ["debug"]);
-        assert_eq!(routed("tests and ui", &["ui", "debug", "tests", "security"]), ["tests"], "the first it names, not the first known");
+        assert_eq!(
+            routed(
+                "Debug, build-ui, tests.",
+                &["ui", "debug", "tests", "security"]
+            ),
+            ["debug"]
+        );
+        assert_eq!(
+            routed("tests and ui", &["ui", "debug", "tests", "security"]),
+            ["tests"],
+            "the first it names, not the first known"
+        );
     }
 }

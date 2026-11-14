@@ -42,19 +42,31 @@ fn parse_exit(v: &Value) -> Option<ExitExpect> {
 
 fn parse_exit_word(s: &str) -> Option<ExitExpect> {
     let t = s.trim().to_ascii_lowercase();
-    let t = t.strip_prefix("exit").map(|r| r.trim_start_matches([' ', '=', ':', '_'])).unwrap_or(&t).trim();
+    let t = t
+        .strip_prefix("exit")
+        .map(|r| r.trim_start_matches([' ', '=', ':', '_']))
+        .unwrap_or(&t)
+        .trim();
     if let Ok(c) = t.parse::<i32>() {
         return Some(ExitExpect::Code(c));
     }
     match t {
         "any" | "*" | "ignore" | "either" => return Some(ExitExpect::Any),
         "fail" | "fails" | "failure" | "error" | "errors" => return Some(ExitExpect::Nonzero),
-        "pass" | "passes" | "ok" | "success" | "succeeds" | "zero" => return Some(ExitExpect::Code(0)),
+        "pass" | "passes" | "ok" | "success" | "succeeds" | "zero" => {
+            return Some(ExitExpect::Code(0));
+        }
         _ => {}
     }
     // "non-zero", "not 0", "!= 0", "> 0", however it is spaced.
-    let squashed: String = t.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).collect();
-    let negated = squashed.len() <= 12 && ["nonzero", "not0", "notzero", "!=0", "!0", ">0", "≠0"].iter().any(|form| squashed.contains(form));
+    let squashed: String = t
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_'))
+        .collect();
+    let negated = squashed.len() <= 12
+        && ["nonzero", "not0", "notzero", "!=0", "!0", ">0", "≠0"]
+            .iter()
+            .any(|form| squashed.contains(form));
     negated.then_some(ExitExpect::Nonzero)
 }
 
@@ -62,14 +74,31 @@ fn parse_exit_word(s: &str) -> Option<ExitExpect> {
 /// error)"). One that cannot be read at all predicts nothing that could be checked: holding it to
 /// "exit 0" would call the model wrong for the harness's failure to read it.
 fn stated_exit(v: &Value) -> Option<ExitExpect> {
-    let number = |s: &str| s.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect::<String>().parse().ok().map(ExitExpect::Code);
-    Some(parse_exit(v).or_else(|| v.as_str().and_then(number)).unwrap_or(ExitExpect::Any))
+    let number = |s: &str| {
+        s.chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .ok()
+            .map(ExitExpect::Code)
+    };
+    Some(
+        parse_exit(v)
+            .or_else(|| v.as_str().and_then(number))
+            .unwrap_or(ExitExpect::Any),
+    )
 }
 
 fn strings(v: &Value) -> Vec<String> {
     match v {
         Value::String(s) if !s.is_empty() => vec![s.clone()],
-        Value::Array(items) => items.iter().filter_map(|i| i.as_str()).filter(|s| !s.is_empty()).map(String::from).collect(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|i| i.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect(),
         Value::Number(n) => vec![n.to_string()],
         _ => vec![],
     }
@@ -101,7 +130,10 @@ impl Expect {
     /// legacy nested `expect` if the model sent one.
     pub fn from_args(args: &Value) -> Option<Expect> {
         let mut e = args.get("expect").and_then(Expect::from_value);
-        let present = |k: &str| args.get(k).filter(|v| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty()));
+        let present = |k: &str| {
+            args.get(k)
+                .filter(|v| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty()))
+        };
         if let Some(v) = present("expect_exit") {
             e.get_or_insert_with(Expect::default).exit = stated_exit(v);
         }
@@ -109,7 +141,9 @@ impl Expect {
             e.get_or_insert_with(Expect::default).has.extend(strings(v));
         }
         if let Some(v) = present("expect_lacks") {
-            e.get_or_insert_with(Expect::default).lacks.extend(strings(v));
+            e.get_or_insert_with(Expect::default)
+                .lacks
+                .extend(strings(v));
         }
         e
     }
@@ -124,9 +158,14 @@ impl Expect {
                 let mut e = Expect::default();
                 for (k, val) in map {
                     match k.to_ascii_lowercase().as_str() {
-                        "exit" | "exit_code" | "exitcode" | "code" | "status" | "returncode" => e.exit = stated_exit(val),
-                        "has" | "contains" | "includes" | "output" | "stdout" | "match" | "matches" => e.has.extend(strings(val)),
-                        "lacks" | "not_contains" | "excludes" | "absent" | "not" | "without" => e.lacks.extend(strings(val)),
+                        "exit" | "exit_code" | "exitcode" | "code" | "status" | "returncode" => {
+                            e.exit = stated_exit(val)
+                        }
+                        "has" | "contains" | "includes" | "output" | "stdout" | "match"
+                        | "matches" => e.has.extend(strings(val)),
+                        "lacks" | "not_contains" | "excludes" | "absent" | "not" | "without" => {
+                            e.lacks.extend(strings(val))
+                        }
                         _ => {}
                     }
                 }
@@ -137,9 +176,15 @@ impl Expect {
             Value::String(s) if s.trim().is_empty() => None,
             Value::String(s) => match unleak(s) {
                 Some(obj) => Expect::from_value(&obj),
-                None => Some(Expect { exit: parse_exit_word(s), ..Default::default() }),
+                None => Some(Expect {
+                    exit: parse_exit_word(s),
+                    ..Default::default()
+                }),
             },
-            other => parse_exit(other).map(|x| Expect { exit: Some(x), ..Default::default() }),
+            other => parse_exit(other).map(|x| Expect {
+                exit: Some(x),
+                ..Default::default()
+            }),
         }
     }
 
@@ -148,7 +193,12 @@ impl Expect {
     /// to "exit 0" would call a correct prediction a surprise. (Whether a run counts as a passing
     /// check is decided on its real exit code, in `script.rs`.)
     fn exit_expected(&self) -> ExitExpect {
-        self.exit.unwrap_or(if self.has.is_empty() && self.lacks.is_empty() { ExitExpect::Code(0) } else { ExitExpect::Any })
+        self.exit
+            .unwrap_or(if self.has.is_empty() && self.lacks.is_empty() {
+                ExitExpect::Code(0)
+            } else {
+                ExitExpect::Any
+            })
     }
 
     pub fn describe(&self) -> String {
@@ -167,10 +217,19 @@ impl Expect {
 
 /// `/pattern/` is a regex; anything else is a case-insensitive substring.
 fn output_contains(output: &str, needle: &str) -> bool {
-    if needle.len() > 2 && needle.starts_with('/') && let Some(end) = needle.rfind('/').filter(|e| *e > 0) {
+    if needle.len() > 2
+        && needle.starts_with('/')
+        && let Some(end) = needle.rfind('/').filter(|e| *e > 0)
+    {
         let (pat, flags) = (&needle[1..end], &needle[end + 1..]);
-        let regex = RegexBuilder::new(pat).case_insensitive(flags.contains('i')).multi_line(true).dot_matches_new_line(flags.contains('s')).build();
-        if flags.chars().all(|c| matches!(c, 'i' | 'm' | 's')) && let Ok(re) = regex {
+        let regex = RegexBuilder::new(pat)
+            .case_insensitive(flags.contains('i'))
+            .multi_line(true)
+            .dot_matches_new_line(flags.contains('s'))
+            .build();
+        if flags.chars().all(|c| matches!(c, 'i' | 'm' | 's'))
+            && let Ok(re) = regex
+        {
             return re.is_match(output);
         }
     }
@@ -205,7 +264,11 @@ pub fn check(expect: Option<&Expect>, exit: Option<i32>, output: &str) -> Verdic
             violations.push(format!("expected output not to contain {l:?}, but it does"));
         }
     }
-    Verdict { explicit, held: violations.is_empty(), violations }
+    Verdict {
+        explicit,
+        held: violations.is_empty(),
+        violations,
+    }
 }
 
 #[cfg(test)]
@@ -215,17 +278,41 @@ mod tests {
 
     #[test]
     fn parses_object_string_and_scalar_forms() {
-        let e = Expect::from_value(&json!({"exit": 0, "has": "passed", "lacks": ["FAILED", "Error"]})).unwrap();
+        let e =
+            Expect::from_value(&json!({"exit": 0, "has": "passed", "lacks": ["FAILED", "Error"]}))
+                .unwrap();
         assert_eq!(e.exit, Some(ExitExpect::Code(0)));
         assert_eq!(e.has, vec!["passed"]);
         assert_eq!(e.lacks.len(), 2);
 
-        assert_eq!(Expect::from_value(&json!({"exit": "nonzero"})).unwrap().exit, Some(ExitExpect::Nonzero));
-        assert_eq!(Expect::from_value(&json!({"exit_code": "2", "contains": "x"})).unwrap().exit, Some(ExitExpect::Code(2)));
-        assert_eq!(Expect::from_value(&json!("exit 1")).unwrap().exit, Some(ExitExpect::Code(1)));
-        assert_eq!(Expect::from_value(&json!("fails")).unwrap().exit, Some(ExitExpect::Nonzero));
-        assert_eq!(Expect::from_value(&json!("any")).unwrap().exit, Some(ExitExpect::Any));
-        assert_eq!(Expect::from_value(&json!(3)).unwrap().exit, Some(ExitExpect::Code(3)));
+        assert_eq!(
+            Expect::from_value(&json!({"exit": "nonzero"}))
+                .unwrap()
+                .exit,
+            Some(ExitExpect::Nonzero)
+        );
+        assert_eq!(
+            Expect::from_value(&json!({"exit_code": "2", "contains": "x"}))
+                .unwrap()
+                .exit,
+            Some(ExitExpect::Code(2))
+        );
+        assert_eq!(
+            Expect::from_value(&json!("exit 1")).unwrap().exit,
+            Some(ExitExpect::Code(1))
+        );
+        assert_eq!(
+            Expect::from_value(&json!("fails")).unwrap().exit,
+            Some(ExitExpect::Nonzero)
+        );
+        assert_eq!(
+            Expect::from_value(&json!("any")).unwrap().exit,
+            Some(ExitExpect::Any)
+        );
+        assert_eq!(
+            Expect::from_value(&json!(3)).unwrap().exit,
+            Some(ExitExpect::Code(3))
+        );
         assert!(Expect::from_value(&json!(null)).is_none());
         assert!(Expect::from_value(&json!("")).is_none());
         // Uncheckable free text still counts as a prediction of success.
@@ -235,28 +322,53 @@ mod tests {
 
     #[test]
     fn flat_fields_and_leaked_glm_syntax_are_understood() {
-        let e = Expect::from_args(&json!({"cmd": "x", "expect_exit": "nonzero", "expect_has": "FAILED"})).unwrap();
-        assert_eq!((e.exit, e.has.as_slice()), (Some(ExitExpect::Nonzero), &["FAILED".to_string()][..]));
+        let e = Expect::from_args(
+            &json!({"cmd": "x", "expect_exit": "nonzero", "expect_has": "FAILED"}),
+        )
+        .unwrap();
+        assert_eq!(
+            (e.exit, e.has.as_slice()),
+            (Some(ExitExpect::Nonzero), &["FAILED".to_string()][..])
+        );
         assert!(Expect::from_args(&json!({"cmd": "x"})).is_none());
         assert!(Expect::from_args(&json!({"cmd": "x", "expect_has": ""})).is_none());
-        assert_eq!(Expect::from_args(&json!({"expect_lacks": "Error"})).unwrap().describe(), "lacks \"Error\"");
+        assert_eq!(
+            Expect::from_args(&json!({"expect_lacks": "Error"}))
+                .unwrap()
+                .describe(),
+            "lacks \"Error\""
+        );
 
         // An exit prediction is read however it is worded; one that cannot be read is not held
         // against the model as "exit 0".
-        let exit = |said: &str| Expect::from_args(&json!({"expect_exit": said})).unwrap().exit;
+        let exit = |said: &str| {
+            Expect::from_args(&json!({"expect_exit": said}))
+                .unwrap()
+                .exit
+        };
         for said in ["not 0", "non zero", "Non-Zero", "!= 0", "exit != 0"] {
             assert_eq!(exit(said), Some(ExitExpect::Nonzero), "{said}");
         }
         assert_eq!(exit("code 2"), Some(ExitExpect::Code(2)));
         assert_eq!(exit("1 (usage error)"), Some(ExitExpect::Code(1)));
         assert_eq!(exit("whatever the linter says"), Some(ExitExpect::Any));
-        assert!(check(Expect::from_args(&json!({"expect_exit": "not 0"})).as_ref(), Some(1), "").held);
+        assert!(
+            check(
+                Expect::from_args(&json!({"expect_exit": "not 0"})).as_ref(),
+                Some(1),
+                ""
+            )
+            .held
+        );
 
         // Seen live from GLM-5.3: the nested object arrives as a string in its native call syntax.
         let e = Expect::from_args(&json!({"expect": "exit</arg_key><arg_value>nonzero"})).unwrap();
         assert_eq!(e.exit, Some(ExitExpect::Nonzero));
         let e = Expect::from_args(&json!({"expect": "has</arg_key><arg_value>OK</arg_value><arg_key>exit</arg_key><arg_value>0"})).unwrap();
-        assert_eq!((e.exit, e.has.as_slice()), (Some(ExitExpect::Code(0)), &["OK".to_string()][..]));
+        assert_eq!(
+            (e.exit, e.has.as_slice()),
+            (Some(ExitExpect::Code(0)), &["OK".to_string()][..])
+        );
         assert!(unleak("plain text").is_none());
     }
 
@@ -285,7 +397,8 @@ mod tests {
 
     #[test]
     fn has_and_lacks_are_case_insensitive_substrings_or_regex() {
-        let e = Expect::from_value(&json!({"has": "PASSED", "lacks": "/\\bfail(ed|ure)\\b/i"})).unwrap();
+        let e = Expect::from_value(&json!({"has": "PASSED", "lacks": "/\\bfail(ed|ure)\\b/i"}))
+            .unwrap();
         assert!(check(Some(&e), Some(0), "12 passed in 0.3s").held);
         let v = check(Some(&e), Some(0), "11 passed, 1 FAILED");
         assert_eq!(v.violations.len(), 1);
@@ -294,12 +407,21 @@ mod tests {
 
     #[test]
     fn nonzero_any_and_running() {
-        let fail = Expect { exit: Some(ExitExpect::Nonzero), ..Default::default() };
+        let fail = Expect {
+            exit: Some(ExitExpect::Nonzero),
+            ..Default::default()
+        };
         assert!(check(Some(&fail), Some(1), "").held);
         assert!(!check(Some(&fail), Some(0), "").held);
-        let any = Expect { exit: Some(ExitExpect::Any), ..Default::default() };
+        let any = Expect {
+            exit: Some(ExitExpect::Any),
+            ..Default::default()
+        };
         assert!(check(Some(&any), None, "").held);
-        assert!(!check(None, None, "").held, "a command that never exited did not meet 'exit 0'");
+        assert!(
+            !check(None, None, "").held,
+            "a command that never exited did not meet 'exit 0'"
+        );
     }
 
     #[test]

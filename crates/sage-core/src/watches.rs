@@ -74,13 +74,37 @@ pub struct WatchSpec {
 
 impl Watches {
     pub fn specs(&self) -> Vec<WatchSpec> {
-        self.items.iter().map(|w| WatchSpec { name: w.name.clone(), cmd: w.cmd.clone(), cwd: w.cwd.clone(), expect: w.expect.clone(), auto: w.auto, named: w.named }).collect()
+        self.items
+            .iter()
+            .map(|w| WatchSpec {
+                name: w.name.clone(),
+                cmd: w.cmd.clone(),
+                cwd: w.cwd.clone(),
+                expect: w.expect.clone(),
+                auto: w.auto,
+                named: w.named,
+            })
+            .collect()
     }
 
     /// Puts back watches as `specs` gave them. Each runs again, with the first result as new, once
     /// the workspace changes.
     pub fn restore(&mut self, specs: Vec<WatchSpec>) {
-        self.items = specs.into_iter().map(|s| Watch { name: s.name, cmd: s.cmd, cwd: s.cwd, expect: s.expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: s.auto, named: s.named }).collect();
+        self.items = specs
+            .into_iter()
+            .map(|s| Watch {
+                name: s.name,
+                cmd: s.cmd,
+                cwd: s.cwd,
+                expect: s.expect,
+                state: WatchState::Unknown,
+                digest: 0,
+                epoch: 0,
+                summary: String::new(),
+                auto: s.auto,
+                named: s.named,
+            })
+            .collect();
     }
 }
 
@@ -113,7 +137,18 @@ pub(crate) fn digest(text: &str) -> u64 {
 
 impl Watches {
     pub fn set(&mut self, name: &str, cmd: &str, cwd: PathBuf, expect: Option<Expect>) -> usize {
-        let fresh = Watch { name: name.to_string(), cmd: cmd.to_string(), cwd, expect, state: WatchState::Unknown, digest: 0, epoch: 0, summary: String::new(), auto: false, named: false };
+        let fresh = Watch {
+            name: name.to_string(),
+            cmd: cmd.to_string(),
+            cwd,
+            expect,
+            state: WatchState::Unknown,
+            digest: 0,
+            epoch: 0,
+            summary: String::new(),
+            auto: false,
+            named: false,
+        };
         match self.items.iter().position(|w| w.name == name) {
             Some(i) => {
                 self.items[i] = fresh;
@@ -142,7 +177,11 @@ impl Watches {
     }
 
     pub fn names(&self) -> String {
-        self.items.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ")
+        self.items
+            .iter()
+            .map(|w| w.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -152,25 +191,58 @@ pub async fn run_one(sess: &mut Session, idx: usize, cancel: &CancellationToken)
 }
 
 /// As `run_one`, with a time limit. Also returns the exit code if the command ran to its end.
-async fn run_within(sess: &mut Session, idx: usize, limit: Duration, cancel: &CancellationToken) -> (WatchReport, Option<i32>) {
+async fn run_within(
+    sess: &mut Session,
+    idx: usize,
+    limit: Duration,
+    cancel: &CancellationToken,
+) -> (WatchReport, Option<i32>) {
     let w = sess.watches.items[idx].clone();
     sess.evidence.before_command(&sess.ws);
     let result = exec(sess, &w.cmd, &w.cwd, StateKind::ReadOnly, limit, cancel).await;
     sess.evidence.after_command(&sess.ws, &w.cmd);
 
     let (state, text, why, spill, code) = match result {
-        Err(e) => (WatchState::Fail, String::new(), format!("could not start: {e}"), String::new(), None),
+        Err(e) => (
+            WatchState::Fail,
+            String::new(),
+            format!("could not start: {e}"),
+            String::new(),
+            None,
+        ),
         Ok(ex) => match ex.end {
             ExecEnd::Exited(exit) => {
                 let verdict = guard::check(w.expect.as_ref(), exit.code, &ex.text);
-                let state = if verdict.held { WatchState::Pass } else { WatchState::Fail };
-                (state, ex.text, verdict.violations.join("; "), ex.spill, exit.code)
+                let state = if verdict.held {
+                    WatchState::Pass
+                } else {
+                    WatchState::Fail
+                };
+                (
+                    state,
+                    ex.text,
+                    verdict.violations.join("; "),
+                    ex.spill,
+                    exit.code,
+                )
             }
             ExecEnd::TimedOut(running) => {
                 kill_group(running.pid);
-                (WatchState::Fail, ex.text, format!("did not finish within {}s", limit.as_secs()), ex.spill, None)
+                (
+                    WatchState::Fail,
+                    ex.text,
+                    format!("did not finish within {}s", limit.as_secs()),
+                    ex.spill,
+                    None,
+                )
             }
-            ExecEnd::Cancelled => (WatchState::Unknown, ex.text, "cancelled".to_string(), ex.spill, None),
+            ExecEnd::Cancelled => (
+                WatchState::Unknown,
+                ex.text,
+                "cancelled".to_string(),
+                ex.spill,
+                None,
+            ),
         },
     };
 
@@ -179,7 +251,14 @@ async fn run_within(sess: &mut Session, idx: usize, limit: Duration, cancel: &Ca
 
 /// Records a result for watch `idx` and words what changed. Without a `spill` handle the output is
 /// one the model has just been shown (it ran the command itself), so none of it is repeated.
-fn settle(sess: &mut Session, idx: usize, state: WatchState, text: &str, why: &str, spill: Option<&str>) -> WatchReport {
+fn settle(
+    sess: &mut Session,
+    idx: usize,
+    state: WatchState,
+    text: &str,
+    why: &str,
+    spill: Option<&str>,
+) -> WatchReport {
     let w = sess.watches.items[idx].clone();
     let lines = squeeze(text);
     let new_digest = digest(text);
@@ -189,15 +268,34 @@ fn settle(sess: &mut Session, idx: usize, state: WatchState, text: &str, why: &s
         (WatchState::Fail, WatchState::Fail) if w.digest != new_digest => WatchChange::Changed,
         _ => WatchChange::Same,
     };
-    let last = tail(&lines, 1).first().map(|l| one_line(l, 160)).unwrap_or_default();
+    let last = tail(&lines, 1)
+        .first()
+        .map(|l| one_line(l, 160))
+        .unwrap_or_default();
 
     let excerpt = |sess: &mut Session| {
-        let Some(spill) = spill else { return String::new() };
-        let view = bound(&lines, sess.limits.fail_head / 2, sess.limits.fail_tail / 2, sess.limits.fail_chars / 2, Some(spill));
+        let Some(spill) = spill else {
+            return String::new();
+        };
+        let view = bound(
+            &lines,
+            sess.limits.fail_head / 2,
+            sess.limits.fail_tail / 2,
+            sess.limits.fail_chars / 2,
+            Some(spill),
+        );
         let mut s = format!("\n{}", view.text.trim_end());
         if sess.features.expand {
             let step = sess.step;
-            let block = locate::expand(text, &sess.ws, &mut sess.seen, step, sess.limits.expand_radius, sess.limits.expand_windows, sess.limits.expand_chars);
+            let block = locate::expand(
+                text,
+                &sess.ws,
+                &mut sess.seen,
+                step,
+                sess.limits.expand_radius,
+                sess.limits.expand_windows,
+                sess.limits.expand_chars,
+            );
             if !block.is_empty() {
                 s.push_str("\n--- where (current file content; anchors work in edit) ---\n");
                 s.push_str(block.trim_end());
@@ -211,10 +309,20 @@ fn settle(sess: &mut Session, idx: usize, state: WatchState, text: &str, why: &s
         (WatchState::Pass, WatchChange::New) => format!("watch {name}: PASS · {last}"),
         (WatchState::Pass, WatchChange::Flip) => format!("watch {name}: FAIL → PASS · {last}"),
         (WatchState::Pass, _) => String::new(),
-        (WatchState::Fail, WatchChange::New) => format!("watch {name}: FAIL ({why}){}", excerpt(sess)),
-        (WatchState::Fail, WatchChange::Flip) => format!("watch {name}: PASS → FAIL ({why}) — the change you just made broke it{}", excerpt(sess)),
-        (WatchState::Fail, WatchChange::Changed) => format!("watch {name}: still FAIL ({why}), but the output changed{}", excerpt(sess)),
-        (WatchState::Fail, WatchChange::Same) => format!("watch {name}: still FAIL, same output as before"),
+        (WatchState::Fail, WatchChange::New) => {
+            format!("watch {name}: FAIL ({why}){}", excerpt(sess))
+        }
+        (WatchState::Fail, WatchChange::Flip) => format!(
+            "watch {name}: PASS → FAIL ({why}) — the change you just made broke it{}",
+            excerpt(sess)
+        ),
+        (WatchState::Fail, WatchChange::Changed) => format!(
+            "watch {name}: still FAIL ({why}), but the output changed{}",
+            excerpt(sess)
+        ),
+        (WatchState::Fail, WatchChange::Same) => {
+            format!("watch {name}: still FAIL, same output as before")
+        }
         (WatchState::Unknown, _) => format!("watch {name}: not run ({why})"),
     };
 
@@ -222,13 +330,27 @@ fn settle(sess: &mut Session, idx: usize, state: WatchState, text: &str, why: &s
     item.state = state;
     item.digest = new_digest;
     item.summary = last;
-    WatchReport { name: w.name, cmd: w.cmd, state, change, detail }
+    WatchReport {
+        name: w.name,
+        cmd: w.cmd,
+        state,
+        change,
+        detail,
+    }
 }
 
 /// Re-runs every watch that has not seen the current state of the workspace. Returns the reports and
 /// the text to append to the turn's last observation (empty when there is nothing to say).
-pub async fn run_stale(sess: &mut Session, cancel: &CancellationToken) -> (Vec<WatchReport>, String) {
-    let stale: Vec<usize> = (0..sess.watches.items.len()).filter(|i| sess.watches.items[*i].epoch != sess.evidence.epoch || sess.watches.items[*i].state == WatchState::Unknown).collect();
+pub async fn run_stale(
+    sess: &mut Session,
+    cancel: &CancellationToken,
+) -> (Vec<WatchReport>, String) {
+    let stale: Vec<usize> = (0..sess.watches.items.len())
+        .filter(|i| {
+            sess.watches.items[*i].epoch != sess.evidence.epoch
+                || sess.watches.items[*i].state == WatchState::Unknown
+        })
+        .collect();
     if stale.is_empty() {
         return (Vec::new(), String::new());
     }
@@ -252,8 +374,16 @@ pub async fn run_stale(sess: &mut Session, cancel: &CancellationToken) -> (Vec<W
             sess.evidence.passed(format!("watch {names}"));
         }
     }
-    let mut text: Vec<String> = reports.iter().filter(|r| !r.detail.is_empty()).map(|r| r.detail.clone()).collect();
-    let quiet: Vec<&str> = reports.iter().filter(|r| r.detail.is_empty()).map(|r| r.name.as_str()).collect();
+    let mut text: Vec<String> = reports
+        .iter()
+        .filter(|r| !r.detail.is_empty())
+        .map(|r| r.detail.clone())
+        .collect();
+    let quiet: Vec<&str> = reports
+        .iter()
+        .filter(|r| r.detail.is_empty())
+        .map(|r| r.name.as_str())
+        .collect();
     if !quiet.is_empty() {
         text.push(format!("watches still passing: {}", quiet.join(", ")));
     }
@@ -277,11 +407,28 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
     let mut out = Observed::default();
     let cmd = without_cd(cmd, &run.cwd);
     let epoch = sess.evidence.epoch;
-    let same: Vec<usize> = (0..sess.watches.items.len()).filter(|i| sess.watches.items[*i].cmd == cmd && sess.watches.items[*i].cwd == run.cwd).collect();
+    let same: Vec<usize> = (0..sess.watches.items.len())
+        .filter(|i| sess.watches.items[*i].cmd == cmd && sess.watches.items[*i].cwd == run.cwd)
+        .collect();
     for idx in &same {
-        let verdict = guard::check(sess.watches.items[*idx].expect.as_ref(), run.code, &run.text);
-        let state = if verdict.held { WatchState::Pass } else { WatchState::Fail };
-        let report = settle(sess, *idx, state, &run.text, &verdict.violations.join("; "), None);
+        let verdict = guard::check(
+            sess.watches.items[*idx].expect.as_ref(),
+            run.code,
+            &run.text,
+        );
+        let state = if verdict.held {
+            WatchState::Pass
+        } else {
+            WatchState::Fail
+        };
+        let report = settle(
+            sess,
+            *idx,
+            state,
+            &run.text,
+            &verdict.violations.join("; "),
+            None,
+        );
         sess.watches.items[*idx].epoch = epoch;
         if report.change != WatchChange::Same {
             out.reports.push(report);
@@ -290,25 +437,47 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
 
     // A runner that could not start (126, 127) says nothing about the code. Nor does a throwaway
     // script: one that lives outside the workspace is gone, or failing on purpose, soon after.
-    let promote = same.is_empty() && sess.features.auto_watch && run.ms <= AUTO_MAX_MS && !matches!(run.code, None | Some(126 | 127)) && test_like(cmd) && !throwaway(cmd, &sess.ws.root);
-    let previous = sess.watches.items.iter().find(|w| w.auto).map(|w| w.cmd.clone());
+    let promote = same.is_empty()
+        && sess.features.auto_watch
+        && run.ms <= AUTO_MAX_MS
+        && !matches!(run.code, None | Some(126 | 127))
+        && test_like(cmd)
+        && !throwaway(cmd, &sess.ws.root);
+    let previous = sess
+        .watches
+        .items
+        .iter()
+        .find(|w| w.auto)
+        .map(|w| w.cmd.clone());
     // A watch the model itself named `tests` is the model's, the command the task names stays the
     // one that is watched, and of two runs the broader is kept.
-    let owned = sess.watches.items.iter().any(|w| w.name == AUTO_NAME && (!w.auto || w.named));
+    let owned = sess
+        .watches
+        .items
+        .iter()
+        .any(|w| w.name == AUTO_NAME && (!w.auto || w.named));
     if !promote || owned || previous.as_deref().is_some_and(|old| narrows(old, cmd)) {
         return out;
     }
     let idx = sess.watches.set(AUTO_NAME, cmd, run.cwd.clone(), None);
     sess.watches.items[idx].auto = true;
-    let state = if run.code == Some(0) { WatchState::Pass } else { WatchState::Fail };
+    let state = if run.code == Some(0) {
+        WatchState::Pass
+    } else {
+        WatchState::Fail
+    };
     let mut report = settle(sess, idx, state, &run.text, "", None);
     sess.watches.items[idx].epoch = epoch;
 
     let shown = one_line(cmd, 80);
     let notice = match (previous, state) {
-        (Some(_), WatchState::Pass) => format!("watch {AUTO_NAME}: PASS · it now follows `{shown}`."),
+        (Some(_), WatchState::Pass) => {
+            format!("watch {AUTO_NAME}: PASS · it now follows `{shown}`.")
+        }
         (Some(_), _) => format!("watch {AUTO_NAME}: FAIL · it now follows `{shown}`."),
-        (None, WatchState::Pass) => format!("watch {AUTO_NAME}: PASS · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again."),
+        (None, WatchState::Pass) => format!(
+            "watch {AUTO_NAME}: PASS · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again."
+        ),
         (None, _) => format!(
             "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. Send `finish` in the same reply as your fix: the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead."
         ),
@@ -321,7 +490,8 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
 
 /// True when `new` is `old` with more arguments: the same run restricted to a part.
 fn narrows(old: &str, new: &str) -> bool {
-    new.strip_prefix(old).is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    new.strip_prefix(old)
+        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
 }
 
 /// A command that writes its own script first (a here-document), or that names a place in the
@@ -331,14 +501,25 @@ fn throwaway(cmd: &str, root: &Path) -> bool {
         return true;
     }
     let tmp = std::env::temp_dir();
-    cmd.split(|c: char| c.is_whitespace() || "\"'=;&|()<>".contains(c)).map(Path::new).any(|word| word.is_absolute() && (word.starts_with(&tmp) || word.starts_with("/tmp")) && !word.starts_with(root))
+    cmd.split(|c: char| c.is_whitespace() || "\"'=;&|()<>".contains(c))
+        .map(Path::new)
+        .any(|word| {
+            word.is_absolute()
+                && (word.starts_with(&tmp) || word.starts_with("/tmp"))
+                && !word.starts_with(root)
+        })
 }
 
 /// `cd <the directory it already runs in> && rest` is just `rest`.
 fn without_cd<'a>(cmd: &'a str, cwd: &Path) -> &'a str {
-    let stripped = cmd.trim_start().strip_prefix("cd ").and_then(|rest| rest.split_once("&&"));
+    let stripped = cmd
+        .trim_start()
+        .strip_prefix("cd ")
+        .and_then(|rest| rest.split_once("&&"));
     match stripped {
-        Some((dir, rest)) if Path::new(dir.trim().trim_matches(['"', '\''])) == cwd => rest.trim_start(),
+        Some((dir, rest)) if Path::new(dir.trim().trim_matches(['"', '\''])) == cwd => {
+            rest.trim_start()
+        }
         _ => cmd,
     }
 }
@@ -346,7 +527,11 @@ fn without_cd<'a>(cmd: &'a str, cwd: &Path) -> &'a str {
 /// The test command a task names: the first `backticked` span that is a plain test run. Nothing
 /// chained, piped, quoted or redirected qualifies, because it is run before the model has said a word.
 pub fn named_in(task: &str) -> Option<&str> {
-    task.split('`').skip(1).step_by(2).map(str::trim).find(|span| test_like(span) && !span.contains(|c: char| ";&|<>$(){}\\\"'\n".contains(c)))
+    task.split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::trim)
+        .find(|span| test_like(span) && !span.contains(|c: char| ";&|<>$(){}\\\"'\n".contains(c)))
 }
 
 /// What the model is told after a preflight, below the result.
@@ -357,7 +542,11 @@ const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Runs the test command the task names before the first model turn and keeps it as the watch. The
 /// model then starts from the failing output instead of spending a turn to get it, and its first
 /// edit already comes back checked. `None` when the task names no such command or it cannot be run.
-pub async fn preflight(sess: &mut Session, task: &str, cancel: &CancellationToken) -> Option<WatchReport> {
+pub async fn preflight(
+    sess: &mut Session,
+    task: &str,
+    cancel: &CancellationToken,
+) -> Option<WatchReport> {
     if !(sess.features.watches && sess.features.auto_watch && sess.features.preflight) {
         return None;
     }
@@ -379,9 +568,28 @@ pub async fn preflight(sess: &mut Session, task: &str, cancel: &CancellationToke
     Some(report)
 }
 
-const RUNNERS: &[&str] = &["pytest", "py.test", "tox", "nox", "nose2", "nosetests", "jest", "vitest", "mocha", "ava", "phpunit", "rspec", "ctest", "bats", "behave"];
+const RUNNERS: &[&str] = &[
+    "pytest",
+    "py.test",
+    "tox",
+    "nox",
+    "nose2",
+    "nosetests",
+    "jest",
+    "vitest",
+    "mocha",
+    "ava",
+    "phpunit",
+    "rspec",
+    "ctest",
+    "bats",
+    "behave",
+];
 /// Tools whose test run is spelled `<tool> test`.
-const TEST_SUBCOMMAND: &[&str] = &["go", "deno", "dotnet", "mix", "swift", "flutter", "dart", "stack", "cabal", "lein", "sbt", "bazel", "bun", "composer", "just", "task", "rake"];
+const TEST_SUBCOMMAND: &[&str] = &[
+    "go", "deno", "dotnet", "mix", "swift", "flutter", "dart", "stack", "cabal", "lein", "sbt",
+    "bazel", "bun", "composer", "just", "task", "rake",
+];
 
 fn base(word: &str) -> &str {
     word.rsplit('/').next().unwrap_or(word)
@@ -389,7 +597,24 @@ fn base(word: &str) -> &str {
 
 /// `run_tests.sh`, `test_calc.py`, `check`: a file whose name says it tests something.
 fn test_name(path: &str) -> bool {
-    base(path).to_ascii_lowercase().split(['.', '_', '-']).any(|t| matches!(t, "test" | "tests" | "spec" | "specs" | "check" | "checks" | "verify" | "runtests" | "unittest" | "unittests"))
+    base(path)
+        .to_ascii_lowercase()
+        .split(['.', '_', '-'])
+        .any(|t| {
+            matches!(
+                t,
+                "test"
+                    | "tests"
+                    | "spec"
+                    | "specs"
+                    | "check"
+                    | "checks"
+                    | "verify"
+                    | "runtests"
+                    | "unittest"
+                    | "unittests"
+            )
+        })
 }
 
 /// True when `cmd` is a test run whose exit status is its verdict: the last command on the line is a
@@ -399,27 +624,51 @@ pub fn test_like(cmd: &str) -> bool {
     if cmd.contains("||") {
         return false;
     }
-    let Some(last) = cmd.split(['\n', ';']).flat_map(|part| part.split("&&")).map(str::trim).filter(|part| !part.is_empty()).last() else { return false };
+    let Some(last) = cmd
+        .split(['\n', ';'])
+        .flat_map(|part| part.split("&&"))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .last()
+    else {
+        return false;
+    };
     if last.ends_with('&') {
         return false;
     }
     // In `tests | tail` the first stage runs the tests, and `exec` reports its failure.
-    let stage = last.split('|').next().unwrap_or("").trim_matches(['(', ')', '{', '}', ' ']);
+    let stage = last
+        .split('|')
+        .next()
+        .unwrap_or("")
+        .trim_matches(['(', ')', '{', '}', ' ']);
     let mut w: Vec<&str> = stage.split_whitespace().collect();
 
     // Leading `VAR=value` settings and wrappers that only set the stage.
     loop {
         match w.first().copied() {
-            Some(x) if x.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) => {
+            Some(x)
+                if x.split_once('=').is_some_and(|(k, _)| {
+                    !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                }) =>
+            {
                 w.remove(0);
             }
-            Some("env" | "time" | "nice" | "sudo" | "command" | "exec" | "npx" | "bunx" | "xvfb-run" | "timeout") => {
+            Some(
+                "env" | "time" | "nice" | "sudo" | "command" | "exec" | "npx" | "bunx" | "xvfb-run"
+                | "timeout",
+            ) => {
                 w.remove(0);
-                while w.first().is_some_and(|x| x.starts_with(|c: char| c == '-' || c.is_ascii_digit())) {
+                while w
+                    .first()
+                    .is_some_and(|x| x.starts_with(|c: char| c == '-' || c.is_ascii_digit()))
+                {
                     w.remove(0);
                 }
             }
-            Some("uv" | "poetry" | "pipenv" | "hatch" | "pdm" | "rye" | "bundle") if matches!(w.get(1).copied(), Some("run" | "exec")) => {
+            Some("uv" | "poetry" | "pipenv" | "hatch" | "pdm" | "rye" | "bundle")
+                if matches!(w.get(1).copied(), Some("run" | "exec")) =>
+            {
                 w.drain(..2);
             }
             Some("pnpm" | "yarn") if matches!(w.get(1).copied(), Some("exec" | "dlx")) => {
@@ -428,25 +677,55 @@ pub fn test_like(cmd: &str) -> bool {
             _ => break,
         }
     }
-    let Some(first) = w.first().copied() else { return false };
-    let args: Vec<&str> = w[1..].iter().copied().filter(|a| !a.starts_with('-')).collect();
+    let Some(first) = w.first().copied() else {
+        return false;
+    };
+    let args: Vec<&str> = w[1..]
+        .iter()
+        .copied()
+        .filter(|a| !a.starts_with('-'))
+        .collect();
     let arg = |i: usize| args.get(i).copied().unwrap_or("");
     match base(first) {
         h if RUNNERS.contains(&h) => true,
-        h if h.starts_with("python") || h.starts_with("pypy") => match w.iter().position(|a| *a == "-m") {
-            Some(i) => matches!(w.get(i + 1).copied(), Some("pytest" | "unittest" | "nose2" | "tox" | "nox" | "doctest")),
-            None => !w.contains(&"-c") && (test_name(arg(0)) || (base(arg(0)) == "manage.py" && arg(1) == "test")),
-        },
+        h if h.starts_with("python") || h.starts_with("pypy") => {
+            match w.iter().position(|a| *a == "-m") {
+                Some(i) => matches!(
+                    w.get(i + 1).copied(),
+                    Some("pytest" | "unittest" | "nose2" | "tox" | "nox" | "doctest")
+                ),
+                None => {
+                    !w.contains(&"-c")
+                        && (test_name(arg(0)) || (base(arg(0)) == "manage.py" && arg(1) == "test"))
+                }
+            }
+        }
         "node" => w.contains(&"--test") || test_name(arg(0)),
-        "ruby" | "php" | "bash" | "sh" | "zsh" | "dash" | "ksh" => !w.contains(&"-c") && (test_name(arg(0)) || (base(arg(0)) == "artisan" && arg(1) == "test")),
-        "cargo" => matches!(if arg(0).starts_with('+') { arg(1) } else { arg(0) }, "test" | "nextest" | "t"),
+        "ruby" | "php" | "bash" | "sh" | "zsh" | "dash" | "ksh" => {
+            !w.contains(&"-c")
+                && (test_name(arg(0)) || (base(arg(0)) == "artisan" && arg(1) == "test"))
+        }
+        "cargo" => matches!(
+            if arg(0).starts_with('+') {
+                arg(1)
+            } else {
+                arg(0)
+            },
+            "test" | "nextest" | "t"
+        ),
         "npm" | "pnpm" | "yarn" => {
-            let script = if matches!(arg(0), "run" | "run-script") { arg(1) } else { arg(0) };
+            let script = if matches!(arg(0), "run" | "run-script") {
+                arg(1)
+            } else {
+                arg(0)
+            };
             script == "t" || script == "test" || script.starts_with("test:")
         }
         "zig" => arg(0) == "test" || (arg(0) == "build" && arg(1) == "test"),
         h if TEST_SUBCOMMAND.contains(&h) => matches!(arg(0), "test" | "spec"),
-        "make" | "gmake" | "mvn" | "mvnw" | "gradle" | "gradlew" | "ant" => args.iter().any(|a| matches!(*a, "test" | "tests" | "check" | "verify")),
+        "make" | "gmake" | "mvn" | "mvnw" | "gradle" | "gradlew" | "ant" => args
+            .iter()
+            .any(|a| matches!(*a, "test" | "tests" | "check" | "verify")),
         // A script run directly: `./run_tests.sh`, `bin/test`.
         _ => first.contains('/') && test_name(first),
     }
@@ -467,7 +746,11 @@ mod tests {
         let mut s = test_session("watch", Features::ecosage());
         let cancel = CancellationToken::new();
         std::fs::write(s.ws.root.join("ok"), "").unwrap();
-        add(&mut s, "tests", "test -f ok && echo '3 passed in 0.12s' || { echo 'FAILED: ok is missing'; exit 1; }");
+        add(
+            &mut s,
+            "tests",
+            "test -f ok && echo '3 passed in 0.12s' || { echo 'FAILED: ok is missing'; exit 1; }",
+        );
 
         let (reports, text) = run_stale(&mut s, &cancel).await;
         assert_eq!(reports[0].change, WatchChange::New);
@@ -482,13 +765,19 @@ mod tests {
         s.evidence.changed("edit");
         let (_, text) = run_stale(&mut s, &cancel).await;
         assert_eq!(text, "watches still passing: tests");
-        assert!(s.evidence.fresh(), "a passing watch run is evidence for the new state");
+        assert!(
+            s.evidence.fresh(),
+            "a passing watch run is evidence for the new state"
+        );
 
         // A change that breaks it is called out as a regression, with the output.
         std::fs::remove_file(s.ws.root.join("ok")).unwrap();
         s.evidence.changed("edit");
         let (reports, text) = run_stale(&mut s, &cancel).await;
-        assert_eq!((reports[0].state, reports[0].change), (WatchState::Fail, WatchChange::Flip));
+        assert_eq!(
+            (reports[0].state, reports[0].change),
+            (WatchState::Fail, WatchChange::Flip)
+        );
         assert!(text.starts_with("watch tests: PASS → FAIL (expected exit 0, got exit 1) — the change you just made broke it\n"), "{text}");
         assert!(text.contains("FAILED: ok is missing"));
         assert!(!s.evidence.fresh());
@@ -520,7 +809,10 @@ mod tests {
         let stopped = CancellationToken::new();
         stopped.cancel();
         let (reports, _) = run_stale(&mut s, &stopped).await;
-        assert!(reports.is_empty() && !s.evidence.fresh(), "nothing ran, so nothing is verified");
+        assert!(
+            reports.is_empty() && !s.evidence.fresh(),
+            "nothing ran, so nothing is verified"
+        );
 
         // The next run still owes both of them, and finds the one that broke.
         let (reports, _) = run_stale(&mut s, &CancellationToken::new()).await;
@@ -533,7 +825,11 @@ mod tests {
         let mut s = test_session("watch-digest", Features::ecosage());
         let cancel = CancellationToken::new();
         std::fs::write(s.ws.root.join("which"), "test_a").unwrap();
-        add(&mut s, "t", "echo \"FAILED $(cat which) in 0.$(date +%N | cut -c1-3)s\"; exit 1");
+        add(
+            &mut s,
+            "t",
+            "echo \"FAILED $(cat which) in 0.$(date +%N | cut -c1-3)s\"; exit 1",
+        );
         run_stale(&mut s, &cancel).await;
         s.evidence.changed("edit");
         let (r, _) = run_stale(&mut s, &cancel).await;
@@ -556,35 +852,63 @@ mod tests {
 
         add(&mut s, "w", "false");
         assert_eq!(s.watches.items.len(), 1);
-        assert_eq!(s.watches.items[0].state, WatchState::Unknown, "a redefined watch starts over");
+        assert_eq!(
+            s.watches.items[0].state,
+            WatchState::Unknown,
+            "a redefined watch starts over"
+        );
         assert!(s.watches.remove("w"));
-        assert!(!s.watches.all_pass(), "no watches is not the same as all watches passing");
+        assert!(
+            !s.watches.all_pass(),
+            "no watches is not the same as all watches passing"
+        );
     }
 
     fn finished(sess: &Session, code: i32, text: &str) -> Completed {
-        Completed { cwd: sess.ws.cwd.clone(), code: Some(code), ms: 40, text: text.to_string() }
+        Completed {
+            cwd: sess.ws.cwd.clone(),
+            code: Some(code),
+            ms: 40,
+            text: text.to_string(),
+        }
     }
 
     #[tokio::test]
     async fn the_models_test_run_becomes_a_watch_and_is_never_run_twice() {
         let mut s = test_session("watch-auto", Features::ecosage());
         let cancel = CancellationToken::new();
-        std::fs::write(s.ws.root.join("check.sh"), "test -f ok && echo PASS || { echo 'FAIL: ok is missing'; exit 1; }\n").unwrap();
+        std::fs::write(
+            s.ws.root.join("check.sh"),
+            "test -f ok && echo PASS || { echo 'FAIL: ok is missing'; exit 1; }\n",
+        )
+        .unwrap();
 
         // Not a test run, a runner that could not start, a slow run: none becomes a watch.
         let run = finished(&s, 0, "a.txt");
         assert!(observe(&mut s, "ls", &run).notice.is_none());
         let run = finished(&s, 127, "bash: pytest: command not found");
         assert!(observe(&mut s, "pytest -q", &run).notice.is_none());
-        let slow = Completed { ms: 90_000, ..finished(&s, 1, "FAILED") };
+        let slow = Completed {
+            ms: 90_000,
+            ..finished(&s, 1, "FAILED")
+        };
         assert!(observe(&mut s, "pytest -q", &slow).notice.is_none());
         assert!(s.watches.items.is_empty());
 
         // The failing run the model made is the watch's first result.
         let run = finished(&s, 1, "FAIL: ok is missing");
         let seen = observe(&mut s, "sh check.sh", &run);
-        assert!(seen.notice.as_deref().unwrap().starts_with("watch tests: FAIL · `sh check.sh` is now watched: it re-runs by itself"), "{:?}", seen.notice);
-        assert_eq!((seen.reports[0].state, seen.reports[0].change), (WatchState::Fail, WatchChange::New));
+        assert!(
+            seen.notice.as_deref().unwrap().starts_with(
+                "watch tests: FAIL · `sh check.sh` is now watched: it re-runs by itself"
+            ),
+            "{:?}",
+            seen.notice
+        );
+        assert_eq!(
+            (seen.reports[0].state, seen.reports[0].change),
+            (WatchState::Fail, WatchChange::New)
+        );
         assert!(s.watches.items[0].auto);
         let (reports, _) = run_stale(&mut s, &cancel).await;
         assert!(reports.is_empty(), "nothing changed since that run");
@@ -605,12 +929,22 @@ mod tests {
         assert!(reports.is_empty());
 
         // A narrower run of it changes nothing; a different test command takes its place.
-        assert!(observe(&mut s, "sh check.sh --only one", &run).notice.is_none());
+        assert!(
+            observe(&mut s, "sh check.sh --only one", &run)
+                .notice
+                .is_none()
+        );
         assert_eq!(s.watches.items[0].cmd, "sh check.sh");
         let run = finished(&s, 1, "1 failed");
         let seen = observe(&mut s, "python3 -m unittest", &run);
-        assert_eq!(seen.notice.as_deref(), Some("watch tests: FAIL · it now follows `python3 -m unittest`."));
-        assert_eq!((s.watches.items.len(), s.watches.items[0].cmd.as_str()), (1, "python3 -m unittest"));
+        assert_eq!(
+            seen.notice.as_deref(),
+            Some("watch tests: FAIL · it now follows `python3 -m unittest`.")
+        );
+        assert_eq!(
+            (s.watches.items.len(), s.watches.items[0].cmd.as_str()),
+            (1, "python3 -m unittest")
+        );
 
         // `cd` into the directory it already runs in is not a different command.
         let run = finished(&s, 0, "OK");
@@ -621,31 +955,65 @@ mod tests {
 
     #[tokio::test]
     async fn the_test_command_a_task_names_is_run_and_watched_before_the_first_turn() {
-        assert_eq!(named_in("`python3 -m unittest` fails here. Fix `pager.py`."), Some("python3 -m unittest"));
-        assert_eq!(named_in("Fix `summary.sh` so that `sh check.sh` passes."), Some("sh check.sh"));
+        assert_eq!(
+            named_in("`python3 -m unittest` fails here. Fix `pager.py`."),
+            Some("python3 -m unittest")
+        );
+        assert_eq!(
+            named_in("Fix `summary.sh` so that `sh check.sh` passes."),
+            Some("sh check.sh")
+        );
         // Code, files, and anything chained or piped are not a command to run unasked.
-        for task in ["Create `roman.py` with `to_roman(n)`.", "Run `rm -rf build && pytest`.", "`pytest | tail -3` shows the failure", "no backticks: pytest fails", "an unbalanced ` tick"] {
+        for task in [
+            "Create `roman.py` with `to_roman(n)`.",
+            "Run `rm -rf build && pytest`.",
+            "`pytest | tail -3` shows the failure",
+            "no backticks: pytest fails",
+            "an unbalanced ` tick",
+        ] {
             assert_eq!(named_in(task), None, "{task}");
         }
 
         let mut s = test_session("watch-preflight", Features::ecosage());
         let cancel = CancellationToken::new();
-        std::fs::write(s.ws.root.join("check.sh"), "test -f ok && echo PASS || { echo 'FAIL: ok is missing'; exit 1; }\n").unwrap();
-        let report = preflight(&mut s, "`sh check.sh` fails. Make it pass.", &cancel).await.expect("the task names a test command");
-        assert_eq!((report.state, report.change), (WatchState::Fail, WatchChange::New));
-        assert_eq!(report.detail, "watch tests: FAIL (expected exit 0, got exit 1)\nFAIL: ok is missing");
+        std::fs::write(
+            s.ws.root.join("check.sh"),
+            "test -f ok && echo PASS || { echo 'FAIL: ok is missing'; exit 1; }\n",
+        )
+        .unwrap();
+        let report = preflight(&mut s, "`sh check.sh` fails. Make it pass.", &cancel)
+            .await
+            .expect("the task names a test command");
+        assert_eq!(
+            (report.state, report.change),
+            (WatchState::Fail, WatchChange::New)
+        );
+        assert_eq!(
+            report.detail,
+            "watch tests: FAIL (expected exit 0, got exit 1)\nFAIL: ok is missing"
+        );
         assert!(s.watches.items[0].auto);
 
         // From here on it behaves like any watch.
         std::fs::write(s.ws.root.join("ok"), "").unwrap();
         s.evidence.changed("edit");
-        assert_eq!(run_stale(&mut s, &cancel).await.1, "watch tests: FAIL → PASS · PASS");
+        assert_eq!(
+            run_stale(&mut s, &cancel).await.1,
+            "watch tests: FAIL → PASS · PASS"
+        );
 
         // It is the check the task asked for: another test run of the model's does not take its place.
         let other = finished(&s, 1, "1 failed");
         let seen = observe(&mut s, "python3 -m unittest", &other);
         assert!(seen.notice.is_none() && seen.reports.is_empty());
-        assert_eq!((s.watches.items.len(), s.watches.items[0].cmd.as_str(), s.watches.items[0].state), (1, "sh check.sh", WatchState::Pass));
+        assert_eq!(
+            (
+                s.watches.items.len(),
+                s.watches.items[0].cmd.as_str(),
+                s.watches.items[0].state
+            ),
+            (1, "sh check.sh", WatchState::Pass)
+        );
 
         // With no command named, the model's own test run is watched, but not a throwaway one:
         // a script outside the workspace, or one written on the spot.
@@ -653,18 +1021,44 @@ mod tests {
         let run = finished(&s, 1, "AssertionError");
         let tmp = std::env::temp_dir().join("sage-scratch-verify_test.py");
         let inside = s.ws.root.join("tests/test_all.py");
-        for scratch in [format!("python3 {}", tmp.display()), format!("cd /tmp && node --test"), "python3 - <<'EOF' && python3 -m unittest\nimport m\nEOF".to_string()] {
+        for scratch in [
+            format!("python3 {}", tmp.display()),
+            "cd /tmp && node --test".to_string(),
+            "python3 - <<'EOF' && python3 -m unittest\nimport m\nEOF".to_string(),
+        ] {
             assert!(throwaway(&scratch, &s.ws.root), "{scratch}");
-            assert!(observe(&mut s, &scratch, &run).notice.is_none() && s.watches.items.is_empty(), "{scratch}");
+            assert!(
+                observe(&mut s, &scratch, &run).notice.is_none() && s.watches.items.is_empty(),
+                "{scratch}"
+            );
         }
-        assert!(!throwaway(&format!("python3 {}", inside.display()), &s.ws.root) && !throwaway("npm test 2>&1 | tail -5", &s.ws.root));
-        assert!(observe(&mut s, &format!("python3 {}", inside.display()), &run).notice.is_some());
+        assert!(
+            !throwaway(&format!("python3 {}", inside.display()), &s.ws.root)
+                && !throwaway("npm test 2>&1 | tail -5", &s.ws.root)
+        );
+        assert!(
+            observe(&mut s, &format!("python3 {}", inside.display()), &run)
+                .notice
+                .is_some()
+        );
 
         // A command that cannot start is not kept, and the mechanism can be switched off.
         let mut s = test_session("watch-preflight-missing", Features::ecosage());
-        assert!(preflight(&mut s, "`./run_tests.sh` fails.", &cancel).await.is_none() && s.watches.items.is_empty());
-        let mut s = test_session("watch-preflight-off", Features::ecosage().without("preflight").unwrap());
-        assert!(preflight(&mut s, "`sh check.sh` fails.", &cancel).await.is_none());
+        assert!(
+            preflight(&mut s, "`./run_tests.sh` fails.", &cancel)
+                .await
+                .is_none()
+                && s.watches.items.is_empty()
+        );
+        let mut s = test_session(
+            "watch-preflight-off",
+            Features::ecosage().without("preflight").unwrap(),
+        );
+        assert!(
+            preflight(&mut s, "`sh check.sh` fails.", &cancel)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -674,38 +1068,74 @@ mod tests {
         let cancel = CancellationToken::new();
         let root = s.ws.root.display().to_string();
         std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
-        std::fs::write(s.ws.root.join("check.sh"), "echo \"$PWD/calc.py:2: ZeroDivisionError\"; echo \"rootdir: $PWD\"; exit 1\n").unwrap();
+        std::fs::write(
+            s.ws.root.join("check.sh"),
+            "echo \"$PWD/calc.py:2: ZeroDivisionError\"; echo \"rootdir: $PWD\"; exit 1\n",
+        )
+        .unwrap();
 
         // The absolute path is gone from the report, and the line it pointed at is still found.
-        let report = preflight(&mut s, "`sh check.sh` fails.", &cancel).await.expect("the task names a test command");
-        let wanted = format!("watch tests: FAIL (expected exit 0, got exit 1)\ncalc.py:2: ZeroDivisionError\nrootdir: .\n--- where (current file content; anchors work in edit) ---\ncalc.py\n  {}|a = 1\n> {}|b = a / 0", anchor(1, "a = 1"), anchor(2, "b = a / 0"));
+        let report = preflight(&mut s, "`sh check.sh` fails.", &cancel)
+            .await
+            .expect("the task names a test command");
+        let wanted = format!(
+            "watch tests: FAIL (expected exit 0, got exit 1)\ncalc.py:2: ZeroDivisionError\nrootdir: .\n--- where (current file content; anchors work in edit) ---\ncalc.py\n  {}|a = 1\n> {}|b = a / 0",
+            anchor(1, "a = 1"),
+            anchor(2, "b = a / 0")
+        );
         assert_eq!(report.detail, wanted);
 
         // On disk the output is as the command printed it; reopened, it reads as it was shown.
         let kept = std::fs::read_to_string(s.spill_path("out:1").unwrap()).unwrap();
-        assert_eq!(kept, format!("{root}/calc.py:2: ZeroDivisionError\nrootdir: {root}\n"));
+        assert_eq!(
+            kept,
+            format!("{root}/calc.py:2: ZeroDivisionError\nrootdir: {root}\n")
+        );
         let reopened = crate::tools::read::run(&mut s, &serde_json::json!({"path": "out:1"}));
-        assert_eq!(reopened.observation, "out:1 · lines 1-2 of 2\n1|calc.py:2: ZeroDivisionError\n2|rootdir: .");
+        assert_eq!(
+            reopened.observation,
+            "out:1 · lines 1-2 of 2\n1|calc.py:2: ZeroDivisionError\n2|rootdir: ."
+        );
 
-        let mut s = test_session("watch-long-paths", Features::ecosage().without("short_paths").unwrap());
+        let mut s = test_session(
+            "watch-long-paths",
+            Features::ecosage().without("short_paths").unwrap(),
+        );
         let root = s.ws.root.display().to_string();
         std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
-        add(&mut s, "t", "echo \"$PWD/calc.py:2: ZeroDivisionError\"; exit 1");
+        add(
+            &mut s,
+            "t",
+            "echo \"$PWD/calc.py:2: ZeroDivisionError\"; exit 1",
+        );
         let (_, text) = run_stale(&mut s, &cancel).await;
-        assert!(text.contains(&format!("\n{root}/calc.py:2: ZeroDivisionError\n--- where")) && text.ends_with("|b = a / 0"), "{text}");
+        assert!(
+            text.contains(&format!("\n{root}/calc.py:2: ZeroDivisionError\n--- where"))
+                && text.ends_with("|b = a / 0"),
+            "{text}"
+        );
     }
 
     #[tokio::test]
     async fn without_auto_watch_only_requested_watches_adopt_a_run() {
-        let mut s = test_session("watch-manual", Features::ecosage().without("auto-watch").unwrap());
+        let mut s = test_session(
+            "watch-manual",
+            Features::ecosage().without("auto-watch").unwrap(),
+        );
         let run = finished(&s, 1, "FAILED");
         assert!(observe(&mut s, "pytest -q", &run).notice.is_none() && s.watches.items.is_empty());
 
         add(&mut s, "t", "pytest -q");
         let seen = observe(&mut s, "pytest -q", &run);
         assert!(seen.notice.is_none());
-        assert_eq!((seen.reports[0].state, seen.reports[0].change), (WatchState::Fail, WatchChange::New));
-        assert_eq!(seen.reports[0].detail, "watch t: FAIL (expected exit 0, got exit 1)", "the model has the output already");
+        assert_eq!(
+            (seen.reports[0].state, seen.reports[0].change),
+            (WatchState::Fail, WatchChange::New)
+        );
+        assert_eq!(
+            seen.reports[0].detail, "watch t: FAIL (expected exit 0, got exit 1)",
+            "the model has the output already"
+        );
     }
 
     #[test]

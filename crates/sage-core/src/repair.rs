@@ -74,7 +74,12 @@ fn strip_trailing_commas(s: &str) -> String {
         if *c == '"' {
             in_string = true;
         }
-        if *c == ',' && chars[i + 1..].iter().find(|n| !n.is_whitespace()).is_some_and(|n| matches!(n, '}' | ']')) {
+        if *c == ','
+            && chars[i + 1..]
+                .iter()
+                .find(|n| !n.is_whitespace())
+                .is_some_and(|n| matches!(n, '}' | ']'))
+        {
             continue;
         }
         out.push(*c);
@@ -141,12 +146,23 @@ pub fn parse_args(raw: &str) -> Result<(Value, bool), String> {
         Ok(v) => return Ok((v, false)),
         Err(e) => e.to_string(),
     };
-    let unfenced = s.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    let unfenced = s
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
     let escaped = escape_control_in_strings(unfenced);
     let decomma = strip_trailing_commas(&escaped);
     let closed = close_truncated(&decomma);
-    for candidate in [unfenced, escaped.as_str(), decomma.as_str(), closed.as_str()] {
-        if let Ok(v) = serde_json::from_str::<Value>(candidate) && v.is_object() {
+    for candidate in [
+        unfenced,
+        escaped.as_str(),
+        decomma.as_str(),
+        closed.as_str(),
+    ] {
+        if let Ok(v) = serde_json::from_str::<Value>(candidate)
+            && v.is_object()
+        {
             return Ok((v, true));
         }
     }
@@ -160,8 +176,14 @@ pub fn cut_off(raw: &str) -> bool {
     if s.is_empty() || serde_json::from_str::<Value>(s).is_ok() {
         return false;
     }
-    let mended = strip_trailing_commas(&escape_control_in_strings(s.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim()));
-    serde_json::from_str::<Value>(&mended).is_err() && serde_json::from_str::<Value>(&close_truncated(&mended)).is_ok()
+    let mended = strip_trailing_commas(&escape_control_in_strings(
+        s.trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim(),
+    ));
+    serde_json::from_str::<Value>(&mended).is_err()
+        && serde_json::from_str::<Value>(&close_truncated(&mended)).is_ok()
 }
 
 /// A tool's argument names, each with the names other harnesses give it.
@@ -171,9 +193,15 @@ const ALIASES: &[(Tool, Aliases)] = &[
     (
         Tool::Shell,
         &[
-            ("cmd", &["command", "script", "bash", "code", "input", "commands"]),
+            (
+                "cmd",
+                &["command", "script", "bash", "code", "input", "commands"],
+            ),
             ("timeout", &["timeout_secs", "timeout_seconds", "timeout_s"]),
-            ("background", &["run_in_background", "bg", "detach", "is_background"]),
+            (
+                "background",
+                &["run_in_background", "bg", "detach", "is_background"],
+            ),
             ("expect", &["expected", "expects", "expectation", "predict"]),
             ("expect_exit", &["exit", "exit_code", "expected_exit"]),
             ("expect_has", &["has", "contains", "expected_output"]),
@@ -182,23 +210,97 @@ const ALIASES: &[(Tool, Aliases)] = &[
     ),
     (
         Tool::Read,
-        &[("path", &["file_path", "file", "filename", "filepath", "target_file", "target", "dir", "directory"]), ("lines", &["line_range", "view_range", "window"]), ("symbol", &["function", "definition", "name"])],
+        &[
+            (
+                "path",
+                &[
+                    "file_path",
+                    "file",
+                    "filename",
+                    "filepath",
+                    "target_file",
+                    "target",
+                    "dir",
+                    "directory",
+                ],
+            ),
+            ("lines", &["line_range", "view_range", "window"]),
+            ("symbol", &["function", "definition", "name"]),
+        ],
     ),
     (
         Tool::Search,
         &[
-            ("pattern", &["query", "regex", "search", "text", "q", "search_term", "needle"]),
-            ("path", &["dir", "directory", "root", "cwd", "target_directories", "search_path"]),
-            ("glob", &["include", "file_pattern", "glob_pattern", "files", "file_glob", "include_pattern"]),
+            (
+                "pattern",
+                &[
+                    "query",
+                    "regex",
+                    "search",
+                    "text",
+                    "q",
+                    "search_term",
+                    "needle",
+                ],
+            ),
+            (
+                "path",
+                &[
+                    "dir",
+                    "directory",
+                    "root",
+                    "cwd",
+                    "target_directories",
+                    "search_path",
+                ],
+            ),
+            (
+                "glob",
+                &[
+                    "include",
+                    "file_pattern",
+                    "glob_pattern",
+                    "files",
+                    "file_glob",
+                    "include_pattern",
+                ],
+            ),
             ("context", &["context_lines", "-C", "C"]),
         ],
     ),
     (
         Tool::Edit,
         &[
-            ("path", &["file_path", "file", "filename", "filepath", "target_file"]),
-            ("old", &["old_string", "old_str", "old_text", "search", "find", "original", "old_content"]),
-            ("new", &["new_string", "new_str", "new_text", "replace", "replacement", "content", "updated", "new_content", "text"]),
+            (
+                "path",
+                &["file_path", "file", "filename", "filepath", "target_file"],
+            ),
+            (
+                "old",
+                &[
+                    "old_string",
+                    "old_str",
+                    "old_text",
+                    "search",
+                    "find",
+                    "original",
+                    "old_content",
+                ],
+            ),
+            (
+                "new",
+                &[
+                    "new_string",
+                    "new_str",
+                    "new_text",
+                    "replace",
+                    "replacement",
+                    "content",
+                    "updated",
+                    "new_content",
+                    "text",
+                ],
+            ),
             ("range", &["lines", "anchor", "anchors", "at", "line_range"]),
             ("after", &["insert_after", "insert_line", "after_line"]),
             ("all", &["replace_all", "global"]),
@@ -206,14 +308,60 @@ const ALIASES: &[(Tool, Aliases)] = &[
     ),
     (
         Tool::Write,
-        &[("path", &["file_path", "file", "filename", "filepath", "target_file"]), ("content", &["text", "contents", "file_text", "data", "new", "body"]), ("overwrite", &["force", "replace"])],
+        &[
+            (
+                "path",
+                &["file_path", "file", "filename", "filepath", "target_file"],
+            ),
+            (
+                "content",
+                &["text", "contents", "file_text", "data", "new", "body"],
+            ),
+            ("overwrite", &["force", "replace"]),
+        ],
     ),
-    (Tool::Watch, &[("name", &["id", "label", "title"]), ("cmd", &["command", "check", "script"]), ("off", &["remove", "delete", "stop", "unwatch"]), ("expect", &["expected", "expects"])]),
+    (
+        Tool::Watch,
+        &[
+            ("name", &["id", "label", "title"]),
+            ("cmd", &["command", "check", "script"]),
+            ("off", &["remove", "delete", "stop", "unwatch"]),
+            ("expect", &["expected", "expects"]),
+        ],
+    ),
     (
         Tool::Job,
-        &[("id", &["job_id", "job", "bash_id", "shell_id", "task_id", "handle"]), ("wait", &["timeout", "seconds", "wait_seconds", "wait_secs"]), ("until", &["pattern", "match", "wait_for", "contains"]), ("kill", &["stop", "terminate", "cancel"])],
+        &[
+            (
+                "id",
+                &["job_id", "job", "bash_id", "shell_id", "task_id", "handle"],
+            ),
+            ("wait", &["timeout", "seconds", "wait_seconds", "wait_secs"]),
+            ("until", &["pattern", "match", "wait_for", "contains"]),
+            ("kill", &["stop", "terminate", "cancel"]),
+        ],
     ),
-    (Tool::Finish, &[("summary", &["message", "result", "answer", "text", "final_answer", "output", "response"]), ("unverified", &["reason", "unverified_reason", "no_check_reason"])]),
+    (
+        Tool::Finish,
+        &[
+            (
+                "summary",
+                &[
+                    "message",
+                    "result",
+                    "answer",
+                    "text",
+                    "final_answer",
+                    "output",
+                    "response",
+                ],
+            ),
+            (
+                "unverified",
+                &["reason", "unverified_reason", "no_check_reason"],
+            ),
+        ],
+    ),
 ];
 
 /// Renames arguments other harnesses taught these models to use, and folds numeric line windows into
@@ -228,14 +376,24 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
                 Tool::Search => "pattern",
                 Tool::Finish => "summary",
                 Tool::Job => "id",
-                _ => return Err(format!("`{}` needs a JSON object of arguments, got a bare string", tool.name())),
+                _ => {
+                    return Err(format!(
+                        "`{}` needs a JSON object of arguments, got a bare string",
+                        tool.name()
+                    ));
+                }
             };
             let mut m = Map::new();
             m.insert(key.to_string(), Value::String(s));
             m
         }
         Value::Null => Map::new(),
-        other => return Err(format!("`{}` needs a JSON object of arguments, got {other}", tool.name())),
+        other => {
+            return Err(format!(
+                "`{}` needs a JSON object of arguments, got {other}",
+                tool.name()
+            ));
+        }
     };
     if let Some((_, table)) = ALIASES.iter().find(|(t, _)| *t == tool) {
         for (canonical, aliases) in table.iter() {
@@ -255,16 +413,35 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
     {
         *value = obj;
     }
-    let num = |m: &Map<String, Value>, k: &str| m.get(k).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
+    let num = |m: &Map<String, Value>, k: &str| {
+        m.get(k).and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        })
+    };
     // `read {"out": 1}`: the model means the saved output `out:1`.
-    if tool == Tool::Read && !map.contains_key("path") && let Some(n) = map.get("out").and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().trim_start_matches("out:").to_string()))) {
+    if tool == Tool::Read
+        && !map.contains_key("path")
+        && let Some(n) = map.get("out").and_then(|v| {
+            v.as_u64().map(|n| n.to_string()).or_else(|| {
+                v.as_str()
+                    .map(|s| s.trim().trim_start_matches("out:").to_string())
+            })
+        })
+    {
         map.remove("out");
         map.insert("path".into(), json!(format!("out:{n}")));
     }
     if tool == Tool::Read {
         // `view_range: [400, 420]`, as other harnesses take it.
         if let Some(Value::Array(ends)) = map.get("lines") {
-            let ends: Vec<u64> = ends.iter().filter_map(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))).collect();
+            let ends: Vec<u64> = ends
+                .iter()
+                .filter_map(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+                })
+                .collect();
             match ends.as_slice() {
                 [from, to] => drop(map.insert("lines".into(), json!(format!("{from}-{to}")))),
                 [from] => drop(map.insert("lines".into(), json!(format!("{from}+")))),
@@ -273,12 +450,20 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
         }
     }
     if tool == Tool::Read && !map.contains_key("lines") {
-        let start = num(&map, "start_line").or_else(|| num(&map, "start")).or_else(|| num(&map, "offset")).or_else(|| num(&map, "from"));
-        let end = num(&map, "end_line").or_else(|| num(&map, "end")).or_else(|| num(&map, "to"));
+        let start = num(&map, "start_line")
+            .or_else(|| num(&map, "start"))
+            .or_else(|| num(&map, "offset"))
+            .or_else(|| num(&map, "from"));
+        let end = num(&map, "end_line")
+            .or_else(|| num(&map, "end"))
+            .or_else(|| num(&map, "to"));
         let limit = num(&map, "limit").or_else(|| num(&map, "max_lines"));
         match (start, end, limit) {
             (Some(s), Some(e), _) => drop(map.insert("lines".into(), json!(format!("{s}-{e}")))),
-            (Some(s), None, Some(l)) => drop(map.insert("lines".into(), json!(format!("{s}-{}", s.saturating_add(l.saturating_sub(1)))))),
+            (Some(s), None, Some(l)) => drop(map.insert(
+                "lines".into(),
+                json!(format!("{s}-{}", s.saturating_add(l.saturating_sub(1)))),
+            )),
             (Some(s), None, None) => drop(map.insert("lines".into(), json!(format!("{s}+")))),
             (None, _, Some(l)) => drop(map.insert("lines".into(), json!(format!("1-{l}")))),
             _ => {}
@@ -286,10 +471,19 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
     }
     if tool == Tool::Edit {
         // `range: 12` or `range: [12, 14]`: line numbers where an anchor string was meant.
-        let number = |v: &Value| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(|s| s.trim().to_string()));
+        let number = |v: &Value| {
+            v.as_u64()
+                .map(|n| n.to_string())
+                .or_else(|| v.as_str().map(|s| s.trim().to_string()))
+        };
         let range = match map.get("range") {
             Some(Value::Number(n)) => Some(n.to_string()),
-            Some(Value::Array(ends)) => match ends.iter().map(number).collect::<Option<Vec<_>>>().as_deref() {
+            Some(Value::Array(ends)) => match ends
+                .iter()
+                .map(number)
+                .collect::<Option<Vec<_>>>()
+                .as_deref()
+            {
                 Some([from, to]) => Some(format!("{from}-{to}")),
                 Some([only]) => Some(only.clone()),
                 _ => None,
@@ -305,7 +499,11 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             map.entry("timeout").or_insert(json!(ms.div_ceil(1000)));
         }
         if let Some(Value::Array(parts)) = map.get("cmd") {
-            let joined = parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" && ");
+            let joined = parts
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" && ");
             map.insert("cmd".into(), json!(joined));
         }
     }
@@ -315,14 +513,28 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
 /// Tool calls written into the reply text instead of the structured field.
 pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     fn push(found: &mut Vec<ToolCall>, v: &Value) {
-        let name = v.get("name").or_else(|| v.get("tool")).or_else(|| v.get("function")).and_then(Value::as_str);
-        let args = v.get("arguments").or_else(|| v.get("args")).or_else(|| v.get("parameters")).or_else(|| v.get("input"));
-        if let (Some(name), Some(args)) = (name, args) && Tool::from_name(name).is_some() {
+        let name = v
+            .get("name")
+            .or_else(|| v.get("tool"))
+            .or_else(|| v.get("function"))
+            .and_then(Value::as_str);
+        let args = v
+            .get("arguments")
+            .or_else(|| v.get("args"))
+            .or_else(|| v.get("parameters"))
+            .or_else(|| v.get("input"));
+        if let (Some(name), Some(args)) = (name, args)
+            && Tool::from_name(name).is_some()
+        {
             let arguments = match args {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            found.push(ToolCall { id: format!("text_{}", found.len()), name: name.to_string(), arguments });
+            found.push(ToolCall {
+                id: format!("text_{}", found.len()),
+                name: name.to_string(),
+                arguments,
+            });
         }
     }
     let mut found = Vec::new();
@@ -337,8 +549,15 @@ pub fn calls_in_text(content: &str) -> Vec<ToolCall> {
     }
     if found.is_empty() {
         let trimmed = content.trim();
-        let body = trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```")).map(|b| b.trim_end_matches("```").trim()).unwrap_or(trimmed);
-        if body.starts_with('{') && body.ends_with('}') && let Ok(v) = serde_json::from_str::<Value>(body) {
+        let body = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```"))
+            .map(|b| b.trim_end_matches("```").trim())
+            .unwrap_or(trimmed);
+        if body.starts_with('{')
+            && body.ends_with('}')
+            && let Ok(v) = serde_json::from_str::<Value>(body)
+        {
             push(&mut found, &v);
         }
     }
@@ -413,9 +632,12 @@ mod tests {
         let cases = [
             ("{\"cmd\": \"echo a\nb\"}", "echo a\nb"),
             (r#"{"cmd": "ls",}"#, "ls"),
-            (r#"```json
+            (
+                r#"```json
 {"cmd": "ls"}
-```"#, "ls"),
+```"#,
+                "ls",
+            ),
             (r#""{\"cmd\": \"ls\"}""#, "ls"),
             (r#"{"cmd": "make test"#, "make test"),
             (r#"{"cmd": "x", "expect": {"exit": "0""#, "x"),
@@ -427,81 +649,229 @@ mod tests {
         }
         assert!(parse_args("not json at all").is_err());
         // A comma inside a string is content, not a trailing comma.
-        assert_eq!(strip_trailing_commas(r#"{"a": "x,}", "b": 1,}"#), r#"{"a": "x,}", "b": 1}"#);
+        assert_eq!(
+            strip_trailing_commas(r#"{"a": "x,}", "b": 1,}"#),
+            r#"{"a": "x,}", "b": 1}"#
+        );
         // Which of these stopped half-way is known, for the reply that ended without saying why.
-        assert!(cut_off(r#"{"path": "a.py", "content": "import os\nprint("#) && cut_off(r#"{"cmd": "x", "expect": {"exit": "0""#));
-        assert!(!cut_off(r#"{"cmd": "ls",}"#) && !cut_off(r#"{"cmd": "ls"}"#) && !cut_off("") && !cut_off("not json at all"));
+        assert!(
+            cut_off(r#"{"path": "a.py", "content": "import os\nprint("#)
+                && cut_off(r#"{"cmd": "x", "expect": {"exit": "0""#)
+        );
+        assert!(
+            !cut_off(r#"{"cmd": "ls",}"#)
+                && !cut_off(r#"{"cmd": "ls"}"#)
+                && !cut_off("")
+                && !cut_off("not json at all")
+        );
     }
 
     #[test]
     fn a_line_window_given_as_an_array_is_understood() {
-        let lines = |args: Value| normalize_args(Tool::Read, args).unwrap().get("lines").cloned();
-        assert_eq!(lines(json!({"path": "a.py", "view_range": [400, 402]})), Some(json!("400-402")));
-        assert_eq!(lines(json!({"path": "a.py", "lines": ["7"]})), Some(json!("7+")));
+        let lines = |args: Value| {
+            normalize_args(Tool::Read, args)
+                .unwrap()
+                .get("lines")
+                .cloned()
+        };
+        assert_eq!(
+            lines(json!({"path": "a.py", "view_range": [400, 402]})),
+            Some(json!("400-402"))
+        );
+        assert_eq!(
+            lines(json!({"path": "a.py", "lines": ["7"]})),
+            Some(json!("7+"))
+        );
         assert_eq!(lines(json!({"path": "a.py", "lines": []})), None);
-        let range = |args: Value| normalize_args(Tool::Edit, args).unwrap().get("range").cloned();
-        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": 2})), Some(json!("2")));
-        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": [2, "4kq"]})), Some(json!("2-4kq")));
-        assert_eq!(range(json!({"path": "a.py", "new": "x", "range": "2ab-4kq"})), Some(json!("2ab-4kq")));
+        let range = |args: Value| {
+            normalize_args(Tool::Edit, args)
+                .unwrap()
+                .get("range")
+                .cloned()
+        };
+        assert_eq!(
+            range(json!({"path": "a.py", "new": "x", "range": 2})),
+            Some(json!("2"))
+        );
+        assert_eq!(
+            range(json!({"path": "a.py", "new": "x", "range": [2, "4kq"]})),
+            Some(json!("2-4kq"))
+        );
+        assert_eq!(
+            range(json!({"path": "a.py", "new": "x", "range": "2ab-4kq"})),
+            Some(json!("2ab-4kq"))
+        );
     }
 
     #[test]
     fn another_harnesss_tools_are_taken_for_what_they_mean() {
-        let call = |name: &str, args: Value| parse_calls(&[ToolCall { id: "c".into(), name: name.into(), arguments: args.to_string() }]).0.remove(0);
+        let call = |name: &str, args: Value| {
+            parse_calls(&[ToolCall {
+                id: "c".into(),
+                name: name.into(),
+                arguments: args.to_string(),
+            }])
+            .0
+            .remove(0)
+        };
         // One editor tool with a `command`: viewing is reading, creating is writing.
-        let view = call("str_replace_editor", json!({"command": "view", "path": "a.py", "view_range": [3, 9]}));
-        assert_eq!((view.tool, view.args["lines"].as_str()), (Some(Tool::Read), Some("3-9")));
-        let create = call("str_replace_based_edit_tool", json!({"command": "create", "path": "a.py", "file_text": "x = 1\n"}));
-        assert_eq!((create.tool, create.args["content"].as_str()), (Some(Tool::Write), Some("x = 1\n")));
-        let replace = call("str_replace_editor", json!({"command": "str_replace", "path": "a.py", "old_str": "1", "new_str": "2"}));
-        assert_eq!((replace.tool, replace.args["old"].as_str(), replace.args["new"].as_str()), (Some(Tool::Edit), Some("1"), Some("2")));
+        let view = call(
+            "str_replace_editor",
+            json!({"command": "view", "path": "a.py", "view_range": [3, 9]}),
+        );
+        assert_eq!(
+            (view.tool, view.args["lines"].as_str()),
+            (Some(Tool::Read), Some("3-9"))
+        );
+        let create = call(
+            "str_replace_based_edit_tool",
+            json!({"command": "create", "path": "a.py", "file_text": "x = 1\n"}),
+        );
+        assert_eq!(
+            (create.tool, create.args["content"].as_str()),
+            (Some(Tool::Write), Some("x = 1\n"))
+        );
+        let replace = call(
+            "str_replace_editor",
+            json!({"command": "str_replace", "path": "a.py", "old_str": "1", "new_str": "2"}),
+        );
+        assert_eq!(
+            (
+                replace.tool,
+                replace.args["old"].as_str(),
+                replace.args["new"].as_str()
+            ),
+            (Some(Tool::Edit), Some("1"), Some("2"))
+        );
         // A tool for killing a job kills it; a patch is answered with how to edit here.
         let kill = call("KillShell", json!({"shell_id": "bg:1"}));
-        assert_eq!((kill.tool, kill.args["id"].as_str(), kill.args["kill"].as_bool()), (Some(Tool::Job), Some("bg:1"), Some(true)));
-        let patch = call("apply_patch", json!({"input": "*** Begin Patch\n*** End Patch"}));
-        assert!(patch.error.as_deref().is_some_and(|e| e.contains("takes no patch here") && e.contains("`range`, `old` or `after`")), "{:?}", patch.error);
+        assert_eq!(
+            (
+                kill.tool,
+                kill.args["id"].as_str(),
+                kill.args["kill"].as_bool()
+            ),
+            (Some(Tool::Job), Some("bg:1"), Some(true))
+        );
+        let patch = call(
+            "apply_patch",
+            json!({"input": "*** Begin Patch\n*** End Patch"}),
+        );
+        assert!(
+            patch
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("takes no patch here")
+                    && e.contains("`range`, `old` or `after`")),
+            "{:?}",
+            patch.error
+        );
     }
 
     #[test]
     fn maps_foreign_argument_names_and_line_windows() {
-        let edit = normalize_args(Tool::Edit, json!({"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": true})).unwrap();
-        assert_eq!(edit, json!({"path": "a.py", "old": "x", "new": "y", "all": true}));
+        let edit = normalize_args(
+            Tool::Edit,
+            json!({"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            edit,
+            json!({"path": "a.py", "old": "x", "new": "y", "all": true})
+        );
 
-        let read = normalize_args(Tool::Read, json!({"file_path": "a.py", "offset": 40, "limit": 20})).unwrap();
+        let read = normalize_args(
+            Tool::Read,
+            json!({"file_path": "a.py", "offset": 40, "limit": 20}),
+        )
+        .unwrap();
         assert_eq!(read["lines"], "40-59");
-        let read = normalize_args(Tool::Read, json!({"path": "a.py", "start_line": "5", "end_line": 9})).unwrap();
+        let read = normalize_args(
+            Tool::Read,
+            json!({"path": "a.py", "start_line": "5", "end_line": 9}),
+        )
+        .unwrap();
         assert_eq!(read["lines"], "5-9");
 
-        let shell = normalize_args(Tool::Shell, json!({"command": "ls", "timeout_ms": 90500})).unwrap();
-        assert_eq!((&shell["cmd"], &shell["timeout"]), (&json!("ls"), &json!(91)));
-        assert_eq!(normalize_args(Tool::Shell, json!("pwd")).unwrap(), json!({"cmd": "pwd"}));
+        let shell =
+            normalize_args(Tool::Shell, json!({"command": "ls", "timeout_ms": 90500})).unwrap();
+        assert_eq!(
+            (&shell["cmd"], &shell["timeout"]),
+            (&json!("ls"), &json!(91))
+        );
+        assert_eq!(
+            normalize_args(Tool::Shell, json!("pwd")).unwrap(),
+            json!({"cmd": "pwd"})
+        );
         assert!(normalize_args(Tool::Edit, json!("x")).is_err());
 
         // Seen live from GLM-5.3.
-        assert_eq!(normalize_args(Tool::Read, json!({"out": "1"})).unwrap(), json!({"path": "out:1"}));
-        let leaked = normalize_args(Tool::Shell, json!({"cmd": "x", "expect": "exit</arg_key><arg_value>nonzero"})).unwrap();
+        assert_eq!(
+            normalize_args(Tool::Read, json!({"out": "1"})).unwrap(),
+            json!({"path": "out:1"})
+        );
+        let leaked = normalize_args(
+            Tool::Shell,
+            json!({"cmd": "x", "expect": "exit</arg_key><arg_value>nonzero"}),
+        )
+        .unwrap();
         assert_eq!(leaked["expect"], json!({"exit": "nonzero"}));
 
         // A canonical name is never overwritten by an alias that happens to be present too.
-        let both = normalize_args(Tool::Write, json!({"path": "a", "content": "real", "text": "other"})).unwrap();
+        let both = normalize_args(
+            Tool::Write,
+            json!({"path": "a", "content": "real", "text": "other"}),
+        )
+        .unwrap();
         assert_eq!(both["content"], "real");
     }
 
     #[test]
     fn parses_calls_counts_repairs_and_reports_what_it_cannot_fix() {
         let raw = [
-            ToolCall { id: "1".into(), name: "bash".into(), arguments: r#"{"command": "ls"}"#.into() },
-            ToolCall { id: "2".into(), name: "read".into(), arguments: r#"{"path": "a.py"}"#.into() },
-            ToolCall { id: "3".into(), name: "teleport".into(), arguments: "{}".into() },
-            ToolCall { id: "4".into(), name: "edit".into(), arguments: "{{{".into() },
+            ToolCall {
+                id: "1".into(),
+                name: "bash".into(),
+                arguments: r#"{"command": "ls"}"#.into(),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "read".into(),
+                arguments: r#"{"path": "a.py"}"#.into(),
+            },
+            ToolCall {
+                id: "3".into(),
+                name: "teleport".into(),
+                arguments: "{}".into(),
+            },
+            ToolCall {
+                id: "4".into(),
+                name: "edit".into(),
+                arguments: "{{{".into(),
+            },
         ];
         let (calls, repairs) = parse_calls(&raw);
         assert_eq!(calls[0].tool, Some(Tool::Shell));
         assert_eq!(calls[0].args, json!({"cmd": "ls"}));
         assert!(calls[1].error.is_none());
-        assert!(calls[2].error.as_deref().unwrap().contains("unknown tool `teleport`"));
-        assert!(calls[3].error.as_deref().unwrap().contains("not valid JSON"));
-        assert_eq!(repairs, 2, "the tool alias and the argument alias on call 1");
+        assert!(
+            calls[2]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("unknown tool `teleport`")
+        );
+        assert!(
+            calls[3]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("not valid JSON")
+        );
+        assert_eq!(
+            repairs, 2,
+            "the tool alias and the argument alias on call 1"
+        );
     }
 
     #[test]
@@ -509,11 +879,23 @@ mod tests {
         let text = "I'll check.\n<tool_call>\n{\"name\": \"shell\", \"arguments\": {\"cmd\": \"ls\"}}\n</tool_call>\n<tool_call>{\"name\": \"read\", \"arguments\": \"{\\\"path\\\": \\\"a\\\"}\"}</tool_call>";
         let calls = calls_in_text(text);
         assert_eq!(calls.len(), 2);
-        assert_eq!((calls[0].name.as_str(), calls[0].arguments.as_str()), ("shell", r#"{"cmd":"ls"}"#));
+        assert_eq!(
+            (calls[0].name.as_str(), calls[0].arguments.as_str()),
+            ("shell", r#"{"cmd":"ls"}"#)
+        );
         assert_eq!(calls[1].arguments, r#"{"path": "a"}"#);
 
-        assert_eq!(calls_in_text("```json\n{\"name\": \"finish\", \"arguments\": {\"summary\": \"ok\"}}\n```").len(), 1);
-        assert!(calls_in_text("Here is some JSON: {\"name\": \"not_a_tool\", \"arguments\": {}}").is_empty());
+        assert_eq!(
+            calls_in_text(
+                "```json\n{\"name\": \"finish\", \"arguments\": {\"summary\": \"ok\"}}\n```"
+            )
+            .len(),
+            1
+        );
+        assert!(
+            calls_in_text("Here is some JSON: {\"name\": \"not_a_tool\", \"arguments\": {}}")
+                .is_empty()
+        );
         assert!(calls_in_text("All done, the tests pass.").is_empty());
     }
 }

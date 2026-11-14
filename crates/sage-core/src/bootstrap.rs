@@ -12,8 +12,9 @@ use std::process::Stdio;
 use std::time::Duration;
 
 const PROBED_TOOLS: &[&str] = &[
-    "python3", "python", "pip", "uv", "node", "npm", "pnpm", "yarn", "bun", "deno", "cargo", "rustc", "go", "java", "mvn", "gradle", "gcc", "g++",
-    "clang", "make", "cmake", "docker", "git", "rg", "jq", "curl", "wget", "sqlite3", "ruby", "php", "dotnet",
+    "python3", "python", "pip", "uv", "node", "npm", "pnpm", "yarn", "bun", "deno", "cargo",
+    "rustc", "go", "java", "mvn", "gradle", "gcc", "g++", "clang", "make", "cmake", "docker",
+    "git", "rg", "jq", "curl", "wget", "sqlite3", "ruby", "php", "dotnet",
 ];
 
 const MAX_TOP_LEVEL: usize = 40;
@@ -24,8 +25,20 @@ async fn sh(script: &str, cwd: &Path) -> Option<String> {
     if cfg!(not(unix)) {
         return None;
     }
-    let child = tokio::process::Command::new("bash").arg("-c").arg(script).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn().ok()?;
-    let out = tokio::time::timeout(Duration::from_secs(6), child.wait_with_output()).await.ok()?.ok()?;
+    let child = tokio::process::Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let out = tokio::time::timeout(Duration::from_secs(6), child.wait_with_output())
+        .await
+        .ok()?
+        .ok()?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -34,20 +47,32 @@ async fn sh(script: &str, cwd: &Path) -> Option<String> {
 fn manifest_text(path: &Path) -> Option<String> {
     const MAX_MANIFEST: u64 = 1024 * 1024;
     let md = std::fs::symlink_metadata(path).ok()?;
-    (md.is_file() && md.len() <= MAX_MANIFEST).then(|| std::fs::read_to_string(path).ok()).flatten()
+    (md.is_file() && md.len() <= MAX_MANIFEST)
+        .then(|| std::fs::read_to_string(path).ok())
+        .flatten()
 }
 
 fn manifest_note(root: &Path, name: &str) -> Option<String> {
     match name {
         "package.json" => {
             let v: Value = serde_json::from_str(&manifest_text(&root.join(name))?).ok()?;
-            let scripts: Vec<&str> = v.get("scripts")?.as_object()?.keys().map(String::as_str).take(12).collect();
+            let scripts: Vec<&str> = v
+                .get("scripts")?
+                .as_object()?
+                .keys()
+                .map(String::as_str)
+                .take(12)
+                .collect();
             (!scripts.is_empty()).then(|| format!("package.json (scripts: {})", scripts.join(", ")))
         }
         "Makefile" | "makefile" | "GNUmakefile" => {
             let text = manifest_text(&root.join(name))?;
             let re = regex::Regex::new(r"(?m)^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:[^=]|$)").ok()?;
-            let mut targets: Vec<&str> = re.captures_iter(&text).filter_map(|c| c.get(1).map(|m| m.as_str())).filter(|t| !t.starts_with('.')).collect();
+            let mut targets: Vec<&str> = re
+                .captures_iter(&text)
+                .filter_map(|c| c.get(1).map(|m| m.as_str()))
+                .filter(|t| !t.starts_with('.'))
+                .collect();
             targets.dedup();
             targets.truncate(12);
             (!targets.is_empty()).then(|| format!("{name} (targets: {})", targets.join(", ")))
@@ -60,7 +85,9 @@ fn top_level(root: &Path) -> String {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
-        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
         if name == ".git" || name == ".DS_Store" {
             continue;
         }
@@ -77,7 +104,11 @@ fn top_level(root: &Path) -> String {
         return "(empty directory)".to_string();
     }
     let more = all.len().saturating_sub(MAX_TOP_LEVEL);
-    let mut line = all.into_iter().take(MAX_TOP_LEVEL).collect::<Vec<_>>().join("  ");
+    let mut line = all
+        .into_iter()
+        .take(MAX_TOP_LEVEL)
+        .collect::<Vec<_>>()
+        .join("  ");
     if more > 0 {
         line.push_str(&format!("  … +{more} more"));
     }
@@ -92,8 +123,13 @@ fn tree(root: &Path) -> Option<String> {
     }
     let entry = |rel: &std::path::PathBuf| {
         let name = rel.to_string_lossy().into_owned();
-        let note = (rel.components().count() == 1).then(|| manifest_note(root, &name)).flatten();
-        match (note, crate::attach::measure(&root.join(rel)).and_then(|size| size.lines)) {
+        let note = (rel.components().count() == 1)
+            .then(|| manifest_note(root, &name))
+            .flatten();
+        match (
+            note,
+            crate::attach::measure(&root.join(rel)).and_then(|size| size.lines),
+        ) {
             (Some(note), _) => note,
             (None, Some(lines)) => format!("{name} {lines}"),
             (None, None) => name,
@@ -111,7 +147,8 @@ pub async fn snapshot(sess: &Session) -> String {
     );
     let probed = sh(&probe, root).await.unwrap_or_default();
     let (mut present, mut absent) = (Vec::new(), Vec::new());
-    let (mut py, mut node, mut branch, mut dirty) = (String::new(), String::new(), String::new(), String::new());
+    let (mut py, mut node, mut branch, mut dirty) =
+        (String::new(), String::new(), String::new(), String::new());
     for line in probed.lines() {
         if let Some(t) = line.strip_prefix('+') {
             present.push(t.to_string());
@@ -146,14 +183,45 @@ pub async fn snapshot(sess: &Session) -> String {
     };
     // Without this, models `cd` to the absolute path and spell it out in every call. Where command
     // output is cut the same way, say so: a relative path in it is not what the program printed.
-    let output = if sess.features.short_paths { ", as command output does" } else { "" };
-    out.push_str(&format!("cwd: {}{git}; every tool already runs here, so give paths relative to it{output}\n", root.display()));
-    out.push_str(&format!("os: {} {} · date: {}\n", std::env::consts::OS, std::env::consts::ARCH, date_string(now_ms() / 1000)));
+    let output = if sess.features.short_paths {
+        ", as command output does"
+    } else {
+        ""
+    };
+    out.push_str(&format!(
+        "cwd: {}{git}; every tool already runs here, so give paths relative to it{output}\n",
+        root.display()
+    ));
+    out.push_str(&format!(
+        "os: {} {} · date: {}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        date_string(now_ms() / 1000)
+    ));
     if !present.is_empty() {
         out.push_str(&format!("installed: {}\n", present.join(", ")));
     }
     // "Not installed" is the single most common cause of failed commands; say it before it bites.
-    let missing: Vec<&str> = absent.into_iter().filter(|t| !matches!(*t, "python" | "pip" | "deno" | "bun" | "yarn" | "mvn" | "gradle" | "clang" | "php" | "ruby" | "dotnet" | "wget")).collect();
+    let missing: Vec<&str> = absent
+        .into_iter()
+        .filter(|t| {
+            !matches!(
+                *t,
+                "python"
+                    | "pip"
+                    | "deno"
+                    | "bun"
+                    | "yarn"
+                    | "mvn"
+                    | "gradle"
+                    | "clang"
+                    | "php"
+                    | "ruby"
+                    | "dotnet"
+                    | "wget"
+            )
+        })
+        .collect();
     if !missing.is_empty() && !present.is_empty() {
         out.push_str(&format!("not installed: {}\n", missing.join(", ")));
     }
@@ -174,21 +242,46 @@ mod tests {
     async fn snapshot_names_the_place_the_tools_and_the_files() {
         let mut s = test_session("bootstrap", Features::ecosage().without("survey").unwrap());
         std::fs::create_dir_all(s.ws.root.join("src")).unwrap();
-        std::fs::write(s.ws.root.join("package.json"), r#"{"scripts": {"test": "node --test", "build": "tsc"}}"#).unwrap();
-        std::fs::write(s.ws.root.join("Makefile"), "CC=gcc\nall: build\n\nbuild:\n\tcc x.c\n.PHONY: all\ntest: build\n\t./t\n").unwrap();
-        std::fs::write(s.ws.root.join("AGENTS.md"), "Always run `make test` before finishing.\n").unwrap();
+        std::fs::write(
+            s.ws.root.join("package.json"),
+            r#"{"scripts": {"test": "node --test", "build": "tsc"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            s.ws.root.join("Makefile"),
+            "CC=gcc\nall: build\n\nbuild:\n\tcc x.c\n.PHONY: all\ntest: build\n\t./t\n",
+        )
+        .unwrap();
+        std::fs::write(
+            s.ws.root.join("AGENTS.md"),
+            "Always run `make test` before finishing.\n",
+        )
+        .unwrap();
 
         let env = snapshot(&s).await;
         assert!(env.starts_with("<env>\ncwd: "), "{env}");
         assert!(env.contains("(not a git repository); every tool already runs here, so give paths relative to it, as command output does\n"), "{env}");
-        assert!(env.contains(&format!("os: {} {} · date: 20", std::env::consts::OS, std::env::consts::ARCH)));
+        assert!(env.contains(&format!(
+            "os: {} {} · date: 20",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )));
         assert!(env.contains("installed: ") && env.contains("git"), "{env}");
         assert!(env.contains("files: src/  AGENTS.md  Makefile (targets: all, build, test)  package.json (scripts: test, build)"), "{env}");
         // Project instructions are part of the system prompt, so they are not said a second time here.
-        assert!(env.ends_with("</env>") && !env.contains("make test"), "{env}");
+        assert!(
+            env.ends_with("</env>") && !env.contains("make test"),
+            "{env}"
+        );
 
         // Where command output keeps its absolute paths, nothing is said about it.
-        s.features = Features::ecosage().without("survey").unwrap().without("short_paths").unwrap();
-        assert!(snapshot(&s).await.contains("(not a git repository); every tool already runs here, so give paths relative to it\n"));
+        s.features = Features::ecosage()
+            .without("survey")
+            .unwrap()
+            .without("short_paths")
+            .unwrap();
+        assert!(snapshot(&s).await.contains(
+            "(not a git repository); every tool already runs here, so give paths relative to it\n"
+        ));
     }
 }

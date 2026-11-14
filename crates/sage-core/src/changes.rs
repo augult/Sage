@@ -39,7 +39,21 @@ async fn git(root: &Path, args: &[&str]) -> Option<String> {
         .arg(root)
         // The user's own settings must not change what is read here: `color.status` and
         // `color.diff` outrank `color.ui`, and `status.branch` adds a line that is no path.
-        .args(["--no-pager", "-c", "core.quotepath=off", "-c", "color.ui=never", "-c", "color.status=never", "-c", "color.diff=never", "-c", "status.branch=false", "-c", "status.relativePaths=true"])
+        .args([
+            "--no-pager",
+            "-c",
+            "core.quotepath=off",
+            "-c",
+            "color.ui=never",
+            "-c",
+            "color.status=never",
+            "-c",
+            "color.diff=never",
+            "-c",
+            "status.branch=false",
+            "-c",
+            "status.relativePaths=true",
+        ])
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
@@ -48,15 +62,29 @@ async fn git(root: &Path, args: &[&str]) -> Option<String> {
         .kill_on_drop(true)
         .spawn()
         .ok()?;
-    let out = tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await.ok()?.ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    let out = tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output())
+        .await
+        .ok()?
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Uncommitted paths below `root`, as `git status --short` lines with paths relative to it. What a
 /// test run leaves behind (caches, installed dependencies) is nobody's change and is left out.
 async fn status(root: &Path) -> Option<Vec<String>> {
-    let out = git(root, &["status", "--short", "--untracked-files=all", "--", "."]).await?;
-    Some(out.lines().filter(|l| l.len() > 3 && !path_of(l).is_some_and(derived)).map(String::from).collect())
+    let out = git(
+        root,
+        &["status", "--short", "--untracked-files=all", "--", "."],
+    )
+    .await?;
+    Some(
+        out.lines()
+            .filter(|l| l.len() > 3 && !path_of(l).is_some_and(derived))
+            .map(String::from)
+            .collect(),
+    )
 }
 
 /// The path a status line is about (the new name, for a rename). `None` for one git had to quote:
@@ -77,7 +105,11 @@ fn content_hash(root: &Path, path: &str) -> Option<u64> {
         return None;
     }
     if md.len() > HASH_UP_TO {
-        let changed = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+        let changed = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
         return Some(fnv64(format!("{}:{changed}", md.len()).as_bytes()));
     }
     std::fs::read(&file).ok().map(|bytes| fnv64(&bytes))
@@ -106,7 +138,10 @@ pub async fn changes(sess: &Session) -> Option<String> {
     match git_changes(sess).await {
         Some(report) => Some(report),
         None if sess.touched.is_empty() => None,
-        None => Some(format!("Files you changed with edit or write: {}", sess.touched.join(", "))),
+        None => Some(format!(
+            "Files you changed with edit or write: {}",
+            sess.touched.join(", ")
+        )),
     }
 }
 
@@ -145,7 +180,10 @@ async fn git_changes(sess: &Session) -> Option<String> {
         out.push_str(&format!("Paths are relative to {}.\n", root.display()));
     }
 
-    let exclude: Vec<String> = untouched.iter().map(|p| format!(":(exclude,literal){p}")).collect();
+    let exclude: Vec<String> = untouched
+        .iter()
+        .map(|p| format!(":(exclude,literal){p}"))
+        .collect();
     let mut args = vec!["diff", "HEAD", "--no-ext-diff", "--relative", "--", "."];
     args.extend(exclude.iter().map(String::as_str));
     // Where there is no commit yet to compare with, the paths have to do.
@@ -167,31 +205,67 @@ mod tests {
     use crate::state::{Features, test_session};
 
     fn sh(root: &Path, script: &str) {
-        let ok = std::process::Command::new("bash").arg("-c").arg(script).current_dir(root).output().unwrap().status.success();
+        let ok = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .current_dir(root)
+            .output()
+            .unwrap()
+            .status
+            .success();
         assert!(ok, "{script}");
     }
 
-    const COMMIT: &str = "git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base";
+    const COMMIT: &str =
+        "git -c user.name=t -c user.email=t@localhost -c commit.gpgsign=false commit -q -m base";
 
     #[tokio::test]
     async fn only_what_the_session_changed_is_shown() {
         let mut sess = test_session("changes-git", Features::ecosage());
         let root = sess.ws.root.clone();
-        sh(&root, &format!("printf 'a\\nb\\n' > code.py; printf 'x\\n' > wip.py; printf 'k\\n' > both.py; git init -q && git add -A && {COMMIT}"));
+        sh(
+            &root,
+            &format!(
+                "printf 'a\\nb\\n' > code.py; printf 'x\\n' > wip.py; printf 'k\\n' > both.py; git init -q && git add -A && {COMMIT}"
+            ),
+        );
         // The user's own work in progress, there before the session.
-        sh(&root, "printf 'x\\nmine\\n' > wip.py; printf 'k\\nmine\\n' > both.py; printf 'n\\n' > notes.txt");
+        sh(
+            &root,
+            "printf 'x\\nmine\\n' > wip.py; printf 'k\\nmine\\n' > both.py; printf 'n\\n' > notes.txt",
+        );
         sess.baseline = baseline(&root).await;
         assert!(sess.baseline.is_some());
         assert_eq!(changes(&sess).await, None, "nothing yet");
 
-        sh(&root, "printf 'a\\nB\\n' > code.py; printf 'k\\nmine\\ntoo\\n' > both.py; printf 'tmp\\n' > scratch.py");
+        sh(
+            &root,
+            "printf 'a\\nB\\n' > code.py; printf 'k\\nmine\\ntoo\\n' > both.py; printf 'tmp\\n' > scratch.py",
+        );
         let report = changes(&sess).await.unwrap();
-        assert!(report.starts_with("Paths (`git status --short`):\n"), "{report}");
-        assert!(report.contains(" M code.py\n") && report.contains("?? scratch.py\n") && report.contains(" M both.py\n"), "{report}");
-        assert!(report.contains("-b\n+B") && report.contains("+too"), "{report}");
-        assert!(report.contains("leave that as it is): both.py\n"), "{report}");
+        assert!(
+            report.starts_with("Paths (`git status --short`):\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains(" M code.py\n")
+                && report.contains("?? scratch.py\n")
+                && report.contains(" M both.py\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("-b\n+B") && report.contains("+too"),
+            "{report}"
+        );
+        assert!(
+            report.contains("leave that as it is): both.py\n"),
+            "{report}"
+        );
         // What the user had lying about is neither listed nor in the diff.
-        assert!(!report.contains("wip.py") && !report.contains("notes.txt"), "{report}");
+        assert!(
+            !report.contains("wip.py") && !report.contains("notes.txt"),
+            "{report}"
+        );
     }
 
     #[tokio::test]
@@ -201,6 +275,9 @@ mod tests {
         assert!(sess.baseline.is_none(), "not a repository");
         assert_eq!(changes(&sess).await, None);
         sess.touched = vec!["a.py".into(), "b.py".into()];
-        assert_eq!(changes(&sess).await.as_deref(), Some("Files you changed with edit or write: a.py, b.py"));
+        assert_eq!(
+            changes(&sess).await.as_deref(),
+            Some("Files you changed with edit or write: a.py, b.py")
+        );
     }
 }

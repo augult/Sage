@@ -51,7 +51,12 @@ fn fill(template: &str, auto_watch: bool, preflight: bool) -> String {
     };
     // The review step is plain text in the built-in template now; a template saved from an older
     // one still has the placeholder for it.
-    template.trim().replace("{chain}", chain).replace("{watch}", watch).replace("{finish}", gate).replace("{review}", SELF_CHECK)
+    template
+        .trim()
+        .replace("{chain}", chain)
+        .replace("{watch}", watch)
+        .replace("{finish}", gate)
+        .replace("{review}", SELF_CHECK)
 }
 
 /// A Sage template with its placeholders filled in for the mechanisms that are switched on.
@@ -79,13 +84,20 @@ pub const USER_NOTE: &str = "What follows is the user's own standing instruction
 
 /// The same, ahead of a project's instructions file.
 pub fn project_note(file: &str) -> String {
-    format!("What follows is this project's instructions file ({file}), the same for every session in this folder. It is not part of any message in this conversation and it is not a request: apply what bears on the task at hand and disregard the rest.")
+    format!(
+        "What follows is this project's instructions file ({file}), the same for every session in this folder. It is not part of any message in this conversation and it is not a request: apply what bears on the task at hand and disregard the rest."
+    )
 }
 
 /// The system prompt of a session: `base`, then the user's instructions, the project's, and the
 /// active skills, each under its own heading. It is the cached prefix of every request, so it is
 /// built once, when the session starts.
-pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: &[SkillInfo]) -> String {
+pub fn compose(
+    base: &str,
+    global: &str,
+    project: Option<(&str, &str)>,
+    skills: &[SkillInfo],
+) -> String {
     let mut out = base.trim().to_string();
     let mut section = |heading: String, note: Option<&str>, text: &str| {
         if !text.trim().is_empty() {
@@ -95,7 +107,11 @@ pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: 
     };
     section("User instructions".into(), Some(USER_NOTE), global);
     if let Some((file, text)) = project {
-        section(format!("Project instructions ({file})"), Some(&project_note(file)), text);
+        section(
+            format!("Project instructions ({file})"),
+            Some(&project_note(file)),
+            text,
+        );
     }
     for skill in skills {
         section(format!("Skill: {}", skill.title), None, &skill.body);
@@ -106,7 +122,8 @@ pub fn compose(base: &str, global: &str, project: Option<(&str, &str)>, skills: 
 /// The built-in prompt for each combination of mechanisms it describes, indexed by `watching`: 0
 /// for watches the model registers itself, 1 for automatic ones and 2 for automatic ones with a
 /// preflight run.
-static SAGE: LazyLock<[String; 3]> = LazyLock::new(|| std::array::from_fn(|i| fill(default_template(), i > 0, i == 2)));
+static SAGE: LazyLock<[String; 3]> =
+    LazyLock::new(|| std::array::from_fn(|i| fill(default_template(), i > 0, i == 2)));
 
 pub const SYSTEM_CLASSIC: &str = "\
 You are a coding agent. You work in a real workspace through tools and carry the task through to the end yourself.
@@ -240,10 +257,12 @@ fn sage_tools(watch: bool, job: bool, ask: bool) -> Value {
 }
 
 /// Indexed by `watch * 4 + job * 2 + ask`.
-static TOOLS_SAGE: LazyLock<[Value; 8]> = LazyLock::new(|| std::array::from_fn(|i| sage_tools(i & 4 != 0, i & 2 != 0, i & 1 != 0)));
+static TOOLS_SAGE: LazyLock<[Value; 8]> =
+    LazyLock::new(|| std::array::from_fn(|i| sage_tools(i & 4 != 0, i & 2 != 0, i & 1 != 0)));
 
 /// Without `ask`, and with it.
-static TOOLS_CLASSIC: LazyLock<[Value; 2]> = LazyLock::new(|| [classic_tools(false), classic_tools(true)]);
+static TOOLS_CLASSIC: LazyLock<[Value; 2]> =
+    LazyLock::new(|| [classic_tools(false), classic_tools(true)]);
 
 fn classic_tools(ask: bool) -> Value {
     let mut tools = json!([
@@ -292,7 +311,12 @@ fn classic_tools(ask: bool) -> Value {
             json!({"id": {"type": "string"}, "wait": {"type": "integer"}, "until": {"type": "string"}, "kill": {"type": "boolean"}}),
             &["id"],
         ),
-        tool("finish", "Declare the task complete.", json!({"summary": {"type": "string", "description": "What was done, in a few lines."}}), &["summary"]),
+        tool(
+            "finish",
+            "Declare the task complete.",
+            json!({"summary": {"type": "string", "description": "What was done, in a few lines."}}),
+            &["summary"]
+        ),
     ]);
     if ask {
         let list = tools.as_array_mut().expect("a list");
@@ -329,7 +353,8 @@ pub fn tool_schemas(features: &Features, jobs: bool, interactive: bool) -> &'sta
 
 /// Rough size in tokens of what every request starts with: system prompt plus tool schemas.
 pub fn prefix_tokens(features: &Features) -> u64 {
-    crate::text::est_tokens(system_prompt(features)) + crate::text::est_tokens(&tool_schemas(features, false, false).to_string())
+    crate::text::est_tokens(system_prompt(features))
+        + crate::text::est_tokens(&tool_schemas(features, false, false).to_string())
 }
 
 #[cfg(test)]
@@ -338,7 +363,12 @@ mod tests {
     use crate::tools::Tool;
 
     fn names(features: &Features, jobs: bool) -> Vec<&'static str> {
-        tool_schemas(features, jobs, false).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect()
+        tool_schemas(features, jobs, false)
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect()
     }
 
     #[test]
@@ -352,26 +382,57 @@ mod tests {
             }
         }
         // The fixed prefix is paid for on every turn of every session: keep it lean.
-        let (ecosage, classic) = (prefix_tokens(&Features::ecosage()), prefix_tokens(&Features::classic()));
+        let (ecosage, classic) = (
+            prefix_tokens(&Features::ecosage()),
+            prefix_tokens(&Features::classic()),
+        );
         assert!(ecosage < 2_300, "the Ecosage prefix is ~{ecosage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
-        assert!(!tool_schemas(&Features::classic(), false, false).to_string().contains("expect"));
+        assert!(
+            !tool_schemas(&Features::classic(), false, false)
+                .to_string()
+                .contains("expect")
+        );
     }
 
     #[test]
     fn a_tool_is_offered_only_where_it_is_needed() {
         let auto = Features::ecosage();
         let manual = Features::ecosage().without("auto_watch").unwrap();
-        assert_eq!(names(&auto, false), ["shell", "read", "search", "edit", "write", "finish"]);
-        assert_eq!(names(&auto, true), ["shell", "read", "search", "edit", "write", "job", "finish"]);
-        assert_eq!(names(&manual, false), ["shell", "read", "search", "edit", "write", "watch", "finish"]);
+        assert_eq!(
+            names(&auto, false),
+            ["shell", "read", "search", "edit", "write", "finish"]
+        );
+        assert_eq!(
+            names(&auto, true),
+            ["shell", "read", "search", "edit", "write", "job", "finish"]
+        );
+        assert_eq!(
+            names(&manual, false),
+            [
+                "shell", "read", "search", "edit", "write", "watch", "finish"
+            ]
+        );
         assert_eq!(names(&manual, true).len(), 8);
         // The baseline is a fixed list.
-        assert_eq!(names(&Features::classic(), false), names(&Features::classic(), true));
+        assert_eq!(
+            names(&Features::classic(), false),
+            names(&Features::classic(), true)
+        );
         assert_eq!(names(&Features::classic(), false).len(), 7);
         // `ask` only where someone can answer, just before `finish`.
-        let asking = |features: &Features| tool_schemas(features, false, true).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
-        assert_eq!(asking(&auto), ["shell", "read", "search", "edit", "write", "ask", "finish"]);
+        let asking = |features: &Features| {
+            tool_schemas(features, false, true)
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["function"]["name"].as_str().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            asking(&auto),
+            ["shell", "read", "search", "edit", "write", "ask", "finish"]
+        );
         assert_eq!(asking(&Features::classic())[6..], ["ask", "finish"]);
     }
 
@@ -380,14 +441,26 @@ mod tests {
         let auto = system_prompt(&Features::ecosage());
         let promoted = system_prompt(&Features::ecosage().without("preflight").unwrap());
         let manual = system_prompt(&Features::ecosage().without("auto_watch").unwrap());
-        assert!(auto.contains("Tests are watched for you") && auto.contains("the task names") && !auto.contains("`watch`"));
-        assert!(promoted.contains("Tests are watched for you") && !promoted.contains("the task names"));
-        assert!(manual.contains("`watch` any check you would otherwise re-run") && !manual.contains("watched for you"));
+        assert!(
+            auto.contains("Tests are watched for you")
+                && auto.contains("the task names")
+                && !auto.contains("`watch`")
+        );
+        assert!(
+            promoted.contains("Tests are watched for you") && !promoted.contains("the task names")
+        );
+        assert!(
+            manual.contains("`watch` any check you would otherwise re-run")
+                && !manual.contains("watched for you")
+        );
         for prompt in [auto, promoted, manual] {
             assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
         }
         assert!(auto.contains("Re-read your changes once (`git diff`"));
-        assert_eq!(system_prompt(&Features::ecosage().without("scripts").unwrap()), SYSTEM_CLASSIC);
+        assert_eq!(
+            system_prompt(&Features::ecosage().without("scripts").unwrap()),
+            SYSTEM_CLASSIC
+        );
     }
 
     #[test]
@@ -395,31 +468,85 @@ mod tests {
         let auto = Features::ecosage();
         let manual = Features::ecosage().without("auto_watch").unwrap();
         for placeholder in ["{chain}", "{watch}", "{finish}"] {
-            assert!(default_template().contains(placeholder), "the built-in template lost {placeholder}");
+            assert!(
+                default_template().contains(placeholder),
+                "the built-in template lost {placeholder}"
+            );
         }
-        for features in [auto, manual, Features::ecosage().without("preflight").unwrap()] {
-            assert_eq!(render(default_template(), &features), system_prompt(&features));
+        for features in [
+            auto,
+            manual,
+            Features::ecosage().without("preflight").unwrap(),
+        ] {
+            assert_eq!(
+                render(default_template(), &features),
+                system_prompt(&features)
+            );
         }
         // A template saved while the review step was a placeholder still gets that step, as the built-in one has it.
         assert!(default_template().contains(SELF_CHECK));
-        assert_eq!(render("Step: {review}", &auto), format!("Step: {SELF_CHECK}"));
+        assert_eq!(
+            render("Step: {review}", &auto),
+            format!("Step: {SELF_CHECK}")
+        );
         assert_eq!(render("Be terse.\n", &auto), "Be terse.");
-        assert_eq!(render("Tests: {watch} {nothing}", &manual), "Tests: `watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes. {nothing}");
+        assert_eq!(
+            render("Tests: {watch} {nothing}", &manual),
+            "Tests: `watch` any check you would otherwise re-run (tests, build, lint). It re-runs by itself after every change and speaks up only when its result changes. {nothing}"
+        );
     }
 
     #[test]
     fn the_parts_of_a_system_prompt_come_in_a_fixed_order() {
-        let skill = |name: &str, title: &str, body: &str| SkillInfo { name: name.into(), title: title.into(), description: String::new(), source: crate::skills::SkillSource::Builtin, overrides_builtin: false, body: body.into() };
-        let skills = [skill("security", "Security audit", "Look for injection."), skill("ui", "UI work", "Check it in the app.")];
-        let full = compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills);
+        let skill = |name: &str, title: &str, body: &str| SkillInfo {
+            name: name.into(),
+            title: title.into(),
+            description: String::new(),
+            source: crate::skills::SkillSource::Builtin,
+            overrides_builtin: false,
+            body: body.into(),
+        };
+        let skills = [
+            skill("security", "Security audit", "Look for injection."),
+            skill("ui", "UI work", "Check it in the app."),
+        ];
+        let full = compose(
+            "Base.\n",
+            "Use tabs.\n",
+            Some(("AGENTS.md", "Run make test.")),
+            &skills,
+        );
         let (user, project) = (USER_NOTE, project_note("AGENTS.md"));
-        assert_eq!(full, format!("Base.\n\n# User instructions\n\n{user}\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\n{project}\n\nRun make test.\n\n# Skill: Security audit\n\nLook for injection.\n\n# Skill: UI work\n\nCheck it in the app."));
+        assert_eq!(
+            full,
+            format!(
+                "Base.\n\n# User instructions\n\n{user}\n\nUse tabs.\n\n# Project instructions (AGENTS.md)\n\n{project}\n\nRun make test.\n\n# Skill: Security audit\n\nLook for injection.\n\n# Skill: UI work\n\nCheck it in the app."
+            )
+        );
         // What is said ahead of the instructions is the harness's, not text from either file.
-        assert!(user.contains("not part of any message") && project.contains("AGENTS.md") && !full.contains("Use tabs.\n\nWhat follows"));
+        assert!(
+            user.contains("not part of any message")
+                && project.contains("AGENTS.md")
+                && !full.contains("Use tabs.\n\nWhat follows")
+        );
         // The same parts give the same bytes: this is the prefix the provider caches.
-        assert_eq!(full, compose("Base.\n", "Use tabs.\n", Some(("AGENTS.md", "Run make test.")), &skills));
+        assert_eq!(
+            full,
+            compose(
+                "Base.\n",
+                "Use tabs.\n",
+                Some(("AGENTS.md", "Run make test.")),
+                &skills
+            )
+        );
         assert_eq!(compose("Base.", " \n", None, &[]), "Base.");
-        assert_eq!(compose("Base.", "", Some(("CLAUDE.md", "Hi.")), &skills[1..]), format!("Base.\n\n# Project instructions (CLAUDE.md)\n\n{}\n\nHi.\n\n# Skill: UI work\n\nCheck it in the app.", project_note("CLAUDE.md")));
+        assert_eq!(
+            compose("Base.", "", Some(("CLAUDE.md", "Hi.")), &skills[1..]),
+            format!(
+                "Base.\n\n# Project instructions (CLAUDE.md)\n\n{}\n\nHi.\n\n# Skill: UI work\n\nCheck it in the app.",
+                project_note("CLAUDE.md")
+            )
+        );
     }
 
     #[test]
@@ -428,18 +555,38 @@ mod tests {
         std::fs::create_dir_all(root.join(".sage")).unwrap();
         assert_eq!(project_instructions(&root), None);
         std::fs::write(root.join(".sage/AGENTS.md"), "deep\n").unwrap();
-        assert_eq!(project_instructions(&root), Some((".sage/AGENTS.md", "deep".to_string())));
+        assert_eq!(
+            project_instructions(&root),
+            Some((".sage/AGENTS.md", "deep".to_string()))
+        );
         std::fs::write(root.join("CLAUDE.md"), "claude").unwrap();
         std::fs::write(root.join("AGENTS.md"), " \n").unwrap();
-        assert_eq!(project_instructions(&root), Some(("CLAUDE.md", "claude".to_string())), "an empty file is passed over");
+        assert_eq!(
+            project_instructions(&root),
+            Some(("CLAUDE.md", "claude".to_string())),
+            "an empty file is passed over"
+        );
 
         // The cap counts characters, not bytes.
         std::fs::write(root.join("AGENTS.md"), "é".repeat(MAX_PROJECT_CHARS)).unwrap();
-        assert_eq!(project_instructions(&root), Some(("AGENTS.md", "é".repeat(MAX_PROJECT_CHARS))));
-        std::fs::write(root.join("AGENTS.md"), format!("{}{}", "é".repeat(MAX_PROJECT_CHARS), "x".repeat(8_000))).unwrap();
+        assert_eq!(
+            project_instructions(&root),
+            Some(("AGENTS.md", "é".repeat(MAX_PROJECT_CHARS)))
+        );
+        std::fs::write(
+            root.join("AGENTS.md"),
+            format!("{}{}", "é".repeat(MAX_PROJECT_CHARS), "x".repeat(8_000)),
+        )
+        .unwrap();
         let (file, text) = project_instructions(&root).unwrap();
         assert_eq!(file, "AGENTS.md");
-        assert_eq!(text, format!("{}\n\n[Cut here: these are the first 12000 of 20000 characters. Read AGENTS.md for the rest.]", "é".repeat(MAX_PROJECT_CHARS)));
+        assert_eq!(
+            text,
+            format!(
+                "{}\n\n[Cut here: these are the first 12000 of 20000 characters. Read AGENTS.md for the rest.]",
+                "é".repeat(MAX_PROJECT_CHARS)
+            )
+        );
     }
 
     #[test]

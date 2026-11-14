@@ -31,7 +31,12 @@ pub const TASKS: &[Task] = &[
         needs: &["python3", "sh"],
         files: embed!("attempts/workspace": "README.md", "config/fetchkit.ini.template", "docs/attempts-migration.md", "examples/manifest.json", "fetchkit/__init__.py", "fetchkit/__main__.py", "fetchkit/cli.py", "fetchkit/client.py", "fetchkit/config.py", "fetchkit/jobs.py", "fetchkit/retry.py", "fetchkit/transport.py", "scripts/backfill.py", "scripts/nightly.sh", "scripts/smoke.sh", "tests/test_client.py", "tests/test_retry.py"),
         check: "python3 -m unittest discover -s tests",
-        restore: &["tests/test_client.py", "tests/test_retry.py", "docs/attempts-migration.md", "fetchkit/transport.py"],
+        restore: &[
+            "tests/test_client.py",
+            "tests/test_retry.py",
+            "docs/attempts-migration.md",
+            "fetchkit/transport.py",
+        ],
         hidden: embed!("attempts/hidden": "tests/test_migration_more.py"),
         verify: "python3 -m unittest tests/test_client.py tests/test_retry.py tests/test_migration_more.py",
         solution: embed!("attempts/solution": "README.md", "config/fetchkit.ini.template", "examples/manifest.json", "fetchkit/__init__.py", "fetchkit/cli.py", "fetchkit/client.py", "fetchkit/config.py", "fetchkit/jobs.py", "fetchkit/retry.py", "scripts/backfill.py", "scripts/nightly.sh", "scripts/smoke.sh"),
@@ -77,7 +82,12 @@ pub const TASKS: &[Task] = &[
             ("expected_top3.txt", rollup!("workspace/expected_top3.txt")),
         ],
         check: "sh check.sh",
-        restore: &["check.sh", "access.log", "expected.txt", "expected_top3.txt"],
+        restore: &[
+            "check.sh",
+            "access.log",
+            "expected.txt",
+            "expected_top3.txt",
+        ],
         hidden: &[
             ("more/check_more.sh", rollup!("hidden/more/check_more.sh")),
             ("more/big.log", rollup!("hidden/more/big.log.txt")),

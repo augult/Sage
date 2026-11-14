@@ -62,14 +62,26 @@ fn real_path(p: &Path) -> PathBuf {
 /// The directory the user's shell believes it is in, which keeps the symlinks they came through.
 fn logical_cwd() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let same = |p: &PathBuf| p.is_absolute() && crate::util::canonical(p).ok() == crate::util::canonical(&cwd).ok();
-    Some(std::env::var_os("PWD").map(PathBuf::from).filter(same).unwrap_or(cwd))
+    let same = |p: &PathBuf| {
+        p.is_absolute() && crate::util::canonical(p).ok() == crate::util::canonical(&cwd).ok()
+    };
+    Some(
+        std::env::var_os("PWD")
+            .map(PathBuf::from)
+            .filter(same)
+            .unwrap_or(cwd),
+    )
 }
 
 /// `given` as an absolute path with its symlinks left in, if that spells `canonical` differently.
 fn as_given(given: &Path, canonical: &Path) -> Option<PathBuf> {
-    let spelled = if given.is_absolute() { normalize(given) } else { normalize(&logical_cwd()?.join(given)) };
-    (spelled != canonical && crate::util::canonical(&spelled).is_ok_and(|real| real == canonical)).then_some(spelled)
+    let spelled = if given.is_absolute() {
+        normalize(given)
+    } else {
+        normalize(&logical_cwd()?.join(given))
+    };
+    (spelled != canonical && crate::util::canonical(&spelled).is_ok_and(|real| real == canonical))
+        .then_some(spelled)
 }
 
 /// What can sit inside a file name: next to one of these, a path goes on.
@@ -79,7 +91,26 @@ fn in_name(c: char) -> bool {
 
 /// True where a path written in running text is over.
 fn ends_path(next: Option<char>) -> bool {
-    next.is_none_or(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')' | ']' | '}' | '>' | '<' | ',' | ';' | ':' | '|' | '&' | '’' | '”'))
+    next.is_none_or(|c| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\''
+                    | '`'
+                    | ')'
+                    | ']'
+                    | '}'
+                    | '>'
+                    | '<'
+                    | ','
+                    | ';'
+                    | ':'
+                    | '|'
+                    | '&'
+                    | '’'
+                    | '”'
+            )
+    })
 }
 
 /// `text` without `dir` wherever a path starts with it: `dir/x` becomes `x`, `dir` on its own `.`
@@ -88,18 +119,32 @@ fn ends_path(next: Option<char>) -> bool {
 fn cut_dir(text: &str, dir: &str, windows_paths: bool) -> Option<String> {
     // Match either Windows separator, including mixed spellings from tools. Substitution is only
     // for matching: it preserves byte offsets, and the output still copies the original text.
-    let search_text = if windows_paths { Cow::Owned(text.replace('\\', "/")) } else { Cow::Borrowed(text) };
-    let search_dir = if windows_paths { Cow::Owned(dir.replace('\\', "/")) } else { Cow::Borrowed(dir) };
+    let search_text = if windows_paths {
+        Cow::Owned(text.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(text)
+    };
+    let search_dir = if windows_paths {
+        Cow::Owned(dir.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(dir)
+    };
     let step = search_dir.chars().next()?.len_utf8();
     let mut out: Option<String> = None;
     let (mut copied, mut from) = (0, 0);
-    while let Some(at) = search_text[from..].find(search_dir.as_ref()).map(|i| from + i) {
+    while let Some(at) = search_text[from..]
+        .find(search_dir.as_ref())
+        .map(|i| from + i)
+    {
         from = at + step;
         let rest = &text[at + dir.len()..];
         let below = rest.trim_start_matches(|c| c == '/' || (windows_paths && c == '\\'));
         let slashes = rest.len() - below.len();
         // Glued to what stands before it, the match is the tail of a longer path.
-        let glued = text[..at].chars().next_back().is_some_and(|c| in_name(c) || matches!(c, '/' | '\\' | '$' | '}' | ')'));
+        let glued = text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| in_name(c) || matches!(c, '/' | '\\' | '$' | '}' | ')'));
         let put = match (slashes > 0, ends_path(below.chars().next())) {
             _ if glued => continue,
             (true, false) => "",
@@ -124,9 +169,17 @@ impl Workspace {
         let given = root;
         let root = crate::util::canonical(given)?;
         if !root.is_dir() {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotADirectory, "workspace root is not a directory"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                "workspace root is not a directory",
+            ));
         }
-        Ok(Self { cwd: root.clone(), as_given: as_given(given, &root), root, allow_outside_writes: false })
+        Ok(Self {
+            cwd: root.clone(),
+            as_given: as_given(given, &root),
+            root,
+            allow_outside_writes: false,
+        })
     }
 
     /// Absolute, normalised path for something the model named (relative paths are relative to cwd).
@@ -139,7 +192,11 @@ impl Workspace {
         } else {
             PathBuf::from(p)
         };
-        let abs = if expanded.is_absolute() { expanded } else { self.cwd.join(expanded) };
+        let abs = if expanded.is_absolute() {
+            expanded
+        } else {
+            self.cwd.join(expanded)
+        };
         normalize(&abs)
     }
 
@@ -151,15 +208,33 @@ impl Workspace {
             Err(_) => abs,
         };
         let text = path.to_string_lossy();
-        if cfg!(windows) { text.replace('\\', "/") } else { text.into_owned() }
+        if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text.into_owned()
+        }
     }
 
     /// Every absolute spelling of the directory the tools run in. None once a `cd` has left the
     /// workspace: paths out there are named in full.
     fn cwd_spellings(&self) -> Vec<String> {
-        let Ok(below) = self.cwd.strip_prefix(&self.root) else { return Vec::new() };
-        let at = |root: &PathBuf| if below.as_os_str().is_empty() { root.clone() } else { root.join(below) };
-        [Some(&self.root), self.as_given.as_ref()].into_iter().flatten().map(at).filter_map(|dir| dir.to_str().map(String::from)).filter(|dir| dir.len() > 1).collect()
+        let Ok(below) = self.cwd.strip_prefix(&self.root) else {
+            return Vec::new();
+        };
+        let at = |root: &PathBuf| {
+            if below.as_os_str().is_empty() {
+                root.clone()
+            } else {
+                root.join(below)
+            }
+        };
+        [Some(&self.root), self.as_given.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(at)
+            .filter_map(|dir| dir.to_str().map(String::from))
+            .filter(|dir| dir.len() > 1)
+            .collect()
     }
 
     /// `text` with absolute paths into the directory the tools run in made relative to it, which is
@@ -186,7 +261,8 @@ impl Workspace {
             return Ok(());
         }
         let real = real_path(abs);
-        let tmp = crate::util::canonical(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+        let tmp =
+            crate::util::canonical(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
         if real.starts_with(&self.root) || real.starts_with(&tmp) {
             Ok(())
         } else {
@@ -227,12 +303,29 @@ pub enum SeenCheck {
 }
 
 impl Seen {
-    pub fn observe(&mut self, path: &Path, hash: u64, from: usize, to: usize, step: u32) -> SeenCheck {
-        let file = self.files.entry(path.to_path_buf()).or_insert(SeenFile { hash, windows: Vec::new() });
+    pub fn observe(
+        &mut self,
+        path: &Path,
+        hash: u64,
+        from: usize,
+        to: usize,
+        step: u32,
+    ) -> SeenCheck {
+        let file = self.files.entry(path.to_path_buf()).or_insert(SeenFile {
+            hash,
+            windows: Vec::new(),
+        });
         if file.hash != hash {
-            *file = SeenFile { hash, windows: Vec::new() };
+            *file = SeenFile {
+                hash,
+                windows: Vec::new(),
+            };
         }
-        if let Some(w) = file.windows.iter_mut().find(|w| w.from <= from && w.to >= to) {
+        if let Some(w) = file
+            .windows
+            .iter_mut()
+            .find(|w| w.from <= from && w.to >= to)
+        {
             if !w.stubbed {
                 w.stubbed = true;
                 return SeenCheck::AlreadyShown { step: w.step };
@@ -241,28 +334,50 @@ impl Seen {
             w.step = step;
             return SeenCheck::Fresh;
         }
-        file.windows.push(SeenWindow { from, to, step, stubbed: false });
+        file.windows.push(SeenWindow {
+            from,
+            to,
+            step,
+            stubbed: false,
+        });
         SeenCheck::Fresh
     }
 
     /// Records a window without asking, for text the harness attaches on its own initiative.
     pub fn mark(&mut self, path: &Path, hash: u64, from: usize, to: usize, step: u32) {
-        let file = self.files.entry(path.to_path_buf()).or_insert(SeenFile { hash, windows: Vec::new() });
+        let file = self.files.entry(path.to_path_buf()).or_insert(SeenFile {
+            hash,
+            windows: Vec::new(),
+        });
         if file.hash != hash {
-            *file = SeenFile { hash, windows: Vec::new() };
+            *file = SeenFile {
+                hash,
+                windows: Vec::new(),
+            };
         }
         if !file.windows.iter().any(|w| w.from <= from && w.to >= to) {
-            file.windows.push(SeenWindow { from, to, step, stubbed: false });
+            file.windows.push(SeenWindow {
+                from,
+                to,
+                step,
+                stubbed: false,
+            });
         }
     }
 
     pub fn covered(&self, path: &Path, hash: u64, from: usize, to: usize) -> bool {
-        self.files.get(path).is_some_and(|f| f.hash == hash && f.windows.iter().any(|w| w.from <= from && w.to >= to))
+        self.files.get(path).is_some_and(|f| {
+            f.hash == hash && f.windows.iter().any(|w| w.from <= from && w.to >= to)
+        })
     }
 
     /// The line windows shown of a file while its content had this hash.
     pub fn windows(&self, path: &Path, hash: u64) -> Vec<(usize, usize)> {
-        self.files.get(path).filter(|f| f.hash == hash).map(|f| f.windows.iter().map(|w| (w.from, w.to)).collect()).unwrap_or_default()
+        self.files
+            .get(path)
+            .filter(|f| f.hash == hash)
+            .map(|f| f.windows.iter().map(|w| (w.from, w.to)).collect())
+            .unwrap_or_default()
     }
 
     /// Forget everything: called when old observations are dropped from the context.
@@ -273,8 +388,20 @@ impl Seen {
 
 /// Directories that are large, derived, and never the deliverable.
 const SKIP_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox",
-    ".next", ".cache", ".gradle", ".idea", ".ruff_cache",
+    ".git",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    ".next",
+    ".cache",
+    ".gradle",
+    ".idea",
+    ".ruff_cache",
 ];
 
 /// True for a path inside one of the directories that hold derived files (caches, dependencies).
@@ -295,14 +422,20 @@ pub fn small_tree(root: &Path, max_files: usize) -> Option<Vec<PathBuf>> {
         .git_exclude(false)
         .parents(false)
         .follow_links(false)
-        .filter_entry(|e| !e.file_name().to_str().is_some_and(|n| SKIP_DIRS.contains(&n)))
+        .filter_entry(|e| {
+            !e.file_name()
+                .to_str()
+                .is_some_and(|n| SKIP_DIRS.contains(&n))
+        })
         .build();
     let mut files = Vec::new();
     for entry in walker.flatten() {
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
-        let Ok(rel) = entry.path().strip_prefix(root) else { continue };
+        let Ok(rel) = entry.path().strip_prefix(root) else {
+            continue;
+        };
         files.push(rel.to_path_buf());
         if files.len() > max_files {
             return None;
@@ -336,7 +469,11 @@ pub fn fingerprint(root: &Path, budget: Duration) -> u64 {
         .git_exclude(false)
         .parents(false)
         .follow_links(false)
-        .filter_entry(|e| !e.file_name().to_str().is_some_and(|n| SKIP_DIRS.contains(&n)))
+        .filter_entry(|e| {
+            !e.file_name()
+                .to_str()
+                .is_some_and(|n| SKIP_DIRS.contains(&n))
+        })
         .build();
     for entry in walker.flatten() {
         let Ok(md) = entry.metadata() else { continue };
@@ -349,10 +486,13 @@ pub fn fingerprint(root: &Path, budget: Duration) -> u64 {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
-        let h = fnv64(entry.path().as_os_str().as_encoded_bytes()) ^ mix(md.len()) ^ mix(mtime).rotate_left(21);
+        let h = fnv64(entry.path().as_os_str().as_encoded_bytes())
+            ^ mix(md.len())
+            ^ mix(mtime).rotate_left(21);
         acc = acc.wrapping_add(mix(h));
         count += 1;
-        if count >= FINGERPRINT_MAX_FILES || (count.is_multiple_of(256) && start.elapsed() > budget) {
+        if count >= FINGERPRINT_MAX_FILES || (count.is_multiple_of(256) && start.elapsed() > budget)
+        {
             break;
         }
     }
@@ -391,7 +531,10 @@ mod tests {
         let ws = Workspace::new(&tmp("display-backslash")).unwrap();
         let name = r"dir/file\name.rs";
         assert_eq!(ws.display(&ws.root.join(name)), name);
-        assert_eq!(ws.resolve(&ws.display(&ws.root.join(name))), ws.root.join(name));
+        assert_eq!(
+            ws.resolve(&ws.display(&ws.root.join(name))),
+            ws.root.join(name)
+        );
     }
 
     #[test]
@@ -400,8 +543,16 @@ mod tests {
         let outside = tmp("policy-outside");
         let ws = Workspace::new(&root).unwrap();
         assert!(ws.check_writable(&ws.resolve("new/dir/file.txt")).is_ok());
-        assert!(ws.check_writable(&ws.resolve("../../etc/passwd")).is_err() || ws.resolve("../../etc/passwd").starts_with(std::env::temp_dir()));
-        assert!(ws.check_writable(Path::new("/etc/sage-should-not-write")).is_err());
+        assert!(
+            ws.check_writable(&ws.resolve("../../etc/passwd")).is_err()
+                || ws
+                    .resolve("../../etc/passwd")
+                    .starts_with(std::env::temp_dir())
+        );
+        assert!(
+            ws.check_writable(Path::new("/etc/sage-should-not-write"))
+                .is_err()
+        );
         #[cfg(unix)]
         {
             // The policy must hold for a symlink that points out of the workspace into a non-temp place.
@@ -417,32 +568,75 @@ mod tests {
         let r = ws.root.display().to_string();
         let short = |text: String| ws.shorten(&text).into_owned();
         assert_eq!(short(format!("{r}/x/y.py:12: error")), "x/y.py:12: error");
-        assert_eq!(short(format!("  File \"{r}/pager.py\", line 3, in page\n  File \"{r}/test_pager.py\", line 9")), "  File \"pager.py\", line 3, in page\n  File \"test_pager.py\", line 9");
+        assert_eq!(
+            short(format!(
+                "  File \"{r}/pager.py\", line 3, in page\n  File \"{r}/test_pager.py\", line 9"
+            )),
+            "  File \"pager.py\", line 3, in page\n  File \"test_pager.py\", line 9"
+        );
         // The directory on its own is `.`, whatever closes it.
         assert_eq!(short(format!("rootdir: {r}")), "rootdir: .");
-        assert_eq!(short(format!("cd {r} && ls '{r}' {r}/")), "cd . && ls '.' ./");
+        assert_eq!(
+            short(format!("cd {r} && ls '{r}' {r}/")),
+            "cd . && ls '.' ./"
+        );
         assert_eq!(short(format!("PYTHONPATH={r}:{r}/src")), "PYTHONPATH=.:src");
         assert_eq!(short(format!("{r}//x.py")), "x.py");
         // Another place that only shares the prefix, or has it in the middle, is left as it is.
-        for other in [format!("{r}-other/x.py"), format!("{r}.bak"), format!("{r}2/x.py"), format!("/mnt{r}/x.py"), format!("file://{r}/x.html"), format!("see {r}.")] {
+        for other in [
+            format!("{r}-other/x.py"),
+            format!("{r}.bak"),
+            format!("{r}2/x.py"),
+            format!("/mnt{r}/x.py"),
+            format!("file://{r}/x.html"),
+            format!("see {r}."),
+        ] {
             assert!(matches!(ws.shorten(&other), Cow::Borrowed(_)), "{other}");
         }
-        assert!(matches!(ws.shorten("3 passed in 0.12s"), Cow::Borrowed(_)), "nothing to cut, nothing copied");
+        assert!(
+            matches!(ws.shorten("3 passed in 0.12s"), Cow::Borrowed(_)),
+            "nothing to cut, nothing copied"
+        );
     }
 
     #[test]
     fn shortening_matches_windows_separators_without_rewriting_output() {
         let dir = r"C:\work\prøject\pkg";
-        for prefix in [r"C:\work\prøject\pkg", "C:/work/prøject/pkg", r"C:\work/prøject\pkg"] {
-            assert_eq!(cut_dir(&format!("{prefix}/a.py:3"), dir, true), Some("a.py:3".to_string()));
-            assert_eq!(cut_dir(&format!(r"{prefix}\deep\a.py:3"), dir, true), Some(r"deep\a.py:3".to_string()));
-            assert_eq!(cut_dir(&format!(r"cd {prefix}\ && echo '\n'"), dir, true), Some(r"cd ./ && echo '\n'".to_string()));
+        for prefix in [
+            r"C:\work\prøject\pkg",
+            "C:/work/prøject/pkg",
+            r"C:\work/prøject\pkg",
+        ] {
+            assert_eq!(
+                cut_dir(&format!("{prefix}/a.py:3"), dir, true),
+                Some("a.py:3".to_string())
+            );
+            assert_eq!(
+                cut_dir(&format!(r"{prefix}\deep\a.py:3"), dir, true),
+                Some(r"deep\a.py:3".to_string())
+            );
+            assert_eq!(
+                cut_dir(&format!(r"cd {prefix}\ && echo '\n'"), dir, true),
+                Some(r"cd ./ && echo '\n'".to_string())
+            );
             assert_eq!(cut_dir(prefix, dir, true), Some(".".to_string()));
-            for other in [format!("{prefix}-old/a.py"), format!("{prefix}.bak"), format!(r"D:\parent\{prefix}\a.py"), format!("file://{prefix}/a.py")] {
+            for other in [
+                format!("{prefix}-old/a.py"),
+                format!("{prefix}.bak"),
+                format!(r"D:\parent\{prefix}\a.py"),
+                format!("file://{prefix}/a.py"),
+            ] {
                 assert_eq!(cut_dir(&other, dir, true), None, "{other}");
             }
         }
-        assert_eq!(cut_dir(r"\\host/share\project/pkg\a.py", r"\\host\share\project\pkg", true), Some("a.py".to_string()));
+        assert_eq!(
+            cut_dir(
+                r"\\host/share\project/pkg\a.py",
+                r"\\host\share\project\pkg",
+                true
+            ),
+            Some("a.py".to_string())
+        );
         // On Unix a backslash can be a literal part of a file name, not a separator.
         assert_eq!(cut_dir(r"/work/pkg\a.py", "/work/pkg", false), None);
         assert_eq!(cut_dir(r"/work/pkg/a.py", r"/work\pkg", false), None);
@@ -456,7 +650,10 @@ mod tests {
         let r = ws.root.display().to_string();
         // After `cd pkg` the tools run there: what lies below is relative to it, the rest stays whole.
         ws.cwd = ws.root.join("pkg");
-        assert_eq!(ws.shorten(&format!("{r}/pkg/a.py {r}/pkg {r}/b.py {r}")), format!("a.py . {r}/b.py {r}"));
+        assert_eq!(
+            ws.shorten(&format!("{r}/pkg/a.py {r}/pkg {r}/b.py {r}")),
+            format!("a.py . {r}/b.py {r}")
+        );
         // Outside the workspace nothing is relative to anything.
         ws.cwd = ws.root.parent().unwrap().to_path_buf();
         assert!(matches!(ws.shorten(&format!("{r}/b.py")), Cow::Borrowed(_)));
@@ -468,9 +665,21 @@ mod tests {
             std::os::unix::fs::symlink(&ws.root, &link).unwrap();
             let linked = Workspace::new(&link).unwrap();
             let l = link.display().to_string();
-            assert_eq!((linked.root.display().to_string(), linked.as_given.as_deref()), (r.clone(), Some(link.as_path())));
-            assert_eq!(linked.shorten(&format!("{l}/a.py:3 and {r}/b.py:4 in {l}")), "a.py:3 and b.py:4 in .");
-            assert!(matches!(linked.shorten(&format!("{l}-old/a.py")), Cow::Borrowed(_)));
+            assert_eq!(
+                (
+                    linked.root.display().to_string(),
+                    linked.as_given.as_deref()
+                ),
+                (r.clone(), Some(link.as_path()))
+            );
+            assert_eq!(
+                linked.shorten(&format!("{l}/a.py:3 and {r}/b.py:4 in {l}")),
+                "a.py:3 and b.py:4 in ."
+            );
+            assert!(matches!(
+                linked.shorten(&format!("{l}-old/a.py")),
+                Cow::Borrowed(_)
+            ));
             // Given by its canonical name, it has only that one.
             assert_eq!(Workspace::new(&linked.root).unwrap().as_given, None);
         }
@@ -481,10 +690,25 @@ mod tests {
         let mut seen = Seen::default();
         let p = Path::new("/w/a.rs");
         assert_eq!(seen.observe(p, 1, 1, 100, 3), SeenCheck::Fresh);
-        assert_eq!(seen.observe(p, 1, 10, 50, 5), SeenCheck::AlreadyShown { step: 3 });
-        assert_eq!(seen.observe(p, 1, 10, 50, 6), SeenCheck::Fresh, "asking twice means it is needed");
-        assert_eq!(seen.observe(p, 1, 90, 140, 7), SeenCheck::Fresh, "not fully covered");
-        assert_eq!(seen.observe(p, 2, 1, 100, 8), SeenCheck::Fresh, "content changed");
+        assert_eq!(
+            seen.observe(p, 1, 10, 50, 5),
+            SeenCheck::AlreadyShown { step: 3 }
+        );
+        assert_eq!(
+            seen.observe(p, 1, 10, 50, 6),
+            SeenCheck::Fresh,
+            "asking twice means it is needed"
+        );
+        assert_eq!(
+            seen.observe(p, 1, 90, 140, 7),
+            SeenCheck::Fresh,
+            "not fully covered"
+        );
+        assert_eq!(
+            seen.observe(p, 2, 1, 100, 8),
+            SeenCheck::Fresh,
+            "content changed"
+        );
         assert!(seen.covered(p, 2, 5, 20));
         seen.clear();
         assert!(!seen.covered(p, 2, 5, 20));
@@ -497,7 +721,11 @@ mod tests {
         fs::create_dir_all(root.join("node_modules/x")).unwrap();
         let budget = Duration::from_secs(2);
         let f0 = fingerprint(&root, budget);
-        assert_eq!(f0, fingerprint(&root, budget), "stable when nothing changed");
+        assert_eq!(
+            f0,
+            fingerprint(&root, budget),
+            "stable when nothing changed"
+        );
 
         fs::write(root.join("node_modules/x/big.js"), "ignored").unwrap();
         assert_eq!(f0, fingerprint(&root, budget));

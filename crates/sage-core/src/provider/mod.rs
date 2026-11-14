@@ -53,13 +53,31 @@ pub struct Message {
 
 impl Message {
     pub fn system(text: impl Into<String>) -> Self {
-        Self { role: Role::System, content: text.into(), reasoning: None, tool_calls: vec![], tool_call_id: None }
+        Self {
+            role: Role::System,
+            content: text.into(),
+            reasoning: None,
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
     }
     pub fn user(text: impl Into<String>) -> Self {
-        Self { role: Role::User, content: text.into(), reasoning: None, tool_calls: vec![], tool_call_id: None }
+        Self {
+            role: Role::User,
+            content: text.into(),
+            reasoning: None,
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
     }
     pub fn tool(call_id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self { role: Role::Tool, content: text.into(), reasoning: None, tool_calls: vec![], tool_call_id: Some(call_id.into()) }
+        Self {
+            role: Role::Tool,
+            content: text.into(),
+            reasoning: None,
+            tool_calls: vec![],
+            tool_call_id: Some(call_id.into()),
+        }
     }
 }
 
@@ -122,7 +140,6 @@ pub struct Usage {
     pub reasoning: u64,
 }
 
-
 pub struct ChatRequest<'a> {
     pub messages: &'a [Message],
     /// Prebuilt, constant `tools` array.
@@ -151,13 +168,21 @@ pub enum Delta {
     Reasoning(String),
     Content(String),
     /// The attempt failed and will be retried; anything streamed so far is void.
-    Retry { attempt: u32, wait_ms: u64, reason: String },
+    Retry {
+        attempt: u32,
+        wait_ms: u64,
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub enum ProviderError {
     Cancelled,
-    Http { status: u16, message: String, retry_after_secs: Option<u64> },
+    Http {
+        status: u16,
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
     Network(String),
     Protocol(String),
     /// The model thought this many characters without an answer or a tool call; the stream was cut.
@@ -169,9 +194,13 @@ pub enum ProviderError {
 impl ProviderError {
     pub fn retryable(&self) -> bool {
         match self {
-            ProviderError::Http { status, .. } => matches!(status, 408 | 409 | 425 | 429 | 500..=599),
+            ProviderError::Http { status, .. } => {
+                matches!(status, 408 | 409 | 425 | 429 | 500..=599)
+            }
             ProviderError::Network(_) | ProviderError::Protocol(_) => true,
-            ProviderError::Cancelled | ProviderError::Degenerate | ProviderError::Overthinking(_) => false,
+            ProviderError::Cancelled
+            | ProviderError::Degenerate
+            | ProviderError::Overthinking(_) => false,
         }
     }
 }
@@ -180,11 +209,16 @@ impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProviderError::Cancelled => write!(f, "cancelled"),
-            ProviderError::Http { status, message, .. } => write!(f, "provider returned HTTP {status}: {message}"),
+            ProviderError::Http {
+                status, message, ..
+            } => write!(f, "provider returned HTTP {status}: {message}"),
             ProviderError::Network(m) => write!(f, "network error: {m}"),
             ProviderError::Protocol(m) => write!(f, "unexpected provider response: {m}"),
             ProviderError::Degenerate => write!(f, "model output degenerated into repetition"),
-            ProviderError::Overthinking(chars) => write!(f, "the model reasoned for {chars} characters without acting"),
+            ProviderError::Overthinking(chars) => write!(
+                f,
+                "the model reasoned for {chars} characters without acting"
+            ),
         }
     }
 }
@@ -199,7 +233,12 @@ pub enum Provider {
 }
 
 impl Provider {
-    pub async fn chat(&self, req: ChatRequest<'_>, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
+    pub async fn chat(
+        &self,
+        req: ChatRequest<'_>,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<ChatResponse, ProviderError> {
         match self {
             Provider::OpenAi(p) => p.chat(req, on_delta, cancel).await,
             Provider::Mock(p) => p.chat(req, on_delta, cancel).await,
@@ -242,7 +281,9 @@ pub fn is_looping(text: &str) -> bool {
     (8..=WINDOW / 4).any(|period| {
         (period..WINDOW).all(|i| w[i] == w[i - period]) && {
             let mut distinct = [false; 256];
-            w[..period].iter().for_each(|b| distinct[*b as usize] = true);
+            w[..period]
+                .iter()
+                .for_each(|b| distinct[*b as usize] = true);
             distinct.iter().filter(|d| **d).count() >= 4
         }
     })
@@ -265,19 +306,30 @@ mod tests {
 
     #[test]
     fn detects_repetition_loops_but_not_ordinary_text() {
-        let looped = format!("Let me think about this. {}", "I should check the file again. ".repeat(60));
+        let looped = format!(
+            "Let me think about this. {}",
+            "I should check the file again. ".repeat(60)
+        );
         assert!(is_looping(&looped));
 
-        let prose: String = (0..300).map(|i| format!("Step {i}: consider case {} of the parser. ", i * 7 % 13)).collect();
+        let prose: String = (0..300)
+            .map(|i| format!("Step {i}: consider case {} of the parser. ", i * 7 % 13))
+            .collect();
         assert!(!is_looping(&prose));
 
-        assert!(!is_looping(&"-".repeat(3000)), "a rule of one repeated character is not a thinking loop");
+        assert!(
+            !is_looping(&"-".repeat(3000)),
+            "a rule of one repeated character is not a thinking loop"
+        );
         assert!(!is_looping("short"));
     }
 
     #[test]
     fn message_serialisation_omits_empty_optionals() {
         let m = Message::user("hi");
-        assert_eq!(serde_json::to_string(&m).unwrap(), r#"{"role":"user","content":"hi"}"#);
+        assert_eq!(
+            serde_json::to_string(&m).unwrap(),
+            r#"{"role":"user","content":"hi"}"#
+        );
     }
 }

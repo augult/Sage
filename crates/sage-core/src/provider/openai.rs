@@ -5,7 +5,10 @@
 //! published API contracts. So do the dialects of OpenAI, Anthropic, Gemini, xAI, Mistral, Groq,
 //! Together and Fireworks, read from their documentation on 11 November 2026: none has been called.
 
-use super::{ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, Role, ToolCall, Usage, is_looping};
+use super::{
+    ChatRequest, ChatResponse, Delta, DeltaSink, Effort, Message, ProviderError, Role, ToolCall,
+    Usage, is_looping,
+};
 use crate::text::est_tokens;
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
@@ -80,16 +83,29 @@ impl Dialect {
     /// takes it back at all.
     fn reasoning_key(&self) -> Option<&'static str> {
         match self {
-            Dialect::OpenRouter | Dialect::Logfare | Dialect::Groq | Dialect::Together => Some("reasoning"),
-            Dialect::DeepSeek | Dialect::Zai | Dialect::OpenAi | Dialect::Xai | Dialect::Fireworks | Dialect::Moonshot => Some("reasoning_content"),
-            Dialect::OpenAiPlatform | Dialect::Anthropic | Dialect::Gemini | Dialect::Mistral => None,
+            Dialect::OpenRouter | Dialect::Logfare | Dialect::Groq | Dialect::Together => {
+                Some("reasoning")
+            }
+            Dialect::DeepSeek
+            | Dialect::Zai
+            | Dialect::OpenAi
+            | Dialect::Xai
+            | Dialect::Fireworks
+            | Dialect::Moonshot => Some("reasoning_content"),
+            Dialect::OpenAiPlatform | Dialect::Anthropic | Dialect::Gemini | Dialect::Mistral => {
+                None
+            }
         }
     }
 }
 
 /// `reasoning_effort` in a vendor's words: `off` is what switches thinking off there (nothing where
 /// it cannot be), `max` the most it takes.
-fn effort_word(effort: Effort, off: Option<&'static str>, max: &'static str) -> Option<&'static str> {
+fn effort_word(
+    effort: Effort,
+    off: Option<&'static str>,
+    max: &'static str,
+) -> Option<&'static str> {
     match effort {
         Effort::Off => off,
         Effort::Low => Some("low"),
@@ -106,12 +122,27 @@ fn extra_key(call: &ToolCall) -> String {
 /// The text and the thinking of a `content` that came as chunks rather than as a string:
 /// `[{type: "thinking", thinking: [{type: "text", text}]}, {type: "text", text}]`.
 fn content_chunks(content: Option<&Value>) -> (Option<String>, Option<String>) {
-    let Some(chunks) = content.and_then(Value::as_array) else { return (None, None) };
-    let text_of = |chunk: &Value| chunk.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+    let Some(chunks) = content.and_then(Value::as_array) else {
+        return (None, None);
+    };
+    let text_of = |chunk: &Value| {
+        chunk
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     let (mut text, mut thought) = (String::new(), String::new());
     for chunk in chunks {
         match chunk.get("type").and_then(Value::as_str) {
-            Some("thinking") => thought.extend(chunk.get("thinking").and_then(Value::as_array).into_iter().flatten().map(text_of)),
+            Some("thinking") => thought.extend(
+                chunk
+                    .get("thinking")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(text_of),
+            ),
             _ => text.push_str(&text_of(chunk)),
         }
     }
@@ -137,7 +168,12 @@ pub struct OpenAiProvider {
 const MAX_BACKOFF_SECS: u64 = 60;
 
 impl OpenAiProvider {
-    pub fn new(base_url: &str, api_key: &str, model: &str, dialect: Dialect) -> Result<Self, ProviderError> {
+    pub fn new(
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        dialect: Dialect,
+    ) -> Result<Self, ProviderError> {
         let client = reqwest::Client::builder()
             .user_agent(concat!("sage/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(20))
@@ -165,12 +201,18 @@ impl OpenAiProvider {
             return wire;
         }
         let extras = self.extras.lock().unwrap();
-        let known: Vec<Option<&Value>> = calls.iter().map(|call| extras.get(&extra_key(call))).collect();
+        let known: Vec<Option<&Value>> = calls
+            .iter()
+            .map(|call| extras.get(&extra_key(call)))
+            .collect();
         let none_known = known.iter().all(Option::is_none);
         for (i, (call, extra)) in wire.iter_mut().zip(known).enumerate() {
             match extra {
                 Some(extra) => call["extra_content"] = extra.clone(),
-                None if none_known && i == 0 => call["extra_content"] = json!({"google": {"thought_signature": "skip_thought_signature_validator"}}),
+                None if none_known && i == 0 => {
+                    call["extra_content"] =
+                        json!({"google": {"thought_signature": "skip_thought_signature_validator"}})
+                }
                 None => {}
             }
         }
@@ -226,7 +268,14 @@ impl OpenAiProvider {
         if self.dialect != Dialect::Mistral {
             b.insert("stream_options".into(), json!({"include_usage": true}));
         }
-        let limit = if matches!(self.dialect, Dialect::OpenAiPlatform | Dialect::Groq | Dialect::Moonshot) { "max_completion_tokens" } else { "max_tokens" };
+        let limit = if matches!(
+            self.dialect,
+            Dialect::OpenAiPlatform | Dialect::Groq | Dialect::Moonshot
+        ) {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        };
         b.insert(limit.into(), json!(req.max_tokens));
         let effort = req.effort;
         match self.dialect {
@@ -262,7 +311,10 @@ impl OpenAiProvider {
                 if effort == Effort::Off {
                     b.insert("thinking".into(), json!({"type": "disabled"}));
                 } else {
-                    b.insert("thinking".into(), json!({"type": "enabled", "clear_thinking": false}));
+                    b.insert(
+                        "thinking".into(),
+                        json!({"type": "enabled", "clear_thinking": false}),
+                    );
                     b.insert("reasoning_effort".into(), json!(effort.as_str()));
                 }
             }
@@ -271,17 +323,30 @@ impl OpenAiProvider {
                     b.insert("reasoning_effort".into(), json!(effort.as_str()));
                 }
             }
-            Dialect::Anthropic | Dialect::Gemini | Dialect::Xai | Dialect::Mistral | Dialect::Groq | Dialect::Together | Dialect::Fireworks | Dialect::Moonshot => {
+            Dialect::Anthropic
+            | Dialect::Gemini
+            | Dialect::Xai
+            | Dialect::Mistral
+            | Dialect::Groq
+            | Dialect::Together
+            | Dialect::Fireworks
+            | Dialect::Moonshot => {
                 let model = self.model.as_str();
                 let word = match self.dialect {
                     Dialect::Gemini | Dialect::Fireworks => effort_word(effort, None, "high"),
                     Dialect::Xai => effort_word(effort, None, "xhigh"),
                     Dialect::Mistral => effort_word(effort, Some("none"), "xhigh"),
                     // Efforts are per model there: gpt-oss always thinks, Qwen can stop, Llama takes none.
-                    Dialect::Groq if model.starts_with("qwen/") => effort_word(effort, Some("none"), "high"),
-                    Dialect::Groq | Dialect::Together if model.contains("gpt-oss") => effort_word(effort, Some("low"), "high"),
+                    Dialect::Groq if model.starts_with("qwen/") => {
+                        effort_word(effort, Some("none"), "high")
+                    }
+                    Dialect::Groq | Dialect::Together if model.contains("gpt-oss") => {
+                        effort_word(effort, Some("low"), "high")
+                    }
                     // K3 cannot stop thinking; the K2 models before it take no effort at all.
-                    Dialect::Moonshot if model.starts_with("kimi-k3") => effort_word(effort, Some("low"), "max"),
+                    Dialect::Moonshot if model.starts_with("kimi-k3") => {
+                        effort_word(effort, Some("low"), "max")
+                    }
                     _ => None,
                 };
                 if let Some(word) = word {
@@ -292,13 +357,22 @@ impl OpenAiProvider {
         Value::Object(b)
     }
 
-    pub async fn chat(&self, req: ChatRequest<'_>, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
-        let body = serde_json::to_vec(&self.body(&req)).map_err(|e| ProviderError::Protocol(e.to_string()))?;
+    pub async fn chat(
+        &self,
+        req: ChatRequest<'_>,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<ChatResponse, ProviderError> {
+        let body = serde_json::to_vec(&self.body(&req))
+            .map_err(|e| ProviderError::Protocol(e.to_string()))?;
         let fallback_prompt = est_tokens(std::str::from_utf8(&body).unwrap_or(""));
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            match self.attempt(&body, req.reasoning_cap, on_delta, cancel).await {
+            match self
+                .attempt(&body, req.reasoning_cap, on_delta, cancel)
+                .await
+            {
                 Ok(mut r) => {
                     r.retries = attempt - 1;
                     if !r.usage_reported {
@@ -306,15 +380,26 @@ impl OpenAiProvider {
                     }
                     return Ok(r);
                 }
-                Err(e) if e.retryable() && (attempt <= self.max_retries || self.keep_retrying.load(Ordering::Relaxed)) => {
+                Err(e)
+                    if e.retryable()
+                        && (attempt <= self.max_retries
+                            || self.keep_retrying.load(Ordering::Relaxed)) =>
+                {
                     let wait_secs = match &e {
-                        ProviderError::Http { retry_after_secs: Some(s), .. } => (*s).clamp(1, MAX_BACKOFF_SECS),
+                        ProviderError::Http {
+                            retry_after_secs: Some(s),
+                            ..
+                        } => (*s).clamp(1, MAX_BACKOFF_SECS),
                         _ => (1u64 << attempt.min(6)).min(MAX_BACKOFF_SECS),
                     };
                     // Spread retries a little so parallel sessions do not stampede a recovering provider.
                     let jitter_ms = crate::util::fnv64(&crate::util::now_ms().to_le_bytes()) % 750;
                     let wait_ms = wait_secs * 1000 + jitter_ms;
-                    on_delta(Delta::Retry { attempt, wait_ms, reason: e.to_string() });
+                    on_delta(Delta::Retry {
+                        attempt,
+                        wait_ms,
+                        reason: e.to_string(),
+                    });
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_millis(wait_ms)) => {}
                         _ = cancel.cancelled() => return Err(ProviderError::Cancelled),
@@ -325,7 +410,13 @@ impl OpenAiProvider {
         }
     }
 
-    async fn attempt(&self, body: &[u8], reasoning_cap: usize, on_delta: DeltaSink<'_>, cancel: &CancellationToken) -> Result<ChatResponse, ProviderError> {
+    async fn attempt(
+        &self,
+        body: &[u8],
+        reasoning_cap: usize,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<ChatResponse, ProviderError> {
         let send = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -345,21 +436,41 @@ impl OpenAiProvider {
         };
         let status = resp.status();
         if !status.is_success() {
-            let retry_after_secs = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
-            let text = tokio::time::timeout(self.idle_timeout, resp.text()).await.ok().and_then(Result::ok).unwrap_or_default();
-            return Err(ProviderError::Http { status: status.as_u16(), message: error_message(&text), retry_after_secs });
+            let retry_after_secs = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok());
+            let text = tokio::time::timeout(self.idle_timeout, resp.text())
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            return Err(ProviderError::Http {
+                status: status.as_u16(),
+                message: error_message(&text),
+                retry_after_secs,
+            });
         }
 
         let mut stream = resp.bytes_stream();
         let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-        let mut acc = Accum { reasoning_cap, ..Accum::default() };
+        let mut acc = Accum {
+            reasoning_cap,
+            ..Accum::default()
+        };
         'read: loop {
             let next = tokio::select! {
                 n = tokio::time::timeout(self.idle_timeout, stream.next()) => n,
                 _ = cancel.cancelled() => return Err(ProviderError::Cancelled),
             };
             let chunk = match next {
-                Err(_) => return Err(ProviderError::Network(format!("no data from provider for {}s", self.idle_timeout.as_secs()))),
+                Err(_) => {
+                    return Err(ProviderError::Network(format!(
+                        "no data from provider for {}s",
+                        self.idle_timeout.as_secs()
+                    )));
+                }
                 Ok(None) => break,
                 Ok(Some(Err(e))) => return Err(ProviderError::Network(e.to_string())),
                 Ok(Some(Ok(bytes))) => bytes,
@@ -390,7 +501,10 @@ impl OpenAiProvider {
 fn error_message(body: &str) -> String {
     let from_json = serde_json::from_str::<Value>(body).ok().and_then(|v| {
         let e = v.get("error")?;
-        e.get("message").and_then(Value::as_str).map(String::from).or_else(|| e.as_str().map(String::from))
+        e.get("message")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| e.as_str().map(String::from))
     });
     crate::util::truncate_chars(from_json.as_deref().unwrap_or(body.trim()), 400)
 }
@@ -405,14 +519,20 @@ fn u64_at(v: &Value, path: &[&str]) -> Option<u64> {
 
 pub(crate) fn parse_usage(u: &Value) -> Usage {
     Usage {
-        prompt: u64_at(u, &["prompt_tokens"]).or_else(|| u64_at(u, &["input_tokens"])).unwrap_or(0),
+        prompt: u64_at(u, &["prompt_tokens"])
+            .or_else(|| u64_at(u, &["input_tokens"]))
+            .unwrap_or(0),
         cached: u64_at(u, &["prompt_tokens_details", "cached_tokens"])
             .or_else(|| u64_at(u, &["prompt_cache_hit_tokens"]))
             .or_else(|| u64_at(u, &["input_tokens_details", "cached_tokens"]))
             .or_else(|| u64_at(u, &["cache_read_input_tokens"]))
             .unwrap_or(0),
-        output: u64_at(u, &["completion_tokens"]).or_else(|| u64_at(u, &["output_tokens"])).unwrap_or(0),
-        reasoning: u64_at(u, &["completion_tokens_details", "reasoning_tokens"]).or_else(|| u64_at(u, &["reasoning_tokens"])).unwrap_or(0),
+        output: u64_at(u, &["completion_tokens"])
+            .or_else(|| u64_at(u, &["output_tokens"]))
+            .unwrap_or(0),
+        reasoning: u64_at(u, &["completion_tokens_details", "reasoning_tokens"])
+            .or_else(|| u64_at(u, &["reasoning_tokens"]))
+            .unwrap_or(0),
     }
 }
 
@@ -448,7 +568,11 @@ const REASONING_CAP: usize = 64_000;
 
 impl Accum {
     /// Feeds one line of the response body. Returns true once the stream signalled completion.
-    pub(crate) fn feed_line(&mut self, line: &[u8], on_delta: DeltaSink<'_>) -> Result<bool, ProviderError> {
+    pub(crate) fn feed_line(
+        &mut self,
+        line: &[u8],
+        on_delta: DeltaSink<'_>,
+    ) -> Result<bool, ProviderError> {
         let line = String::from_utf8_lossy(line);
         let line = line.trim_end_matches('\r');
         if line.is_empty() || line.starts_with(':') {
@@ -457,7 +581,11 @@ impl Accum {
         let Some(payload) = line.strip_prefix("data:") else {
             // Not SSE. Either an `event:` field (ignored) or a plain JSON body from a server that
             // ignored `stream: true`; keep it so `finish` can try to read it as one.
-            if !line.starts_with("event:") && !line.starts_with("id:") && !line.starts_with("retry:") && self.raw.len() < 4 * 1024 * 1024 {
+            if !line.starts_with("event:")
+                && !line.starts_with("id:")
+                && !line.starts_with("retry:")
+                && self.raw.len() < 4 * 1024 * 1024
+            {
                 self.raw.push_str(line);
                 self.raw.push('\n');
             }
@@ -478,27 +606,52 @@ impl Accum {
 
     fn apply_chunk(&mut self, v: &Value, on_delta: DeltaSink<'_>) -> Result<(), ProviderError> {
         if let Some(err) = v.get("error").filter(|e| !e.is_null()) {
-            let status = err.get("code").and_then(Value::as_u64).filter(|c| (400..600).contains(c)).unwrap_or(502) as u16;
-            let message = err.get("message").and_then(Value::as_str).map(String::from).unwrap_or_else(|| err.to_string());
-            return Err(ProviderError::Http { status, message: crate::util::truncate_chars(&message, 400), retry_after_secs: None });
+            let status = err
+                .get("code")
+                .and_then(Value::as_u64)
+                .filter(|c| (400..600).contains(c))
+                .unwrap_or(502) as u16;
+            let message = err
+                .get("message")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(|| err.to_string());
+            return Err(ProviderError::Http {
+                status,
+                message: crate::util::truncate_chars(&message, 400),
+                retry_after_secs: None,
+            });
         }
         if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
             self.usage = Some(parse_usage(u));
         }
-        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else { return Ok(()) };
+        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
+            return Ok(());
+        };
         if let Some(f) = choice.get("finish_reason").and_then(Value::as_str) {
             self.finish = f.to_string();
         }
-        let Some(delta) = choice.get("delta").or_else(|| choice.get("message")) else { return Ok(()) };
+        let Some(delta) = choice.get("delta").or_else(|| choice.get("message")) else {
+            return Ok(());
+        };
 
         let (chunk_text, chunk_thought) = content_chunks(delta.get("content"));
-        let reasoning = delta.get("reasoning_content").and_then(Value::as_str).or_else(|| delta.get("reasoning").and_then(Value::as_str)).or(chunk_thought.as_deref());
+        let reasoning = delta
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .or_else(|| delta.get("reasoning").and_then(Value::as_str))
+            .or(chunk_thought.as_deref());
         if let Some(r) = reasoning.filter(|r| !r.is_empty()) {
             self.reasoning.push_str(r);
             self.unchecked += r.len();
             on_delta(Delta::Reasoning(r.to_string()));
         }
-        if let Some(c) = delta.get("content").and_then(Value::as_str).or(chunk_text.as_deref()).filter(|c| !c.is_empty()) {
+        if let Some(c) = delta
+            .get("content")
+            .and_then(Value::as_str)
+            .or(chunk_text.as_deref())
+            .filter(|c| !c.is_empty())
+        {
             self.content.push_str(c);
             self.unchecked += c.len();
             on_delta(Delta::Content(c.to_string()));
@@ -508,7 +661,11 @@ impl Accum {
             if is_looping(&self.reasoning) || is_looping(&self.content) {
                 return Err(ProviderError::Degenerate);
             }
-            let cap = if self.reasoning_cap == 0 { REASONING_CAP } else { self.reasoning_cap };
+            let cap = if self.reasoning_cap == 0 {
+                REASONING_CAP
+            } else {
+                self.reasoning_cap
+            };
             if self.reasoning.len() > cap && self.content.is_empty() && self.calls.is_empty() {
                 return Err(ProviderError::Overthinking(self.reasoning.len()));
             }
@@ -518,7 +675,10 @@ impl Accum {
             for (pos, tc) in tcs.iter().enumerate() {
                 let id = tc.get("id").and_then(Value::as_str).unwrap_or("");
                 let func = tc.get("function");
-                let name = func.and_then(|f| f.get("name")).and_then(Value::as_str).unwrap_or("");
+                let name = func
+                    .and_then(|f| f.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let args = match func.and_then(|f| f.get("arguments")) {
                     Some(Value::String(s)) => s.clone(),
                     Some(Value::Null) | None => String::new(),
@@ -526,11 +686,17 @@ impl Accum {
                 };
                 let slot = match tc.get("index").and_then(Value::as_u64) {
                     Some(i) => i as usize,
-                    None if !id.is_empty() => self.calls.iter().position(|c| c.id == id).unwrap_or(self.calls.len()),
+                    None if !id.is_empty() => self
+                        .calls
+                        .iter()
+                        .position(|c| c.id == id)
+                        .unwrap_or(self.calls.len()),
                     None => self.calls.len().saturating_sub(1).max(pos),
                 };
                 if slot > 256 {
-                    return Err(ProviderError::Protocol("tool call index out of range".into()));
+                    return Err(ProviderError::Protocol(
+                        "tool call index out of range".into(),
+                    ));
                 }
                 while self.calls.len() <= slot {
                     self.calls.push(PartialCall::default());
@@ -559,7 +725,9 @@ impl Accum {
     /// The response, and with it what the vendor attached to its tool calls, by `extra_key`.
     fn finish_with_extras(mut self) -> Result<(ChatResponse, Vec<(String, Value)>), ProviderError> {
         if !self.saw_event && !self.raw.trim().is_empty() {
-            let v: Value = serde_json::from_str(self.raw.trim()).map_err(|_| ProviderError::Protocol(crate::util::truncate_chars(self.raw.trim(), 200)))?;
+            let v: Value = serde_json::from_str(self.raw.trim()).map_err(|_| {
+                ProviderError::Protocol(crate::util::truncate_chars(self.raw.trim(), 200))
+            })?;
             let mut sink = |_d: Delta| {};
             self.apply_chunk(&v, &mut sink)?;
         }
@@ -570,7 +738,15 @@ impl Accum {
             .filter(|c| !c.name.is_empty() || !c.arguments.trim().is_empty())
             .enumerate()
             .map(|(i, c)| {
-                let call = ToolCall { id: if c.id.is_empty() { format!("call_{i}") } else { c.id }, name: c.name, arguments: c.arguments };
+                let call = ToolCall {
+                    id: if c.id.is_empty() {
+                        format!("call_{i}")
+                    } else {
+                        c.id
+                    },
+                    name: c.name,
+                    arguments: c.arguments,
+                };
                 if let Some(extra) = c.extra {
                     extras.push((extra_key(&call), extra));
                 }
@@ -584,9 +760,25 @@ impl Accum {
         let usage = self.usage.unwrap_or_else(|| {
             let reasoning = est_tokens(&self.reasoning);
             let args: u64 = calls.iter().map(|c| est_tokens(&c.arguments) + 8).sum();
-            Usage { prompt: 0, cached: 0, output: reasoning + est_tokens(&self.content) + args, reasoning }
+            Usage {
+                prompt: 0,
+                cached: 0,
+                output: reasoning + est_tokens(&self.content) + args,
+                reasoning,
+            }
         });
-        Ok((ChatResponse { content: self.content, reasoning: self.reasoning, calls, usage, usage_reported, finish: self.finish, retries: 0 }, extras))
+        Ok((
+            ChatResponse {
+                content: self.content,
+                reasoning: self.reasoning,
+                calls,
+                usage,
+                usage_reported,
+                finish: self.finish,
+                retries: 0,
+            },
+            extras,
+        ))
     }
 }
 
@@ -628,7 +820,11 @@ mod tests {
                 loop {
                     let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
                     if let Some(head) = text.find("\r\n\r\n") {
-                        let length = text[..head].lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+                        let length = text[..head]
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
                         if request.len() >= head + 4 + length {
                             break;
                         }
@@ -639,12 +835,23 @@ mod tests {
                     }
                 }
                 let (status, extra, body) = if served < failures {
-                    ("429 Too Many Requests", "retry-after: 1\r\n", r#"{"error":{"message":"rate limited"}}"#)
+                    (
+                        "429 Too Many Requests",
+                        "retry-after: 1\r\n",
+                        r#"{"error":{"message":"rate limited"}}"#,
+                    )
                 } else {
-                    ("200 OK", "", r#"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#)
+                    (
+                        "200 OK",
+                        "",
+                        r#"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#,
+                    )
                 };
                 served += 1;
-                let answer = format!("HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let answer = format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
                 let _ = socket.write_all(answer.as_bytes()).await;
                 let _ = socket.shutdown().await;
             }
@@ -663,28 +870,54 @@ mod tests {
                 held.push(socket);
             }
         });
-        let mut p = OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi).unwrap();
+        let mut p = OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi)
+            .unwrap();
         p.max_retries = 0;
         p.idle_timeout = Duration::from_millis(200);
         let messages = [Message::user("hi")];
         let tools = json!([]);
-        let request = ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64, reasoning_cap: 0 };
+        let request = ChatRequest {
+            messages: &messages,
+            tools: &tools,
+            effort: Effort::High,
+            max_tokens: 64,
+            reasoning_cap: 0,
+        };
         let cancel = CancellationToken::new();
-        let answer = tokio::time::timeout(Duration::from_secs(20), p.chat(request, &mut |_| {}, &cancel)).await.expect("the request must not wait for ever");
-        assert!(matches!(answer, Err(ProviderError::Network(_))), "{:?}", answer.err().map(|e| e.to_string()));
+        let answer = tokio::time::timeout(
+            Duration::from_secs(20),
+            p.chat(request, &mut |_| {}, &cancel),
+        )
+        .await
+        .expect("the request must not wait for ever");
+        assert!(
+            matches!(answer, Err(ProviderError::Network(_))),
+            "{:?}",
+            answer.err().map(|e| e.to_string())
+        );
     }
 
     #[tokio::test]
     async fn gives_up_at_the_limit_unless_told_to_keep_retrying() {
-        let mut p = OpenAiProvider::new(&rate_limited_endpoint(3).await, "k", "m", Dialect::OpenAi).unwrap();
+        let mut p = OpenAiProvider::new(&rate_limited_endpoint(3).await, "k", "m", Dialect::OpenAi)
+            .unwrap();
         p.max_retries = 0;
         let messages = [Message::user("hi")];
         let tools = json!([]);
-        let ask = || ChatRequest { messages: &messages, tools: &tools, effort: Effort::High, max_tokens: 64, reasoning_cap: 0 };
+        let ask = || ChatRequest {
+            messages: &messages,
+            tools: &tools,
+            effort: Effort::High,
+            max_tokens: 64,
+            reasoning_cap: 0,
+        };
         let cancel = CancellationToken::new();
 
         let gave_up = p.chat(ask(), &mut |_| {}, &cancel).await.unwrap_err();
-        assert!(matches!(gave_up, ProviderError::Http { status: 429, .. }), "{gave_up}");
+        assert!(
+            matches!(gave_up, ProviderError::Http { status: 429, .. }),
+            "{gave_up}"
+        );
 
         // Two rate limits are left: both are waited out, past a limit of no retries at all.
         p.keep_retrying.store(true, Ordering::Relaxed);
@@ -695,7 +928,10 @@ mod tests {
             }
         };
         let reply = p.chat(ask(), &mut sink, &cancel).await.unwrap();
-        assert_eq!((reply.content.as_str(), reply.retries, attempts.as_slice()), ("done", 2, &[1, 2][..]));
+        assert_eq!(
+            (reply.content.as_str(), reply.retries, attempts.as_slice()),
+            ("done", 2, &[1, 2][..])
+        );
     }
 
     #[test]
@@ -717,8 +953,23 @@ mod tests {
         assert_eq!(seen, vec!["r:The", "r: user wants", "r:."]);
         assert_eq!(r.content, "");
         assert_eq!(r.calls.len(), 2);
-        assert_eq!(r.calls[1], ToolCall { id: "b2".into(), name: "shell".into(), arguments: r#"{"cmd":"ls","expect":{"exit":0}}"#.into() });
-        assert_eq!(r.usage, Usage { prompt: 1610, cached: 1536, output: 104, reasoning: 63 });
+        assert_eq!(
+            r.calls[1],
+            ToolCall {
+                id: "b2".into(),
+                name: "shell".into(),
+                arguments: r#"{"cmd":"ls","expect":{"exit":0}}"#.into()
+            }
+        );
+        assert_eq!(
+            r.usage,
+            Usage {
+                prompt: 1610,
+                cached: 1536,
+                output: 104,
+                reasoning: 63
+            }
+        );
         assert!(r.usage_reported);
         assert_eq!(r.finish, "tool_calls");
     }
@@ -734,40 +985,80 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(r.reasoning, "hm");
-        assert_eq!(r.calls, vec![ToolCall { id: "c1".into(), name: "edit".into(), arguments: r#"{"path":"a.py"}"#.into() }]);
+        assert_eq!(
+            r.calls,
+            vec![ToolCall {
+                id: "c1".into(),
+                name: "edit".into(),
+                arguments: r#"{"path":"a.py"}"#.into()
+            }]
+        );
         assert_eq!(r.usage.cached, 800);
     }
 
     #[test]
     fn accepts_a_plain_json_body_when_the_server_ignores_streaming() {
         let (r, _) = feed(&[r#"{"choices":[{"message":{"role":"assistant","content":"done","reasoning":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#]).unwrap();
-        assert_eq!((r.content.as_str(), r.reasoning.as_str(), r.finish.as_str()), ("done", "ok", "stop"));
+        assert_eq!(
+            (r.content.as_str(), r.reasoning.as_str(), r.finish.as_str()),
+            ("done", "ok", "stop")
+        );
     }
 
     #[test]
     fn surfaces_midstream_errors_and_empty_responses() {
-        let err = feed(&[r#"data: {"error":{"message":"Provider overloaded","code":429}}"#]).unwrap_err();
+        let err =
+            feed(&[r#"data: {"error":{"message":"Provider overloaded","code":429}}"#]).unwrap_err();
         assert!(matches!(err, ProviderError::Http { status: 429, .. }) && err.retryable());
-        assert!(matches!(feed(&["data: [DONE]"]).unwrap_err(), ProviderError::Protocol(_)));
+        assert!(matches!(
+            feed(&["data: [DONE]"]).unwrap_err(),
+            ProviderError::Protocol(_)
+        ));
     }
 
     #[test]
     fn cuts_a_looping_stream() {
-        let chunk = format!(r#"data: {{"choices":[{{"delta":{{"reasoning":"{}"}}}}]}}"#, "I should re-check the file. ".repeat(30));
+        let chunk = format!(
+            r#"data: {{"choices":[{{"delta":{{"reasoning":"{}"}}}}]}}"#,
+            "I should re-check the file. ".repeat(30)
+        );
         let lines: Vec<&str> = vec![chunk.as_str(); 4];
-        assert!(matches!(feed(&lines).unwrap_err(), ProviderError::Degenerate));
+        assert!(matches!(
+            feed(&lines).unwrap_err(),
+            ProviderError::Degenerate
+        ));
 
         // Thinking without end is cut too, unless an answer or a call has begun.
-        let thought: String = (0..700).map(|i| format!("Step {i}: consider case {i}. ")).collect();
+        let thought: String = (0..700)
+            .map(|i| format!("Step {i}: consider case {i}. "))
+            .collect();
         let chunk = format!(r#"data: {{"choices":[{{"delta":{{"reasoning":"{thought}"}}}}]}}"#);
-        assert!(matches!(feed(&[chunk.as_str(); 4]).unwrap_err(), ProviderError::Overthinking(n) if n > REASONING_CAP));
+        assert!(
+            matches!(feed(&[chunk.as_str(); 4]).unwrap_err(), ProviderError::Overthinking(n) if n > REASONING_CAP)
+        );
         // Where long thought is allowed, the same reply is let through.
-        let mut patient = Accum { reasoning_cap: 8 * REASONING_CAP, ..Accum::default() };
+        let mut patient = Accum {
+            reasoning_cap: 8 * REASONING_CAP,
+            ..Accum::default()
+        };
         for _ in 0..4 {
-            assert!(matches!(patient.feed_line(chunk.as_bytes(), &mut |_| {}), Ok(false)));
+            assert!(matches!(
+                patient.feed_line(chunk.as_bytes(), &mut |_| {}),
+                Ok(false)
+            ));
         }
         let answer = r#"data: {"choices":[{"delta":{"content":"Here is the answer."}}]}"#;
-        assert!(feed(&[answer, chunk.as_str(), chunk.as_str(), chunk.as_str(), chunk.as_str(), "data: [DONE]"]).is_ok());
+        assert!(
+            feed(&[
+                answer,
+                chunk.as_str(),
+                chunk.as_str(),
+                chunk.as_str(),
+                chunk.as_str(),
+                "data: [DONE]"
+            ])
+            .is_ok()
+        );
     }
 
     #[test]
@@ -779,12 +1070,19 @@ mod tests {
             role: Role::Assistant,
             content: String::new(),
             reasoning: Some("thinking…".into()),
-            tool_calls: vec![ToolCall { id: "x".into(), name: "shell".into(), arguments: "{\"cmd\": \"ls\" }".into() }],
+            tool_calls: vec![ToolCall {
+                id: "x".into(),
+                name: "shell".into(),
+                arguments: "{\"cmd\": \"ls\" }".into(),
+            }],
             tool_call_id: None,
         });
         msgs.push(Message::tool("x", "[ok] exit 0"));
         let second = p.wire_messages(&msgs).to_string();
-        assert!(second.starts_with(&first[..first.len() - 1]), "earlier turns must serialise identically");
+        assert!(
+            second.starts_with(&first[..first.len() - 1]),
+            "earlier turns must serialise identically"
+        );
         // Arguments are echoed exactly as produced, odd spacing included.
         assert!(second.contains(r#""arguments":"{\"cmd\": \"ls\" }""#));
         assert!(second.contains(r#""reasoning_content":"thinking…""#));
@@ -802,17 +1100,41 @@ mod tests {
             acc.feed_line(line.as_bytes(), &mut sink).unwrap();
         }
         let (response, extras) = acc.finish_with_extras().unwrap();
-        assert_eq!(extras.len(), 1, "of parallel calls only the first carries a signature");
+        assert_eq!(
+            extras.len(),
+            1,
+            "of parallel calls only the first carries a signature"
+        );
 
         let p = provider(Dialect::Gemini);
         p.extras.lock().unwrap().extend(extras);
-        let unknown = ToolCall { id: "x".into(), name: "shell".into(), arguments: "{}".into() };
-        let reply = |calls: Vec<ToolCall>| Message { role: Role::Assistant, content: "".into(), reasoning: None, tool_calls: calls, tool_call_id: None };
+        let unknown = ToolCall {
+            id: "x".into(),
+            name: "shell".into(),
+            arguments: "{}".into(),
+        };
+        let reply = |calls: Vec<ToolCall>| Message {
+            role: Role::Assistant,
+            content: "".into(),
+            reasoning: None,
+            tool_calls: calls,
+            tool_call_id: None,
+        };
         let wire = p.wire_messages(&[reply(response.calls.clone()), reply(vec![unknown.clone()])]);
-        assert_eq!(wire[0]["tool_calls"][0]["extra_content"], json!({"google": {"thought_signature": "SIG"}}));
+        assert_eq!(
+            wire[0]["tool_calls"][0]["extra_content"],
+            json!({"google": {"thought_signature": "SIG"}})
+        );
         assert!(wire[0]["tool_calls"][1].get("extra_content").is_none());
-        assert_eq!(wire[1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], json!("skip_thought_signature_validator"));
-        assert!(provider(Dialect::OpenAi).wire_messages(&[reply(vec![unknown])])[0]["tool_calls"][0].get("extra_content").is_none());
+        assert_eq!(
+            wire[1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"],
+            json!("skip_thought_signature_validator")
+        );
+        assert!(
+            provider(Dialect::OpenAi).wire_messages(&[reply(vec![unknown])])[0]["tool_calls"][0]
+                .get("extra_content")
+                .is_none()
+        );
 
         // Mistral: thinking and text as chunks of `content`.
         let (r, _) = feed(&[
@@ -827,7 +1149,13 @@ mod tests {
     fn dialects_spell_reasoning_their_own_way() {
         let tools = json!([]);
         let msgs = [Message::user("x")];
-        let req = |effort| ChatRequest { messages: &msgs, tools: &tools, effort, max_tokens: 100, reasoning_cap: 0 };
+        let req = |effort| ChatRequest {
+            messages: &msgs,
+            tools: &tools,
+            effort,
+            max_tokens: 100,
+            reasoning_cap: 0,
+        };
 
         let b = provider(Dialect::OpenRouter).body(&req(Effort::High));
         assert_eq!(b["reasoning"], json!({"effort": "high"}));
@@ -835,46 +1163,147 @@ mod tests {
         assert!(b.get("tools").is_none(), "an empty tools array is omitted");
 
         let b = provider(Dialect::Logfare).body(&req(Effort::High));
-        assert_eq!((&b["reasoning"], &b["reasoning_effort"]), (&json!({"effort": "high"}), &json!("high")));
+        assert_eq!(
+            (&b["reasoning"], &b["reasoning_effort"]),
+            (&json!({"effort": "high"}), &json!("high"))
+        );
         let b = provider(Dialect::Logfare).body(&req(Effort::Off));
-        assert_eq!((&b["reasoning"], &b["reasoning_effort"]), (&json!({"enabled": false}), &json!("low")));
+        assert_eq!(
+            (&b["reasoning"], &b["reasoning_effort"]),
+            (&json!({"enabled": false}), &json!("low"))
+        );
 
         let b = provider(Dialect::DeepSeek).body(&req(Effort::Max));
-        assert_eq!((&b["thinking"], &b["reasoning_effort"]), (&json!({"type": "enabled"}), &json!("max")));
-        assert_eq!(provider(Dialect::DeepSeek).body(&req(Effort::Off))["thinking"], json!({"type": "disabled"}));
+        assert_eq!(
+            (&b["thinking"], &b["reasoning_effort"]),
+            (&json!({"type": "enabled"}), &json!("max"))
+        );
+        assert_eq!(
+            provider(Dialect::DeepSeek).body(&req(Effort::Off))["thinking"],
+            json!({"type": "disabled"})
+        );
 
         let b = provider(Dialect::Zai).body(&req(Effort::Low));
-        assert_eq!(b["thinking"], json!({"type": "enabled", "clear_thinking": false}));
+        assert_eq!(
+            b["thinking"],
+            json!({"type": "enabled", "clear_thinking": false})
+        );
 
         // The vendors nobody here has called: what their documentation says they take.
         let b = provider(Dialect::OpenAiPlatform).body(&req(Effort::Max));
-        assert_eq!((&b["max_completion_tokens"], &b["reasoning_effort"], b.get("max_tokens")), (&json!(100), &json!("max"), None));
+        assert_eq!(
+            (
+                &b["max_completion_tokens"],
+                &b["reasoning_effort"],
+                b.get("max_tokens")
+            ),
+            (&json!(100), &json!("max"), None)
+        );
         let b = provider(Dialect::Anthropic).body(&req(Effort::High));
-        assert_eq!((b.get("reasoning_effort"), &b["max_tokens"]), (None, &json!(100)));
+        assert_eq!(
+            (b.get("reasoning_effort"), &b["max_tokens"]),
+            (None, &json!(100))
+        );
         let b = provider(Dialect::Gemini).body(&req(Effort::Max));
         assert_eq!(b["reasoning_effort"], json!("high"));
-        assert!(provider(Dialect::Gemini).body(&req(Effort::Off)).get("reasoning_effort").is_none(), "Gemini cannot stop thinking");
-        assert_eq!(provider(Dialect::Xai).body(&req(Effort::Max))["reasoning_effort"], json!("xhigh"));
+        assert!(
+            provider(Dialect::Gemini)
+                .body(&req(Effort::Off))
+                .get("reasoning_effort")
+                .is_none(),
+            "Gemini cannot stop thinking"
+        );
+        assert_eq!(
+            provider(Dialect::Xai).body(&req(Effort::Max))["reasoning_effort"],
+            json!("xhigh")
+        );
         let b = provider(Dialect::Mistral).body(&req(Effort::Off));
-        assert_eq!((&b["reasoning_effort"], b.get("stream_options")), (&json!("none"), None));
-        let groq = |model: &str, effort| OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Groq).unwrap().body(&req(effort));
-        assert_eq!((&groq("openai/gpt-oss-120b", Effort::Max)["reasoning_effort"], &groq("openai/gpt-oss-120b", Effort::Off)["reasoning_effort"]), (&json!("high"), &json!("low")));
-        assert!(groq("llama-3.3-70b-versatile", Effort::High).get("reasoning_effort").is_none());
-        assert_eq!(groq("llama-3.3-70b-versatile", Effort::High)["max_completion_tokens"], json!(100));
-        assert!(provider(Dialect::Together).body(&req(Effort::High)).get("reasoning_effort").is_none());
-        assert_eq!(provider(Dialect::Fireworks).body(&req(Effort::Max))["reasoning_effort"], json!("high"));
-        let kimi = |model: &str, effort| OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Moonshot).unwrap().body(&req(effort));
-        assert_eq!((&kimi("kimi-k3.1-pro", Effort::Max)["reasoning_effort"], &kimi("kimi-k3", Effort::Off)["reasoning_effort"]), (&json!("max"), &json!("low")));
-        assert_eq!((kimi("kimi-k2.6", Effort::High).get("reasoning_effort"), &kimi("kimi-k3", Effort::High)["max_completion_tokens"]), (None, &json!(100)));
+        assert_eq!(
+            (&b["reasoning_effort"], b.get("stream_options")),
+            (&json!("none"), None)
+        );
+        let groq = |model: &str, effort| {
+            OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Groq)
+                .unwrap()
+                .body(&req(effort))
+        };
+        assert_eq!(
+            (
+                &groq("openai/gpt-oss-120b", Effort::Max)["reasoning_effort"],
+                &groq("openai/gpt-oss-120b", Effort::Off)["reasoning_effort"]
+            ),
+            (&json!("high"), &json!("low"))
+        );
+        assert!(
+            groq("llama-3.3-70b-versatile", Effort::High)
+                .get("reasoning_effort")
+                .is_none()
+        );
+        assert_eq!(
+            groq("llama-3.3-70b-versatile", Effort::High)["max_completion_tokens"],
+            json!(100)
+        );
+        assert!(
+            provider(Dialect::Together)
+                .body(&req(Effort::High))
+                .get("reasoning_effort")
+                .is_none()
+        );
+        assert_eq!(
+            provider(Dialect::Fireworks).body(&req(Effort::Max))["reasoning_effort"],
+            json!("high")
+        );
+        let kimi = |model: &str, effort| {
+            OpenAiProvider::new("https://example.invalid", "k", model, Dialect::Moonshot)
+                .unwrap()
+                .body(&req(effort))
+        };
+        assert_eq!(
+            (
+                &kimi("kimi-k3.1-pro", Effort::Max)["reasoning_effort"],
+                &kimi("kimi-k3", Effort::Off)["reasoning_effort"]
+            ),
+            (&json!("max"), &json!("low"))
+        );
+        assert_eq!(
+            (
+                kimi("kimi-k2.6", Effort::High).get("reasoning_effort"),
+                &kimi("kimi-k3", Effort::High)["max_completion_tokens"]
+            ),
+            (None, &json!(100))
+        );
 
-        let said = [Message { role: Role::Assistant, content: "".into(), reasoning: Some("r".into()), tool_calls: vec![], tool_call_id: None }];
-        assert!(provider(Dialect::OpenAiPlatform).wire_messages(&said)[0].get("reasoning_content").is_none(), "OpenAI refuses fields it does not know");
-        assert_eq!(provider(Dialect::Groq).wire_messages(&said)[0]["reasoning"], json!("r"));
-        assert_eq!(provider(Dialect::Moonshot).wire_messages(&said)[0]["reasoning_content"], json!("r"));
+        let said = [Message {
+            role: Role::Assistant,
+            content: "".into(),
+            reasoning: Some("r".into()),
+            tool_calls: vec![],
+            tool_call_id: None,
+        }];
+        assert!(
+            provider(Dialect::OpenAiPlatform).wire_messages(&said)[0]
+                .get("reasoning_content")
+                .is_none(),
+            "OpenAI refuses fields it does not know"
+        );
+        assert_eq!(
+            provider(Dialect::Groq).wire_messages(&said)[0]["reasoning"],
+            json!("r")
+        );
+        assert_eq!(
+            provider(Dialect::Moonshot).wire_messages(&said)[0]["reasoning_content"],
+            json!("r")
+        );
 
         let p = provider(Dialect::OpenRouter);
         assert_eq!(p.base_url, "https://example.invalid/v1");
-        let wire = p.wire_messages(&[Message { role: Role::Assistant, content: "".into(), reasoning: Some("r".into()), tool_calls: vec![], tool_call_id: None }]);
+        let wire = p.wire_messages(&[Message {
+            role: Role::Assistant,
+            content: "".into(),
+            reasoning: Some("r".into()),
+            tool_calls: vec![],
+            tool_call_id: None,
+        }]);
         assert_eq!(wire[0]["reasoning"], json!("r"));
     }
 }

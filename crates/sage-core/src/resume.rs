@@ -78,10 +78,20 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// What the snapshot in `dir` is, or why there is none to be had.
 pub fn read(dir: &Path) -> Result<Snapshot, String> {
     let path = dir.join(SNAPSHOT);
-    let text = std::fs::read_to_string(&path).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "it has no snapshot: it was stored before sessions could be continued".to_string() } else { format!("its snapshot cannot be read: {e}") })?;
-    let snapshot: Snapshot = serde_json::from_str(&text).map_err(|e| format!("its snapshot cannot be read: {e}"))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "it has no snapshot: it was stored before sessions could be continued".to_string()
+        } else {
+            format!("its snapshot cannot be read: {e}")
+        }
+    })?;
+    let snapshot: Snapshot =
+        serde_json::from_str(&text).map_err(|e| format!("its snapshot cannot be read: {e}"))?;
     if snapshot.version > VERSION {
-        return Err(format!("its snapshot is version {}, from a newer Sage than this one ({VERSION})", snapshot.version));
+        return Err(format!(
+            "its snapshot is version {}, from a newer Sage than this one ({VERSION})",
+            snapshot.version
+        ));
     }
     Ok(snapshot)
 }
@@ -99,7 +109,13 @@ impl SessionLock {
     /// when the operating system permits reading the locked file.
     pub fn acquire(dir: &Path) -> Result<Self, String> {
         let path = dir.join(LOCK);
-        let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
         // A lock is let go of when the last copy of its file is closed, and a command being started
         // at that moment (between fork and exec) holds one for an instant: wait for it.
         let mut waited = 0;
@@ -124,8 +140,13 @@ impl SessionLock {
                 // Windows locks also prevent reading the pid through another handle, so the
                 // holder's identity is best-effort; the native lock alone decides ownership.
                 let _ = File::open(&path).and_then(|mut f| f.read_to_string(&mut pid));
-                let who = pid.trim().parse::<u32>().map_or_else(|_| "another process".to_string(), |pid| format!("process {pid}"));
-                Err(format!("it is open in {who}: only one process can run a session at a time"))
+                let who = pid.trim().parse::<u32>().map_or_else(
+                    |_| "another process".to_string(),
+                    |pid| format!("process {pid}"),
+                );
+                Err(format!(
+                    "it is open in {who}: only one process can run a session at a time"
+                ))
             }
             // A file system that cannot lock: the session is used without the protection.
             Err(TryLockError::Error(_)) => Ok(Self { _file: file }),
@@ -134,7 +155,9 @@ impl SessionLock {
 
     /// Whether another holder has the session in `dir` right now.
     pub fn held(dir: &Path) -> bool {
-        let Ok(file) = File::open(dir.join(LOCK)) else { return false };
+        let Ok(file) = File::open(dir.join(LOCK)) else {
+            return false;
+        };
         matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
     }
 }
@@ -144,7 +167,8 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("sage-resume-{name}-{}", crate::util::rand_hex(4)));
+        let dir =
+            std::env::temp_dir().join(format!("sage-resume-{name}-{}", crate::util::rand_hex(4)));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -168,12 +192,23 @@ mod tests {
             Err(_) => "another process".to_string(),
         };
         let refused = SessionLock::acquire(&dir).unwrap_err();
-        assert_eq!(refused, format!("it is open in {who}: only one process can run a session at a time"));
-        assert!(SessionLock::held(&dir), "a refused acquisition must not release the first holder");
+        assert_eq!(
+            refused,
+            format!("it is open in {who}: only one process can run a session at a time")
+        );
+        assert!(
+            SessionLock::held(&dir),
+            "a refused acquisition must not release the first holder"
+        );
         drop(first);
         assert!(!SessionLock::held(&dir));
-        assert_eq!(std::fs::read_to_string(dir.join(LOCK)).unwrap(), pid, "the pid remains as metadata after the lock is released");
-        let second = SessionLock::acquire(&dir).expect("the lock is available after its holder is dropped");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(LOCK)).unwrap(),
+            pid,
+            "the pid remains as metadata after the lock is released"
+        );
+        let second =
+            SessionLock::acquire(&dir).expect("the lock is available after its holder is dropped");
         assert!(SessionLock::held(&dir));
         drop(second);
         assert!(!SessionLock::held(&dir));
@@ -186,10 +221,16 @@ mod tests {
         assert!(read(&dir).unwrap_err().contains("no snapshot"));
         write_atomic(&dir.join(SNAPSHOT), b"{ not json").unwrap();
         assert!(read(&dir).unwrap_err().contains("cannot be read"));
-        assert!(!dir.join("snapshot.json.tmp").exists(), "the temporary file is renamed away");
+        assert!(
+            !dir.join("snapshot.json.tmp").exists(),
+            "the temporary file is renamed away"
+        );
         let mut newer = serde_json::json!({"version": VERSION + 1});
         newer["x"] = 1.into();
         write_atomic(&dir.join(SNAPSHOT), newer.to_string().as_bytes()).unwrap();
-        assert!(read(&dir).unwrap_err().contains("cannot be read"), "a newer format that this build cannot type is refused, not guessed at");
+        assert!(
+            read(&dir).unwrap_err().contains("cannot be read"),
+            "a newer format that this build cannot type is refused, not guessed at"
+        );
     }
 }

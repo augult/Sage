@@ -45,17 +45,41 @@ impl Tool {
         let n = name.trim().to_ascii_lowercase().replace('-', "_");
         let n = n.rsplit(['.', ':']).next().unwrap_or(&n);
         Some(match n {
-            "shell" | "bash" | "sh" | "run" | "exec" | "execute" | "terminal" | "run_command" | "execute_command" | "run_terminal_cmd"
-            | "run_shell_command" | "execute_commands" | "cmd" | "command" => Tool::Shell,
-            "read" | "read_file" | "cat" | "view" | "open" | "view_file" | "read_files" | "ls" | "list" | "list_dir" | "list_files" => Tool::Read,
-            "search" | "grep" | "rg" | "find" | "glob" | "search_files" | "grep_search" | "ripgrep" | "codebase_search" | "file_search" => Tool::Search,
-            "edit" | "edit_file" | "str_replace" | "replace" | "str_replace_editor" | "str_replace_based_edit_tool" | "search_replace"
-            | "apply_patch" | "patch" | "replace_in_file" | "multi_edit" | "multiedit" => Tool::Edit,
-            "write" | "write_file" | "create" | "create_file" | "write_to_file" | "save" => Tool::Write,
+            "shell" | "bash" | "sh" | "run" | "exec" | "execute" | "terminal" | "run_command"
+            | "execute_command" | "run_terminal_cmd" | "run_shell_command" | "execute_commands"
+            | "cmd" | "command" => Tool::Shell,
+            "read" | "read_file" | "cat" | "view" | "open" | "view_file" | "read_files" | "ls"
+            | "list" | "list_dir" | "list_files" => Tool::Read,
+            "search" | "grep" | "rg" | "find" | "glob" | "search_files" | "grep_search"
+            | "ripgrep" | "codebase_search" | "file_search" => Tool::Search,
+            "edit"
+            | "edit_file"
+            | "str_replace"
+            | "replace"
+            | "str_replace_editor"
+            | "str_replace_based_edit_tool"
+            | "search_replace"
+            | "apply_patch"
+            | "patch"
+            | "replace_in_file"
+            | "multi_edit"
+            | "multiedit" => Tool::Edit,
+            "write" | "write_file" | "create" | "create_file" | "write_to_file" | "save" => {
+                Tool::Write
+            }
             "watch" | "add_watch" => Tool::Watch,
-            "job" | "jobs" | "wait" | "bash_output" | "bashoutput" | "job_output" | "kill" | "killshell" => Tool::Job,
-            "ask" | "ask_user" | "ask_question" | "ask_followup_question" | "askuserquestion" | "question" | "clarify" | "request_user_input" => Tool::Ask,
-            "finish" | "done" | "complete" | "task_complete" | "submit" | "attempt_completion" | "final_answer" | "end" => Tool::Finish,
+            "job" | "jobs" | "wait" | "bash_output" | "bashoutput" | "job_output" | "kill"
+            | "killshell" => Tool::Job,
+            "ask"
+            | "ask_user"
+            | "ask_question"
+            | "ask_followup_question"
+            | "askuserquestion"
+            | "question"
+            | "clarify"
+            | "request_user_input" => Tool::Ask,
+            "finish" | "done" | "complete" | "task_complete" | "submit" | "attempt_completion"
+            | "final_answer" | "end" => Tool::Finish,
             _ => return None,
         })
     }
@@ -126,12 +150,21 @@ pub struct StepOutput {
 impl StepOutput {
     pub fn ok(observation: impl Into<String>) -> Self {
         let observation = observation.into();
-        Self { stub: crate::util::one_line(&observation, 160), observation, ..Default::default() }
+        Self {
+            stub: crate::util::one_line(&observation, 160),
+            observation,
+            ..Default::default()
+        }
     }
 
     pub fn error(message: impl AsRef<str>) -> Self {
         let observation = format!("[error] {}", message.as_ref());
-        Self { status: StepStatus::Error, stub: crate::util::one_line(&observation, 160), observation, ..Default::default() }
+        Self {
+            status: StepStatus::Error,
+            stub: crate::util::one_line(&observation, 160),
+            observation,
+            ..Default::default()
+        }
     }
 }
 
@@ -142,7 +175,9 @@ pub fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 pub fn bool_arg(args: &Value, key: &str) -> bool {
     match args.get(key) {
         Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1"),
+        Some(Value::String(s)) => {
+            matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1")
+        }
         Some(Value::Number(n)) => n.as_i64().is_some_and(|n| n != 0),
         _ => false,
     }
@@ -150,7 +185,9 @@ pub fn bool_arg(args: &Value, key: &str) -> bool {
 
 pub fn u64_arg(args: &Value, key: &str) -> Option<u64> {
     match args.get(key)? {
-        Value::Number(n) => n.as_u64().or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64)),
+        Value::Number(n) => n
+            .as_u64()
+            .or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64)),
         Value::String(s) => s.trim().parse().ok(),
         _ => None,
     }
@@ -163,7 +200,17 @@ mod tests {
 
     #[test]
     fn tool_names_round_trip_and_aliases_resolve() {
-        for t in [Tool::Shell, Tool::Read, Tool::Search, Tool::Edit, Tool::Write, Tool::Watch, Tool::Job, Tool::Ask, Tool::Finish] {
+        for t in [
+            Tool::Shell,
+            Tool::Read,
+            Tool::Search,
+            Tool::Edit,
+            Tool::Write,
+            Tool::Watch,
+            Tool::Job,
+            Tool::Ask,
+            Tool::Finish,
+        ] {
             assert_eq!(Tool::from_name(t.name()), Some(t));
         }
         assert_eq!(Tool::from_name("Bash"), Some(Tool::Shell));

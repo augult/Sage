@@ -120,17 +120,33 @@ fn adopt_login_shell_path() {
     const MARK: &str = "__SAGE_PATH__";
     // Started from a terminal, the environment already is that shell's, and an interactive child
     // shell would compete with it for the terminal.
-    if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() || std::io::stderr().is_terminal() {
+    if std::io::stdin().is_terminal()
+        || std::io::stdout().is_terminal()
+        || std::io::stderr().is_terminal()
+    {
         return;
     }
-    let Some(shell) = std::env::var_os("SHELL").filter(|s| !s.is_empty()) else { return };
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
+    let Some(shell) = std::env::var_os("SHELL").filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
     let printed = runtime.block_on(async {
         // Start-up files may print before the command runs; the markers isolate the value.
         let script = format!("printf '{MARK}%s{MARK}' \"$PATH\"");
         // Its own process group: an interactive shell that finds itself in the background of a
         // terminal stops its whole group, which must not include this app.
-        let run = tokio::process::Command::new(shell).args(["-ilc", &script]).stdin(Stdio::null()).stderr(Stdio::null()).process_group(0).kill_on_drop(true).output();
+        let run = tokio::process::Command::new(shell)
+            .args(["-ilc", &script])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .kill_on_drop(true)
+            .output();
         tokio::time::timeout(Duration::from_secs(3), run).await
     });
     drop(runtime);
@@ -149,7 +165,15 @@ async fn ui_hooks(hooks: State<'_, Hooks>) -> Reply<Hooks> {
 }
 
 fn stand_in(turns: Vec<ScriptedTurn>, delay_ms: u64) -> MockProvider {
-    let turns = turns.into_iter().map(|t| MockTurn { reasoning: t.reasoning, content: t.content, calls: t.calls, ..Default::default() }).collect();
+    let turns = turns
+        .into_iter()
+        .map(|t| MockTurn {
+            reasoning: t.reasoning,
+            content: t.content,
+            calls: t.calls,
+            ..Default::default()
+        })
+        .collect();
     let mut provider = MockProvider::scripted(turns);
     provider.chunk_delay_ms = delay_ms;
     provider
@@ -158,12 +182,27 @@ fn stand_in(turns: Vec<ScriptedTurn>, delay_ms: u64) -> MockProvider {
 /// Test hook: starts the session `SAGE_UI_SCRIPTED` describes. The path comes from the
 /// environment only, never from the webview, and no provider is contacted.
 #[tauri::command]
-async fn start_scripted(harness: State<'_, Harness>, hooks: State<'_, Hooks>) -> Reply<SessionMeta> {
-    let path = hooks.scripted.as_deref().ok_or("SAGE_UI_SCRIPTED is not set")?;
+async fn start_scripted(
+    harness: State<'_, Harness>,
+    hooks: State<'_, Hooks>,
+) -> Reply<SessionMeta> {
+    let path = hooks
+        .scripted
+        .as_deref()
+        .ok_or("SAGE_UI_SCRIPTED is not set")?;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let script: Scripted = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
     let provider = stand_in(script.turns, script.delay_ms);
-    let req = StartRequest { cwd: script.cwd, task: script.task, autonomy: script.autonomy, effort: script.effort, skills: script.skills, mode: script.mode, interactive: true, ..Default::default() };
+    let req = StartRequest {
+        cwd: script.cwd,
+        task: script.task,
+        autonomy: script.autonomy,
+        effort: script.effort,
+        skills: script.skills,
+        mode: script.mode,
+        interactive: true,
+        ..Default::default()
+    };
     harness.start_scripted(req, provider)
 }
 
@@ -180,7 +219,13 @@ async fn set_key(harness: State<'_, Harness>, provider: String, key: String) -> 
 
 /// Adds an OpenAI-compatible endpoint of the user's own and answers with the id it goes by.
 #[tauri::command]
-async fn add_provider(harness: State<'_, Harness>, name: String, base_url: String, models: Vec<String>, key: Option<String>) -> Reply<String> {
+async fn add_provider(
+    harness: State<'_, Harness>,
+    name: String,
+    base_url: String,
+    models: Vec<String>,
+    key: Option<String>,
+) -> Reply<String> {
     harness.add_provider(&name, &base_url, &models, key.as_deref().unwrap_or(""))
 }
 
@@ -190,7 +235,12 @@ async fn remove_provider(harness: State<'_, Harness>, id: String) -> Reply<()> {
 }
 
 #[tauri::command]
-async fn set_defaults(harness: State<'_, Harness>, provider: Option<String>, model: Option<String>, effort: Option<String>) -> Reply<()> {
+async fn set_defaults(
+    harness: State<'_, Harness>,
+    provider: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Reply<()> {
     harness.set_defaults(provider, model, effort)
 }
 
@@ -219,15 +269,33 @@ async fn start_demo(harness: State<'_, Harness>) -> Reply<SessionMeta> {
 
 /// `skills` are switched on with this message, and `files` are attached to it.
 #[tauri::command]
-async fn send_message(harness: State<'_, Harness>, hooks: State<'_, Hooks>, id: String, text: String, skills: Option<Vec<String>>, files: Option<Vec<String>>, changes: Option<Changes>) -> Reply<()> {
+async fn send_message(
+    harness: State<'_, Harness>,
+    hooks: State<'_, Hooks>,
+    id: String,
+    text: String,
+    skills: Option<Vec<String>>,
+    files: Option<Vec<String>>,
+    changes: Option<Changes>,
+) -> Reply<()> {
     // A session that is stored is brought back by the message itself. Only one a stand-in played
     // needs the hook to say who plays it now.
-    if let Some(path) = hooks.revive.as_deref().filter(|_| !harness.is_live(&id) && harness.meta(&id).is_ok_and(|meta| meta.simulated)) {
+    if let Some(path) = hooks
+        .revive
+        .as_deref()
+        .filter(|_| !harness.is_live(&id) && harness.meta(&id).is_ok_and(|meta| meta.simulated))
+    {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
         let revival: Revival = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
         harness.resume_scripted(&id, stand_in(revival.turns, revival.delay_ms))?;
     }
-    harness.send_with(&id, &text, &skills.unwrap_or_default(), &files.unwrap_or_default(), changes.unwrap_or_default())
+    harness.send_with(
+        &id,
+        &text,
+        &skills.unwrap_or_default(),
+        &files.unwrap_or_default(),
+        changes.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -237,7 +305,11 @@ async fn stop_session(harness: State<'_, Harness>, id: String) -> Reply<()> {
 
 /// Gives a session another title, and returns it as it then stands.
 #[tauri::command]
-async fn rename_session(harness: State<'_, Harness>, id: String, title: String) -> Reply<SessionMeta> {
+async fn rename_session(
+    harness: State<'_, Harness>,
+    id: String,
+    title: String,
+) -> Reply<SessionMeta> {
     harness.rename(&id, &title)
 }
 
@@ -258,17 +330,30 @@ async fn approve(harness: State<'_, Harness>, id: String, approval: u64, allow: 
 #[tauri::command]
 async fn session_events(harness: State<'_, Harness>, id: String) -> Reply<Vec<Value>> {
     if !harness.is_live(&id) && !id.contains(['/', '\\', '.']) {
-        let log = Path::new(&harness.state().data_dir).join("sessions").join(&id).join("events.jsonl");
+        let log = Path::new(&harness.state().data_dir)
+            .join("sessions")
+            .join(&id)
+            .join("events.jsonl");
         if let Ok(text) = std::fs::read_to_string(log) {
             let event = |line: &str| {
-                let parsed = serde_json::from_str::<Value>(line).ok().filter(Value::is_object);
+                let parsed = serde_json::from_str::<Value>(line)
+                    .ok()
+                    .filter(Value::is_object);
                 // A line that is not an event (a torn write, say) is shown as such rather than skipped.
                 parsed.unwrap_or_else(|| json!({ "type": "unreadable", "text": line.chars().take(240).collect::<String>() }))
             };
-            return Ok(text.lines().filter(|line| !line.trim().is_empty()).map(event).collect());
+            return Ok(text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(event)
+                .collect());
         }
     }
-    harness.events(&id)?.iter().map(|event| serde_json::to_value(event).map_err(|e| e.to_string())).collect()
+    harness
+        .events(&id)?
+        .iter()
+        .map(|event| serde_json::to_value(event).map_err(|e| e.to_string()))
+        .collect()
 }
 
 #[tauri::command]
@@ -292,8 +377,12 @@ async fn pick_folder(app: tauri::AppHandle, start: Option<String>) -> Reply<Opti
     dialog.pick_folder(move |folder| {
         let _ = chosen.send(folder);
     });
-    let folder = answer.await.map_err(|_| "the folder dialog closed without an answer".to_string())?;
-    Ok(folder.and_then(|folder| folder.into_path().ok()).map(|path| sage_core::util::plain_path(&path.to_string_lossy())))
+    let folder = answer
+        .await
+        .map_err(|_| "the folder dialog closed without an answer".to_string())?;
+    Ok(folder
+        .and_then(|folder| folder.into_path().ok())
+        .map(|path| sage_core::util::plain_path(&path.to_string_lossy())))
 }
 
 /// Asks for files to attach with the system's own dialog, opened at `start` when that is a folder.
@@ -312,8 +401,15 @@ async fn pick_files(app: tauri::AppHandle, start: Option<String>) -> Reply<Vec<S
     dialog.pick_files(move |files| {
         let _ = chosen.send(files);
     });
-    let files = answer.await.map_err(|_| "the file dialog closed without an answer".to_string())?;
-    Ok(files.unwrap_or_default().into_iter().filter_map(|file| file.into_path().ok()).map(|path| sage_core::util::plain_path(&path.to_string_lossy())).collect())
+    let files = answer
+        .await
+        .map_err(|_| "the file dialog closed without an answer".to_string())?;
+    Ok(files
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|file| file.into_path().ok())
+        .map(|path| sage_core::util::plain_path(&path.to_string_lossy()))
+        .collect())
 }
 
 /// Built-in and user skills, plus the project's own when `cwd` is given.
@@ -323,12 +419,20 @@ async fn list_skills(harness: State<'_, Harness>, cwd: Option<String>) -> Reply<
 }
 
 #[tauri::command]
-async fn skill_file(harness: State<'_, Harness>, name: String, cwd: Option<String>) -> Reply<String> {
+async fn skill_file(
+    harness: State<'_, Harness>,
+    name: String,
+    cwd: Option<String>,
+) -> Reply<String> {
     harness.skill_file(&name, cwd.as_deref())
 }
 
 #[tauri::command]
-async fn save_skill(harness: State<'_, Harness>, name: String, content: String) -> Reply<SkillInfo> {
+async fn save_skill(
+    harness: State<'_, Harness>,
+    name: String,
+    content: String,
+) -> Reply<SkillInfo> {
     harness.save_skill(&name, &content)
 }
 
@@ -357,7 +461,10 @@ async fn set_global_instructions(harness: State<'_, Harness>, text: String) -> R
 fn session_cwd(harness: &Harness, id: &str) -> Reply<PathBuf> {
     // Asked for with every reading of the files and git panels: this session's own record, not
     // the whole list, which reads every stored session from disk.
-    harness.meta(id).map(|meta| PathBuf::from(meta.cwd)).map_err(|_| format!("no session {id}"))
+    harness
+        .meta(id)
+        .map(|meta| PathBuf::from(meta.cwd))
+        .map_err(|_| format!("no session {id}"))
 }
 
 /// Where the session's workspace stands with git: branch, remote, what is uncommitted or unpushed.
@@ -374,7 +481,11 @@ async fn git_push(harness: State<'_, Harness>, id: String, message: String) -> R
 
 /// What a directory of the session's folder holds; `path` is from the folder's root.
 #[tauri::command]
-async fn list_dir(harness: State<'_, Harness>, id: String, path: Option<String>) -> Reply<Vec<files::Entry>> {
+async fn list_dir(
+    harness: State<'_, Harness>,
+    id: String,
+    path: Option<String>,
+) -> Reply<Vec<files::Entry>> {
     files::list(&session_cwd(&harness, &id)?, path.as_deref().unwrap_or(""))
 }
 
@@ -386,19 +497,34 @@ async fn read_file(harness: State<'_, Harness>, id: String, path: String) -> Rep
 
 /// Writes `text` to a file of the session's folder.
 #[tauri::command]
-async fn write_file(harness: State<'_, Harness>, id: String, path: String, text: String) -> Reply<()> {
+async fn write_file(
+    harness: State<'_, Harness>,
+    id: String,
+    path: String,
+    text: String,
+) -> Reply<()> {
     files::write(&session_cwd(&harness, &id)?, &path, &text)
 }
 
 /// Makes an empty file, or a folder when `dir`, in the session's folder.
 #[tauri::command]
-async fn create_entry(harness: State<'_, Harness>, id: String, path: String, dir: bool) -> Reply<()> {
+async fn create_entry(
+    harness: State<'_, Harness>,
+    id: String,
+    path: String,
+    dir: bool,
+) -> Reply<()> {
     files::create(&session_cwd(&harness, &id)?, &path, dir)
 }
 
 /// Moves a file or folder of the session's folder to another path in it.
 #[tauri::command]
-async fn rename_entry(harness: State<'_, Harness>, id: String, from: String, to: String) -> Reply<()> {
+async fn rename_entry(
+    harness: State<'_, Harness>,
+    id: String,
+    from: String,
+    to: String,
+) -> Reply<()> {
     files::rename(&session_cwd(&harness, &id)?, &from, &to)
 }
 
@@ -417,7 +543,11 @@ async fn git_discard(harness: State<'_, Harness>, id: String, path: String) -> R
 /// Returns everything stored so far and forwards what follows to `on_event`, with nothing lost or
 /// repeated in between. Forwarding ends when the webview or the session goes away.
 #[tauri::command]
-async fn subscribe(harness: State<'_, Harness>, id: String, on_event: Channel<Event>) -> Reply<Vec<Event>> {
+async fn subscribe(
+    harness: State<'_, Harness>,
+    id: String,
+    on_event: Channel<Event>,
+) -> Reply<Vec<Event>> {
     let (backlog, mut live) = harness.subscribe(&id)?;
     tokio::spawn(async move {
         loop {
@@ -470,7 +600,12 @@ fn main() {
                 use tokio::signal::unix::{SignalKind, signal};
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let (Ok(mut terminate), Ok(mut interrupt)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else { return };
+                    let (Ok(mut terminate), Ok(mut interrupt)) = (
+                        signal(SignalKind::terminate()),
+                        signal(SignalKind::interrupt()),
+                    ) else {
+                        return;
+                    };
                     tokio::select! {
                         _ = terminate.recv() => {}
                         _ = interrupt.recv() => {}

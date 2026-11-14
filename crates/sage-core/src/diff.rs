@@ -43,13 +43,19 @@ enum Op {
 fn script(a: &[String], b: &[String]) -> Vec<Op> {
     let (m, n) = (a.len(), b.len());
     if m == 0 || n == 0 || m.saturating_mul(n) > MAX_CELLS {
-        return std::iter::repeat_n(Op::Remove, m).chain(std::iter::repeat_n(Op::Add, n)).collect();
+        return std::iter::repeat_n(Op::Remove, m)
+            .chain(std::iter::repeat_n(Op::Add, n))
+            .collect();
     }
     let width = n + 1;
     let mut common = vec![0u32; (m + 1) * width];
     for i in (0..m).rev() {
         for j in (0..n).rev() {
-            common[i * width + j] = if a[i] == b[j] { common[(i + 1) * width + j + 1] + 1 } else { common[(i + 1) * width + j].max(common[i * width + j + 1]) };
+            common[i * width + j] = if a[i] == b[j] {
+                common[(i + 1) * width + j + 1] + 1
+            } else {
+                common[(i + 1) * width + j].max(common[i * width + j + 1])
+            };
         }
     }
     let (mut i, mut j) = (0, 0);
@@ -73,7 +79,9 @@ fn script(a: &[String], b: &[String]) -> Vec<Op> {
 }
 
 fn clip(text: &str) -> &str {
-    text.char_indices().nth(MAX_COLS).map_or(text, |(end, _)| &text[..end])
+    text.char_indices()
+        .nth(MAX_COLS)
+        .map_or(text, |(end, _)| &text[..end])
 }
 
 /// What turned `before` into `after`. `before` is `None` for a file that did not exist.
@@ -81,23 +89,45 @@ pub fn change(path: &str, before: Option<&[String]>, after: &[String]) -> FileCh
     let created = before.is_none();
     let before = before.unwrap_or(&[]);
     let prefix = before.iter().zip(after).take_while(|(a, b)| a == b).count();
-    let suffix = before[prefix..].iter().rev().zip(after[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
-    let ops = script(&before[prefix..before.len() - suffix], &after[prefix..after.len() - suffix]);
+    let suffix = before[prefix..]
+        .iter()
+        .rev()
+        .zip(after[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let ops = script(
+        &before[prefix..before.len() - suffix],
+        &after[prefix..after.len() - suffix],
+    );
     let count = |wanted: Op| ops.iter().filter(|op| **op == wanted).count() as u32;
-    let mut out = FileChange { path: path.to_string(), created, added: count(Op::Add), removed: count(Op::Remove), ..Default::default() };
+    let mut out = FileChange {
+        path: path.to_string(),
+        created,
+        added: count(Op::Add),
+        removed: count(Op::Remove),
+        ..Default::default()
+    };
 
     // Every line in reach of the change: what happened to it and where it sits before and after.
     let (lead, trail) = (prefix.min(CONTEXT), suffix.min(CONTEXT));
     let mut rows: Vec<(Op, usize, usize)> = Vec::with_capacity(lead + ops.len() + trail);
     let (mut i, mut j) = (prefix - lead, prefix - lead);
-    for op in std::iter::repeat_n(Op::Keep, lead).chain(ops).chain(std::iter::repeat_n(Op::Keep, trail)) {
+    for op in std::iter::repeat_n(Op::Keep, lead)
+        .chain(ops)
+        .chain(std::iter::repeat_n(Op::Keep, trail))
+    {
         rows.push((op, i, j));
         i += usize::from(op != Op::Add);
         j += usize::from(op != Op::Remove);
     }
 
     // A hunk is a run of changes with its context; runs within two contexts of each other share one.
-    let changed: Vec<usize> = rows.iter().enumerate().filter(|(_, row)| row.0 != Op::Keep).map(|(at, _)| at).collect();
+    let changed: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.0 != Op::Keep)
+        .map(|(at, _)| at)
+        .collect();
     let mut budget = MAX_LINES;
     let mut next = 0;
     while next < changed.len() && !out.truncated {
@@ -110,7 +140,11 @@ pub fn change(path: &str, before: Option<&[String]>, after: &[String]) -> FileCh
         next += 1;
         let from = first.saturating_sub(CONTEXT);
         let to = (last + CONTEXT).min(rows.len() - 1);
-        let mut hunk = Hunk { old_start: rows[from].1 as u32 + 1, new_start: rows[from].2 as u32 + 1, lines: Vec::new() };
+        let mut hunk = Hunk {
+            old_start: rows[from].1 as u32 + 1,
+            new_start: rows[from].2 as u32 + 1,
+            lines: Vec::new(),
+        };
         for &(op, i, j) in &rows[from..=to] {
             if budget == 0 {
                 out.truncated = true;
@@ -143,8 +177,18 @@ mod tests {
         let before = lines("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
         let after = lines("a\nb\nc\nd\nE\nf\ng\nh\ni\nj");
         let c = change("x.txt", Some(&before), &after);
-        assert_eq!((c.added, c.removed, c.created, c.truncated), (1, 1, false, false));
-        assert_eq!(c.hunks, vec![Hunk { old_start: 2, new_start: 2, lines: lines(" b\n c\n d\n-e\n+E\n f\n g\n h") }]);
+        assert_eq!(
+            (c.added, c.removed, c.created, c.truncated),
+            (1, 1, false, false)
+        );
+        assert_eq!(
+            c.hunks,
+            vec![Hunk {
+                old_start: 2,
+                new_start: 2,
+                lines: lines(" b\n c\n d\n-e\n+E\n f\n g\n h")
+            }]
+        );
     }
 
     #[test]
@@ -166,8 +210,18 @@ mod tests {
         after[20] = "twenty-one".into();
         let c = change("n.txt", Some(&before), &after);
         assert_eq!((c.added, c.removed, c.hunks.len()), (2, 2, 2));
-        assert_eq!((c.hunks[0].old_start, c.hunks[1].old_start, c.hunks[1].new_start), (1, 18, 18));
-        assert_eq!(c.hunks[1].lines, lines(" 18\n 19\n 20\n-21\n+twenty-one\n 22\n 23\n 24"));
+        assert_eq!(
+            (
+                c.hunks[0].old_start,
+                c.hunks[1].old_start,
+                c.hunks[1].new_start
+            ),
+            (1, 18, 18)
+        );
+        assert_eq!(
+            c.hunks[1].lines,
+            lines(" 18\n 19\n 20\n-21\n+twenty-one\n 22\n 23\n 24")
+        );
         // Five unchanged lines between two changes are less than two contexts: one hunk.
         after[8] = "nine".into();
         assert_eq!(change("n.txt", Some(&before), &after).hunks.len(), 2);
@@ -178,7 +232,14 @@ mod tests {
         let c = change("new.txt", None, &lines("a\nb"));
         assert!(c.created);
         assert_eq!((c.added, c.removed), (2, 0));
-        assert_eq!(c.hunks, vec![Hunk { old_start: 1, new_start: 1, lines: lines("+a\n+b") }]);
+        assert_eq!(
+            c.hunks,
+            vec![Hunk {
+                old_start: 1,
+                new_start: 1,
+                lines: lines("+a\n+b")
+            }]
+        );
         // An existing file that was empty is not a new one.
         assert!(!change("new.txt", Some(&[]), &lines("a")).created);
     }
@@ -187,7 +248,10 @@ mod tests {
     fn a_large_change_is_counted_whole_and_carried_in_part() {
         let after: Vec<String> = (1..=1000).map(|n| format!("line {n}")).collect();
         let c = change("big.txt", None, &after);
-        assert_eq!((c.added, c.truncated, c.hunks[0].lines.len()), (1000, true, MAX_LINES));
+        assert_eq!(
+            (c.added, c.truncated, c.hunks[0].lines.len()),
+            (1000, true, MAX_LINES)
+        );
         // Too many lines to compare one by one: taken as one replacement.
         let before: Vec<String> = (1..=700).map(|n| format!("old {n}")).collect();
         let c = change("big.txt", Some(&before), &after[..700]);
@@ -195,6 +259,11 @@ mod tests {
         assert!(c.hunks[0].lines.iter().all(|line| line.starts_with('-')));
         // A very long line is cut, on a character boundary.
         let long = vec!["é".repeat(MAX_COLS + 50)];
-        assert_eq!(change("wide.txt", None, &long).hunks[0].lines[0].chars().count(), MAX_COLS + 1);
+        assert_eq!(
+            change("wide.txt", None, &long).hunks[0].lines[0]
+                .chars()
+                .count(),
+            MAX_COLS + 1
+        );
     }
 }
