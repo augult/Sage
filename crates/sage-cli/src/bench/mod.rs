@@ -44,6 +44,9 @@ OPTIONS
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
+      --tasks-dir <dir>    tasks kept outside the binary, e.g. a slice of a public benchmark: one
+                           directory each with task.json (prompt, verify; title, needs, check,
+                           restore, skill) beside workspace/, hidden/ and solution/
   -n, --repeats <n>        runs per task and variant (default 3)
   -e, --effort <level>     as for `sage run`
       --max-turns <n>      per run (default 30)
@@ -296,6 +299,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 opt.tasks = picked;
             }
+            "--tasks-dir" => opt.tasks = tasks::load_dir(Path::new(&value(a)?))?,
             "-n" | "--repeats" => opt.repeats = number(a, value(a)?)?,
             "-e" | "--effort" => opt.effort = Some(value(a)?),
             "--max-turns" => opt.max_turns = number(a, value(a)?)?,
