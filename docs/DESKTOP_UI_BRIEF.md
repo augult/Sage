@@ -38,7 +38,7 @@ answers with its id) and `remove_provider(id)`,
 `interactive = true`; `req.skills` names the skills to start with), `start_demo`,
 `send_message(id, text, skills?, changes?, files?)` (`send_with`: the skills named are switched on with the
 message; `changes` is `{ provider?, model?, effort?, autonomy? }`, what the session is to run with
-from this message on), `stop_session(id)`,
+from this message on), `stop_session(id)`, `rename_session(id, title)` (another title: its first line, 72 characters at most; the session as it then stands), `delete_session(id)` (the session's record for good, never the folder it worked in; refused while it runs, and for one another process has),
 `approve(id, approval, allow)`, `session_events(id)`, `read_output(id, handle)`,
 `pick_folder(start?)` (the system's folder dialog, opened at `start`; the chosen path, or nothing),
 and `subscribe(id, on_event: tauri::ipc::Channel<Event>) -> Vec<Event>`, which returns the backlog
@@ -188,7 +188,7 @@ bar frosts what lies behind it (`backdrop-filter` in `session.css`). It is one s
 800px wide; in a session what lies behind it is the sheet, which does not move, and in the New
 session view the dither, which is redrawn twenty times a second. The app brings its own picture. A background is a painting made by a script
 (`desktop/art/<id>.py`, numpy and Pillow, deterministic; it writes `ui/themes/<id>/art.webp` at
-2400×1500 and `thumb.webp` at 480×300): Ember, Orchid, Tide and Graphite, or None for flat panes.
+2400×1500 and `thumb.webp` at 480×300): Orchid, Ember, Tide and Graphite, or None for flat panes.
 At start-up, and on every change of background or appearance, `backdrop.js` takes the painting
 at 320px, softens it, presses its brightness into a band (14–76 of 255 for dark, 198–248 for
 light) and draws it once, with a little grain, to a canvas behind the panes. Over it a second,
@@ -198,8 +198,8 @@ shows on the bare glass only: it is cut away where the sheet lies
 (`clip-path` in `glass.css`, from the one pane width in `layout.css`), and it stands still while
 no bare glass is in view (`backdrop.js`). Each of the three panels shows the background or does
 not (Settings, Panels; `data-bg-left`, `data-bg-middle` and `data-bg-right` on `<html>`, from
-`themes.js` and, before the first paint, `boot.js`). Out of the box only the middle one does: the
-sidebar, the title bar (which goes with the sidebar) and the inspector are solid. A panel that
+`themes.js` and, before the first paint, `boot.js`). Out of the box all three do, the background
+is Orchid and the dither is off; a panel switched off is solid, the title bar with the sidebar. A panel that
 shows it is a translucent fill over it: the veil for a side panel, and in the middle the sheet, the
 reading surface. With the middle panel's background on, the New session view puts the sheet away
 (`data-view="new"` on `<html>`, from `main.js` and `boot.js`): there the painting and its dither
@@ -238,7 +238,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
    a session opens its folder; the walkthrough's throwaway workspaces share one folder, "demo"),
    under each its sessions, and Settings. A session is one line: its title, and after it a mark
    only while it has something to say, a dot with a ring that swells while it runs, a triangle
-   when it waits for an approval or, in red, when its run failed. A session's row is as wide as
+   when it waits for an approval or, in red, when its run failed. Its right-click menu (the same one as the file tree's, `contextMenu` in `ui/js/views/common.js`) has Open, Rename, Copy folder path, Stop while it runs, and Delete, in red; Rename asks for the title in a dialog and Delete asks first, saying that the folder's files are not touched. F2 and Delete on a row that has the focus do the same, and Shift+F10 opens the menu. A deleted session leaves the back and forward arrows too. A session's row is as wide as
    its folder's, and its title starts as far in from the row's left as its mark ends from the
    right. The sidebar and the inspector are the
    same width, until the inspector shows Code, which widens it.
@@ -360,7 +360,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      and None, each as a small picture of itself; Panels: one more such picture, of the chosen
      background, cut in three as the window is, a fifth for the left panel, three fifths for the
      middle one and a fifth for the right, each part a switch for the background in that panel
-     and solid while it is off, with nothing to switch while the background is None;
+     and solid while it is off, with nothing to switch while the background is None; a part shows its own share of the picture inside its own border, and under the three is one line, "Choose which panels have a background.";
      Dither: On or Off; Motion: On or Off; each
      applies at once). Then **Messages** (Send with: Enter, the default, or Ctrl/Cmd+Enter; the
      other one starts a new line; kept by the window. Auto-retry: On or Off, `set_auto_retry`,

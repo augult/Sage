@@ -233,7 +233,7 @@
   border-color: var(--ink);
 }
 
-/* The tree's right-click menu, where the pointer was. */
+/* A right-click menu, where the pointer was: the file tree's, and a session's in the sidebar. */
 .menu.context-menu {
   position: fixed;
   z-index: 60;
@@ -279,6 +279,17 @@
 
 .confirm-delete {
   width: min(400px, calc(100vw - 48px));
+}
+
+/* A session's new title: one field, as wide as a title is long. */
+.rename-session {
+  width: min(440px, calc(100vw - 48px));
+}
+
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .code-pane {

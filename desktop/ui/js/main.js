@@ -40,6 +40,25 @@ const trail = [];
 let at = -1;
 const sameView = (a, b) => a.name === b.name && a.id === b.id;
 
+function syncArrows() {
+  backLink.disabled = at <= 0;
+  forwardLink.disabled = at >= trail.length - 1;
+}
+
+/** Takes a session that is gone out of the trail, so that neither arrow leads to it. */
+function untrail(id) {
+  for (let i = trail.length - 1; i >= 0; i--) {
+    if (trail[i].name !== 'session' || trail[i].id !== id) continue;
+    trail.splice(i, 1);
+    if (i <= at) at--;
+    // The two views it stood between may be one and the same: a step from one to the other would go nowhere.
+    if (i > 0 && i < trail.length && sameView(trail[i - 1], trail[i])) {
+      trail.splice(i, 1);
+      if (i <= at) at--;
+    }
+  }
+}
+
 const markCurrent = (link, current) => (current ? link.setAttribute('aria-current', 'page') : link.removeAttribute('aria-current'));
 
 const app = {
@@ -60,8 +79,7 @@ const app = {
       trail.splice(at + 1);
       at = trail.push(view) - 1;
     }
-    backLink.disabled = at <= 0;
-    forwardLink.disabled = at >= trail.length - 1;
+    syncArrows();
     // For the stylesheets: a new session opens on the bare glass (styles/glass.css).
     document.documentElement.dataset.view = view.name;
     main.replaceChildren();
@@ -110,12 +128,33 @@ async function step(by) {
   app.show(to, false);
 }
 
+// What the session list asks of the shell: to show a session, and to follow one that was renamed
+// or deleted from its menu.
+const sessionActs = {
+  open: (id) => go({ name: 'session', id }),
+  async renamed(meta) {
+    store.retitle(meta.id, meta.title);
+    app.sessions = await api.listSessions();
+    drawSessionList();
+  },
+  async deleted(id) {
+    const shown = app.view.name === 'session' && app.view.id === id;
+    store.forget(id);
+    untrail(id);
+    app.sessions = await api.listSessions();
+    // The one that was open is gone: back to where a session starts.
+    if (shown) app.show({ name: 'new' });
+    syncArrows();
+    drawSessionList();
+  },
+};
+
 function drawSessionList() {
   const currentId = app.view.name === 'session' ? app.view.id : null;
   const signature = listSignature(app.sessions, currentId);
   if (signature === listShown) return;
   listShown = signature;
-  renderSessionList(list, app.sessions, currentId, app.state.home, (id) => go({ name: 'session', id }));
+  renderSessionList(list, app.sessions, currentId, app.state.home, sessionActs);
 }
 
 [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);

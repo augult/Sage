@@ -133,6 +133,64 @@ export const known = (table, name) => (Object.hasOwn(table, name) ? table[name] 
 /** The cross that closes a dialog. */
 export const closeButton = (close) => h('button.close', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, icon('cross', 14));
 
+// The right-click menu, while one is open: there is never more than one.
+let contextShown = null;
+
+function contextOutside(event) {
+  if (!contextShown?.contains(event.target)) closeContextMenu();
+}
+
+export function closeContextMenu() {
+  contextShown?.remove();
+  contextShown = null;
+  document.removeEventListener('pointerdown', contextOutside, true);
+  window.removeEventListener('blur', closeContextMenu);
+}
+
+/**
+ * The menu of what was right-clicked, where the pointer was, in place of the webview's own.
+ * `rows` is `[{ label, act, danger, glyph, disabled, title }]`, with `'rule'` between two for a
+ * line; what is false among them is left out. Arrows move, Escape closes and gives the focus to
+ * what `back()` returns, and Backspace or Delete does `remove`, the Delete row's shortcut, where
+ * there is one.
+ */
+export function contextMenu(event, rows, { remove, back } = {}) {
+  event.preventDefault();
+  closeContextMenu();
+  const item = (row) =>
+    h(
+      `button.menu-item${row.danger ? '.is-danger' : ''}`,
+      { type: 'button', role: 'menuitem', disabled: row.disabled, title: row.title, onclick: () => (closeContextMenu(), row.act()) },
+      h('span.menu-text', row.label),
+      row.glyph && h('span.menu-glyph', icon(row.glyph, 14)),
+    );
+  const menu = h('div.menu.context-menu', { role: 'menu' }, rows.filter(Boolean).map((row) => (row === 'rule' ? h('div.menu-rule') : item(row))));
+  menu.addEventListener('keydown', (keyed) => {
+    const items = [...menu.querySelectorAll('.menu-item:not(:disabled)')];
+    const at = items.indexOf(document.activeElement);
+    if ((keyed.key === 'Backspace' || keyed.key === 'Delete') && remove) {
+      keyed.preventDefault();
+      closeContextMenu();
+      remove();
+    } else if (keyed.key === 'Escape') {
+      closeContextMenu();
+      back?.()?.focus();
+    } else if ((keyed.key === 'ArrowDown' || keyed.key === 'ArrowUp') && items.length) {
+      keyed.preventDefault();
+      items[(at + (keyed.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+    }
+  });
+  document.body.append(menu);
+  // Inside the window, by the pointer.
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(event.clientX, innerWidth - width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY, innerHeight - height - 4))}px`;
+  menu.querySelector('.menu-item:not(:disabled)')?.focus();
+  contextShown = menu;
+  document.addEventListener('pointerdown', contextOutside, true);
+  window.addEventListener('blur', closeContextMenu);
+}
+
 /** A modal dialog that removes itself when closed. `build(close)` returns its children. */
 export function openDialog(className, build) {
   const dialog = h(`dialog.${className}`);

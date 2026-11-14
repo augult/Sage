@@ -26,6 +26,10 @@ export const api = {
    */
   sendMessage: (id, text, skills = [], changes = {}, files = []) => invoke('send_message', { id, text, skills, changes, files }),
   stopSession: (id) => invoke('stop_session', { id }),
+  /** Another title for a session. Resolves with the session as it then stands. */
+  renameSession: (id, title) => invoke('rename_session', { id, title }),
+  /** Deletes a session's record for good; its folder is not touched. Refused while the session runs. */
+  deleteSession: (id) => invoke('delete_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
   sessionEvents: (id) => invoke('session_events', { id }),
   readOutput: (id, handle) => invoke('read_output', { id, handle }),

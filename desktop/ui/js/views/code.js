@@ -6,7 +6,7 @@
 import { api } from '../api.js';
 import { copyText, h, icon } from '../dom.js';
 import { settleUnsaved, track, watchUnsaved } from '../unsaved.js';
-import { closeButton, openDialog } from './common.js';
+import { closeButton, closeContextMenu, contextMenu, openDialog } from './common.js';
 
 const parentOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 const join = (folder, name) => (folder ? `${folder}/${name}` : name);
@@ -300,64 +300,26 @@ export function codeView(session) {
     go.focus();
   }
 
-  // The right-click menu.
-
-  let menu = null;
-
-  function closeMenu() {
-    menu?.remove();
-    menu = null;
-    document.removeEventListener('pointerdown', outside, true);
-    window.removeEventListener('blur', closeMenu);
-  }
-
-  function outside(event) {
-    if (!menu?.contains(event.target)) closeMenu();
-  }
+  // The right-click menu (`contextMenu` in js/views/common.js). Backspace or Delete in it is the
+  // Delete row's shortcut.
 
   /** `entry` is the row's `{ path, dir }`, or null for the folder's root. */
   function menuAt(event, entry) {
-    event.preventDefault();
-    closeMenu();
     const folder = entry === null ? '' : entry.dir ? entry.path : parentOf(entry.path);
-    const item = (label, act, look = '', glyph = null) =>
-      h(`button.menu-item${look}`, { type: 'button', role: 'menuitem', onclick: () => (closeMenu(), act()) }, h('span.menu-text', label), glyph && h('span.menu-glyph', icon(glyph, 14)));
-    const items = [
-      entry && !entry.dir && item('Open', () => open(entry.path)),
-      item('New file', () => startNew(folder, false)),
-      item('New folder', () => startNew(folder, true)),
-      entry && h('div.menu-rule'),
-      entry && item('Rename', () => startRename(entry.path)),
-      entry && item('Delete', () => askDelete(entry), '.is-danger', 'backspace'),
-      entry && h('div.menu-rule'),
-      entry && item('Copy path', () => copyText(entry.path)),
-    ];
-    menu = h('div.menu.context-menu', { role: 'menu', onkeydown: (keyed) => onMenuKey(keyed, entry) }, items);
-    document.body.append(menu);
-    // Inside the window, by the pointer.
-    const { width, height } = menu.getBoundingClientRect();
-    menu.style.left = `${Math.max(4, Math.min(event.clientX, innerWidth - width - 4))}px`;
-    menu.style.top = `${Math.max(4, Math.min(event.clientY, innerHeight - height - 4))}px`;
-    menu.querySelector('.menu-item')?.focus();
-    document.addEventListener('pointerdown', outside, true);
-    window.addEventListener('blur', closeMenu);
-  }
-
-  /** Arrows move, Escape closes, and Backspace (or Delete) is the Delete row's shortcut: it asks to delete `entry`. */
-  function onMenuKey(event, entry) {
-    const items = [...menu.querySelectorAll('.menu-item')];
-    const at = items.indexOf(document.activeElement);
-    if ((event.key === 'Backspace' || event.key === 'Delete') && entry) {
-      event.preventDefault();
-      closeMenu();
-      askDelete(entry);
-    } else if (event.key === 'Escape') {
-      closeMenu();
-      tree.querySelector('[aria-current="true"]')?.focus();
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
-    }
+    contextMenu(
+      event,
+      [
+        entry && !entry.dir && { label: 'Open', act: () => open(entry.path) },
+        { label: 'New file', act: () => startNew(folder, false) },
+        { label: 'New folder', act: () => startNew(folder, true) },
+        entry && 'rule',
+        entry && { label: 'Rename', act: () => startRename(entry.path) },
+        entry && { label: 'Delete', act: () => askDelete(entry), danger: true, glyph: 'backspace' },
+        entry && 'rule',
+        entry && { label: 'Copy path', act: () => copyText(entry.path) },
+      ],
+      { remove: entry && (() => askDelete(entry)), back: () => tree.querySelector('[aria-current="true"]') },
+    );
   }
 
   /** F2 renames the row that has the focus, Delete deletes it, as in most editors. */
@@ -468,7 +430,7 @@ export function codeView(session) {
     open,
     refresh,
     unmount() {
-      closeMenu();
+      closeContextMenu();
       unwatch();
     },
   };

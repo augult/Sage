@@ -3,7 +3,7 @@
    on a canvas a few hundred cells wide. Each of the three panels shows the two or does not, as
    Settings says (js/themes.js puts `data-bg-left`, `data-bg-middle` and `data-bg-right` on <html>):
    one that does is a plain translucent fill over them, one that does not is solid. Out of the box
-   only the middle one does. The panels neither blur nor filter while the app runs. One thing does,
+   all three do. The panels neither blur nor filter while the app runs. One thing does,
    the chat bar (styles/session.css), which frosts what lies behind it. Nothing shows what is
    behind the window. */
 
