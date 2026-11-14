@@ -164,6 +164,15 @@
   animation: enter 120ms ease-out;
 }
 
+/* Pickers enter the top layer (or portal to body on older WebViews), so a
+   Settings scroll pane cannot cut them off. Coordinates come from controls.js. */
+.menu.pick-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 60;
+}
+
 .opens-up > .menu {
   top: auto;
   bottom: calc(100% + 4px);

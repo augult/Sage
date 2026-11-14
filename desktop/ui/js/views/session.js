@@ -170,7 +170,7 @@ export function mountSession(main, side, app, meta) {
     if (!goal?.text) return;
     const text = `${goal.met ? 'Goal met' : 'Goal'}: ${goal.text}`;
     goalText.textContent = text;
-    goalNote.title = text;
+    goalNote.dataset.tooltip = text;
   }
   const wanted = { provider: null, model: null, effort: null, autonomy: null };
   // The policy as the pickers name it: the engine's `ratchet-low` is Auto.

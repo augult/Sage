@@ -9,7 +9,7 @@
   const rich = params.has('rich');
   const skills = rich ? [{ name: 'ui-review', title: 'Review interface accessibility and responsive layouts', description: 'Check spacing, contrast, keyboard access, and narrow windows.', body: '# UI review\n\nCheck the interface in light and dark appearances.\n', path: '/home/user/.sage/skills/ui-review/SKILL.md' }] : [];
   if (rich) {
-    session.model = state.model = 'example-reasoning-model-with-a-long-display-name';
+    events[0].model = session.model = state.model = 'example-reasoning-model-with-a-long-display-name';
     state.providers[0].models = [state.model];
     events.push(
       { type: 'turn_start', seq: 3, turn: 1, effort: 'medium', ts: session.created + 2 },
@@ -25,10 +25,13 @@
   const handlers = {
     ui_hooks: () => ({ view: initialView, theme: 'none', scheme: params.get('scheme') || 'light' }),
     app_state: () => state,
+    set_defaults: (change) => { for (const [key, value] of Object.entries(change)) if (value !== undefined) state[key] = value; return null; },
+    set_auto_retry: ({ on }) => { state.auto_retry = on; return null; },
     list_sessions: () => [session],
     session_events: () => events,
     subscribe: () => events,
     list_skills: () => skills,
+    skill_file: () => '---\nname: ui-review\ntitle: Review interface\ndescription: Check the interface\n---\n\nCheck spacing and keyboard access.\n',
     instructions: () => ({ system: 'Browser fixture system prompt.', system_default: 'Browser fixture system prompt.', system_custom: false, global: '' }),
     git_state: () => rich ? ({ repo: true, branch: 'feature/interface-polish-with-long-branch-name', remote: 'origin', url: 'https://github.com/example/interface', github: 'example/interface', upstream: 'origin/main', ahead: 1, files: [{ path: 'src/components/Navigation.js', status: 'modified' }, { path: 'src/styles/responsive-layout-with-a-long-name.css', status: 'new' }], commits: [{ hash: 'abc1234', subject: 'Improve interface spacing and keyboard navigation', when: 'Today' }] }) : ({ repo: false, branch: null, remote: null, url: null, github: false, upstream: null, ahead: 0, files: [], commits: [] }),
     list_dir: ({ path }) => rich ? (path ? [{ name: 'Navigation.js', path: 'src/Navigation.js', dir: false }] : [{ name: 'src', path: 'src', dir: true }, { name: 'README-with-a-long-filename.md', path: 'README-with-a-long-filename.md', dir: false }]) : [],

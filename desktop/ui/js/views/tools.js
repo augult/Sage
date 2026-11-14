@@ -87,7 +87,7 @@ export function verbatim(text, ctx) {
 
 /** `+2 −1`, the way every count of changed lines is written. */
 export function lineStat(added, removed) {
-  return h('span.stat-lines', { title: `${plural(added, 'line')} added, ${removed} removed` }, h('span.stat-add', `+${added}`), h('span.stat-del', `−${removed}`));
+  return h('span.stat-lines', { 'aria-label': `${plural(added, 'line')} added, ${removed} removed` }, h('span.stat-add', `+${added}`), h('span.stat-del', `−${removed}`));
 }
 
 /** What a step's row says beside its words: the lines an edit added and removed. */
@@ -237,7 +237,7 @@ function sourceList(found) {
       return h(
         'li.source',
         h('span.source-site', { 'aria-hidden': 'true' }, site.charAt(0).toUpperCase()),
-        h('div.source-body', h('div.source-title', source.title || site), h('div.source-url', { title: source.url }, site, path && h('span', path)), source.snippet && h('p.source-snippet', source.snippet)),
+        h('div.source-body', h('div.source-title', source.title || site), h('div.source-url', { 'data-tooltip': source.url, 'data-tooltip-overflow': '' }, site, path && h('span', path)), source.snippet && h('p.source-snippet', source.snippet)),
         copyButton(() => source.url, 'Copy link'),
       );
     }),

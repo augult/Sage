@@ -24,7 +24,25 @@ if (keptWidth > 0) root.style.setProperty('--code-w', `${keptWidth}px`);
 
 /** The edge of the pane by the sheet, which drags its width while it shows code. Double-click goes back to the default. */
 function resizer(pane) {
-  const grip = h('div.pane-resize', { role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the code editor', title: 'Drag to resize · double-click to reset' });
+  const bounds = () => ({ min: 360, max: Math.max(360, innerWidth - parseFloat(getComputedStyle(root).getPropertyValue('--left-w')) - 360) });
+  function describe() {
+    const { min, max } = bounds();
+    grip.setAttribute('aria-valuemin', String(min));
+    grip.setAttribute('aria-valuemax', String(Math.round(max)));
+    grip.setAttribute('aria-valuenow', String(Math.round(pane.getBoundingClientRect().width)));
+  }
+  const grip = h('div.pane-resize', { role: 'separator', tabindex: '0', 'aria-orientation': 'vertical', 'aria-label': 'Code editor width', 'data-tooltip': 'Drag or use arrow keys to resize. Double-click to reset.', onfocus: describe });
+  grip.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const { min, max } = bounds();
+    const width = pane.getBoundingClientRect().width;
+    const next = event.key === 'Home' ? min : event.key === 'End' ? max : width + (event.key === 'ArrowLeft' ? 24 : -24);
+    const value = Math.round(Math.max(min, Math.min(next, max)));
+    root.style.setProperty('--code-w', `${value}px`);
+    prefs.set('code-width', String(value));
+    describe();
+  });
   grip.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -39,6 +57,7 @@ function resizer(pane) {
       const width = Math.round(pane.getBoundingClientRect().width);
       root.style.setProperty('--code-w', `${width}px`);
       prefs.set('code-width', String(width));
+      describe();
     };
     grip.addEventListener('pointermove', move);
     grip.addEventListener('lostpointercapture', end, { once: true });
@@ -46,6 +65,7 @@ function resizer(pane) {
   grip.addEventListener('dblclick', () => {
     root.style.removeProperty('--code-w');
     prefs.set('code-width', '');
+    describe();
   });
   return grip;
 }
@@ -60,7 +80,14 @@ export function mountPanel(bar, body, session) {
   const tabs = TABS.map((tab) =>
     h(
       'button.tab',
-      { id: `tab-${tab.id}`, type: 'button', role: 'tab', 'aria-label': tab.label, onclick: () => show(tab.id) },
+      { id: `tab-${tab.id}`, type: 'button', role: 'tab', 'aria-label': tab.label, 'aria-controls': 'inspector-body', 'data-tooltip': tab.label, 'data-tooltip-when': 'icon', onclick: () => show(tab.id), onkeydown: (event) => {
+        const at = TABS.indexOf(tab);
+        const next = { ArrowRight: (at + 1) % TABS.length, ArrowLeft: (at + TABS.length - 1) % TABS.length, Home: 0, End: TABS.length - 1 }[event.key];
+        if (next === undefined) return;
+        event.preventDefault();
+        show(TABS[next].id);
+        tabs[next].focus();
+      } },
       icon(tab.icon, 14),
       h('span.tab-label', tab.label),
       tab.id === 'github' && count,
@@ -91,7 +118,9 @@ export function mountPanel(bar, body, session) {
     chosen = id;
     // The pane is as wide as what it shows needs (styles/layout.css).
     document.documentElement.dataset.panel = id;
-    tabs.forEach((tab, at) => tab.setAttribute('aria-selected', String(TABS[at].id === id)));
+    tabs.forEach((tab, at) => { const selected = TABS[at].id === id; tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1; });
+    body.setAttribute('role', 'tabpanel');
+    body.setAttribute('aria-labelledby', `tab-${id}`);
     if (session && id === 'code') code ??= codeView(session);
     body.replaceChildren(!session || id === 'economy' ? economy : id === 'code' ? code.el : github.el);
     body.dataset.view = id;

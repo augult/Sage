@@ -37,7 +37,7 @@ export function standing(state) {
 
 /** One line of what the session is: a name, and a value that keeps to its line. A path keeps its end. */
 function fact(label, value, path = false) {
-  return h('div.fact', h('span.fact-label', label), h(`span.fact-value${path ? '.is-path' : ''}`, { title: value }, path ? h('bdi', value) : value));
+  return h('div.fact', h('span.fact-label', label), h(`span.fact-value${path ? '.is-path' : ''}`, { 'data-tooltip': value, 'data-tooltip-overflow': '' }, path ? h('bdi', value) : value));
 }
 
 function session(model, { state, home, skills }) {
@@ -106,7 +106,7 @@ function watches(model) {
           'div.watch-body',
           h('div.watch-name.mono', watch.name, tag(word, tone)),
           h('div.watch-cmd.mono', watch.cmd),
-          watch.detail && h('div.watch-detail', { title: watch.detail }, watch.detail.replace(/^watch [^:]*:\s*/, '')),
+          watch.detail && h('div.watch-detail', { 'data-tooltip': watch.detail, 'data-tooltip-overflow': '' }, watch.detail.replace(/^watch [^:]*:\s*/, '')),
         ),
       );
     }),

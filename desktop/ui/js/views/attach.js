@@ -16,10 +16,10 @@ export function fileChip(path, onRemove) {
 export function chip(glyph, name, title, onRemove) {
   return h(
     'span.file-chip',
-    { title },
+    { 'data-tooltip': title && title !== name ? title : null },
     icon(glyph, 14),
     h('span.file-name', name),
-    onRemove && h('button.file-remove', { type: 'button', 'aria-label': `Remove ${name}`, onclick: onRemove }, icon('cross', 12)),
+    onRemove && h('button.file-remove', { type: 'button', 'data-tooltip': 'Remove', 'aria-label': `Remove ${name}`, onclick: onRemove }, icon('cross', 12)),
   );
 }
 

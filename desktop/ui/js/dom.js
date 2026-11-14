@@ -20,7 +20,7 @@ export function h(spec, ...rest) {
       // Through the CSSOM, which a strict style-src allows; a `style` attribute it would not.
       else if (name === 'style') el.style.cssText = String(value);
       else if (PROPERTIES.has(name)) el[name] = value;
-      else el.setAttribute(name, value === true ? '' : String(value));
+      else el.setAttribute(name === 'title' ? 'data-tooltip' : name, value === true ? '' : String(value));
     }
   }
   append(el, hasOptions ? rest.slice(1) : rest);
@@ -186,7 +186,7 @@ export function copyButton(text, label = 'Copy') {
     'button.act',
     {
       type: 'button',
-      title: label,
+      'data-tooltip': label,
       'aria-label': label,
       onclick: async (event) => {
         event.stopPropagation();

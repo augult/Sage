@@ -29,7 +29,7 @@ export function dictation({ box, fail }) {
 
   function paint() {
     const label = heard ? 'Stop dictating' : 'Dictate';
-    button.title = label;
+    button.dataset.tooltip = label;
     button.setAttribute('aria-label', label);
     button.setAttribute('aria-pressed', String(Boolean(heard)));
   }

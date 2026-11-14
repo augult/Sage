@@ -1,0 +1,44 @@
+name: Desktop UI checks
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/ui/**'
+      - 'desktop/tests/**'
+      - '.github/workflows/ui-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ui-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: '1.100.0'
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install desktop system libraries and Rust
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy
+      - name: JavaScript syntax and lint
+        run: |
+          find desktop/ui/js desktop/tests -type f \( -name '*.js' -o -name '*.mjs' \) -exec node --check {} \;
+          npx --yes eslint@9 --config desktop/tests/eslint.config.mjs desktop/ui/js desktop/tests
+          npx --yes stylelint@16 'desktop/ui/styles/*.css' --config desktop/tests/stylelint.json
+      - name: Workspace check
+        run: cargo check --workspace --locked
+      - name: Workspace Clippy
+        run: cargo clippy --workspace --locked
+      - name: Workspace tests
+        run: cargo test --workspace --locked

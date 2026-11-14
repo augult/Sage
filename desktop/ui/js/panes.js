@@ -25,7 +25,7 @@ export const toggle = (key) => set(key, !shown(key));
 function sync(key) {
   const button = document.getElementById(`toggle-${key}`);
   const label = `${shown(key) ? 'Hide' : 'Show'} ${key}`;
-  button.title = label;
+  button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
   button.setAttribute('aria-expanded', String(shown(key)));
 }

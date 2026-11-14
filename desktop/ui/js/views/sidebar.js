@@ -217,7 +217,7 @@ export function renderSessionList(list, sessions, currentId, home, acts) {
       'button.folder-toggle',
       {
         type: 'button',
-        title: tilde(path, home),
+        'data-tooltip': tilde(path, home),
         dataset: { folder: path },
         'aria-expanded': String(open),
         // In place, so that the chevron turns and the sessions slide rather than jump.

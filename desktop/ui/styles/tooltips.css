@@ -1,0 +1,26 @@
+/* A quiet, theme-aware label, outside scroll clipping and above modal dialogs. */
+.ui-tooltip {
+  position: fixed;
+  inset: auto;
+  z-index: 200;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 6px 9px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--solid);
+  color: var(--ink);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 10%, transparent);
+  font: 400 var(--text-sm)/1.4 var(--font);
+  letter-spacing: normal;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ui-tooltip::backdrop { background: transparent; pointer-events: none; }
