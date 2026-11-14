@@ -42,6 +42,8 @@ struct Hooks {
     theme: Option<String>,
     /// `SAGE_UI_SCHEME=light|dark`: the appearance for this launch.
     scheme: Option<String>,
+    /// `SAGE_UI_PALETTE=<palette>`: the palette for this launch, by its id (`ui/js/themes.js`).
+    palette: Option<String>,
     /// `SAGE_UI_SIZE=<width>x<height>`: window size in logical pixels.
     #[serde(skip)]
     size: Option<(f64, f64)>,
@@ -63,6 +65,7 @@ impl Hooks {
             script: var("SAGE_UI_SCRIPT"),
             theme: var("SAGE_UI_THEME"),
             scheme: var("SAGE_UI_SCHEME"),
+            palette: var("SAGE_UI_PALETTE"),
             size,
         }
     }

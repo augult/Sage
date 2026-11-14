@@ -91,7 +91,7 @@ export function mountSettings(main, app) {
 }
 
 /**
- * Light or dark, the painting behind the panels, which of the panels show it, and its dither:
+ * Light or dark, the palette, the painting behind the panels, which of the panels show it, and its dither:
  * there or not, moving or still. Kept by the window, not the engine.
  */
 function appearanceSection() {
@@ -125,6 +125,24 @@ function appearanceSection() {
   }
   drawMap();
 
+  // Each palette as a small window drawn in its own colours: the page, a raised sheet on it, and a
+  // line of ink and one of muted ink. Both schemes are drawn; styles/forms.css shows the one in use.
+  const face = (scheme, [page, raised, rule, muted, ink]) =>
+    h('span.palette-face', { dataset: { scheme }, style: `--sw-page: ${page}; --sw-raised: ${raised}; --sw-rule: ${rule}; --sw-muted: ${muted}; --sw-ink: ${ink}` }, h('span.palette-sheet', h('span.palette-bar'), h('span.palette-bar.is-muted')));
+  const palettes = h(
+    'div.theme-grid',
+    { id: 'palette-choice', role: 'radiogroup', 'aria-label': 'Palette' },
+    themes.PALETTES.map((palette) =>
+      h(
+        'label.theme-card',
+        { dataset: { palette: palette.id } },
+        h('input', { type: 'radio', name: 'palette', value: palette.id, checked: palette.id === pick.palette, onchange: () => themes.choose({ palette: palette.id }) }),
+        h('span.theme-thumb.palette-thumb', face('light', palette.swatches.light), face('dark', palette.swatches.dark)),
+        h('span.theme-name', palette.name),
+      ),
+    ),
+  );
+
   const backgrounds = h(
     'div.theme-grid',
     { role: 'radiogroup', 'aria-label': 'Background' },
@@ -152,6 +170,7 @@ function appearanceSection() {
     { id: 'settings-appearance' },
     h('h2.section-title', 'Appearance'),
     field('Mode', choice('appearance', 'Appearance', themes.APPEARANCES, pick.appearance)),
+    field('Palette', palettes),
     field('Background', backgrounds),
     field('Panels', map, mapHint),
     field('Dither', choice('dither', 'Dither', ['on', 'off'], pick.dither)),

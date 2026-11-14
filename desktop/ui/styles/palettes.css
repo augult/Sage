@@ -1,0 +1,159 @@
+/* Palettes: the inks and surfaces of styles/base.css, glass.css and panel.css, drawn in other
+   colours. js/themes.js puts `data-palette` on <html> (js/boot.js before the first paint); Sage, the
+   default, is what those files already say, so it has nothing here. A palette sets the same tokens
+   for both schemes, and the stepped-up inks of the bare glass (glass.css) as well, so its text holds
+   its contrast over any picture. Danger, add and delete stay as they are: they are signals, not
+   decoration. */
+
+/* Anthropic: warm mist and charcoal, as measured from anthropic.com. Its tonal steps are
+   #f5f4ed for the page, #faf9f5 raised, #ffffff for what floats, #e8e6dc for hover. The source is
+   light only; the dark side is drawn from the same colours. */
+
+:root[data-palette="anthropic"][data-scheme="light"] {
+  --ink: #141413;
+  --soft: #30302e;
+  --muted: #5e5d59;
+  --faint: #87867f;
+
+  /* Warm translucent steps: --fill-2 over the page comes to the hover fill, #e8e6dc, and --line to
+     the outline, #dedcd1. */
+  --fill-1: rgba(61, 57, 41, 0.045);
+  --fill-2: rgba(61, 57, 41, 0.07);
+  --fill-3: rgba(61, 57, 41, 0.11);
+  --line: rgba(61, 57, 41, 0.13);
+  --line-strong: rgba(61, 57, 41, 0.22);
+  --solid: #fff;
+  --shade: rgba(20, 20, 19, 0.28);
+  --lift: 0 1px 2px rgba(20, 20, 19, 0.04), 0 12px 32px rgba(20, 20, 19, 0.1);
+
+  --primary: #141413;
+  --primary-hover: #30302e;
+  --on-primary: #faf9f5;
+
+  --veil: rgba(245, 244, 237, 0.3);
+  --sheet: rgba(250, 249, 245, 0.88);
+  --sheet-edge: rgba(61, 57, 41, 0.14);
+  --frost: rgba(250, 249, 245, 0.58);
+  --frost-lift: 0 1px 2px rgba(20, 20, 19, 0.04), 0 8px 28px rgba(20, 20, 19, 0.08);
+  --flat-veil: #f5f4ed;
+  --flat-sheet: #faf9f5;
+}
+
+:root[data-palette="anthropic"][data-scheme="dark"] {
+  --ink: #faf9f5;
+  --soft: #dedcd1;
+  --muted: #b0aea5;
+  --faint: #87867f;
+
+  --fill-1: rgba(250, 249, 245, 0.045);
+  --fill-2: rgba(250, 249, 245, 0.075);
+  --fill-3: rgba(250, 249, 245, 0.115);
+  --well: rgba(0, 0, 0, 0.22);
+  --line: rgba(222, 220, 209, 0.1);
+  --line-strong: rgba(222, 220, 209, 0.18);
+  --solid: #30302e;
+  --shade: rgba(10, 10, 9, 0.56);
+
+  --primary: #faf9f5;
+  --primary-hover: #fff;
+  --on-primary: #141413;
+
+  --veil: rgba(20, 20, 19, 0.3);
+  --sheet: rgba(31, 30, 29, 0.86);
+  --sheet-edge: rgba(222, 220, 209, 0.1);
+  --frost: rgba(31, 30, 29, 0.52);
+  --flat-veil: #262624;
+  --flat-sheet: #1f1e1d;
+  --tab-on: rgba(250, 249, 245, 0.14);
+}
+
+:root[data-palette="anthropic"][data-scheme="light"] :is(#titlebar, #sidebar, #inspector),
+:root[data-palette="anthropic"][data-scheme="light"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
+  --soft: #2a2a28;
+  --muted: #474641;
+  --faint: #65645e;
+  --line: rgba(61, 57, 41, 0.15);
+}
+
+:root[data-palette="anthropic"][data-scheme="dark"] :is(#titlebar, #sidebar, #inspector),
+:root[data-palette="anthropic"][data-scheme="dark"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
+  --soft: #e8e6dc;
+  --muted: #cfcdc3;
+  --faint: #a8a69d;
+  --line: rgba(222, 220, 209, 0.12);
+}
+
+/* Vercel: snow and charcoal in neutral greys, as measured from vercel.com. Its steps are #fafafa
+   for the page, #ffffff raised, #ebebeb for cards and hover, and an 8% black hairline. Its own
+   muted grey, #8f8f8f, is too faint for text (3.1:1), so it is the faint ink here, and the muted
+   ink is a step darker. The source is light only; the dark side follows Geist's dark greys. */
+
+:root[data-palette="vercel"][data-scheme="light"] {
+  --ink: #171717;
+  --soft: #4d4d4d;
+  --muted: #5f5f5f;
+  --faint: #8f8f8f;
+
+  --fill-1: rgba(0, 0, 0, 0.035);
+  --fill-2: rgba(0, 0, 0, 0.06);
+  --fill-3: rgba(0, 0, 0, 0.09);
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.15);
+  --solid: #fff;
+  --shade: rgba(0, 0, 0, 0.28);
+  --lift: 0 0 0 1px rgba(0, 0, 0, 0.02), 0 2px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.1);
+
+  --primary: #171717;
+  --primary-hover: #383838;
+  --on-primary: #fff;
+
+  --veil: rgba(250, 250, 250, 0.3);
+  --sheet: rgba(255, 255, 255, 0.88);
+  --sheet-edge: rgba(0, 0, 0, 0.1);
+  --frost: rgba(255, 255, 255, 0.58);
+  --flat-veil: #fafafa;
+  --flat-sheet: #fff;
+}
+
+:root[data-palette="vercel"][data-scheme="dark"] {
+  --ink: #ededed;
+  --soft: #c9c9c9;
+  --muted: #a1a1a1;
+  --faint: #7d7d7d;
+
+  --fill-1: rgba(255, 255, 255, 0.045);
+  --fill-2: rgba(255, 255, 255, 0.075);
+  --fill-3: rgba(255, 255, 255, 0.115);
+  --well: rgba(0, 0, 0, 0.3);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --solid: #1a1a1a;
+  --shade: rgba(0, 0, 0, 0.6);
+
+  --primary: #ededed;
+  --primary-hover: #fff;
+  --on-primary: #0a0a0a;
+
+  --veil: rgba(10, 10, 10, 0.3);
+  --sheet: rgba(10, 10, 10, 0.86);
+  --sheet-edge: rgba(255, 255, 255, 0.1);
+  --frost: rgba(10, 10, 10, 0.52);
+  --flat-veil: #171717;
+  --flat-sheet: #0a0a0a;
+}
+
+:root[data-palette="vercel"][data-scheme="light"] :is(#titlebar, #sidebar, #inspector),
+:root[data-palette="vercel"][data-scheme="light"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
+  --soft: #2e2e2e;
+  --muted: #454545;
+  --faint: #616161;
+  --line: rgba(0, 0, 0, 0.11);
+}
+
+:root[data-palette="vercel"][data-scheme="dark"] :is(#titlebar, #sidebar, #inspector),
+:root[data-palette="vercel"][data-scheme="dark"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
+  --soft: #dedede;
+  --muted: #c4c4c4;
+  --faint: #a3a3a3;
+  --line: rgba(255, 255, 255, 0.11);
+}

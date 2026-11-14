@@ -15,6 +15,7 @@
 //   SAGE_UI_THEME=<background>           the painting behind the glass for this launch, by id:
 //                                           ember, orchid, tide, graphite or none
 //   SAGE_UI_SCHEME=light|dark            the appearance for this launch
+//   SAGE_UI_PALETTE=<palette>            the palette for this launch, by id: sage, anthropic or vercel
 
 import { api } from './api.js';
 import * as themes from './themes.js';
@@ -58,7 +59,7 @@ async function play(script) {
 /** Opens the first view, as the hooks ask or the New session view by default, then plays the script. */
 export async function applyHooks(app) {
   const hooks = await api.hooks();
-  themes.force({ background: hooks.theme, appearance: hooks.scheme });
+  themes.force({ background: hooks.theme, appearance: hooks.scheme, palette: hooks.palette });
   if (hooks.autodemo) await app.playDemo();
   else if (hooks.scripted) await app.opened(await api.startScripted());
   else if (hooks.open) app.show({ name: 'session', id: hooks.open });

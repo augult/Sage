@@ -1,5 +1,6 @@
-// Appearance, background, dither and motion: what the user chose, and what that comes to right now.
-// The outcome goes on <html> as data-scheme (light or dark), data-theme (the background's id),
+// Appearance, palette, background, dither and motion: what the user chose, and what that comes to
+// right now. The outcome goes on <html> as data-scheme (light or dark), data-palette (the palette's
+// id: the inks and surfaces, styles/palettes.css), data-theme (the background's id),
 // data-bg-left, data-bg-middle and data-bg-right (whether that panel shows the background),
 // data-dither and data-motion (on or off), which is all the stylesheets read; js/backdrop.js paints
 // the background.
@@ -27,6 +28,16 @@ export const BACKGROUNDS = [
 ];
 export const APPEARANCES = ['system', 'light', 'dark'];
 
+// The colours the interface is drawn in. Sage's own are in styles/base.css and glass.css; every other
+// palette overrides those tokens in styles/palettes.css, for light and for dark. The swatches are
+// what Settings shows of each: page, raised surface, line, muted ink, ink.
+export const PALETTES = [
+  // The first is what a window starts with.
+  { id: 'sage', name: 'Sage', swatches: { light: ['#ececea', '#fdfdfc', '#d9d9d9', '#55595f', '#111214'], dark: ['#1a1b1e', '#111214', '#2e2f32', '#a6a9ae', '#f1f1f2'] } },
+  { id: 'anthropic', name: 'Anthropic', swatches: { light: ['#f5f4ed', '#faf9f5', '#dedcd1', '#5e5d59', '#141413'], dark: ['#262624', '#1f1e1d', '#3a3936', '#b0aea5', '#faf9f5'] } },
+  { id: 'vercel', name: 'Vercel', swatches: { light: ['#fafafa', '#ffffff', '#ebebeb', '#5f5f5f', '#171717'], dark: ['#171717', '#0a0a0a', '#2e2e2e', '#a1a1a1', '#ededed'] } },
+];
+
 // The three panels of the window, and the setting that says whether each shows the background.
 export const PANELS = [
   { id: 'left', key: 'bg-left', name: 'Left' },
@@ -35,9 +46,9 @@ export const PANELS = [
 ];
 
 // Out of the box: Orchid, in all three panels, with no dither over it.
-const DEFAULTS = { appearance: 'system', background: 'orchid', dither: 'off', motion: 'on', 'bg-left': 'on', 'bg-middle': 'on', 'bg-right': 'on' };
+const DEFAULTS = { appearance: 'system', palette: 'sage', background: 'orchid', dither: 'off', motion: 'on', 'bg-left': 'on', 'bg-middle': 'on', 'bg-right': 'on' };
 const SWITCH = ['on', 'off'];
-const ALLOWED = { appearance: APPEARANCES, background: BACKGROUNDS.map((background) => background.id), dither: SWITCH, motion: SWITCH, 'bg-left': SWITCH, 'bg-middle': SWITCH, 'bg-right': SWITCH };
+const ALLOWED = { appearance: APPEARANCES, palette: PALETTES.map((palette) => palette.id), background: BACKGROUNDS.map((background) => background.id), dither: SWITCH, motion: SWITCH, 'bg-left': SWITCH, 'bg-middle': SWITCH, 'bg-right': SWITCH };
 const QUIET_DITHER = { waves: [[0.008, 0.004, 0.03], [-0.005, 0.009, 0.022], [0.003, -0.006, 0.017]], warp: 10, reach: [0.2, 0.8], fill: 0.4 };
 // The dots over the pressed backdrop: faint, and of both kinds, so they show on any picture.
 const INKS = {
@@ -59,7 +70,7 @@ function picked(key) {
 }
 
 /**
- * The settings as they stand, which is what Settings shows: `{ appearance, background, dither, motion }`
+ * The settings as they stand, which is what Settings shows: `{ appearance, palette, background, dither, motion }`
  * and, under each panel's key, whether that panel shows the background.
  * Each is what was chosen, or else what it starts as on this system.
  */
@@ -70,11 +81,12 @@ export function chosen() {
   return pick;
 }
 
-/** What the settings come to now: `{ scheme, background, dither, motion }`. */
+/** What the settings come to now: `{ scheme, palette, background, dither, motion }`. */
 export function current() {
   const pick = chosen();
   return {
     scheme: pick.appearance === 'system' ? (prefersDark.matches ? 'dark' : 'light') : pick.appearance,
+    palette: PALETTES.find((palette) => palette.id === pick.palette),
     background: BACKGROUNDS.find((background) => background.id === pick.background),
     // Without it the painting is all there is behind the panes.
     dither: pick.dither === 'on',
@@ -90,6 +102,7 @@ export function ditherLook(now) {
 function apply() {
   const now = current();
   document.documentElement.dataset.scheme = now.scheme;
+  document.documentElement.dataset.palette = now.palette.id;
   document.documentElement.dataset.theme = now.background.id;
   document.documentElement.dataset.dither = now.dither ? 'on' : 'off';
   document.documentElement.dataset.motion = now.motion ? 'on' : 'off';
@@ -98,7 +111,7 @@ function apply() {
   for (const listener of listeners) listener(now);
 }
 
-/** Keeps a choice: `{ appearance }`, `{ background }`, `{ dither }`, `{ motion }` or a panel's, as `{ 'bg-left': 'on' }`. */
+/** Keeps a choice: `{ appearance }`, `{ palette }`, `{ background }`, `{ dither }`, `{ motion }` or a panel's, as `{ 'bg-left': 'on' }`. */
 export function choose(change) {
   for (const [key, value] of Object.entries(change)) {
     if (ALLOWED[key]?.includes(value)) prefs.set(key, value);

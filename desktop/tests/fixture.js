@@ -24,7 +24,7 @@
   window.uiFixture = { disclaimer: 'Mock IPC browser fixture; no backend behavior is exercised.', calls, session };
   window.uiTestResults = { status: 'not-run', checks: [] };
   const handlers = {
-    ui_hooks: () => ({ view: initialView, theme: 'none', scheme: params.get('scheme') || 'light' }),
+    ui_hooks: () => ({ view: initialView, theme: params.get('theme') || 'none', scheme: params.get('scheme') || 'light', palette: params.get('palette') }),
     app_state: () => state,
     set_defaults: (change) => { for (const [key, value] of Object.entries(change)) if (value !== undefined) state[key] = value; return null; },
     set_auto_retry: ({ on }) => { state.auto_retry = on; return null; },

@@ -27,6 +27,8 @@ Open either route in a browser:
 - `http://localhost:4173/?view=session&test` — run the same assertions, then
   return to Hello.
 - Add `&scheme=dark` to exercise the dark appearance (light is the default).
+- Add `&palette=anthropic` or `&palette=vercel` for those palettes, and `&theme=orchid` (or `ember`, `tide`,
+  `graphite`) to put a painting behind the glass (the default is `none`).
 - `/?test&audit` — original regression suite, then workspace layout and tooltip assertions.
 - Add `&rich` for synthetic prose, code blocks, edit diffs, skill cards, a file tree/editor,
   long model/path labels, and GitHub changes/commits. This is all **mock data**;
