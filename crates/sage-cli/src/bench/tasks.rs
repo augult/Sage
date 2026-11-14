@@ -52,6 +52,99 @@ pub fn find(id: &str) -> Option<&'static Task> {
     all().find(|t| t.id == id)
 }
 
+fn keep(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+/// The text files under `dir` as `(relative path, content)`, sorted. A directory that is not
+/// there holds none.
+fn files_under(dir: &std::path::Path) -> Result<&'static [(&'static str, &'static str)], String> {
+    fn walk(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut Vec<(&'static str, &'static str)>,
+    ) -> Result<(), String> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Ok(());
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out)?;
+                continue;
+            }
+            let content =
+                std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            out.push((
+                keep(relative.to_string_lossy().replace('\\', "/")),
+                keep(content),
+            ));
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files)?;
+    files.sort();
+    Ok(Box::leak(files.into_boxed_slice()))
+}
+
+/// Tasks kept outside the binary, for a slice of a public benchmark: one directory each, laid
+/// out like the built-in ones (`workspace/`, `hidden/`, `solution/`), with a `task.json` that
+/// gives `prompt` and `verify` and may give `title`, `needs`, `check`, `restore` and `skill`.
+/// They live as long as the program does.
+pub fn load_dir(dir: &std::path::Path) -> Result<Vec<&'static Task>, String> {
+    let mut ids: Vec<String> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .flatten()
+        .filter(|entry| entry.path().join("task.json").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    ids.sort();
+    if ids.is_empty() {
+        return Err(format!(
+            "{} holds no tasks: each is a directory with a task.json",
+            dir.display()
+        ));
+    }
+    let mut tasks = Vec::new();
+    for id in ids {
+        let root = dir.join(&id);
+        let about: serde_json::Value = std::fs::read_to_string(root.join("task.json"))
+            .map_err(|e| e.to_string())
+            .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
+            .map_err(|e| format!("{id}/task.json: {e}"))?;
+        let text = |key: &str| about[key].as_str().unwrap_or_default().to_string();
+        let list = |key: &str| -> &'static [&'static str] {
+            let items: Vec<&'static str> = about[key]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| keep(s.to_string()))
+                .collect();
+            Box::leak(items.into_boxed_slice())
+        };
+        if text("prompt").is_empty() || text("verify").is_empty() {
+            return Err(format!("{id}/task.json: `prompt` and `verify` are needed"));
+        }
+        tasks.push(&*Box::leak(Box::new(Task {
+            title: keep(text("title")),
+            prompt: keep(text("prompt")),
+            needs: list("needs"),
+            files: files_under(&root.join("workspace"))?,
+            check: keep(text("check")),
+            restore: list("restore"),
+            hidden: files_under(&root.join("hidden"))?,
+            verify: keep(text("verify")),
+            solution: files_under(&root.join("solution"))?,
+            skill: keep(text("skill")),
+            id: keep(id),
+        })));
+    }
+    Ok(tasks)
+}
+
 /// The original set: small single-file tasks that every variant solves.
 pub const TASKS: &[Task] = &[
     Task {
