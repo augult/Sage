@@ -44,6 +44,11 @@
   text-align: center;
 }
 
+.new-hero .brand-mark {
+  flex: none;
+  color: var(--soft);
+}
+
 .new-bar {
   flex: none;
   width: 100%;
@@ -360,13 +365,13 @@
 }
 
 .chip-option input:checked + .chip-face {
-  border-color: var(--accent);
+  border-color: var(--ink);
   background: var(--fill-2);
   color: var(--ink);
 }
 
 .chip-option input:focus-visible + .chip-face {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -438,7 +443,7 @@
   overflow-wrap: anywhere;
 }
 
-/* The backgrounds: each as a small picture of itself, the chosen one framed in the accent. */
+/* The backgrounds: each as a small picture of itself, the chosen one framed in ink. */
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -483,12 +488,12 @@
 }
 
 .theme-card input:checked + .theme-thumb {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
 .theme-card input:focus-visible + .theme-thumb {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -625,7 +630,7 @@
 }
 
 .panel-zone input:focus-visible + .panel-face {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: -2px;
 }
 
@@ -880,7 +885,7 @@ textarea.editor {
 
 /* One that is in use. */
 .skill-card:has(.skill-use[aria-pressed="true"]) {
-  border-color: var(--accent);
+  border-color: var(--ink);
 }
 
 .skill-title {

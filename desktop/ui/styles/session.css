@@ -231,7 +231,7 @@
   width: 6px;
   height: 14px;
   margin-left: 2px;
-  background: var(--accent);
+  background: var(--soft);
   vertical-align: -2px;
   animation: blink 1s steps(1) infinite;
 }
@@ -526,7 +526,7 @@ button.row-line:focus-visible {
 /* A request that waits for its answer: never inside a fold. */
 .approval {
   padding: 12px 14px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--ink);
   border-radius: var(--r-3);
   background: var(--fill-1);
 }
@@ -612,7 +612,7 @@ button.row-line:focus-visible {
 }
 
 .question-choice:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--ink);
   background: var(--fill-2);
 }
 
@@ -622,7 +622,7 @@ button.row-line:focus-visible {
 
 /* The answer that was given stays clear among the ones that were not. */
 .question-choice[aria-pressed="true"] {
-  border-color: var(--accent);
+  border-color: var(--ink);
   opacity: 1;
 }
 

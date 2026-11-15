@@ -30,42 +30,36 @@
   --ease: cubic-bezier(0.3, 0.7, 0.2, 1);
 }
 
-/* The interface has one hue of its own, its palette's: Sage's is sage green. It tints the inks and
-   the surfaces a little and the solid panels more (styles/glass.css), and at full strength it is
-   the accent: what is chosen, focused or running, and the one primary action of a view. Colour
-   otherwise belongs to the painting behind the glass, to the one thing that must not be missed, a
-   failure, and to an edit: green for what it added, red for what it removed.
+/* The interface has no hue of its own: ink, paper, and greys between. Colour belongs to the
+   painting behind the glass, to the one thing that must not be missed, a failure, and to an edit:
+   green for what it added, red for what it removed.
 
    Ink: the first three keep 4.5:1 on every surface, whatever is painted behind the glass (the
    figures are in docs/DESKTOP_UI_BRIEF.md); the fourth is for marks, placeholders and key hints.
-   Surfaces are the other scheme's ink at low alpha: lighter or darker glass, whatever lies behind. */
+   Surfaces are black or white at low alpha: lighter or darker glass, whatever lies behind. */
 
 :root[data-scheme="light"] {
   color-scheme: light;
 
-  --ink: #0b130d;
-  --soft: #2d3830;
-  --muted: #4f5b51;
-  --faint: #7f8b80;
+  --ink: #111214;
+  --soft: #33363a;
+  --muted: #55595f;
+  --faint: #85898f;
 
-  --fill-1: rgba(16, 39, 25, 0.045);
-  --fill-2: rgba(16, 39, 25, 0.07);
-  --fill-3: rgba(16, 39, 25, 0.105);
+  --fill-1: rgba(17, 18, 20, 0.04);
+  --fill-2: rgba(17, 18, 20, 0.065);
+  --fill-3: rgba(17, 18, 20, 0.1);
   --well: rgba(255, 255, 255, 0.62);
-  --line: rgba(16, 39, 25, 0.11);
-  --line-strong: rgba(16, 39, 25, 0.19);
+  --line: rgba(17, 18, 20, 0.1);
+  --line-strong: rgba(17, 18, 20, 0.18);
   /* Opaque, for what floats above the panes. */
-  --solid: #f9fcf9;
-  --shade: rgba(11, 19, 13, 0.28);
-  --lift: 0 1px 2px rgba(11, 19, 13, 0.06), 0 12px 32px rgba(11, 19, 13, 0.14);
+  --solid: #fbfbfa;
+  --shade: rgba(17, 18, 20, 0.28);
+  --lift: 0 1px 2px rgba(17, 18, 20, 0.06), 0 12px 32px rgba(17, 18, 20, 0.14);
 
-  /* The palette's own colour, as a mark or a frame, and its wash under the row a list is at. */
-  --accent: #205738;
-  --accent-soft: rgba(32, 87, 56, 0.13);
-
-  /* The one solid thing in a view: the accent, filled. */
-  --primary: var(--accent);
-  --primary-hover: #114228;
+  /* The one solid thing in a view: ink on paper, the other way round. */
+  --primary: #1b1c1e;
+  --primary-hover: #000;
   --on-primary: #fff;
 
   --danger: #a3372c;
@@ -86,27 +80,24 @@
 :root[data-scheme="dark"] {
   color-scheme: dark;
 
-  --ink: #eff4ee;
-  --soft: #cad1c9;
-  --muted: #a4aca2;
-  --faint: #7c857a;
+  --ink: #f1f1f2;
+  --soft: #cdced1;
+  --muted: #a6a9ae;
+  --faint: #7f8288;
 
-  --fill-1: rgba(214, 239, 222, 0.05);
-  --fill-2: rgba(214, 239, 222, 0.08);
-  --fill-3: rgba(214, 239, 222, 0.12);
-  --well: rgba(2, 8, 5, 0.26);
-  --line: rgba(214, 239, 222, 0.09);
-  --line-strong: rgba(214, 239, 222, 0.18);
-  --solid: #15251c;
-  --shade: rgba(3, 7, 5, 0.56);
+  --fill-1: rgba(255, 255, 255, 0.045);
+  --fill-2: rgba(255, 255, 255, 0.075);
+  --fill-3: rgba(255, 255, 255, 0.115);
+  --well: rgba(0, 0, 0, 0.24);
+  --line: rgba(255, 255, 255, 0.085);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --solid: #1b1c1f;
+  --shade: rgba(4, 5, 6, 0.56);
   --lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.5);
 
-  --accent: #9dd3ad;
-  --accent-soft: rgba(157, 211, 173, 0.15);
-
-  --primary: var(--accent);
-  --primary-hover: #b3e2c1;
-  --on-primary: #061b10;
+  --primary: #f1f1f2;
+  --primary-hover: #fff;
+  --on-primary: #111214;
 
   --danger: #ee9288;
   --danger-soft: rgba(238, 146, 136, 0.09);
@@ -201,7 +192,7 @@ button:disabled {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -301,12 +292,6 @@ button:disabled {
   fill: currentColor;
 }
 
-/* The app's own mark, in its palette's colour. */
-.brand-mark {
-  flex: none;
-  color: var(--accent);
-}
-
 .glyph {
   display: inline-grid;
   flex: none;
@@ -321,7 +306,7 @@ button:disabled {
   width: 12px;
   height: 12px;
   border: 1.5px solid var(--line-strong);
-  border-top-color: var(--accent);
+  border-top-color: var(--soft);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -336,7 +321,7 @@ button:disabled {
 .pulse {
   flex: none;
   overflow: visible;
-  fill: var(--accent);
+  fill: currentColor;
 }
 
 .pulse-ring {
@@ -398,9 +383,9 @@ button:disabled {
   animation: none;
 }
 
-/* A button is a small flat block: a quiet fill for most, the accent for the one a view is about.
-   Every button is 28px tall with the same corners, and a one-line field beside one is as tall. The
-   small ones that sit inside a line or a header (copy, a diff's layout, a recent folder) are 24px. */
+/* A button is a small flat block: grey for most, ink for the one a view is about. Every button is
+   28px tall with the same corners, and a one-line field beside one is as tall. The small ones
+   that sit inside a line or a header (copy, a diff's layout, a recent folder) are 24px. */
 .btn {
   display: inline-flex;
   flex: none;
@@ -518,9 +503,9 @@ button:disabled {
 }
 
 .input:focus-visible {
-  border-color: var(--accent);
+  border-color: var(--ink);
   outline: none;
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
 .input:disabled {
