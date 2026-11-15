@@ -275,6 +275,10 @@ pub fn excerpt(output: &str) -> String {
 
 const SAME_FORMAT: &str = "Reply in the same format as before, with the whole script.";
 
+/// What an examiner or a referee is told when its reply was cut off as nothing but thought. That
+/// thought goes before it, as its own earlier reply: what was paid for is not thought twice.
+pub const CUT_SHORT: &str = "Your reply was cut off: it was all thought, and the answer had not begun. What you had thought so far is above. Do not go over it again. Write your answer from it now, in the required format, deciding what is still open as you write.";
+
 /// What an examiner is told when its reply ran into the output limit before the script ended.
 pub const REPAIR_CUT: &str = "Your reply ran into the output limit before the script ended, so there is no script. Write it again so that it fits: a table of cases and one loop that runs them, no helper that is used once, no comments, at most 60 cases, the ones most likely to show a fault first. Reply in the same format as before, with the whole script.";
 
