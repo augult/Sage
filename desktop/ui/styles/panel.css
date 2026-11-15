@@ -47,7 +47,7 @@
 }
 
 :root[data-scheme="dark"] {
-  --tab-on: rgba(214, 239, 222, 0.16);
+  --tab-on: rgba(255, 255, 255, 0.16);
 }
 
 .tab-label {
@@ -183,7 +183,7 @@
 }
 
 .tree-row[aria-current="true"] {
-  background: var(--accent-soft);
+  background: var(--fill-3);
   color: var(--ink);
 }
 
@@ -231,7 +231,7 @@
 
 .tree-input:focus,
 .code-path-input:focus {
-  border-color: var(--accent);
+  border-color: var(--ink);
 }
 
 /* A right-click menu, where the pointer was: the file tree's, and a session's in the sidebar. */

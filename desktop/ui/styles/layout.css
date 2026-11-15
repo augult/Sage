@@ -302,7 +302,7 @@
 }
 
 .nav-item[aria-current="page"] {
-  background: var(--accent-soft);
+  background: var(--fill-3);
   color: var(--ink);
 }
 
@@ -411,7 +411,7 @@
 }
 
 .session-item[aria-current="page"] {
-  background: var(--accent-soft);
+  background: var(--fill-3);
 }
 
 .session-item > .session-title {
@@ -627,7 +627,7 @@
   content: "· ";
 }
 
-/* A share, as a ruler: one tick every three pixels, in the accent for the part that counts, faint
+/* A share, as a ruler: one tick every three pixels, in full ink for the part that counts, faint
    for the rest, and a shade between for a part that is neither. */
 .bar {
   display: flex;
@@ -638,10 +638,6 @@
 .bar span {
   height: 100%;
   background: repeating-linear-gradient(90deg, var(--tone) 0 1px, transparent 1px 3px);
-}
-
-.bar span.tone-good {
-  --tone: var(--accent);
 }
 
 .bar span.tone-plain {
