@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "setup": "bash .hoplite/setup.sh",
+    "run": "PORT=3000 node desktop/tests/serve.mjs"
+  }
+}

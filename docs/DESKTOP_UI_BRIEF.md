@@ -121,7 +121,7 @@ Static files, no bundler, no framework, no external resources. `window.__TAURI__
 
 ### Look
 
-Plain glass over a painting: dense, quiet, and without a hue of its own.
+Plain glass over a painting: dense, quiet, and with one hue of its own, its palette's.
 
 - **Type.** Inter, bundled (`ui/fonts/`, SIL OFL), at four sizes (11, 12, 13, 14 px) and three
   weights (400, 500, 600). The system monospace for paths, commands and observations only.
@@ -132,20 +132,32 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   one-line field beside one is as tall; the small buttons inside a line or a header (copy, a
   diff's layout, a recent folder) are 24px. A dialog is closed with a cross on light red, which
   darkens when pointed at.
-- **The interface has no colour.** Ink, paper and the greys between, in a light and a dark
+- **The interface has one colour of its own, its palette's.** Ink and paper in a light and a dark
   appearance (`data-scheme` on `<html>`, chosen in Settings or taken from the system), drawn in a
-  palette (`data-palette`): Sage, the default, cool greys; Anthropic, warm mist and charcoal
+  palette (`data-palette`): Sage, the default, sage green; Anthropic, warm mist and charcoal
   measured from anthropic.com; or Vercel, neutral snow and charcoal measured from vercel.com.
   Both sources are light only; their dark sides are drawn from the same colours. A palette only
   re-sets the ink and surface tokens (`styles/palettes.css`); type, corners and motion are the
-  same in all of them. Colour
+  same in all of them. Sage's hue is in three places. It tints the inks and the fills, a little,
+  and at no cost to contrast over a painting: the figures below are those of the greys it
+  replaced, or a little higher. It is the colour of the solid panels, which are what a window
+  with no background, or a panel switched off it, is made of (`--flat-veil`, `--flat-sheet`): the
+  frame (title bar, sidebar, inspector) pine in the dark appearance and sage mist in the light
+  one, the sheet near black or near white with a breath of it. Over a painting the panes stay
+  clear, and the colour there is the painting's. And at full strength it is the accent
+  (`--accent`, and `--accent-soft` as its wash): what is chosen (the row a list is at, the frame
+  of a chosen chip, palette, background or skill), what has the focus (the ring, a field's
+  frame), what is running or arriving (the pulse of a run, a spinner, the caret of text still
+  coming in), a request that waits for its answer, the counted part of a share ruler, the app's
+  own mark, and the primary button, one per view, which is the accent filled. Anthropic and
+  Vercel have no hue: their accent is their ink. Beyond the palette, colour
   belongs to the painting behind the glass and to two things: a failure, which must not be
   missed (`--danger`: a tool that failed has its whole line in red), and an edit, green for what
   it added and red for what it removed
   (`--add`, `--del`: the `+5 −1` counts, and behind the lines of a diff). A state is a word or
   a glyph ("surprise", "failed", "skipped", "held"); a tone (`.tone-*` in `base.css`) only
-  decides how much ink it gets. Tools are otherwise grey: the bar and the rows. The primary
-  button is ink on paper, one per view. No gradients, glows or accent borders.
+  decides how much ink it gets. Tools are otherwise quiet: the bar and the rows. No gradients
+  or glows, and no border that is there for its colour alone.
 - **Boxes are rare.** In the conversation only the user's message, the bar of a stretch of work,
   an approval request, verbatim output and diffs are boxed; the answer is plain text.
 - **Motion.** A view or dialog arriving fades in over 140 ms. A fold slides open and shut over
@@ -226,15 +238,19 @@ with its grain and under a dither dot, the lowest ratios are:
 
 | Surface | `--ink` | `--soft` | `--muted` | `--faint` |
 | --- | --- | --- | --- | --- |
-| Light, glass (sidebar, inspector) | 10.8 | 8.1 | 5.5 | 3.5 |
+| Light, glass (sidebar, inspector) | 10.9 | 8.1 | 5.5 | 3.5 |
 | Light, sheet | 17.5 | 11.3 | 6.6 | 3.3 |
 | Dark, glass | 7.1 | 5.9 | 4.7 | 3.2 |
-| Dark, sheet | 15.5 | 11.1 | 7.4 | 4.5 |
+| Dark, sheet | 15.8 | 11.3 | 7.5 | 4.6 |
 
 So `--ink`, `--soft` and `--muted` keep 4.5:1 everywhere; `--faint` is for marks, placeholders
 and key hints. These figures are for the Sage palette; under the same backdrop the Anthropic
 and Vercel palettes come within a few tenths of them, their `--muted` on the sheet lowest at about
-4.9:1 and 5.0:1 (Vercel's dark glass about 4.6:1). On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1. Change a band in `backdrop.js`, a pane's
+4.9:1 and 5.0:1 (Vercel's dark glass about 4.6:1). On the sheet `--danger` keeps 6.2:1, `--add` 4.7:1 and `--del` 6.1:1.
+Sage's `--accent` keeps 4.7:1 on the glass and 7.8:1 on the sheet, and the text of its filled
+button 8.5:1. With no painting the panels are solid and every figure is higher: on the frame the
+four inks keep 15.9, 11.9, 8.1 and 5.2 in the light appearance and 13.3, 11.1, 8.8 and 6.0 in
+the dark one. Change a band in `backdrop.js`, a pane's
 fill, a dither ink or an ink colour, and these have to be recomputed.
 
 ### Panes
@@ -337,8 +353,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
        pane of frosted glass, the one thing in the app that blurs what lies behind it. In it
        is the text, and along its foot a + that attaches files (the system's file dialog) and
        the effort at one end, and at the other the model, the microphone and one square
-       button: Send, the Return key's arrow on ink, grey until there is text to send, or while
-       a run is in progress Stop, a square on a quieter fill (paler in the light appearance,
+       button: Send, the Return key's arrow on the accent, grey until there is text to send, or
+       while a run is in progress Stop, a square on a quieter fill (paler in the light appearance,
        darker in the dark one). None of the squares has a word on it. Attached files and the
        skills switched on sit in the bar over the text, each a chip with its name and a cross
        that takes it off, so the bar grows upwards by their rows; they go with the next

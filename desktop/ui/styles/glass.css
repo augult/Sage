@@ -8,26 +8,28 @@
    behind the window. */
 
 :root[data-scheme="light"] {
-  /* The material a panel with the background sits on, and the sheet: the reading surface. */
+  /* The material a panel with the background sits on, and the sheet: the reading surface. Over a
+     painting both stay clear, so the colour there is the painting's. */
   --veil: rgba(255, 255, 255, 0.26);
   --sheet: rgba(255, 255, 255, 0.87);
-  --sheet-edge: rgba(17, 18, 20, 0.12);
+  --sheet-edge: rgba(16, 39, 25, 0.13);
   /* The chat bar's own fill, over what it blurs, and its lift where it lies out on the glass. */
   --frost: rgba(255, 255, 255, 0.56);
-  --frost-lift: 0 1px 2px rgba(17, 18, 20, 0.05), 0 8px 28px rgba(17, 18, 20, 0.1);
-  /* The same two without a painting behind them. */
-  --flat-veil: #ececea;
-  --flat-sheet: #fdfdfc;
+  --frost-lift: 0 1px 2px rgba(11, 19, 13, 0.05), 0 8px 28px rgba(11, 19, 13, 0.1);
+  /* The same two without a painting behind them, where the palette brings the colour itself: the
+     frame in its hue, the sheet as paper with a breath of it. */
+  --flat-veil: #e0f0e3;
+  --flat-sheet: #fbfefb;
 }
 
 :root[data-scheme="dark"] {
-  --veil: rgba(8, 9, 10, 0.3);
-  --sheet: rgba(16, 17, 19, 0.86);
-  --sheet-edge: rgba(255, 255, 255, 0.1);
-  --frost: rgba(14, 15, 17, 0.52);
+  --veil: rgba(7, 10, 8, 0.3);
+  --sheet: rgba(13, 17, 15, 0.86);
+  --sheet-edge: rgba(214, 239, 222, 0.1);
+  --frost: rgba(12, 16, 14, 0.52);
   --frost-lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 32px rgba(0, 0, 0, 0.34);
-  --flat-veil: #1a1b1e;
-  --flat-sheet: #111214;
+  --flat-veil: #0f2d1e;
+  --flat-sheet: #0a150f;
 }
 
 /* What shows until the backdrop is drawn, and for good with no background chosen. */
@@ -165,18 +167,18 @@ body {
    put the sheet away. */
 :root[data-scheme="light"] :is(#titlebar, #sidebar, #inspector),
 :root[data-scheme="light"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
-  --soft: #2a2c30;
-  --muted: #43464b;
-  --faint: #5f6368;
-  --line: rgba(17, 18, 20, 0.12);
+  --soft: #242e27;
+  --muted: #3c483e;
+  --faint: #59655a;
+  --line: rgba(16, 39, 25, 0.13);
 }
 
 :root[data-scheme="dark"] :is(#titlebar, #sidebar, #inspector),
 :root[data-scheme="dark"][data-bg-middle="on"][data-view="new"]:not([data-theme="none"]) :is(#main, #toggle-inspector) {
-  --soft: #dcdde0;
-  --muted: #c4c6ca;
-  --faint: #a2a5aa;
-  --line: rgba(255, 255, 255, 0.11);
+  --soft: #d9e1d8;
+  --muted: #c1cabf;
+  --faint: #9fa89d;
+  --line: rgba(214, 239, 222, 0.115);
 }
 
 /* No background (chosen, or what a window starts with where the system asks for less transparency

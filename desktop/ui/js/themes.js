@@ -33,7 +33,7 @@ export const APPEARANCES = ['system', 'light', 'dark'];
 // what Settings shows of each: page, raised surface, line, muted ink, ink.
 export const PALETTES = [
   // The first is what a window starts with.
-  { id: 'sage', name: 'Sage', swatches: { light: ['#ececea', '#fdfdfc', '#d9d9d9', '#55595f', '#111214'], dark: ['#1a1b1e', '#111214', '#2e2f32', '#a6a9ae', '#f1f1f2'] } },
+  { id: 'sage', name: 'Sage', swatches: { light: ['#e0f0e3', '#fbfefb', '#c5d6c9', '#4f5b51', '#0b130d'], dark: ['#0f2d1e', '#0a150f', '#234031', '#a4aca2', '#eff4ee'] } },
   { id: 'anthropic', name: 'Anthropic', swatches: { light: ['#f5f4ed', '#faf9f5', '#dedcd1', '#5e5d59', '#141413'], dark: ['#262624', '#1f1e1d', '#3a3936', '#b0aea5', '#faf9f5'] } },
   { id: 'vercel', name: 'Vercel', swatches: { light: ['#fafafa', '#ffffff', '#ebebeb', '#5f5f5f', '#171717'], dark: ['#171717', '#0a0a0a', '#2e2e2e', '#a1a1a1', '#ededed'] } },
 ];
