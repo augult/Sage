@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { h, icon } from '../dom.js';
 import { barButton } from './common.js';
 
-export const baseName = (path) => path.split(/[\\/]/).pop();
+const baseName = (path) => path.split(/[\\/]/).pop();
 
 /** A file by its name; the whole path is its `title`. With `onRemove`, a cross takes it off. */
 export function fileChip(path, onRemove) {

@@ -86,7 +86,7 @@ export function verbatim(text, ctx) {
 }
 
 /** `+2 −1`, the way every count of changed lines is written. */
-export function lineStat(added, removed) {
+function lineStat(added, removed) {
   return h('span.stat-lines', { 'aria-label': `${plural(added, 'line')} added, ${removed} removed` }, h('span.stat-add', `+${added}`), h('span.stat-del', `−${removed}`));
 }
 
@@ -164,7 +164,7 @@ function splitRows(change) {
 }
 
 /** One file's change as a before and after, in one column or two. `bare` leaves the file's name out. */
-export function diffView(change, { bare = false } = {}) {
+function diffView(change, { bare = false } = {}) {
   const numbers = change.hunks.map((hunk) => Math.max(hunk.old_start, hunk.new_start) + hunk.lines.length);
   const body = h('div.diff-body', { style: `--digits: ${String(Math.max(0, ...numbers)).length}` });
   const modes = ['unified', 'split'].map((mode) => h('button', { type: 'button', dataset: { mode }, onclick: () => draw(mode, true) }, mode === 'unified' ? 'Unified' : 'Split'));

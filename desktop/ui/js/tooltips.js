@@ -14,7 +14,7 @@ let owner = null;
 let timer = null;
 let described = null;
 
-export function dismissTooltip() {
+function dismissTooltip() {
   clearTimeout(timer);
   timer = null;
   if (described) {

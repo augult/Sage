@@ -519,14 +519,14 @@ fn error_message(body: &str) -> String {
 }
 
 fn u64_at(v: &Value, path: &[&str]) -> Option<u64> {
-    let mut cur = v;
-    for key in path {
-        cur = cur.get(key)?;
-    }
-    cur.as_u64()
+    path.iter().try_fold(v, |cur, key| cur.get(key))?.as_u64()
 }
 
-pub(crate) fn parse_usage(u: &Value) -> Usage {
+/// Reads a `usage` object in any of the shapes providers send: chat completions, DeepSeek's cache
+/// fields, the Responses API (`input_tokens`, `output_tokens_details`) and Anthropic's cache reads.
+/// The benchmark's metering proxy reads other harnesses' traffic with this too, so every harness
+/// is counted the same way.
+pub fn parse_usage(u: &Value) -> Usage {
     Usage {
         prompt: u64_at(u, &["prompt_tokens"])
             .or_else(|| u64_at(u, &["input_tokens"]))
@@ -540,6 +540,7 @@ pub(crate) fn parse_usage(u: &Value) -> Usage {
             .or_else(|| u64_at(u, &["output_tokens"]))
             .unwrap_or(0),
         reasoning: u64_at(u, &["completion_tokens_details", "reasoning_tokens"])
+            .or_else(|| u64_at(u, &["output_tokens_details", "reasoning_tokens"]))
             .or_else(|| u64_at(u, &["reasoning_tokens"]))
             .unwrap_or(0),
     }
@@ -1385,5 +1386,23 @@ mod tests {
             tool_call_id: None,
         }]);
         assert_eq!(wire[0]["reasoning"], json!("r"));
+    }
+
+    #[test]
+    fn usage_is_read_in_every_shape_including_reasoning_under_output_tokens_details() {
+        let chat = serde_json::json!({"prompt_tokens": 100, "completion_tokens": 40,
+            "prompt_tokens_details": {"cached_tokens": 60},
+            "completion_tokens_details": {"reasoning_tokens": 30}});
+        let responses = serde_json::json!({"input_tokens": 100, "output_tokens": 40,
+            "input_tokens_details": {"cached_tokens": 60},
+            "output_tokens_details": {"reasoning_tokens": 30}});
+        for u in [chat, responses] {
+            let usage = parse_usage(&u);
+            assert_eq!(
+                (usage.prompt, usage.cached, usage.output, usage.reasoning),
+                (100, 60, 40, 30),
+                "{u}"
+            );
+        }
     }
 }

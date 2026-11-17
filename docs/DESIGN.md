@@ -114,61 +114,25 @@ saved as the `windows-release` artifact, without creating a tag or release.
 Dispatching on `main` also publishes the versioned GitHub release after all checks
 pass. Existing release tags are never overwritten.
 
-## Status (as of 12 November 2026)
+## Status (17 November 2026)
 
-State on 12 November 2026. What is open and how to continue: `docs/HANDOFF.md`. Every number:
-`docs/BENCHMARKS.md`.
+What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test` runs 253 tests (unit tests per module plus
-  end-to-end agent runs against a scripted model).
+- **Engine and CLI**: implemented; `cargo test --workspace` runs 267 tests (unit tests per module
+  plus end-to-end agent runs against a scripted model). CI runs them, Clippy with warnings as
+  errors, formatting and the front end's lint on every pull request and push to `main`.
 - **Benchmark**: `sage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
-  Against OpenCode 1.19.5 with DeepSeek V4.1 Flash on 12 November 2026 (24 tasks, three runs
-  each): Sage solved 67/72 in 5.7 requests and 59 s a run for $1.12, OpenCode 70/72 in 10.8
-  requests and 116 s for $2.23. Sage loses two tasks that OpenCode solves every time
-  (`restyle`, `confdialect`) and is the steadier on the other 22. The comparisons with classic and
-  mini-swe-agent are older, from before the changes of the seventh and ninth sessions. See
-  `docs/BENCHMARKS.md` for all of it and for what limits these numbers.
-- **Live models**: GLM-5.3 and DeepSeek V4.1 Flash both run end to end through Logfare. Every
-  other preset (OpenAI, Anthropic, Google AI, DeepSeek, OpenRouter, Moonshot Kimi, xAI, Groq,
-  Together AI) follows its vendor's documented contract and is untested.
-- **Desktop app**: built (`docs/screenshots/`). The Tauri shell has the commands the brief lists
-  and the front end has the session list, the new-session form with a skills dialog, the live
-  timeline with inspector, and settings for keys, defaults, skills, the system prompt and
-  instructions. It builds without warnings and has been driven through scripted UI actions under
-  xvfb, with screenshots: nobody has driven it by hand, and no live-model session has been started
-  from it.
-- **Walkthrough**: `sage demo` plays a three-reply scripted session through the real harness
-  (read and reproduce, a wrong fix that is caught and halts the script, the right fix accepted with
-  evidence).
-- Not implemented: Windows-specific shell handling,
-  OS-level sandboxing of commands (there is a tripwire for catastrophic commands, nothing more).
-
-### What the benchmark shows
-
-Logfare, 7 tasks, 5 runs per task and variant, medians per run; "no cache" is the cost had the
-provider cached nothing. These rows are the baseline of 10 November, before `attach`.
-
-| Model | Variant | Solved | Turns (mean) | Input tok | Output tok | Cost | No cache | Total spend | Time |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|
-| GLM-5.3 | Ecosage | 35/35 | 3 (3.6) | 8.8k | 395 | $0.0077 | $0.0141 | $0.469 | 6.4 s |
-| GLM-5.3 | Classic | 35/35 | 6 (7.4) | 9.9k | 415 | $0.0088 | $0.0154 | $0.864 | 9.8 s |
-| DeepSeek V4.1 Flash | Ecosage | 35/35 | 3 (3.6) | 9.6k | 442 | $0.0008 | $0.0017 | $0.043 | 3.8 s |
-| DeepSeek V4.1 Flash | Classic | 35/35 | 6 (5.6) | 10.4k | 639 | $0.0009 | $0.0019 | $0.037 | 5.4 s |
-
-- **Turns halve on both models, and runs finish about a third sooner.** The saving comes from the
-  harness running the check itself (preflight and auto-watch each account for one turn), not from
-  the model's own predictions, of which it makes few once a watch exists.
-- **Cost falls less.** On GLM-5.3 a typical run is about a tenth cheaper; the 46% gap in total
-  spend is two runaway classic runs on one task. On DeepSeek there is no saving: three Sage
-  turns carry about as many input tokens as six classic ones.
-- **Reliability is not measured.** Every run of every variant was solved, so these tasks are too
-  easy to separate the variants.
-- **The model still spends a turn on `finish`.** It came in the same reply as the edits in 6 of 35
-  runs on GLM-5.3 and 1 of 35 on DeepSeek. Before `attach`, almost every run was
-  `read → edit → finish`.
-- `attach` and `short_paths` were measured afterwards: see the follow-up in `docs/BENCHMARKS.md`.
+  The latest comparison is the Python, Rust and Go run of 17 November 2026: Ecosage and OpenCode
+  44/72 each, Ecosage at about 60% of OpenCode's cost and time.
+- **Live models**: DeepSeek V4.1 Flash (and GLM-5.3, before the latest changes) run end to end
+  through Logfare. Every other preset follows its vendor's documented contract and is untested.
+- **Desktop app**: released for Windows (`v0.3.0`); it also builds on Linux and macOS. Its UI is
+  covered by a browser fixture with mock IPC (`desktop/tests/`).
+- **Walkthrough**: `sage demo` plays a scripted session through the real harness.
+- Not implemented: OS-level sandboxing of commands (there is a tripwire for catastrophic commands,
+  nothing more).
 
 ## Background
 

@@ -7,6 +7,7 @@
 
 use sage_core::economy::{peak_multiplier, prices_for};
 use sage_core::provider::Usage;
+use sage_core::provider::openai::parse_usage;
 use sage_core::util::{now_ms, one_line};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -373,31 +374,6 @@ async fn refuse(
     stream.write_all(head.as_bytes()).await?;
     stream.write_all(body.as_bytes()).await?;
     stream.flush().await
-}
-
-fn u64_at(v: &Value, path: &[&str]) -> Option<u64> {
-    path.iter().try_fold(v, |cur, key| cur.get(key))?.as_u64()
-}
-
-/// Reads a `usage` object the way Sage's own provider client does.
-fn parse_usage(u: &Value) -> Usage {
-    Usage {
-        prompt: u64_at(u, &["prompt_tokens"])
-            .or_else(|| u64_at(u, &["input_tokens"]))
-            .unwrap_or(0),
-        cached: u64_at(u, &["prompt_tokens_details", "cached_tokens"])
-            .or_else(|| u64_at(u, &["prompt_cache_hit_tokens"]))
-            .or_else(|| u64_at(u, &["input_tokens_details", "cached_tokens"]))
-            .or_else(|| u64_at(u, &["cache_read_input_tokens"]))
-            .unwrap_or(0),
-        output: u64_at(u, &["completion_tokens"])
-            .or_else(|| u64_at(u, &["output_tokens"]))
-            .unwrap_or(0),
-        reasoning: u64_at(u, &["completion_tokens_details", "reasoning_tokens"])
-            .or_else(|| u64_at(u, &["output_tokens_details", "reasoning_tokens"]))
-            .or_else(|| u64_at(u, &["reasoning_tokens"]))
-            .unwrap_or(0),
-    }
 }
 
 /// The usage a response body or stream event carries: at its top for chat completions, under

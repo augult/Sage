@@ -208,7 +208,7 @@ export function field(label, control, status) {
 export const hint = (...content) => h('div.field-hint', ...content);
 
 /** Providers with those that have a key ahead of those that have none, each group in its own order. */
-export const keyedFirst = (providers) => [...providers].sort((a, b) => Number(b.has_key) - Number(a.has_key));
+const keyedFirst = (providers) => [...providers].sort((a, b) => Number(b.has_key) - Number(a.has_key));
 
 /** Provider choices: the connected ones, and `keep` (the one chosen now), greyed if it has no key. */
 export function providerOptions(providers, keep = null) {

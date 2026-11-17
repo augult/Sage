@@ -33,7 +33,7 @@ const INLINE = {
 const spans = (nodes) => nodes.map((node) => INLINE[node.type](node));
 
 /** A fenced block: its language and a copy button above the code. */
-export function codeBlock(text, lang = '') {
+function codeBlock(text, lang = '') {
   return h('div.code', h('div.code-head', h('span.code-lang', lang || 'text'), copyButton(() => text)), h('pre', h('code', text)));
 }
 

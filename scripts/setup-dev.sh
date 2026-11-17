@@ -7,7 +7,8 @@
 # rust-toolchain.toml themselves (.hoplite/setup.sh uses it).
 set -euo pipefail
 
-RUST_VERSION="1.99.1"
+# The version pinned in rust-toolchain.toml.
+RUST_VERSION="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "$(dirname "$0")/../rust-toolchain.toml")"
 SYSTEM_ONLY=0
 if [ "${1:-}" = "--system-only" ]; then SYSTEM_ONLY=1; fi
 

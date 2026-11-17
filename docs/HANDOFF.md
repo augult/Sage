@@ -31,6 +31,15 @@ tasks than Ecosage (41/72 against 44/72) at 2.6 times the cost, and Ecosage tie 
 - **Fixed**: a reply cut off for overthinking was priced without the peak-hour multiplier and did
   not mark the session as priced; it is now booked like every other request (`count_usage`).
 - **Dead code removed**: `Evidence::resync` and `checked_epoch`, which only the examiner read.
+- **Second audit**, the same day: the usage parser was one copy in the provider and a drifted one
+  in the bench proxy; Sage's own copy missed `output_tokens_details.reasoning_tokens`, so it now
+  reads every shape and the proxy uses it. `kill_group` is shared too, and the CLI no longer
+  depends on `libc`. Dead CSS (`.opens-up`), seven needless JS exports and the unreferenced
+  `docs/prompts/system-v1.md` are gone, as is `vercel.json` (Sage is not deployed). CI
+  (`.github/workflows/ci.yml`, formerly the UI-only check) now runs formatting, Clippy with
+  `-D warnings`, the tests and the front end's lint on every pull request and push to `main`, and
+  local builds, CI and releases all take the Rust version from `rust-toolchain.toml` (1.100.0).
+  The tests of `agent.rs` and `harness.rs` moved to `agent/tests.rs` and `harness/tests.rs`.
 
 ## Thirteenth session: Prosage for less (14 November 2026)
 

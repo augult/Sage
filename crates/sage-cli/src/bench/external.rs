@@ -3,6 +3,7 @@
 //! every harness is counted and priced alike.
 
 use super::proxy::{Metered, Proxy};
+use sage_core::tools::jobs::kill_group;
 use sage_core::util::one_line;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -77,21 +78,6 @@ pub struct Ran {
     pub error: Option<String>,
     pub elapsed_ms: u64,
     pub detail: Detail,
-}
-
-fn kill_group(pid: u32) {
-    // SAFETY: a plain syscall; the process group is the child's own (`process_group(0)`).
-    #[cfg(unix)]
-    unsafe {
-        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-    }
-    // Windows has no process groups of this kind: the process is ended with what it started.
-    #[cfg(not(unix))]
-    {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output();
-    }
 }
 
 fn last_lines(path: &Path, n: usize) -> String {
@@ -215,9 +201,7 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
         _ = meter.capped.notified() => (tokio::time::timeout(GRACE, child.wait()).await.ok().and_then(Result::ok), false),
     };
     // Whatever the harness left running goes with it.
-    if let Some(pid) = pid {
-        kill_group(pid);
-    }
+    kill_group(pid);
     let status = match status {
         Some(status) => Some(status),
         None => child.wait().await.ok(),

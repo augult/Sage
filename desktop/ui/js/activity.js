@@ -45,7 +45,7 @@ function words(tool) {
 export const stepVerb = (tool, active) => words(tool)[active ? 'doing' : 'did'];
 
 /** The file a read, edit or write names, without its folder, line range, symbol or anchor. */
-export function fileName(summary) {
+function fileName(summary) {
   const path = summary.split(/\s/, 1)[0].replace(/:[\d,-]+$/, '').replace(/\/+$/, '');
   return path.slice(path.lastIndexOf('/') + 1);
 }
