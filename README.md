@@ -33,66 +33,27 @@ or off, over a set of tasks. Every claim above can be measured rather than belie
 
 ## Modes
 
-A session runs in one of three modes (`--mode`, the Mode picker of the app). The mode is fixed when
+A session runs in one of two modes (`--mode`, the Mode picker of the app). The mode is fixed when
 the session starts: its system prompt and its tools are sent with the first request.
 
 | Mode | What it is for | What it does |
 |---|---|---|
 | **Ecosage** (`--mode ecosage`; the one a session gets unless told otherwise) | Few requests and little money, at a little cost to the result. | Everything in the table above. |
 | **Default** (`--mode default`; `classic` in earlier results) | The loop every other harness runs, for those who want the app and not Sage's ways. | One tool call after another: no scripts, predictions, watches, finish gate or first-message survey. |
-| **Prosage** (`--mode prosage`) | The result, with requests and time spent freely. | Ecosage's loop without what it does to stay cheap, and with second readers: two examiners who never see the work, and referees who decide which of their failing cases the text bears out. See below. |
 
-### What Prosage changes
+Any mechanism in the table above can be switched off in Ecosage (`--without <name>`,
+`ecosage+no-<name>` in the bench) or on in the conventional loop (`--with <name>`,
+`default+<name>`).
 
-Over the stored benchmark runs (`docs/results/`), twelve of the thirteen runs Sage lost on
-DeepSeek V4.1 Flash it had declared finished and verified: the work passed the checks the model
-chose to run and failed ones it never thought of. The conventional loop did not make that mistake
-in any of its 94 runs, at twice the requests (`docs/BENCHMARKS.md`). Prosage is built against that
-one failure. It is not Ecosage with the effort turned up: the effort is the same setting in every
-mode (below), and what Prosage adds is done by the harness around the model. Its six mechanisms
-can each be switched on in Ecosage (`--with <name>`, `ecosage+<name>` in the bench) or off in
-Prosage (`--without <name>`, `prosage+no-<name>`).
-**Measured once, on 12 November 2026** (DeepSeek V4.1 Flash, 24 tasks, two runs each): Prosage
-47/48, OpenCode 45/48, Ecosage 44/48, with Prosage at three times OpenCode's time and four times
-its cost. The lead is within chance, and the examiners decided almost none of it.
-**Measured again on 14 November 2026**, Prosage against itself: 48/48 before and after the
-examiners and referees were made cheaper, at 23% less cost and 41% less time (most of what a
-run costs is what they think, and a third of that had been thrown away).
-`docs/BENCHMARKS.md` has the table and what the logs say, `docs/HANDOFF.md` what to run next,
-`docs/RESEARCH.md` (section 3) what the design rests on.
-
-| Mechanism | What it does | Where |
-|---|---|---|
-| **Examiner** (`examiner`) | A second reader. When the session starts, a separate request with a fresh context is given the task, the files the worker was shown and any longer or overflow files `attach` had to leave out (`<more_files>`), never the work, and writes one check script from the text alone: a case for every rule, example and error the task and its documents state. It is written beside the run, so it costs a request and no waiting. It may think for about 16,000 tokens before the script begins; a reply cut there is handed its own thought and asked again, and writes the script from it instead of thinking it all a second time. The worker is told with its task that the work will be examined this way. When `finish` is accepted (or when a watchless run checks its changes cleanly) the script is run against the work, refreshed from memory first. A script that does not run to its end or misses the header format goes back to its author with its output, twice at most; one more than three in five of whose cases fail against work whose own checks pass goes back once. What is still unusable after that is set aside. In a session whose steps wait for approval (`ask`) there is no examiner: its script would be a command run unasked. | `examiner.rs`, `attach.rs`, `agent.rs` |
-| **Panel** (`panel`) | A second examiner, asked at the same moment and briefed for what a pass rule by rule leaves out: every error the text states and how it is reported, the limits of each rule, two rules meeting in one input. Where the text has nothing of that kind it answers NONE. Needs `examiner`. | `examiner.rs` |
-| **Referee** (`referee`) | A failing case holds nothing by itself: a script written blind is wrong often enough to make a worker break work that was right. Each failing case goes to referees, separate requests that are shown the text, the script and what the case reported, and not the work. Each works out from the text what the result has to be and rules GAP (quoting the sentence that settles it), CASE or OPEN. They are asked one after the other, and a case goes to the next only while it can still be confirmed: one CASE sets it aside at once, and two examinations in three ended with the first reader. Two GAP rulings confirm a case; a split of one GAP against OPEN (with no CASE veto) goes to one tie-breaker referee, so a single hedged or truncated reply cannot drop a real gap while two independent GAP rulings are still required to hold. Confirmed cases reach the worker with what was quoted; the others are named as not to be acted on. Without referees (`prosage+no-referee`) every failing case goes to the worker. Needs `examiner`. | `examiner.rs`, `agent.rs` |
-| **Long thought** (`long_thought`) | A reply may think for about 24,000 tokens before its first word or call, instead of being cut at 14,000 and told to act. On the specification-heavy task Sage loses most, three of five first replies were cut at that mark. | `provider/openai.rs` |
-| **Unhurried** (`unhurried`) | Nothing the harness says counts replies or asks for an early `finish`: no budget line in the first message, no tips about saving replies, no half-time notes. When the checks pass (and no examiner report already speaks on that reply), the model is told what passing checks leave open instead of that `finish` is accepted now. An examiner still writing is waited for up to 15 minutes instead of 4. What takes the budget's place is a progress-aware stopping rule: consecutive surprise-free replies on the same settled workspace state are counted (resetting whenever a file changes or a test of the worker's own fails); after 8 the worker is told to finish or to name what is unmet, and after 16 its next reply is its last. The limits themselves stay, as a safety net, with the note before the last reply. | `agent.rs` |
-| **Routing** (`routing`) | One short request without thinking picks the one skill whose subject is what the task asks to be delivered, if there is one, and it is switched on before the first word goes to the model. | `agent.rs`, `examiner.rs` |
-
-The examiners' cases are run as soon as there is something to run them against: with the first
-reply whose own checks pass on a change, and again at `finish` if the work has changed since.
-Cases the referees confirm go to the worker then; when all pass it is told so and that it may
-finish. (Without this, a worker in no hurry tested its own work for all its sixty replies on two
-tasks and never called `finish`.)
-
-A held `finish` goes back to the worker, which settles each case by the text: fix the work, or
-leave the case failing and name in its summary the sentence that shows it wrong. A `finish` all of
-whose failing cases the worker has been shown stands, and the outcome says how many were left.
-A case that passed before the worker's last changes and fails after them is marked as broken by
-them, so that a fix cannot quietly cost something that was right. Three holds at most per message.
-With a time budget, nothing more is asked for beside the run once less than 45 seconds of it are
-left.
+Earlier versions had a third mode, Prosage, with blind examiners and referees beside the run. It
+was taken out: on the Python, Rust and Go benchmark of 17 November 2026 (DeepSeek V4.1 Flash) it
+solved fewer tasks than Ecosage, 41 of 72 against 44, at more than twice the cost. A session stored as Prosage comes back as Ecosage.
 
 **Effort is not part of the mode.** Every mode runs at the effort it is given. `ratchet` (Auto in
-the app) starts at `low` and rises on surprises; `low`, `high` and `max` are kept as they are set,
-in Ecosage as in Prosage. At `max` a reply may think for about 24,000 tokens in any mode. A reply
-that does nothing but reason is still asked for again one level lower, but under a level that was
-set the session is back at it as soon as the model has acted. Examiners think at the effort the
-session has reached; referees too, and never below `high`. Under `ratchet`, a `finish` the
-examiners hold raises the effort one level. Requests made beside the conversation (examiners,
-referees, router) are counted in the session's tokens, cost and `side_requests`, the thought of
-one that fails included.
+the app) starts at `low` and rises on surprises; `low`, `high` and `max` are kept as they are set.
+At `max` a reply may think for about 24,000 tokens. A reply that does nothing but reason is still
+asked for again one level lower, but under a level that was set the session is back at it as soon
+as the model has acted.
 
 ## Status
 
@@ -163,13 +124,13 @@ cargo build --release           # builds target/release/sage
 sage demo                    # scripted walkthrough, no key needed
 sage key logfare             # store an API key (read from stdin), or export LOGFARE_API_KEY
 sage run -C path/to/project "Fix the failing tests"
-sage run --mode default ...  # the conventional loop; --mode prosage for the result at any price
+sage run --mode default ...  # the conventional loop of other harnesses
 sage run --goal "the tests pass and the README names every flag" -C path/to/project
 sage sessions | sage show <id>
 sage resume <id> "and now the other one"   # continue a stored session (see below)
 
 sage bench --check --tasks all   # the tasks fail as shipped and pass with their reference solutions
-sage bench -p logfare -m glm-5.3 --variants ecosage,no-attach,default,prosage -n 5 -j 3
+sage bench -p logfare -m glm-5.3 --variants ecosage,no-attach,default -n 5 -j 3
 ```
 
 ### The session goal

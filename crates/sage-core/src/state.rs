@@ -44,21 +44,6 @@ pub struct Features {
     pub short_paths: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
-    /// A reply may reason for much longer before its first word or call is due.
-    pub long_thought: bool,
-    /// Nothing the harness says counts replies or asks for an early `finish`; passing checks are
-    /// answered with what they do not cover.
-    pub unhurried: bool,
-    /// A second reader writes checks from the task alone, beside the run; `finish` answers to them.
-    pub examiner: bool,
-    /// A second examiner reads the same text for what a pass rule by rule leaves out: errors,
-    /// limits and rules that meet. Needs `examiner`.
-    pub panel: bool,
-    /// A failing case holds `finish` only where two more readers of the text, each alone and
-    /// without the work, find the text to side with it. Needs `examiner`.
-    pub referee: bool,
-    /// A skill that fits the task is switched on without being asked for.
-    pub routing: bool,
     /// Protected files and named deliverable files in the task are checked mechanically.
     pub contract: bool,
 }
@@ -67,10 +52,7 @@ pub struct Features {
 ///
 /// `Ecosage` spends as few requests and tokens as it can and gives up a little of the result for
 /// it. `Plain` is the loop every other harness runs, one tool call after another with nothing of
-/// Sage's around it; users know it as `default`. `Prosage` is run for the result alone: the
-/// model thinks for as long as it needs, nothing hurries it, examiners who never see the work
-/// check it against the text, referees decide which of their failing cases the text bears out,
-/// and a skill that fits is switched on unasked.
+/// Sage's around it; users know it as `default`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
@@ -78,18 +60,16 @@ pub enum Mode {
     Ecosage,
     #[serde(rename = "default")]
     Plain,
-    Prosage,
 }
 
 impl Mode {
-    pub const NAMES: &'static [&'static str] = &["ecosage", "default", "prosage"];
+    pub const NAMES: &'static [&'static str] = &["ecosage", "default"];
 
     /// A mode by its name. `classic` is what `default` was called before.
     pub fn parse(name: &str) -> Option<Mode> {
         match name.trim().to_ascii_lowercase().as_str() {
             "ecosage" => Some(Mode::Ecosage),
             "default" | "classic" => Some(Mode::Plain),
-            "prosage" => Some(Mode::Prosage),
             _ => None,
         }
     }
@@ -98,7 +78,6 @@ impl Mode {
         match self {
             Mode::Ecosage => "ecosage",
             Mode::Plain => "default",
-            Mode::Prosage => "prosage",
         }
     }
 
@@ -106,25 +85,11 @@ impl Mode {
         match self {
             Mode::Ecosage => Features::ecosage(),
             Mode::Plain => Features::classic(),
-            Mode::Prosage => Features::prosage(),
         }
     }
 }
 
 impl Features {
-    /// Ecosage and what `Features::OPTIONAL` holds back from it.
-    pub fn prosage() -> Self {
-        Self {
-            long_thought: true,
-            unhurried: true,
-            examiner: true,
-            panel: true,
-            referee: true,
-            routing: true,
-            ..Self::ecosage()
-        }
-    }
-
     pub fn ecosage() -> Self {
         Self {
             scripts: true,
@@ -142,12 +107,6 @@ impl Features {
             short_paths: true,
             survey: true,
             contract: true,
-            long_thought: false,
-            unhurried: false,
-            examiner: false,
-            panel: false,
-            referee: false,
-            routing: false,
         }
     }
 
@@ -167,12 +126,6 @@ impl Features {
             attach: false,
             short_paths: false,
             survey: false,
-            long_thought: false,
-            unhurried: false,
-            examiner: false,
-            panel: false,
-            referee: false,
-            routing: false,
             contract: false,
         }
     }
@@ -193,23 +146,7 @@ impl Features {
         "attach",
         "short_paths",
         "survey",
-        "long_thought",
-        "unhurried",
-        "examiner",
-        "panel",
-        "referee",
-        "routing",
         "contract",
-    ];
-
-    /// The ones that are off unless a run asks for them with `with`.
-    pub const OPTIONAL: &'static [&'static str] = &[
-        "long_thought",
-        "unhurried",
-        "examiner",
-        "panel",
-        "referee",
-        "routing",
     ];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
@@ -217,10 +154,21 @@ impl Features {
         self.set(name, false)
     }
 
-    /// Switches one mechanism on by name: what a run needs to get one of the `OPTIONAL` ones.
+    /// Switches one mechanism on by name, e.g. one of Sage's in the conventional loop.
     pub fn with(self, name: &str) -> Option<Self> {
         self.set(name, true)
     }
+
+    /// Mechanisms that were taken out of Sage with the Prosage mode. A session stored before that
+    /// may still name them; it comes back without them.
+    pub const RETIRED: &'static [&'static str] = &[
+        "long_thought",
+        "unhurried",
+        "examiner",
+        "panel",
+        "referee",
+        "routing",
+    ];
 
     fn set(mut self, name: &str, on: bool) -> Option<Self> {
         let slot = match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
@@ -238,12 +186,6 @@ impl Features {
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
-            "long_thought" => &mut self.long_thought,
-            "unhurried" => &mut self.unhurried,
-            "examiner" => &mut self.examiner,
-            "panel" => &mut self.panel,
-            "referee" => &mut self.referee,
-            "routing" => &mut self.routing,
             "contract" => &mut self.contract,
             _ => return None,
         };
@@ -309,8 +251,6 @@ pub struct Evidence {
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
-    /// The latest epoch at which a non-trivial read-only shell command exited 0, predicted or not.
-    pub checked_epoch: Option<u64>,
 }
 
 const FINGERPRINT_BUDGET: Duration = Duration::from_millis(400);
@@ -360,21 +300,9 @@ impl Evidence {
         changed
     }
 
-    /// Takes the workspace as it is now for the state already judged: for a command the harness ran
-    /// itself that may leave caches behind but is no change to the work.
-    pub fn resync(&mut self, ws: &Workspace) {
-        self.fingerprint = Some(fingerprint(&ws.root, FINGERPRINT_BUDGET));
-    }
-
     /// A check passed against the workspace as it is right now.
     pub fn passed(&mut self, check: impl Into<String>) {
         self.verified = Some((self.epoch, check.into()));
-        self.checked_epoch = Some(self.epoch);
-    }
-
-    /// A non-trivial read-only command exited 0 against the workspace as it is right now.
-    pub fn note_checked(&mut self) {
-        self.checked_epoch = Some(self.epoch);
     }
 }
 
@@ -639,12 +567,10 @@ mod tests {
             let without = Features::ecosage()
                 .without(name)
                 .unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
-            // One that is off unless asked for is switched on by name instead.
-            let optional = Features::OPTIONAL.contains(name);
-            assert_eq!(without == Features::ecosage(), optional, "{name}");
+            assert_ne!(without, Features::ecosage(), "{name} is on in Ecosage");
             assert_eq!(
-                Features::ecosage().with(name).unwrap() == Features::ecosage(),
-                !optional,
+                Features::ecosage().with(name),
+                Some(Features::ecosage()),
                 "{name}"
             );
             assert_eq!(

@@ -259,7 +259,7 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      foot of the sheet. In the bar are the task and, along its foot, the + that attaches files
      and the effort (Auto, Low, High, Max: Auto is the engine's `ratchet`, which starts low and
      steps up when predictions fail) at one end, and the model, the microphone and Start at the
-     other. Under the bar are the folder, the mode (Ecosage / Default / Prosage, each with what
+     other. Under the bar are the folder, the mode (Ecosage / Default, each with what
      it is for as its `title`; README, "Modes") and the autonomy (Auto / Ask). The folder is a
      picker like the rest: the folders of up to five recent sessions by name (the full path is
      the `title`), the chosen one checked, and under a rule "Choose folder…" (the system's own

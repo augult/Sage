@@ -37,10 +37,10 @@ USAGE
 OPTIONS
   -p, --provider <id>      provider (default: the configured one)
   -m, --model <name>       model; repeat or separate with commas to compare several
-      --variants <list>    ecosage, default, prosage, no-<mechanism>, e.g. no-auto-watch (default: ecosage,default);
+      --variants <list>    ecosage, default, no-<mechanism>, e.g. no-auto-watch (default: ecosage,default);
                            add +skill (each task with its skill), +sys:<file> (system prompt template),
-                           +effort:<level>, +no-<mechanism>, or +<mechanism> for one that is off unless
-                           asked for (`sage run --help` lists them), e.g. ecosage+skill+effort:max
+                           +effort:<level>, +no-<mechanism>, or +<mechanism> to switch one on, e.g.
+                           ecosage+skill+effort:max or default+watches
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
@@ -116,14 +116,9 @@ impl Variant {
                 ..Variant::own(&name.to_ascii_lowercase(), Mode::Ecosage, vec![])
             });
         }
-        let optional = if Features::OPTIONAL.is_empty() {
-            String::new()
-        } else {
-            format!(", +<mechanism> for {}", Features::OPTIONAL.join(", "))
-        };
         let unknown = || {
             format!(
-                "unknown variant {s:?}: use ecosage, default, prosage, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +no-<mechanism>{optional}",
+                "unknown variant {s:?}: use ecosage, default, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +<mechanism>, +no-<mechanism>",
                 Features::NAMES.join(", ")
             )
         };
@@ -142,7 +137,7 @@ impl Variant {
         let base = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut v = match base.as_str() {
             // `classic` is what `default` was called, and what earlier results name it.
-            "ecosage" | "default" | "classic" | "prosage" => Variant {
+            "ecosage" | "default" | "classic" => Variant {
                 mode: Mode::parse(&base).unwrap_or_default(),
                 ..Variant::default()
             },
@@ -161,11 +156,11 @@ impl Variant {
                 );
             } else if let Some(level) = m.strip_prefix("effort:") {
                 v.effort = Some(level.to_string());
-            } else if let Some(optional) = Features::OPTIONAL
+            } else if let Some(on) = Features::NAMES
                 .iter()
                 .find(|name| name.eq_ignore_ascii_case(&m.replace('-', "_")))
             {
-                v.with.push(optional.to_string());
+                v.with.push(on.to_string());
             } else {
                 v.without.push(mechanism(m)?);
             }
@@ -1684,36 +1679,28 @@ mod tests {
                 && !opt.variants[2].features().short_paths
                 && opt.variants[2].features().attach
         );
-        // What Prosage adds is off in Ecosage unless asked for with `+<mechanism>`, and Prosage can
-        // be run without any of it. `classic` is still read as `default`.
+        // A mechanism can be switched on with `+<mechanism>`, e.g. in the conventional loop, and
+        // `classic` is still read as `default`. Prosage is gone.
         let Ok(Command::Run(opt)) = parse(&args(
-            "--variants ecosage+examiner,prosage,prosage+no-examiner+effort:low,default,classic",
+            "--variants default+watches,ecosage+effort:low,default,classic",
         )) else {
             panic!("should parse")
         };
         let modes: Vec<(Mode, bool, bool)> = opt
             .variants
             .iter()
-            .map(|v| (v.mode, v.features().examiner, v.features().long_thought))
+            .map(|v| (v.mode, v.features().watches, v.features().scripts))
             .collect();
         assert_eq!(
             modes,
             [
-                (Mode::Ecosage, true, false),
-                (Mode::Prosage, true, true),
-                (Mode::Prosage, false, true),
+                (Mode::Plain, true, false),
+                (Mode::Ecosage, true, true),
                 (Mode::Plain, false, false),
                 (Mode::Plain, false, false)
             ]
         );
-        assert!(
-            Features::OPTIONAL
-                .iter()
-                .all(
-                    |name| Features::ecosage().with(name) != Some(Features::ecosage())
-                        && Features::prosage().with(name) == Some(Features::prosage())
-                )
-        );
+        assert!(parse(&args("--variants prosage")).is_err());
         let Ok(Command::Run(opt)) = parse(&args(
             "--variants ecosage,ecosage+no-survey,no-survey+no-attach",
         )) else {
@@ -2128,7 +2115,7 @@ u.urlopen(r).read()' "$1"; }"#;
     }
 
     #[tokio::test]
-    async fn prosage_recovers_live_benchmark_failure_modes_where_default_and_ecosage_fail() {
+    async fn ecosage_recovers_live_benchmark_failure_modes_where_default_fails() {
         use sage_core::provider::Message;
         use sage_core::provider::mock::TurnFn;
 
@@ -2136,16 +2123,6 @@ u.urlopen(r).read()' "$1"; }"#;
             return;
         }
         let base = std::env::temp_dir().join(format!("sage-bench-eval-{}", rand_hex(4)));
-        let noop_aside = || -> sage_core::provider::mock::AsideFn {
-            Box::new(|msgs| {
-                let sys = msgs.first()?.content.as_str();
-                (sys.starts_with("You route coding tasks")
-                    || sys.starts_with("You are the examiner")
-                    || sys.starts_with("You are the second examiner")
-                    || sys.starts_with("You are a referee"))
-                .then(|| MockTurn::say("NONE"))
-            })
-        };
         let eval_ws = |task: &Task, ws: &Path| {
             for &r in task.restore {
                 let orig = task.files.iter().find(|(p, _)| *p == r).unwrap().1;
@@ -2156,9 +2133,9 @@ u.urlopen(r).read()' "$1"; }"#;
             }
         };
 
-        // Scenario 1 (`audit` — Prosage's single loss in 96 live runs): mode-blind model summarizes
-        // findings in `finish` with `epoch == 0`, and writes `findings.json` only if held by the harness.
-        // Both Ecosage and Prosage now enforce `contract` at zero token cost.
+        // Scenario 1 (`audit`): a mode-blind model summarizes findings in `finish` with `epoch == 0`,
+        // and writes `findings.json` only if held by the harness. Ecosage enforces `contract` at zero
+        // token cost.
         let audit = tasks::find("audit").unwrap();
         let audit_sol = audit.solution[0].1;
         for (label, mode, without, expect_solved) in [
@@ -2170,13 +2147,6 @@ u.urlopen(r).read()' "$1"; }"#;
                 false,
             ),
             ("ecosage", "ecosage", vec![], true),
-            (
-                "prosage-no-contract",
-                "prosage",
-                vec!["contract".to_string()],
-                false,
-            ),
-            ("prosage", "prosage", vec![], true),
         ] {
             let h = Harness::at(base.join(format!("s1-{label}")));
             let ws = base.join(format!("ws-s1-{label}"));
@@ -2213,7 +2183,7 @@ u.urlopen(r).read()' "$1"; }"#;
                     )
                 }),
             ];
-            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let provider = MockProvider::new(turns);
             let meta = h
                 .start_scripted(
                     StartRequest {
@@ -2240,11 +2210,9 @@ u.urlopen(r).read()' "$1"; }"#;
         // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
         // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
         let audit_clean = tasks::find("audit-clean").unwrap();
-        for (label, mode, expect_solved) in [
-            ("default", "default", false),
-            ("ecosage", "ecosage", true),
-            ("prosage", "prosage", true),
-        ] {
+        for (label, mode, expect_solved) in
+            [("default", "default", false), ("ecosage", "ecosage", true)]
+        {
             let h = Harness::at(base.join(format!("s2-{label}")));
             let ws = base.join(format!("ws-s2-{label}"));
             materialize(&ws, audit_clean.files).unwrap();
@@ -2283,7 +2251,7 @@ u.urlopen(r).read()' "$1"; }"#;
                     )
                 }),
             ];
-            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let provider = MockProvider::new(turns);
             let meta = h
                 .start_scripted(
                     StartRequest {
@@ -2305,123 +2273,8 @@ u.urlopen(r).read()' "$1"; }"#;
             );
         }
 
-        // Scenario 3 (`restyle` — watchless UI task, unpredicted shell inspection, split GAP/OPEN referee):
-        // The exact same mode-blind model writes a flawed draft (leaving original unstyled CSS + inline
-        // style, score < 9/11) and inspects with an unpredicted `shell` call. Only when `[examiner]`
-        // reports the confirmed GAP (via watchless `early_exam` + tie-breaker referee) does it fix the
-        // page and finish verified (even with no `expect_exit` on `finish`!).
-        let restyle = tasks::find("restyle").unwrap();
-        let (restyle_html, restyle_css) = (restyle.solution[0].1, restyle.solution[1].1);
-        let shipped_css = restyle
-            .files
-            .iter()
-            .find(|(p, _)| *p == "styles.css")
-            .unwrap()
-            .1;
-        let flawed_html = restyle_html.replacen("<main", "<main style=\"margin: 4px\"", 1);
-        let exam_restyle = "COMMAND: python3 {file}\n```python\nimport sys\nhtml = open('index.html', encoding='utf-8').read()\nif 'style=' in html:\n    print('FAIL no_inline_style\\n  clause: no inline styles\\n  got: style attribute present')\n    print('EXAM: 0 passed, 1 failed')\n    sys.exit(1)\nprint('EXAM: 1 passed, 0 failed')\n```";
-        for (label, mode, expect_solved) in [
-            ("default", "default", false),
-            ("ecosage", "ecosage", false),
-            ("prosage", "prosage", true),
-        ] {
-            let h = Harness::at(base.join(format!("s3-{label}")));
-            let ws = base.join(format!("ws-s3-{label}"));
-            materialize(&ws, restyle.files).unwrap();
-            let fh = flawed_html.clone();
-            let step = std::sync::atomic::AtomicUsize::new(0);
-            let turns: Vec<TurnFn> = (0..6)
-                .map(|_| -> TurnFn {
-                    let fh = fh.clone();
-                    let n = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Box::new(move |msgs: &[Message]| {
-                        let feedback = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
-                        if n == 0 {
-                            MockTurn::calls(
-                                "",
-                                vec![
-                                    ("write", json!({"path": "index.html", "content": fh.clone(), "overwrite": true})),
-                                    ("write", json!({"path": "styles.css", "content": shipped_css, "overwrite": true})),
-                                    ("shell", json!({"cmd": "python3 -c \"open('index.html').read()\""})),
-                                ],
-                            )
-                        } else if feedback.contains("FAIL no_inline_style") {
-                            // Fixes HTML & CSS and calls `finish` with NO `expect_exit`: examiner pass verifies it!
-                            MockTurn::calls(
-                                "",
-                                vec![
-                                    ("write", json!({"path": "index.html", "content": restyle_html, "overwrite": true})),
-                                    ("write", json!({"path": "styles.css", "content": restyle_css, "overwrite": true})),
-                                    ("finish", json!({"summary": "Fixed inline styles and CSS system."})),
-                                ],
-                            )
-                        } else {
-                            MockTurn::calls(
-                                "",
-                                vec![
-                                    ("shell", json!({"cmd": "test -s styles.css", "expect_exit": "0"})),
-                                    ("finish", json!({"summary": "Done."})),
-                                ],
-                            )
-                        }
-                    })
-                })
-                .collect();
-            let nth = std::sync::atomic::AtomicUsize::new(0);
-            let provider = MockProvider::new(turns).with_aside(Box::new(move |msgs| {
-                let sys = msgs.first()?.content.as_str();
-                if sys.starts_with("You route coding tasks") {
-                    Some(MockTurn::say("ui"))
-                } else if sys.starts_with("You are the examiner") {
-                    Some(MockTurn::say(exam_restyle))
-                } else if sys.starts_with("You are the second examiner") {
-                    Some(MockTurn::say("NONE"))
-                } else if sys.starts_with("You are a referee") {
-                    let i = nth.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let verdicts = [
-                        "no_inline_style: GAP: \"Improve how index.html and styles.css look\"",
-                        "no_inline_style: OPEN: checking",
-                        "no_inline_style: GAP: \"styles belong in styles.css\"",
-                    ];
-                    Some(MockTurn::say(verdicts[i.min(2)]))
-                } else {
-                    None
-                }
-            }));
-            let meta = h
-                .start_scripted(
-                    StartRequest {
-                        cwd: ws.to_string_lossy().into_owned(),
-                        task: restyle.prompt.into(),
-                        mode: Some(mode.into()),
-                        max_turns: Some(12),
-                        ..Default::default()
-                    },
-                    provider,
-                )
-                .unwrap();
-            let end = wait_for_end(&h, &meta.id).await.unwrap();
-            eval_ws(restyle, &ws);
-            let (solved, tail) = verify(restyle, &ws).await;
-            assert_eq!(
-                solved, expect_solved,
-                "s3 restyle ({label}): end={:?}, verified={}, tail={tail}",
-                end.status, end.verified
-            );
-            if label == "prosage" {
-                assert!(
-                    end.verified
-                        && end.status == FinishStatus::Done
-                        && (2..=3).contains(&end.stats.turns),
-                    "{:?} turns={}",
-                    end.status,
-                    end.stats.turns
-                );
-            }
-        }
-
         // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
-        // Default accepts `finish` and fails when `test_pager.py` is restored; Ecosage and Prosage's
+        // Default accepts `finish` and fails when `test_pager.py` is restored; Ecosage's
         // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
@@ -2431,11 +2284,9 @@ u.urlopen(r).read()' "$1"; }"#;
             .find(|(p, _)| *p == "test_pager.py")
             .unwrap()
             .1;
-        for (label, mode, expect_solved) in [
-            ("default", "default", false),
-            ("ecosage", "ecosage", true),
-            ("prosage", "prosage", true),
-        ] {
+        for (label, mode, expect_solved) in
+            [("default", "default", false), ("ecosage", "ecosage", true)]
+        {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
             materialize(&ws, pager.files).unwrap();
@@ -2482,7 +2333,7 @@ u.urlopen(r).read()' "$1"; }"#;
                     )
                 }),
             ];
-            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let provider = MockProvider::new(turns);
             let meta = h
                 .start_scripted(
                     StartRequest {
@@ -2501,18 +2352,15 @@ u.urlopen(r).read()' "$1"; }"#;
             assert_eq!(solved, expect_solved, "s4 pager ({label}): tail={tail}");
         }
 
-        // Scenario 5 (`confdialect` — Ecosage rushes to `finish` when visible `unittest` passes, whereas
-        // Prosage's `COVERAGE_NOTE` prompts 20 turns of clause-by-clause self-testing + bug fixing without
-        // `settling` cutting the run short when a bug is discovered on turn 12 and fixed on turn 13).
+        // Scenario 5 (`confdialect`): once the visible tests pass, Ecosage's tip asks for the spec to be
+        // covered before `finish` but still accepts a direct one; this model takes it and misses §5.
         let conf = tasks::find("confdialect").unwrap();
         let conf_sol = conf.solution[0].1;
         let partial_conf = conf_sol.replace(
             "raise ConfError(\"continuation at the end of the file\", number)",
             "break",
         );
-        for (label, mode, expect_solved) in
-            [("ecosage", "ecosage", false), ("prosage", "prosage", true)]
-        {
+        for (label, mode, expect_solved) in [("ecosage", "ecosage", false)] {
             let h = Harness::at(base.join(format!("s5-{label}")));
             let ws = base.join(format!("ws-s5-{label}"));
             materialize(&ws, conf.files).unwrap();
@@ -2528,7 +2376,7 @@ u.urlopen(r).read()' "$1"; }"#;
                             // Visible tests pass on `partial_conf`, which misses trailing-backslash error.
                             MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": pc.clone(), "overwrite": true}))])
                         } else if step == 1 && last.contains("`finish` is accepted now") {
-                            // Ecosage qualifies `finish` with spec coverage, while still accepting a direct finish without examiners.
+                            // Ecosage qualifies `finish` with spec coverage, while still accepting a direct finish.
                             assert!(last.contains("once every rule in the task and its spec is covered"), "{last}");
                             MockTurn::calls("", vec![("finish", json!({"summary": "Visible tests pass."}))])
                         } else if step < 11 {
@@ -2547,7 +2395,7 @@ u.urlopen(r).read()' "$1"; }"#;
                     })
                 })
                 .collect();
-            let provider = MockProvider::new(turns).with_aside(noop_aside());
+            let provider = MockProvider::new(turns);
             let meta = h
                 .start_scripted(
                     StartRequest {
@@ -2568,94 +2416,8 @@ u.urlopen(r).read()' "$1"; }"#;
                 "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}",
                 end.status, end.stats.turns
             );
-            if label == "prosage" {
-                assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 20));
-            }
+            assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 2));
         }
-
-        // Scenario 6 (`audit` 262-line `notesvc/app.py` visibility): `notesvc/app.py` exceeds the
-        // 250-line worker cap, yet Prosage supplies it in `<more_files>` so the blind examiner sees
-        // every route handler and catches a missing vulnerability in `findings.json`.
-        let partial_findings = "[\n  {\"file\": \"notesvc/notes.py\", \"line\": 27, \"kind\": \"sql-injection\", \"summary\": \"SQL injection.\"},\n  {\"file\": \"notesvc/files.py\", \"line\": 18, \"kind\": \"path-traversal\", \"summary\": \"Path traversal.\"},\n  {\"file\": \"notesvc/export.py\", \"line\": 17, \"kind\": \"command-injection\", \"summary\": \"Command injection.\"},\n  {\"file\": \"notesvc/prefs.py\", \"line\": 14, \"kind\": \"insecure-deserialization\", \"summary\": \"Pickle cookie.\"}\n]\n";
-        let h = Harness::at(base.join("s6-prosage"));
-        let ws = base.join("ws-s6-prosage");
-        materialize(&ws, audit.files).unwrap();
-        let saw_app_py = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let saw_clone = saw_app_py.clone();
-        let exam_audit = "COMMAND: python3 {file}\n```python\nimport json, sys\nf = json.load(open('findings.json'))\nif len(f) < 5:\n    print('FAIL missing_vulns\\n  clause: report all real vulnerabilities\\n  got:', len(f))\n    print('EXAM: 0 passed, 1 failed')\n    sys.exit(1)\nprint('EXAM: 1 passed, 0 failed')\n```";
-        let turns: Vec<TurnFn> = vec![
-            Box::new(move |_| {
-                MockTurn::calls(
-                    "",
-                    vec![
-                        (
-                            "write",
-                            json!({"path": "findings.json", "content": partial_findings, "overwrite": true}),
-                        ),
-                        (
-                            "shell",
-                            json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
-                        ),
-                        ("finish", json!({"summary": "Reported 4 issues."})),
-                    ],
-                )
-            }),
-            Box::new(move |_| {
-                MockTurn::calls(
-                    "",
-                    vec![
-                        (
-                            "write",
-                            json!({"path": "findings.json", "content": audit_sol, "overwrite": true}),
-                        ),
-                        (
-                            "shell",
-                            json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
-                        ),
-                        ("finish", json!({"summary": "Reported all 6 issues."})),
-                    ],
-                )
-            }),
-        ];
-        let provider = MockProvider::new(turns).with_aside(Box::new(move |msgs| {
-            let sys = msgs.first()?.content.as_str();
-            if sys.starts_with("You route coding tasks") {
-                Some(MockTurn::say("security"))
-            } else if sys.starts_with("You are the examiner") {
-                let prompt = &msgs[1].content;
-                if prompt.contains("<more_files>\nnotesvc/app.py · 262 lines") {
-                    saw_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                }
-                Some(MockTurn::say(exam_audit))
-            } else if sys.starts_with("You are the second examiner") {
-                Some(MockTurn::say("NONE"))
-            } else if sys.starts_with("You are a referee") {
-                Some(MockTurn::say(
-                    "missing_vulns: GAP: \"one object per real vulnerability\"",
-                ))
-            } else {
-                None
-            }
-        }));
-        let meta = h
-            .start_scripted(
-                StartRequest {
-                    cwd: ws.to_string_lossy().into_owned(),
-                    task: audit.prompt.into(),
-                    mode: Some("prosage".into()),
-                    max_turns: Some(10),
-                    ..Default::default()
-                },
-                provider,
-            )
-            .unwrap();
-        let end = wait_for_end(&h, &meta.id).await.unwrap();
-        eval_ws(audit, &ws);
-        assert!(
-            saw_app_py.load(std::sync::atomic::Ordering::SeqCst),
-            "examiner must see 262-line notesvc/app.py in <more_files>"
-        );
-        assert!(verify(audit, &ws).await.0 && end.verified);
 
         let _ = std::fs::remove_dir_all(&base);
     }

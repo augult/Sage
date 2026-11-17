@@ -149,13 +149,12 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
 export const MODES = [
   { value: 'ecosage', label: 'Ecosage', title: 'Faster runs, lower cost' },
   { value: 'default', label: 'Default', title: 'Standard tool-by-tool workflow' },
-  { value: 'prosage', label: 'Prosage', title: 'Extra review for thorough results. Uses more time and requests.' },
 ];
 
 /** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
 export const plainMode = (mode) => mode === 'default' || mode === 'classic';
 
-/** A session's mode as its record spells it (`prosage without examiner`), with the mode's name as the app shows it. */
+/** A session's mode as its record spells it (`ecosage without watches`), with the mode's name as the app shows it. */
 export function modeLabel(mode) {
   const [name, ...rest] = String(mode ?? '').split(' ');
   const known = MODES.find((option) => option.value === (name === 'classic' ? 'default' : name));

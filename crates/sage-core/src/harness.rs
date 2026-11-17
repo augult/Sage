@@ -83,7 +83,7 @@ pub struct StartRequest {
     /// `low`, `high`, `max`, `off`, or `ratchet[-low|-high]`.
     #[serde(default)]
     pub effort: Option<String>,
-    /// `ecosage` (default), `default` or `prosage`, the conventional baseline loop.
+    /// `ecosage` (default) or `default`, the conventional baseline loop.
     #[serde(default)]
     pub mode: Option<String>,
     /// `auto` (default) or `ask`.
@@ -99,7 +99,7 @@ pub struct StartRequest {
     /// Mechanisms to switch off, for ablation runs (see `Features::NAMES`).
     #[serde(default)]
     pub without: Vec<String>,
-    /// Mechanisms to switch on that are off unless asked for (see `Features::OPTIONAL`).
+    /// Mechanisms to switch on, e.g. Sage's own in the conventional loop (see `Features::NAMES`).
     #[serde(default)]
     pub with: Vec<String>,
     /// A system prompt template for this run alone, in place of the user's or the built-in one.
@@ -932,12 +932,6 @@ impl Harness {
             .time_budget_secs
             .filter(|s| *s > 0)
             .map(Duration::from_secs);
-        if features.routing {
-            cfg.routable = skills::list(&self.inner.data_dir, Some(Path::new(&cwd)))
-                .into_iter()
-                .filter(|s| !skill_names.contains(&s.name))
-                .collect();
-        }
 
         let now = now_ms();
         let meta = SessionMeta {
@@ -1533,7 +1527,7 @@ impl Harness {
                 "it was not played by a stand-in".into()
             }));
         }
-        let snapshot = resume::read(&dir).map_err(cannot)?;
+        let mut snapshot = resume::read(&dir).map_err(cannot)?;
         if !Path::new(&meta.cwd).is_dir() {
             return Err(cannot(format!("its folder {} is gone", meta.cwd)));
         }
@@ -1564,6 +1558,20 @@ impl Harness {
 
         let ws = Workspace::new(Path::new(&meta.cwd))
             .map_err(|e| cannot(format!("cannot use {:?} as a workspace: {e}", meta.cwd)))?;
+        // A session stored before Prosage was taken out comes back as Ecosage, without the
+        // mechanisms that went with it.
+        let current = |names: &[String]| -> Vec<String> {
+            names
+                .iter()
+                .filter(|n| !Features::RETIRED.contains(&n.replace('-', "_").as_str()))
+                .cloned()
+                .collect()
+        };
+        snapshot.setup.with = current(&snapshot.setup.with);
+        snapshot.setup.without = current(&snapshot.setup.without);
+        if snapshot.setup.mode.eq_ignore_ascii_case("prosage") {
+            snapshot.setup.mode = Mode::Ecosage.as_str().to_string();
+        }
         let (features, mode) = features_of(&StartRequest {
             mode: Some(snapshot.setup.mode.clone()),
             with: snapshot.setup.with.clone(),
@@ -2199,7 +2207,7 @@ mod tests {
             (Some("ecosage"), "ecosage", "ratchet-low"),
             (Some("default"), "default", "ratchet-low"),
             (Some("classic"), "default", "ratchet-low"),
-            (Some("Prosage"), "prosage", "ratchet-low"),
+            (Some("Ecosage"), "ecosage", "ratchet-low"),
         ] {
             let meta = h
                 .start_scripted(
@@ -2217,29 +2225,35 @@ mod tests {
         assert_eq!(
             h.start_scripted(req(Some("turbo")), MockProvider::scripted(vec![]))
                 .unwrap_err(),
-            "unknown mode \"turbo\"; use ecosage, default, prosage"
+            "unknown mode \"turbo\"; use ecosage, default"
         );
-        // An effort that was chosen stands, and Prosage can be run without a part of itself.
+        // Prosage is gone: asking for it is an error like any unknown mode.
+        assert_eq!(
+            h.start_scripted(req(Some("prosage")), MockProvider::scripted(vec![]))
+                .unwrap_err(),
+            "unknown mode \"prosage\"; use ecosage, default"
+        );
+        // An effort that was chosen stands, and a mode can be run without a part of itself.
         let meta = h
             .start_scripted(
                 StartRequest {
                     effort: Some("low".into()),
-                    without: vec!["examiner".into()],
-                    ..req(Some("prosage"))
+                    without: vec!["watches".into()],
+                    ..req(Some("ecosage"))
                 },
                 MockProvider::scripted(vec![MockTurn::say("ok")]),
             )
             .unwrap();
         assert_eq!(
             (meta.mode.as_str(), meta.effort.as_str()),
-            ("prosage without examiner", "low")
+            ("ecosage without watches", "low")
         );
         // What is stored for a restart names the mode, so the session comes back as what it was.
         until_idle(&h, &meta.id).await;
         let setup = resume::read(&session_dir(&h, &meta.id)).unwrap().setup;
         assert_eq!(
             (setup.mode.as_str(), setup.without.as_slice()),
-            ("prosage", &["examiner".to_string()][..])
+            ("ecosage", &["watches".to_string()][..])
         );
         let back = features_of(&StartRequest {
             mode: Some(setup.mode),
@@ -2250,35 +2264,18 @@ mod tests {
         assert_eq!(
             back,
             (
-                Features::prosage().without("examiner").unwrap(),
-                Mode::Prosage
+                Features::ecosage().without("watches").unwrap(),
+                Mode::Ecosage
             )
         );
 
-        // Prosage is Ecosage and what Ecosage leaves out to stay cheap; the conventional loop has none of either.
-        let (pro, plain) = (Mode::Prosage.features(), Mode::Plain.features());
+        // Ecosage has every mechanism; the conventional loop has none.
+        assert_eq!(Mode::Ecosage.features(), Features::ecosage());
+        assert_eq!(Mode::Plain.features(), Features::classic());
         assert!(
-            pro.long_thought
-                && pro.unhurried
-                && pro.examiner
-                && pro.panel
-                && pro.referee
-                && pro.routing
-                && pro.scripts
-                && pro.gate
-        );
-        assert!(
-            !plain.scripts
-                && !plain.examiner
-                && !plain.referee
-                && !plain.routing
-                && Mode::Ecosage.features() == Features::ecosage()
-        );
-        assert_eq!(
-            Features::OPTIONAL
+            Features::NAMES
                 .iter()
-                .fold(Features::ecosage(), |f, name| f.with(name).unwrap()),
-            pro
+                .all(|name| Features::classic().with(name).unwrap() != Features::classic())
         );
     }
 
@@ -3110,6 +3107,54 @@ mod tests {
         let meta = h.start_scripted(req, recording(&seen, turns)).unwrap();
         until_idle(&h, &meta.id).await;
         (h, meta.id, cwd, seen)
+    }
+
+    #[tokio::test]
+    async fn a_session_stored_as_prosage_comes_back_as_ecosage_without_the_retired_mechanisms() {
+        use crate::provider::mock::MockTurn;
+        let h = harness("resume-prosage");
+        let cwd = resume_workspace(&h);
+        let req = StartRequest {
+            cwd,
+            task: "hello".into(),
+            interactive: true,
+            ..Default::default()
+        };
+        let meta = h
+            .start_scripted(req, MockProvider::scripted(vec![MockTurn::say("ok")]))
+            .unwrap();
+        until_idle(&h, &meta.id).await;
+        let dir = session_dir(&h, &meta.id);
+        let data = h.inner.data_dir.clone();
+        drop(h);
+
+        // What a session of the Prosage mode stored before the mode was taken out.
+        let mut snapshot = resume::read(&dir).unwrap();
+        snapshot.setup.mode = "prosage".into();
+        snapshot.setup.without = vec!["examiner".into(), "watches".into()];
+        snapshot.setup.with = vec!["long-thought".into()];
+        resume::write_atomic(
+            &dir.join(resume::SNAPSHOT),
+            &serde_json::to_vec(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let back = Harness::at(data);
+        back.resume_stand_ins(true);
+        listed_free(&back).await;
+        back.resume_scripted(&meta.id, MockProvider::scripted(vec![MockTurn::say("ok")]))
+            .unwrap();
+        back.send_with_skills(&meta.id, "again", &[]).unwrap();
+        until_idle(&back, &meta.id).await;
+        let setup = resume::read(&dir).unwrap().setup;
+        assert_eq!(
+            (
+                setup.mode.as_str(),
+                setup.with.len(),
+                setup.without.as_slice()
+            ),
+            ("ecosage", 0, &["watches".to_string()][..])
+        );
     }
 
     #[tokio::test]

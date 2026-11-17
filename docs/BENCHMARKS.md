@@ -19,6 +19,29 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
   --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## Python, Rust and Go, 17 November 2026 (fourteenth session)
+
+36 tasks from the Exercism polyglot set, 12 each in Python, Rust and Go, built into a local
+`sage bench` for this run only (they are not among the shipped tasks). The agent sees the task and its starting files; the tests stay hidden until it finishes. DeepSeek V4.1
+Flash through Logfare, effort `ratchet`, every task twice per harness (72 runs each). Each harness
+ran under its own system account with no network beyond the gateway and no way to read the hidden
+tests. Runs broken by the benchmark machine (a full disk) or by the gateway (503s) were run again.
+
+| Harness | Solved | Python | Rust | Go | Total cost | Time per run |
+|---|---|---|---|---|---|---|
+| Ecosage | 44/72 | 13/24 | 17/24 | 14/24 | $2.73 | 3.8 min |
+| OpenCode | 44/72 | 13/24 | 17/24 | 14/24 | $4.51 | 6.2 min |
+| Prosage | 41/72 | 11/24 | 17/24 | 13/24 | $7.12 | 7.1 min |
+| Unharnessed | 39/72 | 13/24 | 17/24 | 9/24 | $5.13 | 8.7 min |
+
+Every transcript was checked for the hidden tests or the reference solutions. Five runs held 90%
+or more of one, most likely from memory, since the exercises are public; without them Ecosage is
+44/71 and OpenCode 42/70. Gaps of two or three runs are within chance.
+
+What follows: Ecosage matches OpenCode at about 60% of its cost and time. Prosage spent the most
+and solved fewer than Ecosage, so it was taken out of the harness in this session (`README.md`,
+"Modes"). The sections below are kept as the record of what it was measured at.
+
 ## Prosage for less, 14 November 2026 (thirteenth session)
 
 What Prosage spends, and what of it buys nothing. DeepSeek V4.1 Flash

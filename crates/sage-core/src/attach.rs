@@ -32,14 +32,6 @@ const SURVEY_TREE: usize = 40;
 const SURVEY_FILES: usize = 24;
 const SURVEY_TOTAL_LINES: usize = 1000;
 const SURVEY_TOTAL_BYTES: u64 = 40 * 1024;
-/// Readers beside the conversation (examiners, referees) have no `read` tool, and their prompt is
-/// sent once rather than re-read on every turn: give them the files `attach` had to leave out.
-const READER_TREE: usize = 60;
-const READER_FILES: usize = 48;
-const READER_FILE_LINES: usize = 1_200;
-const READER_FILE_BYTES: u64 = 64 * 1024;
-const READER_TOTAL_LINES: usize = 3_000;
-const READER_TOTAL_BYTES: u64 = 120 * 1024;
 /// Files too long to attach that are still mentioned, with their length.
 const MAX_MENTIONED: usize = 4;
 /// Named files looked at, however many a long task lists.
@@ -320,71 +312,6 @@ pub fn attach(sess: &mut Session, task: &str) -> Option<Attached> {
         text,
         summary: summary.join("; "),
     })
-}
-
-/// Files that `attach` left out of the worker's opening (longer specifications, source files past
-/// the 250-line or 24-file worker caps), formatted for readers that have no tools of their own.
-/// `None` when every qualifying file is already in `seen`.
-pub fn for_readers(ws: &Workspace, seen: &crate::workspace::Seen, task: &str) -> Option<String> {
-    let named = named_files(task, ws);
-    let named_count = named.len();
-    let rest: Vec<Named> = small_tree(&ws.root, READER_TREE)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|rel| ws.root.join(rel))
-        .map(|p| Named {
-            path: p.clone(),
-            real: p,
-        })
-        .collect();
-    let mut taken: HashSet<PathBuf> = HashSet::new();
-    let mut blocks: Vec<String> = Vec::new();
-    let (mut lines_left, mut bytes_left) = (READER_TOTAL_LINES, READER_TOTAL_BYTES);
-    for (i, named) in named.into_iter().chain(rest).enumerate() {
-        let asked_for = i < named_count;
-        if blocks.len() == READER_FILES {
-            break;
-        }
-        let instructions = !asked_for
-            && named
-                .real
-                .file_name()
-                .is_some_and(|n| n == "AGENTS.md" || n == "CLAUDE.md");
-        if instructions
-            || !taken.insert(named.real.clone())
-            || named
-                .real
-                .strip_prefix(&ws.root)
-                .is_ok_and(may_hold_secrets)
-        {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(&named.real) else {
-            continue;
-        };
-        if bytes.is_empty()
-            || bytes.len() as u64 > READER_FILE_BYTES.min(bytes_left)
-            || bytes.iter().take(8192).any(|b| *b == 0)
-        {
-            continue;
-        }
-        let Ok(content) = std::str::from_utf8(&bytes) else {
-            continue;
-        };
-        let lines = content.lines().count();
-        if lines == 0 || lines > READER_FILE_LINES.min(lines_left) {
-            continue;
-        }
-        let hash = crate::util::fnv64(&bytes);
-        if seen.covered(&named.real, hash, 1, lines) {
-            continue;
-        }
-        lines_left -= lines;
-        bytes_left -= bytes.len() as u64;
-        let shown = ws.display(&named.path);
-        blocks.push(format!("{shown} · {lines} lines\n{}", content.trim_end()));
-    }
-    (!blocks.is_empty()).then(|| format!("<more_files>\n{}\n</more_files>", blocks.join("\n\n")))
 }
 
 #[cfg(test)]
@@ -675,35 +602,5 @@ mod tests {
             attach(&mut s, "Fix src/f1.py.").unwrap().summary,
             "attached src/f1.py (1 lines)"
         );
-    }
-
-    #[test]
-    fn toolless_readers_receive_longer_specs_and_files_past_the_worker_cap_without_duplicating_seen_files()
-     {
-        let mut s = test_session("attach-readers", Features::ecosage());
-        put(&s, "short.py", "x = 1\n");
-        // 270 lines: left out of the worker's <files>, included for tool-less readers.
-        put(&s, "notesvc/app.py", &numbered(270));
-        put(&s, ".env", "SECRET=nope\n");
-        for i in 1..=26 {
-            put(&s, &format!("mod/m{i:02}.py"), &format!("v = {i}\n"));
-        }
-        let task = "Audit `notesvc/app.py` and `short.py`.";
-        let worker = attach(&mut s, task).unwrap();
-        assert!(
-            worker.text.contains("notesvc/app.py · 270 lines")
-                && worker.text.contains("not attached")
-        );
-
-        let extra =
-            for_readers(&s.ws, &s.seen, task).expect("omitted files are supplied to readers");
-        assert!(
-            extra.starts_with("<more_files>\nnotesvc/app.py · 270 lines\nline 1\n")
-                && extra.contains("\nline 270"),
-            "{extra}"
-        );
-        // Files past the worker's 24-file cap come through too; already-attached files and secrets do not.
-        assert!(extra.contains("mod/m26.py · 1 lines\nv = 26"));
-        assert!(!extra.contains("short.py ·") && !extra.contains("SECRET"));
     }
 }

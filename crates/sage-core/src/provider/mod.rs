@@ -245,16 +245,6 @@ impl Provider {
         }
     }
 
-    /// Whether a request beside the conversation gets an answer of its own. A scripted stand-in
-    /// has one only where its script provides for it; otherwise such a request would take a turn
-    /// of the conversation.
-    pub fn answers_beside(&self) -> bool {
-        match self {
-            Provider::OpenAi(_) => true,
-            Provider::Mock(p) => p.has_aside(),
-        }
-    }
-
     /// True for the scripted provider: its numbers are fabricated and must be labelled as such.
     pub fn simulated(&self) -> bool {
         matches!(self, Provider::Mock(_))

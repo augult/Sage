@@ -85,9 +85,6 @@ pub struct Runner<'a> {
     pub interactive: bool,
     /// The budget ends with this reply: `finish` is taken as it stands, since nothing can follow it.
     pub landing: bool,
-    /// Active blind examiners are waiting behind `finish` on a watchless workspace, so `finish`
-    /// after an edit may pass through to `exam_check` instead of tripping the `expect_exit` gate first.
-    pub exam_gates_finish: bool,
 }
 
 fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
@@ -347,7 +344,6 @@ impl Runner<'_> {
     /// Asks for approval where the step needs it. Returns what the model is told if it was refused.
     async fn refusal(&mut self, call: &Call, tool: Tool) -> Option<StepOutput> {
         // Whatever the autonomy: what a tool prints goes to the provider with the next request.
-        // Seen live: a run that went looking for the examiners' cases printed this file.
         let named = match tool {
             Tool::Shell => str_arg(&call.args, "cmd"),
             Tool::Read | Tool::Search => str_arg(&call.args, "path"),
@@ -464,9 +460,6 @@ impl Runner<'_> {
             // A run that left the workspace alone is also the current result of any watch on that
             // command, and the model's own test command becomes a watch here.
             if let (Some(run), true) = (&meta.completed, self.sess.evidence.epoch == epoch_before) {
-                if meta.ok && !proves_nothing(&meta.cmd) {
-                    self.sess.evidence.note_checked();
-                }
                 let seen = watches::observe(self.sess, &meta.cmd, run);
                 for r in &seen.reports {
                     self.sink.emit(EventKind::Watch {
@@ -673,14 +666,6 @@ impl Runner<'_> {
             });
             return StepOutput::ok("[done] accepted without verification");
         }
-        if self.exam_gates_finish {
-            res.finished = Some(Finished {
-                summary,
-                verified: false,
-                evidence: format!("not checked since {}", ev.last_change),
-            });
-            return StepOutput::ok("[done] pending examination");
-        }
         // The gate asks for a check; it must not be able to trap a model that cannot produce one.
         ev.refusals += 1;
         if ev.refusals > 2 {
@@ -754,7 +739,6 @@ mod tests {
             autonomy: Autonomy::Auto,
             interactive: false,
             landing,
-            exam_gates_finish: false,
         }
         .run(&calls(list))
         .await;
@@ -1232,7 +1216,6 @@ mod tests {
             autonomy: Autonomy::Ask,
             interactive: true,
             landing: false,
-            exam_gates_finish: false,
         };
         let (res, _) = tokio::join!(runner.run(&list), answer);
         assert!(s.ws.root.join("a.txt").exists() && !s.ws.root.join("b.txt").exists());

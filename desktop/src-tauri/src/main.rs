@@ -83,7 +83,7 @@ struct Scripted {
     /// Skills the session starts with, by name.
     #[serde(default)]
     skills: Vec<String>,
-    /// `sage` (when left out), `default` or `prosage`.
+    /// `sage` (when left out) or `default`.
     #[serde(default)]
     mode: Option<String>,
     /// Milliseconds between streamed chunks of a reply.

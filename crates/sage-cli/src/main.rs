@@ -32,13 +32,8 @@ OPTIONS for run
                            The same in every mode: a level you set is the level the run thinks at
       --mode <name>        ecosage (default): few requests, at a little cost to the result
                            default: the conventional loop of other harnesses, nothing of Sage's
-                           prosage: for the result alone. Nothing hurries the run, two examiners who
-                           never see the work check it against the task's text, referees decide
-                           which of their failing cases the text bears out, and skills are
-                           switched on unasked; costs more requests and time
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch on a mechanism that is off unless asked for: long_thought, unhurried,
-                           examiner, panel, referee, routing (repeatable; prosage has them all)
+      --with <name>        switch one mechanism on, e.g. watches in the default mode (repeatable)
       --goal <condition>   keep working until an independent check agrees the condition holds; with
                            no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)
@@ -188,13 +183,8 @@ impl Printer {
         } else {
             String::new()
         };
-        let beside = if s.side_requests > 0 {
-            format!(" · requests beside the conversation {}", s.side_requests)
-        } else {
-            String::new()
-        };
         [
-            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}{beside}", s.turns, s.steps, s.surprises),
+            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}", s.turns, s.steps, s.surprises),
             format!("tokens: in {} ({} cached) · out {} ({} thinking) · {cost}", k(s.prompt_tokens), pct(s.cached_tokens, s.prompt_tokens), k(s.output_tokens), k(s.reasoning_tokens)),
             format!(
                 "time {} (model {}, tools {}) · output kept out of context {} · repairs {} · retries {} · cache misses {}",

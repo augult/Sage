@@ -1,6 +1,9 @@
 # Handoff: Sage
 
-Read this first. State: 14 November 2026, after the thirteenth session. The tenth removed the reflex
+Read this first. State: 17 November 2026, after the fourteenth session, which **took Prosage
+out** (next section). What follows about Prosage is the record of earlier sessions.
+
+Before that: state on 14 November 2026, after the thirteenth session. The tenth removed the reflex
 memory and the review pass, added `/goal`, made a stored session continuable after a restart, and
 gave the harness three modes: Ecosage, Default (the conventional loop, `classic` until now) and
 Prosage. The eleventh renamed the product (it was Presage, and Ecosage was `presage`), reworked
@@ -10,6 +13,24 @@ across all 24 benchmark tasks. The thirteenth measured that code live (**48/48**
 Prosage spends beside the run: **23% less cost, 41% less time, still 48/48** (next section).
 Design notes are in `README.md`; every number is in `docs/BENCHMARKS.md`; research is in
 `docs/RESEARCH.md`.
+
+## Fourteenth session: Prosage taken out, and an audit (17 November 2026)
+
+The Python, Rust and Go benchmark (`docs/BENCHMARKS.md`, first section) had Prosage solve fewer
+tasks than Ecosage (41/72 against 44/72) at 2.6 times the cost, and Ecosage tie OpenCode at about
+60% of its cost and time. The owner asked for Prosage to be removed.
+
+- **Removed**: the `prosage` mode, and the six mechanisms only it used (`examiner`, `panel`,
+  `referee`, `long_thought`, `unhurried`, `routing`), with `examiner.rs`, the readers' file supply
+  in `attach.rs`, the settling rule and the examiner gate in `agent.rs` and `script.rs`, the scripted
+  provider's answers beside the run, the `side_requests` stat, the bench variant, the CLI help and
+  the desktop app's Prosage option. `--with` / `+<mechanism>` now switch any mechanism on, e.g. in
+  the conventional loop.
+- **Kept working**: a session stored as Prosage resumes as Ecosage, and retired mechanism names in
+  its stored setup are dropped (`Features::RETIRED`; tested).
+- **Fixed**: a reply cut off for overthinking was priced without the peak-hour multiplier and did
+  not mark the session as priced; it is now booked like every other request (`count_usage`).
+- **Dead code removed**: `Evidence::resync` and `checked_epoch`, which only the examiner read.
 
 ## Thirteenth session: Prosage for less (14 November 2026)
 
