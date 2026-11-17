@@ -1,0 +1,248 @@
+{
+  "id": "20261117-220450-1f62",
+  "started_ms": 1794953090959,
+  "provider": "logfare",
+  "effort": "ratchet",
+  "repeats": 1,
+  "simulated": false,
+  "dir": "/home/sb-oc1/sage/bench/20261117-220450-1f62",
+  "models": [
+    "glm-5.3"
+  ],
+  "tasks": [
+    "pgb-rs-fizzy"
+  ],
+  "variants": [
+    "ext:opencode"
+  ],
+  "prefix_tokens": [],
+  "first_prompt_tokens": [
+    {
+      "variant": "ext:opencode",
+      "tokens": 7152
+    }
+  ],
+  "skipped_tasks": [],
+  "not_started": 0,
+  "summary": [
+    {
+      "model": "glm-5.3",
+      "task": "pgb-rs-fizzy",
+      "variant": "ext:opencode",
+      "runs": 1,
+      "errors": 0,
+      "solved": 0,
+      "false_done": 0,
+      "total_cost": 0.074211,
+      "median": {
+        "turns": 9.0,
+        "steps": 0.0,
+        "prompt_tokens": 67643.0,
+        "cached_tokens": 57600.0,
+        "output_tokens": 10267.0,
+        "reasoning_tokens": 0.0,
+        "cost": 0.074211,
+        "cost_uncached": 0.139875,
+        "elapsed_ms": 337456.0
+      }
+    },
+    {
+      "model": "glm-5.3",
+      "task": "ALL",
+      "variant": "ext:opencode",
+      "runs": 1,
+      "errors": 0,
+      "solved": 0,
+      "false_done": 0,
+      "total_cost": 0.074211,
+      "median": {
+        "turns": 9.0,
+        "steps": 0.0,
+        "prompt_tokens": 67643.0,
+        "cached_tokens": 57600.0,
+        "output_tokens": 10267.0,
+        "reasoning_tokens": 0.0,
+        "cost": 0.074211,
+        "cost_uncached": 0.139875,
+        "elapsed_ms": 337456.0
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "glm-5.3",
+      "task": "pgb-rs-fizzy",
+      "variant": "ext:opencode",
+      "repeat": 1,
+      "session": "0-pgb-rs-fizzy-ext-opencode-0",
+      "outcome": "error",
+      "harness_verified": false,
+      "solved": false,
+      "failure": "exit code 1: \u001b[91m\u001b[1mError: \u001b[0m{\"message\":\"The model did not respond in time.\",\"type\":\"api_error\",\"param\":null,\"code\":\"upstream_error\"}",
+      "verify_tail": "failures:\n    custom\n    f64\n    minimal_generic_bounds\n    nonsequential\n    simple\n    u64\n    u8\n\ntest result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `--test fizzy`",
+      "error": null,
+      "cost_uncached": 0.139875,
+      "stats": {
+        "turns": 9,
+        "steps": 0,
+        "skipped": 0,
+        "surprises": 0,
+        "predictions": 0,
+        "predictions_held": 0,
+        "prompt_tokens": 67643,
+        "cached_tokens": 57600,
+        "output_tokens": 10267,
+        "reasoning_tokens": 0,
+        "context_tokens": 12595,
+        "cost": 0.074211,
+        "priced": true,
+        "hidden_bytes": 0,
+        "repairs": 0,
+        "retries": 0,
+        "cache_misses": 0,
+        "cache_busts": 0,
+        "goal_checks": 0,
+        "elapsed_ms": 337456,
+        "model_ms": 336649,
+        "tool_ms": 0
+      },
+      "external": {
+        "exit_code": 1,
+        "log": "/home/sb-oc1/sage/bench/20261117-220450-1f62/external/0-pgb-rs-fizzy-ext-opencode-0/output.log",
+        "usage": {
+          "turns": 9,
+          "prompt_tokens": 67643,
+          "cached_tokens": 57600,
+          "output_tokens": 10267,
+          "reasoning_tokens": 0,
+          "first_prompt_tokens": 7152,
+          "context_tokens": 12595,
+          "cost": 0.074211,
+          "cost_uncached": 0.139875,
+          "priced": true,
+          "model_ms": 336649,
+          "unmetered": 1,
+          "usage_injected": 0,
+          "failed": 0,
+          "refused": 0,
+          "other_requests": 0,
+          "models": [
+            "glm-5.3"
+          ],
+          "last_error": null,
+          "last_status": 200,
+          "calls": [
+            {
+              "at_ms": 3073,
+              "ms": 2415,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 2,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 7152,
+              "cached_tokens": 6720,
+              "output_tokens": 160
+            },
+            {
+              "at_ms": 2568,
+              "ms": 3171,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 3,
+              "tools": 0,
+              "status": 200,
+              "prompt_tokens": 587,
+              "cached_tokens": 512,
+              "output_tokens": 243
+            },
+            {
+              "at_ms": 5575,
+              "ms": 31651,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 6,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 8335,
+              "cached_tokens": 7040,
+              "output_tokens": 4349
+            },
+            {
+              "at_ms": 37335,
+              "ms": 8610,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 10,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 8633,
+              "cached_tokens": 6720,
+              "output_tokens": 184
+            },
+            {
+              "at_ms": 46351,
+              "ms": 7700,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 13,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 8808,
+              "cached_tokens": 8512,
+              "output_tokens": 67
+            },
+            {
+              "at_ms": 54089,
+              "ms": 2453,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 15,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 9130,
+              "cached_tokens": 6720,
+              "output_tokens": 78
+            },
+            {
+              "at_ms": 56615,
+              "ms": 36785,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 17,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 12403,
+              "cached_tokens": 9088,
+              "output_tokens": 5013
+            },
+            {
+              "at_ms": 93482,
+              "ms": 2838,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 19,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 12595,
+              "cached_tokens": 12288,
+              "output_tokens": 173
+            },
+            {
+              "at_ms": 96372,
+              "ms": 241026,
+              "model": "glm-5.3",
+              "stream": true,
+              "messages": 21,
+              "tools": 10,
+              "status": 200,
+              "prompt_tokens": 0,
+              "cached_tokens": 0,
+              "output_tokens": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

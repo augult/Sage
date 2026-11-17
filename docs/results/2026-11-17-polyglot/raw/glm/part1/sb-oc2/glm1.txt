@@ -1,0 +1,30 @@
+[1/36] glm-5.3 · pgb-rs-ocr-numbers · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 8 turns · $0.0103 · 10m41s
+[2/36] glm-5.3 · pgb-py-bowling · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 22 turns · $0.0886 · 20m00s
+[3/36] glm-5.3 · pgb-py-two-bucket · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 22 turns · $0.0983 · 20m00s
+[4/36] glm-5.3 · pgb-rs-xorcism · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 6 turns · $0.0309 · 7m54s
+[5/36] glm-5.3 · pgb-rs-wordy · ext:opencode #1: NOT solved (done) · 19 turns · $0.1018 · 17m21s
+[6/36] glm-5.3 · pgb-go-alphametics · ext:opencode #1: NOT solved (done) · 7 turns · $0.0396 · 8m01s
+[7/36] glm-5.3 · pgb-go-connect · ext:opencode #1: NOT solved (done) · 8 turns · $0.1779 · 4m29s
+[8/36] glm-5.3 · pgb-go-dominoes · ext:opencode #1: NOT solved (done) · 8 turns · $0.2025 · 5m24s
+[9/36] glm-5.3 · pgb-go-hexadecimal · ext:opencode #1: NOT solved (done) · 12 turns · $0.0460 · 51s
+[10/36] glm-5.3 · pgb-go-poker · ext:opencode #1: NOT solved (done) · 8 turns · $0.1924 · 4m50s
+[11/36] glm-5.3 · pgb-go-forth · ext:opencode #1: NOT solved (done) · 7 turns · $0.3353 · 8m33s
+[12/36] glm-5.3 · pgb-go-bowling · ext:opencode #1: solved · 59 turns · $1.1289 · 18m34s
+[13/36] glm-5.3 · pgb-go-scale-generator · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 9 turns · $0.0085 · 12m33s
+[14/36] glm-5.3 · pgb-go-react · ext:opencode #1: solved · 32 turns · $0.2753 · 19m59s
+[15/36] glm-5.3 · pgb-go-robot-simulator · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 30 turns · $0.2779 · 20m02s
+[16/36] glm-5.3 · pgb-go-zebra-puzzle · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 15 turns · $0.0919 · 8m11s
+[17/36] glm-5.3 · pgb-py-zebra-puzzle · ext:opencode #1: solved · 10 turns · $0.0816 · 4m55s
+[18/36] glm-5.3 · pgb-go-two-bucket · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 9 turns · $0.0128 · 20m02s
+[19/36] glm-5.3 · pgb-rs-bowling · ext:opencode #1: solved · 35 turns · $0.3105 · 20m02s
+[20/36] glm-5.3 · pgb-rs-book-store · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 8 turns · $0.0040 · 14m54s
+[21/36] glm-5.3 · pgb-rs-react · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model is temporarily unavailable.","type"…) · 12 turns · $0.0057 · 12m37s
+[22/36] glm-5.3 · pgb-rs-parallel-letter-frequency · ext:opencode #1: solved · 34 turns · $0.1482 · 20m00s
+[23/36] glm-5.3 · pgb-rs-fizzy · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 50 turns · $0.3079 · 20m02s
+[24/36] glm-5.3 · pgb-rs-dot-dsl · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 35 turns · $0.4083 · 20m00s
+[25/36] glm-5.3 · pgb-py-food-chain · ext:opencode #1: NOT solved (done) · 15 turns · $0.0929 · 2m12s
+[26/36] glm-5.3 · pgb-py-paasio · ext:opencode #1: NOT solved (budget: stopped at the limit of 60 model requests) · 60 turns · $0.5221 · 17m51s
+[27/36] glm-5.3 · pgb-py-forth · ext:opencode #1: NOT solved (done) · 10 turns · $0.3100 · 5m49s
+[28/36] glm-5.3 · pgb-py-connect · ext:opencode #1: NOT solved (done) · 17 turns · $0.3740 · 12m46s
+[29/36] glm-5.3 · pgb-rs-two-bucket · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 7 turns · $0.0903 · 5m54s
+[30/36] glm-5.3 · pgb-rs-variable-length-quantity · ext:opencode #1: solved · 28 turns · $0.4224 · 5m56s

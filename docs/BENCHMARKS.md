@@ -19,6 +19,21 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
   --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## GLM-5.3 on the same tasks, 17 November 2026
+
+The Python, Rust and Go set below, run again on GLM-5.3 through Logfare with Sage 0.3.0, Ecosage
+and OpenCode only. Everything about both runs (per-run rows, raw output, scripts, audit) is in
+`docs/results/2026-11-17-polyglot/`.
+
+| Harness | Solved | Python | Rust | Go | Total cost | Time per run |
+|---|---|---|---|---|---|---|
+| Ecosage | 31/72 | 8/24 | 15/24 | 8/24 | $8.86 | 4.6 min |
+| OpenCode | 19/72 | 3/24 | 9/24 | 7/24 | $21.65 | 11.5 min |
+
+Both asked GLM-5.3 for the same reasoning effort (`low`). OpenCode's requests each wrote about
+5–6 times as much and took nearly twice as long, and 18 of its runs ended at the 20-minute or
+60-request limit, against one of Ecosage's. No solved run held the hidden tests or the solution.
+
 ## Python, Rust and Go, 17 November 2026 (fourteenth session)
 
 36 tasks from the Exercism polyglot set, 12 each in Python, Rust and Go, built into a local

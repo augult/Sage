@@ -1,0 +1,21 @@
+[1/36] deepseek-v4.1-flash-1017 · pgb-py-bowling · prosage #1: NOT solved (done) · 20 turns · $0.1624 · 5m26s
+[2/36] deepseek-v4.1-flash-1017 · pgb-py-two-bucket · prosage #1: solved · 13 turns · $0.1151 · 3m32s
+[3/36] deepseek-v4.1-flash-1017 · pgb-py-zebra-puzzle · prosage #1: solved · 10 turns · $0.0321 · 47s
+[4/36] deepseek-v4.1-flash-1017 · pgb-rs-book-store · prosage #1: solved · 11 turns · $0.0661 · 4m00s
+[5/36] deepseek-v4.1-flash-1017 · pgb-rs-bowling · prosage #1: solved · 12 turns · $0.1205 · 2m59s
+[6/36] deepseek-v4.1-flash-1017 · pgb-rs-dot-dsl · prosage #1: NOT solved (done) · 17 turns · $0.1346 · 3m23s
+[7/36] deepseek-v4.1-flash-1017 · pgb-rs-fizzy · prosage #1: solved · 22 turns · $0.1068 · 2m56s
+[8/36] deepseek-v4.1-flash-1017 · pgb-rs-forth · prosage #1: NOT solved (done) · 47 turns · $0.2364 · 11m37s
+[9/36] deepseek-v4.1-flash-1017 · pgb-rs-ocr-numbers · prosage #1: NOT solved (done) · 13 turns · $0.1086 · 12m25s
+[10/36] deepseek-v4.1-flash-1017 · pgb-rs-parallel-letter-frequency · prosage #1: solved · 7 turns · $0.0647 · 4m43s
+[11/36] deepseek-v4.1-flash-1017 · pgb-rs-react · prosage #1: NOT solved (done) · 21 turns · $0.1434 · 8m09s
+[12/36] deepseek-v4.1-flash-1017 · pgb-rs-two-bucket · prosage #1: solved · 29 turns · $0.1618 · 8m45s
+[13/36] deepseek-v4.1-flash-1017 · pgb-rs-variable-length-quantity · prosage #1: solved · 11 turns · $0.0799 · 4m42s
+[14/36] deepseek-v4.1-flash-1017 · pgb-rs-wordy · prosage #1: solved · 7 turns · $0.0716 · 2m37s
+[15/36] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · prosage #1: solved · 19 turns · $0.1279 · 5m08s
+[16/36] deepseek-v4.1-flash-1017 · pgb-go-alphametics · prosage #1: solved · 12 turns · $0.0638 · 4m19s
+[17/36] deepseek-v4.1-flash-1017 · pgb-go-bowling · prosage #1: solved · 25 turns · $0.1028 · 4m41s
+[18/36] deepseek-v4.1-flash-1017 · pgb-go-connect · prosage #1: NOT solved (done) · 11 turns · $0.1423 · 5m20s
+[19/36] deepseek-v4.1-flash-1017 · pgb-go-dominoes · prosage #1: solved · 21 turns · $0.0877 · 3m47s
+[20/36] deepseek-v4.1-flash-1017 · pgb-go-forth · prosage #1: NOT solved (done) · 17 turns · $0.1118 · 3m56s
+[21/36] deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · prosage #1: NOT solved (budget) · 54 turns · $0.0985 · 21m05s

@@ -1,0 +1,40 @@
+[1/11] deepseek-v4.1-flash-1017 · pgb-py-forth · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 51 turns · $0.1132 · 20m00s
+[2/11] deepseek-v4.1-flash-1017 · pgb-go-forth · ext:opencode #1: solved · 57 turns · $0.0730 · 11m06s
+[3/11] deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:opencode #1: solved · 38 turns · $0.0352 · 3m48s
+[4/11] deepseek-v4.1-flash-1017 · pgb-go-poker · ext:opencode #1: NOT solved (done) · 17 turns · $0.0209 · 2m10s
+[5/11] deepseek-v4.1-flash-1017 · pgb-go-react · ext:opencode #1: NOT solved (done) · 14 turns · $0.0172 · 2m36s
+[6/11] deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:opencode #1: NOT solved (budget: stopped at the limit of 60 model requests) · 60 turns · $0.2073 · 18m44s
+[7/11] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 40 turns · $0.1978 · 17m32s
+[8/11] deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:opencode #1: solved · 60 turns · $0.3742 · 20m00s
+[9/11] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 9 turns · $0.0050 · 3m25s
+[10/11] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:opencode #1: solved · 49 turns · $0.1840 · 17m36s
+[11/11] deepseek-v4.1-flash-1017 · pgb-go-dominoes · ext:opencode #1: solved · 6 turns · $0.0124 · 31s
+sage bench 20261117-001842-069f · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7460 tokens
+ext:opencode: 75 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-py-forth ext:opencode        0/1    51    866k    87%    155k   $0.1132   $0.2235  20m00s
+pgb-rs-xorcism ext:opencode        1/1    49   1.14M    70%   65.1k   $0.1840   $0.4197  17m36s
+pgb-go-dominoes ext:opencode        1/1     6   44.5k    34%    2.9k   $0.0124   $0.0169     31s
+pgb-go-forth ext:opencode        1/1    57   1.23M    91%   89.5k   $0.0730   $0.2384  11m06s
+pgb-go-hexadecimal ext:opencode        1/1    38   1.44M    90%   15.5k   $0.0352   $0.2250   3m48s
+pgb-go-poker ext:opencode        0/1    17    174k    84%   26.9k   $0.0209   $0.0423   2m10s   1 declared done, then failed verification
+pgb-go-react ext:opencode        0/1    14    134k    63%   15.8k   $0.0172   $0.0297   2m36s   1 declared done, then failed verification
+pgb-go-robot-simulator ext:opencode        0/1    60   1.76M    80%   86.6k   $0.2073   $0.5987  18m44s
+pgb-go-scale-generator ext:opencode        0/1    40    474k    79%    137k   $0.1978   $0.3076  17m32s
+pgb-go-two-bucket ext:opencode        1/1    60   2.05M    79%    197k   $0.3742   $0.8522  20m00s
+pgb-go-zebra-puzzle ext:opencode        0/1     9   16.7k    11%     434   $0.0050   $0.0055   3m25s
+ALL        ext:opencode       5/11    40    866k    87%   65.1k   $0.0730   $0.2250  11m06s   total $1.240, $0.2480 per solved task   2 declared done, then failed verification
+
+6 runs without a solution:
+  deepseek-v4.1-flash-1017 · pgb-py-forth · ext:opencode #1 · session 0-pgb-py-forth-ext-opencode-0 · budget: killed at the time budget of 1200s
+  deepseek-v4.1-flash-1017 · pgb-go-poker · ext:opencode #1 · session 5-pgb-go-poker-ext-opencode-0 · done; verification: FAIL
+  deepseek-v4.1-flash-1017 · pgb-go-react · ext:opencode #1 · session 6-pgb-go-react-ext-opencode-0 · done; verification: ./interfaces.go:4:6: other declaration of Reactor
+  deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:opencode #1 · session 7-pgb-go-robot-simulator-ext-opencode-0 · budget: stopped at the limit of 60 model requests
+  deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:opencode #1 · session 8-pgb-go-scale-generator-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"server_error"}
+  deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:opencode #1 · session 10-pgb-go-zebra-puzzle-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"server_error"}
+
+results: /home/sb-oc2/sage/bench/20261117-001842-069f/results.json
+output of an external run: /home/sb-oc2/sage/bench/20261117-001842-069f/external/<session>/output.log

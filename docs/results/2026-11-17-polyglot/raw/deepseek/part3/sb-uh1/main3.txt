@@ -1,0 +1,13 @@
+[1/14] deepseek-v4.1-flash-1017 · pgb-rs-dot-dsl · ext:unharnessed #1: NOT solved (done) · 10 turns · $0.0121 · 2m58s
+[2/14] deepseek-v4.1-flash-1017 · pgb-rs-bowling · ext:unharnessed #1: solved · 16 turns · $0.0166 · 2m59s
+[3/14] deepseek-v4.1-flash-1017 · pgb-rs-fizzy · ext:unharnessed #1: solved · 43 turns · $0.0637 · 8m10s
+[4/14] deepseek-v4.1-flash-1017 · pgb-rs-parallel-letter-frequency · ext:unharnessed #1: solved · 17 turns · $0.0090 · 1m31s
+[5/14] deepseek-v4.1-flash-1017 · pgb-go-connect · ext:unharnessed #1: NOT solved (done) · 9 turns · $0.0134 · 2m06s
+[6/14] deepseek-v4.1-flash-1017 · pgb-go-forth · ext:unharnessed #1: NOT solved (done) · 2 turns · $0.0001 · 13s
+[7/14] deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.7s
+[8/14] deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 4.2s
+[9/14] deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.3s
+[10/14] deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.3s
+[11/14] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.1s
+[12/14] deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.1s
+[13/14] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.2s

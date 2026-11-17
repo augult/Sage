@@ -1,0 +1,20 @@
+[1/36] deepseek-v4.1-flash-1017 · pgb-py-bowling · ext:unharnessed #1: solved · 40 turns · $0.2014 · 9m38s
+[2/36] deepseek-v4.1-flash-1017 · pgb-py-food-chain · ext:unharnessed #1: solved · 6 turns · $0.0055 · 25s
+[3/36] deepseek-v4.1-flash-1017 · pgb-py-forth · ext:unharnessed #1: NOT solved (done) · 4 turns · $0.0023 · 1m01s
+[4/36] deepseek-v4.1-flash-1017 · pgb-py-connect · ext:unharnessed #1: solved · 39 turns · $0.3774 · 20m05s
+[5/36] deepseek-v4.1-flash-1017 · pgb-py-go-counting · ext:unharnessed #1: NOT solved (budget: killed at the time budget of 1200s) · 39 turns · $0.3821 · 20m07s
+[6/36] deepseek-v4.1-flash-1017 · pgb-py-phone-number · ext:unharnessed #1: NOT solved (done) · 10 turns · $0.0162 · 1m07s
+[7/36] deepseek-v4.1-flash-1017 · pgb-py-paasio · ext:unharnessed #1: NOT solved (budget: killed at the time budget of 1200s) · 58 turns · $0.3308 · 20m05s
+[8/36] deepseek-v4.1-flash-1017 · pgb-py-pov · ext:unharnessed #1: NOT solved (done) · 36 turns · $0.1392 · 15m31s
+[9/36] deepseek-v4.1-flash-1017 · pgb-py-rest-api · ext:unharnessed #1: solved · 13 turns · $0.0650 · 12m59s
+[10/36] deepseek-v4.1-flash-1017 · pgb-py-two-bucket · ext:unharnessed #1: solved · 8 turns · $0.0235 · 2m30s
+[11/36] deepseek-v4.1-flash-1017 · pgb-py-zebra-puzzle · ext:unharnessed #1: solved · 12 turns · $0.0140 · 58s
+[12/36] deepseek-v4.1-flash-1017 · pgb-rs-react · ext:unharnessed #1: NOT solved (done) · 26 turns · $0.0726 · 7m38s
+[13/36] deepseek-v4.1-flash-1017 · pgb-py-sgf-parsing · ext:unharnessed #1: NOT solved (budget: killed at the time budget of 1200s) · 17 turns · $0.0241 · 20m00s
+[14/36] deepseek-v4.1-flash-1017 · pgb-rs-variable-length-quantity · ext:unharnessed #1: solved · 22 turns · $0.0292 · 2m00s
+[15/36] deepseek-v4.1-flash-1017 · pgb-rs-two-bucket · ext:unharnessed #1: solved · 30 turns · $0.1441 · 12m26s
+[16/36] deepseek-v4.1-flash-1017 · pgb-rs-wordy · ext:unharnessed #1: solved · 44 turns · $0.1640 · 19m56s
+[17/36] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:unharnessed #1: solved · 45 turns · $0.2087 · 20m01s
+[18/36] deepseek-v4.1-flash-1017 · pgb-go-alphametics · ext:unharnessed #1: solved · 27 turns · $0.0759 · 19m45s
+[19/36] deepseek-v4.1-flash-1017 · pgb-go-bowling · ext:unharnessed #1: NOT solved (budget: killed at the time budget of 1200s) · 26 turns · $0.0594 · 20m00s
+[20/36] deepseek-v4.1-flash-1017 · pgb-go-dominoes · ext:unharnessed #1: solved · 37 turns · $0.0273 · 7m07s

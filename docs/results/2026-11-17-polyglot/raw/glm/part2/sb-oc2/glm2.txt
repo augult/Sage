@@ -1,0 +1,42 @@
+[1/11] glm-5.3 · pgb-py-go-counting · ext:opencode #1: NOT solved (done) · 7 turns · $0.2714 · 6m14s
+[2/11] glm-5.3 · pgb-rs-react · ext:opencode #1: NOT solved (done) · 31 turns · $0.5112 · 7m32s
+[3/11] glm-5.3 · pgb-rs-forth · ext:opencode #1: NOT solved (done) · 9 turns · $0.3358 · 7m19s
+[4/11] glm-5.3 · pgb-py-rest-api · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 18 turns · $0.4699 · 15m15s
+[5/11] glm-5.3 · pgb-go-zebra-puzzle · ext:opencode #1: solved · 12 turns · $0.1082 · 2m21s
+[6/11] glm-5.3 · pgb-rs-ocr-numbers · ext:opencode #1: NOT solved (done) · 17 turns · $0.4255 · 10m38s
+[7/11] glm-5.3 · pgb-go-scale-generator · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 7 turns · $0.0562 · 5m04s
+[8/11] glm-5.3 · pgb-py-sgf-parsing · ext:opencode #1: solved · 30 turns · $0.2934 · 7m45s
+[9/11] glm-5.3 · pgb-py-phone-number · ext:opencode #1: NOT solved (done) · 13 turns · $0.3641 · 8m09s
+[10/11] glm-5.3 · pgb-rs-book-store · ext:opencode #1: solved · 15 turns · $0.4814 · 13m16s
+[11/11] glm-5.3 · pgb-py-pov · ext:opencode #1: NOT solved (done) · 25 turns · $0.7156 · 16m32s
+sage bench 20261117-205734-4871 · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7148 tokens
+ext:opencode: 2 requests answered without a usage report; its tokens and cost are understated
+
+glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-py-go-counting ext:opencode        0/1     7   50.9k    73%   55.1k   $0.2714   $0.3139   6m14s   1 declared done, then failed verification
+pgb-py-phone-number ext:opencode        0/1    13    116k    91%   73.0k   $0.3641   $0.4849   8m09s   1 declared done, then failed verification
+pgb-py-pov ext:opencode        0/1    25    288k    92%    139k   $0.7156   $1.0186  16m32s   1 declared done, then failed verification
+pgb-py-rest-api ext:opencode        0/1    18    202k    85%   86.9k   $0.4699   $0.6657  15m15s
+pgb-py-sgf-parsing ext:opencode        1/1    30    415k    95%   36.5k   $0.2934   $0.7424   7m45s
+pgb-rs-book-store ext:opencode        1/1    15    153k    90%   96.2k   $0.4814   $0.6382  13m16s
+pgb-rs-forth ext:opencode        0/1     9   81.6k    84%   68.0k   $0.3358   $0.4137   7m19s   1 declared done, then failed verification
+pgb-rs-ocr-numbers ext:opencode        0/1    17    216k    85%   75.3k   $0.4255   $0.6342  10m38s   1 declared done, then failed verification
+pgb-rs-react ext:opencode        0/1    31    766k    92%   54.4k   $0.5112   $1.3120   7m32s   1 declared done, then failed verification
+pgb-go-scale-generator ext:opencode        0/1     7   42.1k    79%    8.0k   $0.0562   $0.0939   5m04s
+pgb-go-zebra-puzzle ext:opencode        1/1    12    102k    88%   15.4k   $0.1082   $0.2115   2m21s
+ALL        ext:opencode       3/11    15    153k    90%   68.0k   $0.3641   $0.6342   7m45s   total $4.033, $1.3442 per solved task   6 declared done, then failed verification
+
+8 runs without a solution:
+  glm-5.3 · pgb-py-go-counting · ext:opencode #1 · session 0-pgb-py-go-counting-ext-opencode-0 · done; verification: FAILED (errors=1)
+  glm-5.3 · pgb-py-phone-number · ext:opencode #1 · session 1-pgb-py-phone-number-ext-opencode-0 · done; verification: FAILED (failures=2, errors=1)
+  glm-5.3 · pgb-py-pov · ext:opencode #1 · session 2-pgb-py-pov-ext-opencode-0 · done; verification: FAILED (failures=3)
+  glm-5.3 · pgb-py-rest-api · ext:opencode #1 · session 3-pgb-py-rest-api-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"api_error","param":nu…
+  glm-5.3 · pgb-rs-forth · ext:opencode #1 · session 6-pgb-rs-forth-ext-opencode-0 · done; verification: error: test failed, to rerun pass `--test alloc-attack`
+  glm-5.3 · pgb-rs-ocr-numbers · ext:opencode #1 · session 7-pgb-rs-ocr-numbers-ext-opencode-0 · done; verification: error: test failed, to rerun pass `--test ocr-numbers`
+  glm-5.3 · pgb-rs-react · ext:opencode #1 · session 8-pgb-rs-react-ext-opencode-0 · done; verification: error: could not compile `react` (test "react") due to 12 previous errors
+  glm-5.3 · pgb-go-scale-generator · ext:opencode #1 · session 9-pgb-go-scale-generator-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"api_error","param":nu…
+
+results: /home/sb-oc2/sage/bench/20261117-205734-4871/results.json
+output of an external run: /home/sb-oc2/sage/bench/20261117-205734-4871/external/<session>/output.log

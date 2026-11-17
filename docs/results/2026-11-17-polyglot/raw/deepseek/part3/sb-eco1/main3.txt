@@ -1,0 +1,2 @@
+[1/7] deepseek-v4.1-flash-1017 · pgb-py-connect · ecosage #1: solved · 37 turns · $0.0947 · 10m49s
+[2/7] deepseek-v4.1-flash-1017 · pgb-py-forth · ecosage #1: solved · 20 turns · $0.0316 · 4m28s

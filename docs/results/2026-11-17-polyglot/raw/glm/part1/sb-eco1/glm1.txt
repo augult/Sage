@@ -1,0 +1,96 @@
+[1/36] glm-5.3 · pgb-py-go-counting · ecosage #1: NOT solved (done) · 3 turns · $0.0110 · 28s
+[2/36] glm-5.3 · pgb-py-food-chain · ecosage #1: NOT solved (done) · 3 turns · $0.0142 · 26s
+[3/36] glm-5.3 · pgb-py-connect · ecosage #1: solved · 12 turns · $0.0461 · 6m13s
+[4/36] glm-5.3 · pgb-py-forth · ecosage #1: NOT solved (done) · 9 turns · $0.0599 · 12m36s
+[5/36] glm-5.3 · pgb-py-bowling · ecosage #1: NOT solved (done) · 15 turns · $0.1187 · 13m39s
+[6/36] glm-5.3 · pgb-py-pov · ecosage #1: NOT solved (done) · 17 turns · $0.0603 · 7m26s
+[7/36] glm-5.3 · pgb-py-rest-api · ecosage #1: NOT solved (done) · 5 turns · $0.0315 · 40s
+[8/36] glm-5.3 · pgb-py-zebra-puzzle · ecosage #1: NOT solved (done) · 8 turns · $0.0335 · 5m45s
+[9/36] glm-5.3 · pgb-rs-book-store · ecosage #1: NOT solved (done) · 14 turns · $0.0587 · 4m13s
+[10/36] glm-5.3 · pgb-rs-bowling · ecosage #1: solved · 6 turns · $0.0339 · 33s
+[11/36] glm-5.3 · pgb-py-two-bucket · ecosage #1: solved · 21 turns · $0.1680 · 11m16s
+[12/36] glm-5.3 · pgb-rs-dot-dsl · ecosage #1: NOT solved (done) · 10 turns · $0.0694 · 57s
+[13/36] glm-5.3 · pgb-rs-fizzy · ecosage #1: NOT solved (done) · 8 turns · $0.0441 · 58s
+[14/36] glm-5.3 · pgb-py-sgf-parsing · ecosage #1: solved · 30 turns · $0.3766 · 15m06s
+[15/36] glm-5.3 · pgb-rs-parallel-letter-frequency · ecosage #1: solved · 7 turns · $0.0192 · 28s
+[16/36] glm-5.3 · pgb-rs-ocr-numbers · ecosage #1: solved · 44 turns · $0.3446 · 4m34s
+[17/36] glm-5.3 · pgb-rs-react · ecosage #1: NOT solved (done) · 30 turns · $0.2431 · 2m16s
+[18/36] glm-5.3 · pgb-rs-variable-length-quantity · ecosage #1: solved · 5 turns · $0.0154 · 16s
+[19/36] glm-5.3 · pgb-rs-two-bucket · ecosage #1: solved · 17 turns · $0.1176 · 1m41s
+[20/36] glm-5.3 · pgb-rs-wordy · ecosage #1: solved · 11 turns · $0.0363 · 33s
+[21/36] glm-5.3 · pgb-rs-xorcism · ecosage #1: solved · 12 turns · $0.0582 · 35s
+[22/36] glm-5.3 · pgb-go-alphametics · ecosage #1: solved · 7 turns · $0.0239 · 24s
+[23/36] glm-5.3 · pgb-go-bowling · ecosage #1: solved · 10 turns · $0.0557 · 56s
+[24/36] glm-5.3 · pgb-go-dominoes · ecosage #1: solved · 14 turns · $0.0482 · 1m10s
+[25/36] glm-5.3 · pgb-go-connect · ecosage #1: solved · 28 turns · $0.1419 · 2m45s
+[26/36] glm-5.3 · pgb-go-hexadecimal · ecosage #1: NOT solved (done) · 6 turns · $0.0149 · 23s
+[27/36] glm-5.3 · pgb-go-forth · ecosage #1: NOT solved (done) · 25 turns · $0.2083 · 2m43s
+[28/36] glm-5.3 · pgb-go-react · ecosage #1: NOT solved (done) · 33 turns · $0.1578 · 1m40s
+[29/36] glm-5.3 · pgb-go-poker · ecosage #1: NOT solved (done) · 39 turns · $0.3474 · 4m30s
+[30/36] glm-5.3 · pgb-rs-forth · ecosage #1: solved · 43 turns · $0.7015 · 14m52s
+[31/36] glm-5.3 · pgb-go-scale-generator · ecosage #1: NOT solved (done) · 13 turns · $0.0560 · 49s
+[32/36] glm-5.3 · pgb-go-two-bucket · ecosage #1: NOT solved (done) · 13 turns · $0.0870 · 1m03s
+[33/36] glm-5.3 · pgb-go-zebra-puzzle · ecosage #1: NOT solved (done) · 5 turns · $0.0212 · 20s
+[34/36] glm-5.3 · pgb-py-phone-number · ecosage #1: NOT solved (done) · 5 turns · $0.0157 · 18s
+[35/36] glm-5.3 · pgb-py-paasio · ecosage #1: NOT solved (done) · 4 turns · $0.0276 · 40s
+[36/36] glm-5.3 · pgb-go-robot-simulator · ecosage #1: NOT solved (budget) · 15 turns · $0.2340 · 20m27s
+sage bench 20261117-181015-8fa2 · logfare · effort ratchet · 1 run per task and variant
+fixed prompt prefix, estimated: ecosage ~2014 tokens
+
+glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-py-bowling ecosage             0/1    15    116k    74%   12.2k   $0.1187   $0.2172  13m39s   1 declared done, then failed verification
+pgb-py-connect ecosage             1/1    12   51.7k    69%    3.3k   $0.0461   $0.0871   6m13s
+pgb-py-food-chain ecosage             0/1     3   10.7k    66%    1.6k   $0.0142   $0.0222     26s   1 declared done, then failed verification
+pgb-py-forth ecosage             0/1     9   46.1k    80%    8.5k   $0.0599   $0.1021  12m36s   1 declared done, then failed verification
+pgb-py-go-counting ecosage             0/1     3   11.9k    83%    1.3k   $0.0110   $0.0223     28s   1 declared done, then failed verification
+pgb-py-paasio ecosage             0/1     4   16.0k    66%    3.9k   $0.0276   $0.0397     40s   1 declared done, then failed verification
+pgb-py-phone-number ecosage             0/1     5   19.7k    74%    1.1k   $0.0157   $0.0324     18s   1 declared done, then failed verification
+pgb-py-pov ecosage             0/1    17    116k    94%    4.9k   $0.0603   $0.1847   7m26s   1 declared done, then failed verification
+pgb-py-rest-api ecosage             0/1     5   22.9k    67%    3.8k   $0.0315   $0.0489     40s   1 declared done, then failed verification
+pgb-py-sgf-parsing ecosage             1/1    30    357k    70%   36.9k   $0.3766   $0.6621  15m06s
+pgb-py-two-bucket ecosage             1/1    21    175k    78%   17.9k   $0.1680   $0.3239  11m16s
+pgb-py-zebra-puzzle ecosage             0/1     8   41.1k    71%    2.1k   $0.0335   $0.0670   5m45s   1 declared done, then failed verification
+pgb-rs-book-store ecosage             0/1    14   77.1k    78%    4.4k   $0.0587   $0.1273   4m13s   1 declared done, then failed verification
+pgb-rs-bowling ecosage             1/1     6   30.2k    66%    3.3k   $0.0339   $0.0568     33s
+pgb-rs-dot-dsl ecosage             0/1    10   58.9k    67%    7.2k   $0.0694   $0.1142     57s   1 declared done, then failed verification
+pgb-rs-fizzy ecosage             0/1     8   36.4k    79%    5.9k   $0.0441   $0.0768     58s   1 declared done, then failed verification
+pgb-rs-forth ecosage             1/1    43    749k    74%   65.5k   $0.7015   $1.3372  14m52s
+pgb-rs-ocr-numbers ecosage             1/1    44    557k    86%   25.6k   $0.3446   $0.8930   4m34s
+pgb-rs-parallel-letter-frequency ecosage             1/1     7   27.3k    81%    1.4k   $0.0192   $0.0443     28s
+pgb-rs-react ecosage             0/1    30    435k    87%   14.7k   $0.2431   $0.6739   2m16s   1 declared done, then failed verification
+pgb-rs-two-bucket ecosage             1/1    17    149k    78%    9.6k   $0.1176   $0.2509   1m41s
+pgb-rs-variable-length-quantity ecosage             1/1     5   20.5k    82%    1.3k   $0.0154   $0.0346     16s
+pgb-rs-wordy ecosage             1/1    11   51.2k    81%    2.7k   $0.0363   $0.0836     33s
+pgb-rs-xorcism ecosage             1/1    12   87.1k    81%    3.8k   $0.0582   $0.1388     35s
+pgb-go-alphametics ecosage             1/1     7   32.1k    89%    2.6k   $0.0239   $0.0565     24s
+pgb-go-bowling ecosage             1/1    10   69.8k    87%    6.2k   $0.0557   $0.1250     56s
+pgb-go-connect ecosage             1/1    28    216k    87%   12.4k   $0.1419   $0.3573   2m45s
+pgb-go-dominoes ecosage             1/1    14   82.6k    86%    3.0k   $0.0482   $0.1289   1m10s
+pgb-go-forth ecosage             0/1    25    307k    88%   19.2k   $0.2083   $0.5156   2m43s   1 declared done, then failed verification
+pgb-go-hexadecimal ecosage             0/1     6   20.7k    88%    1.5k   $0.0149   $0.0358     23s   1 declared done, then failed verification
+pgb-go-poker ecosage             0/1    39    505k    87%   32.1k   $0.3474   $0.8491   4m30s   1 declared done, then failed verification
+pgb-go-react ecosage             0/1    33    307k    85%    5.9k   $0.1578   $0.4560   1m40s   1 declared done, then failed verification
+pgb-go-robot-simulator ecosage             0/1    15   97.4k    60%   37.4k   $0.2340   $0.3009  20m27s
+pgb-go-scale-generator ecosage             0/1    13   80.4k    83%    4.5k   $0.0560   $0.1323     49s   1 declared done, then failed verification
+pgb-go-two-bucket ecosage             0/1    13    102k    76%    7.4k   $0.0870   $0.1763   1m03s   1 declared done, then failed verification
+pgb-go-zebra-puzzle ecosage             0/1     5   22.7k    79%    2.3k   $0.0212   $0.0417     20s   1 declared done, then failed verification
+ALL        ecosage           15/36    12   73.4k    81%    4.7k   $0.0571   $0.1262   1m07s   total $4.101, $0.2734 per solved task   20 declared done, then failed verification
+
+21 runs without a solution:
+  glm-5.3 · pgb-py-bowling · ecosage #1 · session 20261117-181016-d6ea · done; verification: FAILED (failures=1)
+  glm-5.3 · pgb-py-food-chain · ecosage #1 · session 20261117-181044-fdf2 · done; verification: FAILED (failures=10)
+  glm-5.3 · pgb-py-forth · ecosage #1 · session 20261117-181110-25f9 · done; verification: FAILED (failures=2)
+  glm-5.3 · pgb-py-go-counting · ecosage #1 · session 20261117-181016-5b1c · done; verification: FAILED (errors=1)
+  glm-5.3 · pgb-py-paasio · ecosage #1 · session 20261117-185157-1684 · done; verification: FAILED (failures=3, errors=13)
+  glm-5.3 · pgb-py-phone-number · ecosage #1 · session 20261117-185201-20d1 · done; verification: FAILED (errors=3)
+  glm-5.3 · pgb-py-pov · ecosage #1 · session 20261117-181629-18df · done; verification: FAILED (failures=4)
+  glm-5.3 · pgb-py-rest-api · ecosage #1 · session 20261117-182347-7427 · done; verification: FAILED (errors=9)
+  glm-5.3 · pgb-py-zebra-puzzle · ecosage #1 · session 20261117-182428-d1c8 · done; verification: FAILED (failures=2)
+  glm-5.3 · pgb-rs-book-store · ecosage #1 · session 20261117-183014-36df · done; verification: error: test failed, to rerun pass `--test book-store`
+  glm-5.3 · pgb-rs-dot-dsl · ecosage #1 · session 20261117-183502-778f · done; verification: error: could not compile `dot-dsl` (test "dot-dsl") due to 16 previous errors
+  glm-5.3 · pgb-rs-fizzy · ecosage #1 · session 20261117-183513-c025 · done; verification: error: could not compile `fizzy` (test "fizzy") due to 6 previous errors
+  … and 9 more, all in results.json
+
+results: /home/sb-eco1/sage/bench/20261117-181015-8fa2/results.json
+replay a run: SAGE_HOME=/home/sb-eco1/sage/bench/20261117-181015-8fa2/home sage show <session>

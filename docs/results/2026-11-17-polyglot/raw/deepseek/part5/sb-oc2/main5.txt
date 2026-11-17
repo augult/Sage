@@ -1,0 +1,17 @@
+[1/2] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 45 turns · $0.1760 · 20m01s
+[2/2] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:opencode #1: solved · 6 turns · $0.0153 · 32s
+sage bench 20261117-030852-d32f · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7461 tokens
+ext:opencode: 13 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-go-scale-generator ext:opencode        0/1    45   1.22M    73%   59.3k   $0.1760   $0.4374  20m01s
+pgb-go-zebra-puzzle ext:opencode        1/1     6   46.5k    19%    3.3k   $0.0153   $0.0179     32s
+ALL        ext:opencode        1/2  25.5    633k    71%   31.3k   $0.0956   $0.2277  10m16s   total $0.191, $0.1913 per solved task
+
+1 run without a solution:
+  deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:opencode #1 · session 0-pgb-go-scale-generator-ext-opencode-0 · budget: killed at the time budget of 1200s
+
+results: /home/sb-oc2/sage/bench/20261117-030852-d32f/results.json
+output of an external run: /home/sb-oc2/sage/bench/20261117-030852-d32f/external/<session>/output.log

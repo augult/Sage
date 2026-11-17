@@ -1,0 +1,34 @@
+[1/8] deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1: NOT solved (done) · 14 turns · $0.0135 · 3m28s
+[2/8] deepseek-v4.1-flash-1017 · pgb-rs-forth · ext:unharnessed #1: solved · 24 turns · $0.0396 · 10m57s
+[3/8] deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1: NOT solved (done) · 19 turns · $0.0400 · 8m37s
+[4/8] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1: NOT solved (done) · 7 turns · $0.0063 · 1m15s
+[5/8] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1: NOT solved (done) · 1 turns · $0.0000 · 3.0s
+[6/8] deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1: solved · 7 turns · $0.0071 · 1m13s
+[7/8] deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1: NOT solved (done) · 21 turns · $0.0286 · 5m19s
+[8/8] deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:unharnessed #1: NOT solved (done) · 31 turns · $0.0320 · 4m50s
+sage bench 20261117-001842-1d0d · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:unharnessed ~1261 tokens
+ext:unharnessed: 8 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-rs-forth ext:unharnessed     1/1    24    204k    79%   54.6k   $0.0396   $0.0634  10m57s
+pgb-go-hexadecimal ext:unharnessed     0/1    31    584k    80%   21.6k   $0.0320   $0.1006   4m50s   1 declared done, then failed verification
+pgb-go-poker ext:unharnessed     0/1    14   76.0k    58%   14.4k   $0.0135   $0.0200   3m28s   1 declared done, then failed verification
+pgb-go-react ext:unharnessed     0/1    21    140k    71%   36.9k   $0.0286   $0.0433   5m19s   1 declared done, then failed verification
+pgb-go-robot-simulator ext:unharnessed     0/1    19    316k    79%   49.0k   $0.0400   $0.0768   8m37s   1 declared done, then failed verification
+pgb-go-scale-generator ext:unharnessed     0/1     7   10.7k    31%    8.6k   $0.0063   $0.0068   1m15s   1 declared done, then failed verification
+pgb-go-two-bucket ext:unharnessed     1/1     7   15.3k    19%    8.6k   $0.0071   $0.0075   1m13s
+pgb-go-zebra-puzzle ext:unharnessed     0/1     1       0      –       0   $0.0000   $0.0000    3.0s   1 declared done, then failed verification
+ALL        ext:unharnessed     2/8  16.5    108k    67%   18.0k   $0.0210   $0.0317   4m09s   total $0.167, $0.0835 per solved task   6 declared done, then failed verification
+
+6 runs without a solution:
+  deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:unharnessed #1 · session 1-pgb-go-hexadecimal-ext-unharnessed-0 · done; verification: want (string, int64, string)
+  deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1 · session 2-pgb-go-poker-ext-unharnessed-0 · done; verification: FAIL
+  deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1 · session 3-pgb-go-react-ext-unharnessed-0 · done; verification: ./interfaces.go:4:6: other declaration of Reactor
+  deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1 · session 4-pgb-go-robot-simulator-ext-unharnessed-0 · done; verification: ./robot_simulator_test.go:43:13: too many errors
+  deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1 · session 5-pgb-go-scale-generator-ext-unharnessed-0 · done; verification: FAIL
+  deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1 · session 7-pgb-go-zebra-puzzle-ext-unharnessed-0 · done; verification: FAIL
+
+results: /home/sb-uh1/sage/bench/20261117-001842-1d0d/results.json
+output of an external run: /home/sb-uh1/sage/bench/20261117-001842-1d0d/external/<session>/output.log

@@ -1,0 +1,46 @@
+[1/13] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:unharnessed #1: NOT solved (done) · 6 turns · $0.0109 · 2m58s
+[2/13] deepseek-v4.1-flash-1017 · pgb-rs-wordy · ext:unharnessed #1: solved · 24 turns · $0.0272 · 3m29s
+[3/13] deepseek-v4.1-flash-1017 · pgb-go-bowling · ext:unharnessed #1: solved · 34 turns · $0.0319 · 5m23s
+[4/13] deepseek-v4.1-flash-1017 · pgb-go-alphametics · ext:unharnessed #1: solved · 29 turns · $0.0264 · 6m55s
+[5/13] deepseek-v4.1-flash-1017 · pgb-go-connect · ext:unharnessed #1: NOT solved (done) · 12 turns · $0.0147 · 2m05s
+[6/13] deepseek-v4.1-flash-1017 · pgb-go-dominoes · ext:unharnessed #1: solved · 13 turns · $0.0066 · 2m07s
+[7/13] deepseek-v4.1-flash-1017 · pgb-go-forth · ext:unharnessed #1: solved · 13 turns · $0.0250 · 3m59s
+[8/13] deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1: NOT solved (done) · 19 turns · $0.0165 · 3m06s
+[9/13] deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 4.0s
+[10/13] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.3s
+[11/13] deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.4s
+[12/13] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.2s
+[13/13] deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1: no result (provider returned HTTP 429: {"error":{"message":"Your account has reached its request budg…) · 0 turns · $0.0000 · 3.2s
+sage bench 20261116-152715-33aa · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:unharnessed ~1258 tokens
+ext:unharnessed: 8 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-rs-wordy ext:unharnessed     1/1    24    219k    78%   32.4k   $0.0272   $0.0524   3m29s
+pgb-rs-xorcism ext:unharnessed     0/1     6   12.6k    24%   15.7k   $0.0109   $0.0113   2m58s   1 declared done, then failed verification
+pgb-go-alphametics ext:unharnessed     1/1    29    299k    76%   24.9k   $0.0264   $0.0598   6m55s
+pgb-go-bowling ext:unharnessed     1/1    34    319k    83%   38.0k   $0.0319   $0.0707   5m23s
+pgb-go-connect ext:unharnessed     0/1    12   48.7k    58%   19.2k   $0.0147   $0.0188   2m05s   1 declared done, then failed verification
+pgb-go-dominoes ext:unharnessed     1/1    13   49.2k    70%    7.1k   $0.0066   $0.0117   2m07s
+pgb-go-forth ext:unharnessed     1/1    13   44.8k    60%   37.0k   $0.0250   $0.0289   3m59s
+pgb-go-poker ext:unharnessed     0/1    19    104k    79%   21.6k   $0.0165   $0.0287   3m06s   1 declared done, then failed verification
+pgb-go-react ext:unharnessed     0/0     0       0      –       0   $0.0000   $0.0000    0.0s   1 run lost to provider errors
+pgb-go-robot-simulator ext:unharnessed     0/0     0       0      –       0   $0.0000   $0.0000    0.0s   1 run lost to provider errors
+pgb-go-scale-generator ext:unharnessed     0/0     0       0      –       0   $0.0000   $0.0000    0.0s   1 run lost to provider errors
+pgb-go-two-bucket ext:unharnessed     0/0     0       0      –       0   $0.0000   $0.0000    0.0s   1 run lost to provider errors
+pgb-go-zebra-puzzle ext:unharnessed     0/0     0       0      –       0   $0.0000   $0.0000    0.0s   1 run lost to provider errors
+ALL        ext:unharnessed     5/8    16   77.1k    76%   23.2k   $0.0207   $0.0288   3m17s   total $0.159, $0.0318 per solved task   3 declared done, then failed verification   5 runs lost to provider errors
+
+8 runs without a solution:
+  deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:unharnessed #1 · session 1-pgb-rs-xorcism-ext-unharnessed-0 · done; verification: error: could not compile `xorcism` (test "xorcism") due to 72 previous errors
+  deepseek-v4.1-flash-1017 · pgb-go-connect · ext:unharnessed #1 · session 4-pgb-go-connect-ext-unharnessed-0 · done; verification: FAIL
+  deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1 · session 7-pgb-go-poker-ext-unharnessed-0 · done; verification: FAIL
+  deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1 · session 8-pgb-go-react-ext-unharnessed-1 · no result: provider returned HTTP 429: {"error":{"message":"Your account has reached its request budget. Limit reached: 1…
+  deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1 · session 9-pgb-go-robot-simulator-ext-unharnessed-1 · no result: provider returned HTTP 429: {"error":{"message":"Your account has reached its request budget. Limit reached: 1…
+  deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1 · session 10-pgb-go-scale-generator-ext-unharnessed-1 · no result: provider returned HTTP 429: {"error":{"message":"Your account has reached its request budget. Limit reached: 1…
+  deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1 · session 11-pgb-go-two-bucket-ext-unharnessed-1 · no result: provider returned HTTP 429: {"error":{"message":"Your account has reached its request budget. Limit reached: 1…
+  deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1 · session 12-pgb-go-zebra-puzzle-ext-unharnessed-1 · no result: provider returned HTTP 429: {"error":{"message":"Your account has reached its request budget. Limit reached: 1…
+
+results: /home/sb-uh2/sage/bench/20261116-152715-33aa/results.json
+output of an external run: /home/sb-uh2/sage/bench/20261116-152715-33aa/external/<session>/output.log

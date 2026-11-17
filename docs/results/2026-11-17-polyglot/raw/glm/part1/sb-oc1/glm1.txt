@@ -1,0 +1,32 @@
+[1/36] glm-5.3 · pgb-rs-forth · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model is temporarily unavailable.","type"…) · 10 turns · $0.0433 · 8m14s
+[2/36] glm-5.3 · pgb-py-sgf-parsing · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 19 turns · $0.0900 · 20m00s
+[3/36] glm-5.3 · pgb-py-bowling · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 19 turns · $0.0512 · 20m00s
+[4/36] glm-5.3 · pgb-rs-wordy · ext:opencode #1: solved · 27 turns · $0.1615 · 16m32s
+[5/36] glm-5.3 · pgb-rs-xorcism · ext:opencode #1: NOT solved (done) · 7 turns · $0.0582 · 8m02s
+[6/36] glm-5.3 · pgb-go-bowling · ext:opencode #1: NOT solved (done) · 7 turns · $0.0737 · 3m15s
+[7/36] glm-5.3 · pgb-go-alphametics · ext:opencode #1: NOT solved (done) · 8 turns · $0.0789 · 8m02s
+[8/36] glm-5.3 · pgb-go-dominoes · ext:opencode #1: solved · 14 turns · $0.1635 · 3m24s
+[9/36] glm-5.3 · pgb-go-forth · ext:opencode #1: NOT solved (done) · 6 turns · $0.2290 · 5m33s
+[10/36] glm-5.3 · pgb-go-poker · ext:opencode #1: NOT solved (done) · 15 turns · $0.2432 · 4m57s
+[11/36] glm-5.3 · pgb-go-hexadecimal · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 39 turns · $0.6121 · 12m12s
+[12/36] glm-5.3 · pgb-go-react · ext:opencode #1: NOT solved (done) · 33 turns · $0.3604 · 7m19s
+[13/36] glm-5.3 · pgb-go-connect · ext:opencode #1: solved · 34 turns · $0.8177 · 20m02s
+[14/36] glm-5.3 · pgb-go-scale-generator · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 12 turns · $0.0542 · 3m37s
+[15/36] glm-5.3 · pgb-go-two-bucket · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 7 turns · $0.0000 · 2m12s
+[16/36] glm-5.3 · pgb-go-zebra-puzzle · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"AiError: AiError: Service temporarily at capa…) · 16 turns · $0.0062 · 8m16s
+[17/36] glm-5.3 · pgb-go-robot-simulator · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 52 turns · $0.3034 · 20m02s
+[18/36] glm-5.3 · pgb-py-connect · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model is temporarily unavailable.","type"…) · 14 turns · $0.0064 · 7m50s
+[19/36] glm-5.3 · pgb-py-food-chain · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 7 turns · $0.0000 · 2m21s
+[20/36] glm-5.3 · pgb-py-go-counting · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 23 turns · $0.0525 · 20m02s
+[21/36] glm-5.3 · pgb-rs-react · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"Service temporarily unavailable","type":"serv…) · 13 turns · $0.0031 · 19m25s
+[22/36] glm-5.3 · pgb-py-forth · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 34 turns · $0.1900 · 20m01s
+[23/36] glm-5.3 · pgb-rs-ocr-numbers · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 22 turns · $0.1220 · 20m02s
+[24/36] glm-5.3 · pgb-py-phone-number · ext:opencode #1: NOT solved (done) · 13 turns · $0.0660 · 3m43s
+[25/36] glm-5.3 · pgb-rs-parallel-letter-frequency · ext:opencode #1: solved · 42 turns · $0.2330 · 16m07s
+[26/36] glm-5.3 · pgb-rs-two-bucket · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 42 turns · $0.3025 · 20m00s
+[27/36] glm-5.3 · pgb-py-paasio · ext:opencode #1: NOT solved (budget: killed at the time budget of 1200s) · 21 turns · $0.1497 · 20m00s
+[28/36] glm-5.3 · pgb-rs-variable-length-quantity · ext:opencode #1: NOT solved (done) · 14 turns · $0.3098 · 15m45s
+[29/36] glm-5.3 · pgb-py-zebra-puzzle · ext:opencode #1: solved · 11 turns · $0.1093 · 1m49s
+[30/36] glm-5.3 · pgb-rs-book-store · ext:opencode #1: solved · 32 turns · $0.3745 · 15m02s
+[31/36] glm-5.3 · pgb-rs-dot-dsl · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 17 turns · $0.1470 · 6m40s
+[32/36] glm-5.3 · pgb-py-two-bucket · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 16 turns · $0.4497 · 11m57s

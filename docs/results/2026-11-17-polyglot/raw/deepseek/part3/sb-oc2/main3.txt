@@ -1,0 +1,2 @@
+[1/13] deepseek-v4.1-flash-1017 · pgb-py-connect · ext:opencode #1: solved · 48 turns · $0.0772 · 9m51s
+[2/13] deepseek-v4.1-flash-1017 · pgb-go-connect · ext:opencode #1: NOT solved (done) · 22 turns · $0.0402 · 5m03s

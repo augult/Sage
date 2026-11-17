@@ -1,0 +1,16 @@
+[1/36] deepseek-v4.1-flash-1017 · pgb-py-bowling · prosage #1: solved · 38 turns · $0.4512 · 18m10s
+[2/36] deepseek-v4.1-flash-1017 · pgb-py-connect · prosage #1: solved · 17 turns · $0.1150 · 2m40s
+[3/36] deepseek-v4.1-flash-1017 · pgb-py-food-chain · prosage #1: NOT solved (done) · 6 turns · $0.0380 · 1m12s
+[4/36] deepseek-v4.1-flash-1017 · pgb-py-forth · prosage #1: NOT solved (done) · 5 turns · $0.0961 · 2m22s
+[5/36] deepseek-v4.1-flash-1017 · pgb-py-go-counting · prosage #1: NOT solved (done) · 10 turns · $0.1229 · 8m07s
+[6/36] deepseek-v4.1-flash-1017 · pgb-py-paasio · prosage #1: NOT solved (budget) · 25 turns · $0.1601 · 20m05s
+[7/36] deepseek-v4.1-flash-1017 · pgb-py-phone-number · prosage #1: NOT solved (done) · 5 turns · $0.0366 · 1m55s
+[8/36] deepseek-v4.1-flash-1017 · pgb-py-pov · prosage #1: NOT solved (done) · 15 turns · $0.0880 · 4m34s
+[9/36] deepseek-v4.1-flash-1017 · pgb-py-rest-api · prosage #1: NOT solved (done) · 4 turns · $0.0701 · 3m19s
+[10/36] deepseek-v4.1-flash-1017 · pgb-py-sgf-parsing · prosage #1: solved · 7 turns · $0.0817 · 2m35s
+[11/36] deepseek-v4.1-flash-1017 · pgb-py-two-bucket · prosage #1: solved · 17 turns · $0.1369 · 9m51s
+[12/36] deepseek-v4.1-flash-1017 · pgb-py-zebra-puzzle · prosage #1: solved · 6 turns · $0.0322 · 2m40s
+[13/36] deepseek-v4.1-flash-1017 · pgb-rs-book-store · prosage #1: solved · 10 turns · $0.0732 · 4m44s
+[14/36] deepseek-v4.1-flash-1017 · pgb-rs-bowling · prosage #1: solved · 14 turns · $0.0580 · 7m29s
+[15/36] deepseek-v4.1-flash-1017 · pgb-rs-dot-dsl · prosage #1: NOT solved (done) · 6 turns · $0.0311 · 3m50s
+[16/36] deepseek-v4.1-flash-1017 · pgb-rs-fizzy · prosage #1: solved · 5 turns · $0.0481 · 7m05s

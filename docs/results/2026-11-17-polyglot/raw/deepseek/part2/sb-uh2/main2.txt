@@ -1,0 +1,55 @@
+[1/15] deepseek-v4.1-flash-1017 · pgb-py-food-chain · ext:unharnessed #1: solved · 5 turns · $0.0023 · 1m03s
+[2/15] deepseek-v4.1-flash-1017 · pgb-go-bowling · ext:unharnessed #1: solved · 36 turns · $0.0482 · 11m12s
+[3/15] deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:unharnessed #1: NOT solved (done) · 21 turns · $0.0189 · 2m53s
+[4/15] deepseek-v4.1-flash-1017 · pgb-go-forth · ext:unharnessed #1: NOT solved (budget: killed at the time budget of 1200s) · 43 turns · $0.0771 · 20m01s
+[5/15] deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 9 turns · $0.0143 · 4m12s
+[6/15] deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 41 turns · $0.0651 · 11m04s
+[7/15] deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 9 turns · $0.0057 · 1m11s
+[8/15] deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1: NOT solved (done) · 4 turns · $0.0005 · 42s
+[9/15] deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 20 turns · $0.0188 · 2m47s
+[10/15] deepseek-v4.1-flash-1017 · pgb-go-connect · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"session","version":3,"id":"01a1e2e3-0035-76c8-94f7-a98e2d00aa48","…) · 0 turns · $0.0000 · 2.6s
+[11/15] deepseek-v4.1-flash-1017 · pgb-go-dominoes · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 5 turns · $0.0014 · 58s
+[12/15] deepseek-v4.1-flash-1017 · pgb-go-zebra-puzzle · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 19 turns · $0.0132 · 1m57s
+[13/15] deepseek-v4.1-flash-1017 · pgb-rs-wordy · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 6 turns · $0.0026 · 45s
+[14/15] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 4 turns · $0.0006 · 46s
+[15/15] deepseek-v4.1-flash-1017 · pgb-go-alphametics · ext:unharnessed #1: NOT solved (error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"…) · 6 turns · $0.0010 · 28s
+sage bench 20261116-051643-f173 · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:unharnessed ~1258 tokens
+ext:unharnessed: 13 requests answered without a usage report; its tokens and cost are understated
+
+deepseek-v4.1-flash-1017   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-py-food-chain ext:unharnessed     1/1     5   11.4k    37%    2.0k   $0.0023   $0.0029   1m03s
+pgb-rs-wordy ext:unharnessed     0/1     6    8.6k    58%    3.3k   $0.0026   $0.0033     45s
+pgb-rs-xorcism ext:unharnessed     0/1     4    5.1k    45%     226   $0.0006   $0.0009     46s
+pgb-go-alphametics ext:unharnessed     0/1     6    8.6k    45%     379   $0.0010   $0.0015     28s
+pgb-go-bowling ext:unharnessed     1/1    36    357k    75%   56.9k   $0.0482   $0.0878  11m12s
+pgb-go-connect ext:unharnessed     0/1     0       0      –       0   $0.0000   $0.0000    2.6s
+pgb-go-dominoes ext:unharnessed     0/1     5    6.9k    54%    1.6k   $0.0014   $0.0020     58s
+pgb-go-forth ext:unharnessed     0/1    43    990k    89%   96.8k   $0.0771   $0.2066  20m01s
+pgb-go-hexadecimal ext:unharnessed     0/1    21    259k    67%    9.3k   $0.0189   $0.0445   2m53s   1 declared done, then failed verification
+pgb-go-poker ext:unharnessed     0/1    41   1.23M    88%   65.5k   $0.0651   $0.2243  11m04s
+pgb-go-react ext:unharnessed     0/1     9   16.9k    40%   21.3k   $0.0143   $0.0153   4m12s
+pgb-go-robot-simulator ext:unharnessed     0/1    20    220k    66%   11.9k   $0.0188   $0.0401   2m47s
+pgb-go-scale-generator ext:unharnessed     0/1     9   18.4k    33%    6.4k   $0.0057   $0.0066   1m11s
+pgb-go-two-bucket ext:unharnessed     0/1     4    5.0k    46%     210   $0.0005   $0.0009     42s   1 declared done, then failed verification
+pgb-go-zebra-puzzle ext:unharnessed     0/1    19    107k    54%    9.2k   $0.0132   $0.0217   1m57s
+ALL        ext:unharnessed    2/15     9   16.9k    36%    6.4k   $0.0057   $0.0066   1m11s   total $0.270, $0.1348 per solved task   2 declared done, then failed verification
+
+13 runs without a solution:
+  deepseek-v4.1-flash-1017 · pgb-rs-wordy · ext:unharnessed #1 · session 1-pgb-rs-wordy-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-rs-xorcism · ext:unharnessed #1 · session 2-pgb-rs-xorcism-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-alphametics · ext:unharnessed #1 · session 3-pgb-go-alphametics-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-connect · ext:unharnessed #1 · session 5-pgb-go-connect-ext-unharnessed-0 · error: exit code 101: {"type":"session","version":3,"id":"01a1e2e3-0035-76c8-94f7-a98e2d00aa48","timestamp":"2026-11-…
+  deepseek-v4.1-flash-1017 · pgb-go-dominoes · ext:unharnessed #1 · session 6-pgb-go-dominoes-ext-unharnessed-1 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-forth · ext:unharnessed #1 · session 7-pgb-go-forth-ext-unharnessed-0 · budget: killed at the time budget of 1200s
+  deepseek-v4.1-flash-1017 · pgb-go-hexadecimal · ext:unharnessed #1 · session 8-pgb-go-hexadecimal-ext-unharnessed-0 · done; verification: want (string, int64, string)
+  deepseek-v4.1-flash-1017 · pgb-go-poker · ext:unharnessed #1 · session 9-pgb-go-poker-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-react · ext:unharnessed #1 · session 10-pgb-go-react-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-robot-simulator · ext:unharnessed #1 · session 11-pgb-go-robot-simulator-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-scale-generator · ext:unharnessed #1 · session 12-pgb-go-scale-generator-ext-unharnessed-0 · error: exit code 101: {"type":"message_update","message":{"role":"assistant","content":[{"type":"thinking","thinking"…
+  deepseek-v4.1-flash-1017 · pgb-go-two-bucket · ext:unharnessed #1 · session 13-pgb-go-two-bucket-ext-unharnessed-0 · done; verification: FAIL
+  … and 1 more, all in results.json
+
+results: /home/sb-uh2/sage/bench/20261116-051643-f173/results.json
+output of an external run: /home/sb-uh2/sage/bench/20261116-051643-f173/external/<session>/output.log

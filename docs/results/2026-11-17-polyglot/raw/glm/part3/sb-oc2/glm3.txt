@@ -1,0 +1,23 @@
+[1/4] glm-5.3 · pgb-py-rest-api · ext:opencode #1: NOT solved (done) · 8 turns · $0.2983 · 7m12s
+[2/4] glm-5.3 · pgb-rs-xorcism · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"a…) · 7 turns · $0.1998 · 9m30s
+[3/4] glm-5.3 · pgb-go-scale-generator · ext:opencode #1: solved · 25 turns · $0.3985 · 13m50s
+[4/4] glm-5.3 · pgb-rs-two-bucket · ext:opencode #1: NOT solved (error: exit code 1: [91m[1mError: [0m{"message":"AiError: AiError: Service temporarily at capa…) · 8 turns · $0.0038 · 12m05s
+sage bench 20261117-214028-a4d1 · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7152 tokens
+ext:opencode: 9 requests answered without a usage report; its tokens and cost are understated
+
+glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-py-rest-api ext:opencode        0/1     8   59.7k    91%   63.0k   $0.2983   $0.3606   7m12s   1 declared done, then failed verification
+pgb-rs-two-bucket ext:opencode        0/1     8    7.7k    93%     283   $0.0038   $0.0121  12m05s
+pgb-rs-xorcism ext:opencode        0/1     7   46.4k    85%   40.8k   $0.1998   $0.2446   9m30s
+pgb-go-scale-generator ext:opencode        1/1    25    291k    93%   67.8k   $0.3985   $0.7059  13m50s
+ALL        ext:opencode        1/4     8   53.0k    89%   51.9k   $0.2491   $0.3026  10m48s   total $0.900, $0.9005 per solved task   1 declared done, then failed verification
+
+3 runs without a solution:
+  glm-5.3 · pgb-py-rest-api · ext:opencode #1 · session 0-pgb-py-rest-api-ext-opencode-0 · done; verification: FAILED (errors=9)
+  glm-5.3 · pgb-rs-two-bucket · ext:opencode #1 · session 1-pgb-rs-two-bucket-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"AiError: AiError: Service temporarily at capacity (de7c61a4-6a8a-…
+  glm-5.3 · pgb-rs-xorcism · ext:opencode #1 · session 2-pgb-rs-xorcism-ext-opencode-0 · error: exit code 1: [91m[1mError: [0m{"message":"The model did not respond in time.","type":"api_error","param":nu…
+
+results: /home/sb-oc2/sage/bench/20261117-214028-a4d1/results.json
+output of an external run: /home/sb-oc2/sage/bench/20261117-214028-a4d1/external/<session>/output.log

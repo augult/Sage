@@ -1,0 +1,16 @@
+[1/2] glm-5.3 · pgb-rs-two-bucket · ext:opencode #1: NOT solved (done) · 4 turns · $0.2224 · 5m55s
+[2/2] glm-5.3 · pgb-rs-xorcism · ext:opencode #1: solved · 37 turns · $0.4813 · 9m18s
+sage bench 20261117-220450-cabd · logfare · effort ratchet · 1 run per task and variant
+first prompt with the task, measured: ext:opencode ~7150 tokens
+
+glm-5.3   medians per run; solved = the held-out verification passed after the run; no cache = cost had the provider cached nothing
+task       variant          solved turns  in tok cached out tok      cost  no cache    time
+pgb-rs-two-bucket ext:opencode        0/1     4   25.0k    89%   48.3k   $0.2224   $0.2476   5m55s   1 declared done, then failed verification
+pgb-rs-xorcism ext:opencode        1/1    37    575k    92%   64.2k   $0.4813   $1.0878   9m18s
+ALL        ext:opencode        1/2  20.5    300k    92%   56.3k   $0.3518   $0.6677   7m37s   total $0.704, $0.7037 per solved task   1 declared done, then failed verification
+
+1 run without a solution:
+  glm-5.3 · pgb-rs-two-bucket · ext:opencode #1 · session 0-pgb-rs-two-bucket-ext-opencode-0 · done; verification: error: test failed, to rerun pass `--test two-bucket`
+
+results: /home/sb-oc2/sage/bench/20261117-220450-cabd/results.json
+output of an external run: /home/sb-oc2/sage/bench/20261117-220450-cabd/external/<session>/output.log
