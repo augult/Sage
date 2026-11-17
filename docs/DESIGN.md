@@ -128,7 +128,7 @@ What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMA
   44/72 each, Ecosage at about 60% of OpenCode's cost and time.
 - **Live models**: DeepSeek V4.1 Flash (and GLM-5.3, before the latest changes) run end to end
   through Logfare. Every other preset follows its vendor's documented contract and is untested.
-- **Desktop app**: released for Windows (`v0.3.0`); it also builds on Linux and macOS. Its UI is
+- **Desktop app**: Windows builds are published on GitHub Releases. It also builds on Linux and macOS. Its UI is
   covered by a browser fixture with mock IPC (`desktop/tests/`).
 - **Walkthrough**: `sage demo` plays a scripted session through the real harness.
 - Not implemented: OS-level sandboxing of commands (there is a tripwire for catastrophic commands,

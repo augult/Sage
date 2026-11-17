@@ -86,9 +86,10 @@ jobs:
           @"
           # Sage $env:VERSION
 
-          Prosage is removed: Sage now has two modes, Ecosage and Default. On a 36-task Python, Rust and Go
-          benchmark, Ecosage solved as many tasks as OpenCode at about 60% of its cost and time. Sessions
-          saved as Prosage reopen as Ecosage. Replies cut off for overthinking are now priced correctly.
+          - The Code editor rejects stale saves, and the composer preserves drafts typed while a message is sending.
+          - Concurrent settings saves preserve both changes. Stop and shutdown handle queued runs and slow provider responses more reliably.
+          - Git commits are scoped to the session folder. Sage asks for a fresh review if the Git preview is out of date.
+          - The Windows demo runs without a Unix shell. The desktop also improves keyboard navigation, API key setup, and layouts from the minimum window size to 4K.
 
           ## Windows 10/11 (64-bit)
           - **Sage_$env:VERSION`_x64-setup.exe**: recommended installer.

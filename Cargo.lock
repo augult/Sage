@@ -2885,7 +2885,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "sage-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "reqwest",
  "sage-core",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "sage-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -2914,7 +2914,7 @@ dependencies = [
 
 [[package]]
 name = "sage-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "sage-core",
  "serde",
