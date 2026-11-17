@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       CARGO_BUILD_JOBS: 2
@@ -23,18 +27,29 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Install desktop system libraries and Rust
+      - name: Install Linux desktop system libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-          # The version pinned in rust-toolchain.toml, the same one local builds and releases use.
-          toolchain=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: |
+          toolchain=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
           rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt
       - name: JavaScript syntax and lint
+        if: runner.os == 'Linux'
         run: |
           find desktop/ui/js desktop/tests -type f \( -name '*.js' -o -name '*.mjs' \) -exec node --check {} \;
           npx --yes eslint@9 --config desktop/tests/eslint.config.mjs desktop/ui/js desktop/tests
           npx --yes stylelint@16 'desktop/ui/styles/*.css' --config desktop/tests/stylelint.json
+      - name: Run desktop browser regressions
+        if: runner.os == 'Linux'
+        working-directory: desktop/tests
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+          node check-browser.mjs
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy

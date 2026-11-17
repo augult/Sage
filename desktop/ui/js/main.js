@@ -95,7 +95,7 @@ const app = {
       main.append(h('div.view-message', h('p', `There is no session ${view.id}.`)));
       mounted = null;
     } else {
-      mounted = view.name === 'settings' ? mountSettings(main, app) : mountNewSession(main, app);
+      mounted = view.name === 'settings' ? mountSettings(main, app, view.section) : mountNewSession(main, app);
     }
     // The inspector's tabs belong to the window even when there is no session to inspect.
     if (!meta) emptyPanel = mountPanel(document.getElementById('inspector-tabs'), side);
@@ -163,13 +163,29 @@ function drawSessionList() {
   renderSessionList(list, app.sessions, currentId, app.state.home, sessionActs);
 }
 
-[app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
-newLink.addEventListener('click', () => go({ name: 'new' }));
-settingsLink.addEventListener('click', () => go({ name: 'settings' }));
-backLink.addEventListener('click', () => step(-1));
-forwardLink.addEventListener('click', () => step(1));
-mountMenuBar(document.getElementById('menubar'), { app, go, back: () => step(-1), forward: () => step(1), canGoBack: () => at > 0, canGoForward: () => at < trail.length - 1 });
-// A session changing state changes its mark.
-let listFrame = 0;
-store.onChange(() => (listFrame ||= requestAnimationFrame(() => ((listFrame = 0), drawSessionList()))));
-await applyHooks(app);
+async function initialize() {
+  main.replaceChildren(h('div.view-message', h('p', 'Loading Sage…')));
+  try {
+    [app.state, app.sessions] = await Promise.all([api.appState(), api.listSessions()]);
+  } catch (problem) {
+    const retry = h('button.btn', { type: 'button', onclick: initialize }, 'Try again');
+    main.replaceChildren(h('div.view-message', h('p', { role: 'alert' }, `Sage could not start. ${problem}`), retry));
+    retry.focus();
+    return;
+  }
+  newLink.addEventListener('click', () => go({ name: 'new' }));
+  settingsLink.addEventListener('click', () => go({ name: 'settings' }));
+  backLink.addEventListener('click', () => step(-1));
+  forwardLink.addEventListener('click', () => step(1));
+  mountMenuBar(document.getElementById('menubar'), { app, go, back: () => step(-1), forward: () => step(1), canGoBack: () => at > 0, canGoForward: () => at < trail.length - 1 });
+  let listFrame = 0;
+  store.onChange(() => (listFrame ||= requestAnimationFrame(() => ((listFrame = 0), drawSessionList()))));
+  try {
+    await applyHooks(app);
+  } catch (problem) {
+    if (!mounted) app.show({ name: 'new' });
+    throw problem;
+  }
+}
+
+await initialize();

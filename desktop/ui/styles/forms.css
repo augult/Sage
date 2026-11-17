@@ -143,6 +143,12 @@
   text-overflow: ellipsis;
 }
 
+@media (min-width: 1600px) {
+  .composer .pick-value {
+    max-width: 340px;
+  }
+}
+
 .menu {
   position: absolute;
   top: calc(100% + 4px);

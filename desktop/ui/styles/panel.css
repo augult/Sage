@@ -382,10 +382,7 @@
   color: var(--faint);
   text-align: right;
   user-select: none;
-}
-
-.code-lines span {
-  display: block;
+  white-space: pre;
 }
 
 .code-edit textarea {

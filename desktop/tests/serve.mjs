@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const ui = resolve(here, '../ui');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png' };
-const server = createServer(async (req, res) => {
+export const server = createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
     const testFile = { '/__fixture.js': 'fixture.js', '/__audit.js': 'audit.js' }[pathname];
@@ -22,4 +22,4 @@ const server = createServer(async (req, res) => {
   } catch (error) { res.writeHead(error.code === 'ENOENT' ? 404 : 500).end('Fixture asset unavailable'); }
 });
 const port = Number(process.env.PORT || 4173);
-server.listen(port, '0.0.0.0', () => console.log(`Browser-only UI fixture: http://localhost:${port}/?test (mock Tauri IPC; no backend)`));
+server.listen(port, process.env.HOST || '0.0.0.0', () => console.log(`Browser-only UI fixture: http://localhost:${server.address().port}/?test (mock Tauri IPC; no backend)`));

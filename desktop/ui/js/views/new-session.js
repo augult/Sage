@@ -38,16 +38,17 @@ export function mountNewSession(main, app) {
   const recent = recentWorkspaces(app.sessions);
 
   draft.cwd ??= recent[0] ?? '';
-  draft.effort ??= state.effort;
   if (!keyed.some((provider) => provider.id === draft.provider)) {
-    draft.provider = (keyed.find((provider) => provider.id === state.provider) ?? keyed[0])?.id ?? null;
+    draft.provider = null;
     draft.model = null;
   }
-  const chosen = state.providers.find((provider) => provider.id === draft.provider);
-  if (chosen) {
-    const models = modelOptions(chosen, state).map((option) => option.value);
-    if (!models.includes(draft.model)) draft.model = chosen.id === state.provider && state.model ? state.model : models[0] ?? null;
-  }
+  const chosen = keyed.find((provider) => provider.id === (draft.provider ?? state.provider)) ?? keyed[0];
+  const models = chosen ? modelOptions(chosen, state).map((option) => option.value) : [];
+  let selection = {
+    provider: chosen?.id ?? null,
+    model: models.includes(draft.model) ? draft.model : models[0] ?? null,
+  };
+  if (draft.model === null && chosen?.id === state.provider && models.includes(state.model)) selection.model = state.model;
 
   const error = h('div.form-error', { role: 'alert', hidden: true });
   const fail = (problem) => {
@@ -106,7 +107,7 @@ export function mountNewSession(main, app) {
 
   /** A run setting: its name, the current value, and a menu of the others. */
   const setting = (key, name, options, changed) =>
-    settingPicker(key, name, options, draft[key], (value) => {
+    settingPicker(key, name, options, draft[key] ?? state[key], (value) => {
       draft[key] = value;
       changed?.();
     });
@@ -136,7 +137,7 @@ export function mountNewSession(main, app) {
   }
   async function loadSkills() {
     const asked = ++skillsAsked;
-    const listed = await api.skills(draft.cwd || null);
+    const listed = await api.skills(draft.cwd || null).catch(() => []);
     // A slower answer for an earlier folder must not replace a later one.
     if (asked !== skillsAsked || JSON.stringify(listed) === JSON.stringify(skillList)) return;
     skillList = listed;
@@ -153,16 +154,18 @@ export function mountNewSession(main, app) {
     if (startButton.disabled) return;
     // A command typed out and sent is taken now. Alone in the box, it was all there was to do.
     if (skills.take()) return;
-    if (!draft.provider) return fail('No API key.');
+    if (!selection.provider) return fail('No API key.');
     if (!draft.cwd) return fail('No folder.');
     if (!draft.task.trim()) return fail('No task.');
     mic.stop();
     return guarded(startButton, async () => {
-      const { cwd, provider, model, effort, mode, autonomy } = draft;
-      const meta = await api.startSession({ cwd, task: draft.task, provider, model, effort, mode, autonomy, skills: plainMode(mode) ? [] : draft.skills, files: draft.files });
-      draft.task = '';
-      draft.skills = [];
-      draft.files = [];
+      const { cwd, task, mode, autonomy } = draft;
+      const spentSkills = plainMode(mode) ? [] : draft.skills;
+      const spentFiles = draft.files;
+      const meta = await api.startSession({ cwd, task, ...selection, effort: draft.effort ?? state.effort, mode, autonomy, skills: spentSkills, files: spentFiles });
+      if (draft.task === task) draft.task = '';
+      skills.remove(spentSkills);
+      files.remove(spentFiles);
       await app.opened(meta);
     });
   }
@@ -183,13 +186,16 @@ export function mountNewSession(main, app) {
       skills,
       box: task,
       start: setting('effort', 'Effort', effortOptions(state.effort)),
-      end: [modelPicker(state, draft, (choice) => Object.assign(draft, choice), 'end'), mic.button, startButton],
+      end: [modelPicker(state, selection, (choice) => {
+        selection = choice;
+        Object.assign(draft, choice);
+      }, 'end'), mic.button, startButton],
       under: [folderSlot, setting('mode', 'Mode', MODES, drawMode), setting('autonomy', 'Autonomy', AUTONOMIES), hint],
     }),
   );
 
   // The way to a key leads while there is none.
-  const lead = keyed.length === 0 && h('button.btn.primary.new-lead', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings' }) }, icon('key', 14), 'Add an API key');
+  const lead = keyed.length === 0 && h('button.btn.primary.new-lead', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings', section: 'settings-keys' }) }, icon('key', 14), 'Add an API key');
   const hero = h('div.new-hero', brandMark(44), h('h1.view-title', 'What should we work on?'));
 
   main.append(h('div.new-body', hero, lead, bar));

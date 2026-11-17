@@ -59,7 +59,7 @@ export function githubView(session, { onState, openFile, onDiscard }) {
       h(
         'div.push-target',
         h('div.push-line', icon(state.github ? 'github' : 'branch', 16), h('span.push-repo', { 'data-tooltip': state.github || state.url, 'data-tooltip-overflow': '' }, state.github ?? state.url ?? 'No remote')),
-        h('div.push-line', h('span.push-branch', { 'data-tooltip': state.branch, 'data-tooltip-overflow': '' }, state.branch ?? 'No branch checked out'), state.remote && state.branch && h('span.muted', `→ ${state.remote}`)),
+        h('div.push-line', h('span.push-branch', { 'data-tooltip': state.branch, 'data-tooltip-overflow': '' }, state.branch ?? 'No branch checked out'), state.remote && state.branch && h('span.muted', { 'data-tooltip': `${state.remote}/${state.push_branch ?? state.branch}` }, `→ ${state.remote}`)),
       ),
       h('div.push-standing', standing),
       // Only with something to commit: its files, and the message they go under.
@@ -85,11 +85,11 @@ export function githubView(session, { onState, openFile, onDiscard }) {
       ...(state.commits.length > 0
         ? [
             h('div.side-title', h('span.label', 'Commits')),
-            ...state.commits.map((commit, at) =>
+            ...state.commits.map((commit) =>
               h(
                 'div.commit',
                 h('span.commit-subject', { 'data-tooltip': commit.subject, 'data-tooltip-overflow': '' }, commit.subject),
-                h('span.commit-facts', h('span.mono', commit.hash), ` · ${commit.when}`, at < state.ahead && h('span.commit-ahead', 'not pushed')),
+                h('span.commit-facts', h('span.mono', commit.hash), ` · ${commit.when}`, commit.unpushed && h('span.commit-ahead', 'not pushed')),
               ),
             ),
           ]
@@ -147,6 +147,10 @@ export function githubView(session, { onState, openFile, onDiscard }) {
     } catch (problem) {
       if (asked !== reading) return;
       readFailed = true;
+      state = null;
+      enable();
+      onState(null);
+      log.hidden = true;
       body.replaceChildren();
       error.textContent = String(problem);
       error.hidden = false;
@@ -159,7 +163,7 @@ export function githubView(session, { onState, openFile, onDiscard }) {
     error.hidden = true;
     note.textContent = 'Pushing…';
     try {
-      const done = await api.gitPush(session.id, message.value);
+      const done = await api.gitPush(session.id, message.value, state.revision);
       note.textContent = done.pushed ? `Pushed ${done.commit ? `${done.commit} ` : ''}to ${done.remote}/${done.branch}` : 'Already up to date';
     } catch (problem) {
       note.textContent = '';

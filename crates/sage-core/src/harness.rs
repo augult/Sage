@@ -191,20 +191,6 @@ pub struct AppState {
     pub home: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct DirEntry {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DirListing {
-    pub path: String,
-    pub parent: Option<String>,
-    pub dirs: Vec<DirEntry>,
-    pub is_git: bool,
-}
-
 struct Live {
     dir: PathBuf,
     meta: Mutex<SessionMeta>,
@@ -216,9 +202,11 @@ struct Live {
     cancel: Mutex<CancellationToken>,
     /// Cancelled when the session is closed for good.
     closed: CancellationToken,
+    finished: CancellationToken,
     approvals: Arc<Approvals>,
-    /// This process's claim on the session's directory, let go of when the session is closed.
+    /// Released by the worker after its last write and job cleanup.
     lock: Mutex<Option<SessionLock>>,
+    storage_warned: AtomicBool,
 }
 
 /// What the worker of a session is sent.
@@ -242,27 +230,42 @@ enum Input {
 }
 
 impl Live {
-    fn save_meta(&self) {
-        let meta = self.meta.lock().unwrap().clone();
-        if let Ok(body) = serde_json::to_string_pretty(&meta) {
-            let _ = std::fs::write(self.dir.join("meta.json"), body);
-        }
+    fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+        let body = serde_json::to_vec_pretty(meta).map_err(|e| e.to_string())?;
+        resume::write_atomic(&self.dir.join("meta.json"), &body)
+            .map_err(|e| format!("Could not save session metadata: {e}"))
     }
 
     fn set_status(&self, status: SessionStatus) {
-        {
-            let mut m = self.meta.lock().unwrap();
-            m.status = status;
-            m.updated = now_ms();
+        let result = {
+            let mut meta = self.meta.lock().unwrap();
+            meta.status = status;
+            meta.updated = now_ms();
+            self.save_meta(&meta)
+        };
+        if let Err(problem) = result {
+            self.warn_storage(problem);
         }
-        self.save_meta();
     }
 
-    /// Ends the run in progress, if any, and lets another process have the session.
+    fn warn_storage(&self, message: String) {
+        if self.storage_warned.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let mut backlog = self.events.lock().unwrap();
+        let warning = Event {
+            seq: self.seq.fetch_add(1, Ordering::SeqCst) + 1,
+            ts: now_ms(),
+            kind: EventKind::Error { message },
+        };
+        backlog.push(warning.clone());
+        let _ = self.tx.send(warning);
+    }
+
+    /// Signals the worker to stop accepting messages and end the active run.
     fn shut(&self) {
-        self.cancel.lock().unwrap().cancel();
         self.closed.cancel();
-        self.lock.lock().unwrap().take();
+        self.cancel.lock().unwrap().cancel();
     }
 }
 
@@ -277,12 +280,15 @@ impl Sink for Live {
             ts: now_ms(),
             kind,
         };
+        let mut storage_error = None;
         if !transient {
-            if let (Some(file), Ok(line)) = (
-                self.log.lock().unwrap().as_mut(),
-                serde_json::to_string(&event),
-            ) {
-                let _ = writeln!(file, "{line}");
+            if let Some(file) = self.log.lock().unwrap().as_mut() {
+                let result = serde_json::to_string(&event)
+                    .map_err(std::io::Error::other)
+                    .and_then(|line| writeln!(file, "{line}"));
+                storage_error = result
+                    .err()
+                    .map(|e| format!("Could not append to the session log: {e}"));
             }
             match &event.kind {
                 EventKind::Stats { stats } => self.meta.lock().unwrap().stats = stats.clone(),
@@ -298,32 +304,35 @@ impl Sink for Live {
                     text,
                     ..
                 } => {
-                    {
-                        let mut m = self.meta.lock().unwrap();
-                        match state {
-                            GoalState::Set => m.goal = Some(Goal::new(text)),
-                            GoalState::Cleared => m.goal = None,
-                            _ => {
-                                if let Some(goal) = m.goal.as_mut() {
-                                    goal.met = true;
-                                }
+                    let mut meta = self.meta.lock().unwrap();
+                    match state {
+                        GoalState::Set => meta.goal = Some(Goal::new(text)),
+                        GoalState::Cleared => meta.goal = None,
+                        _ => {
+                            if let Some(goal) = meta.goal.as_mut() {
+                                goal.met = true;
                             }
                         }
                     }
                     // A goal that has been met is kept as met even if the app is closed in the middle of the run.
-                    self.save_meta();
+                    storage_error = storage_error.or(self.save_meta(&meta).err());
                 }
                 _ => {}
             }
             backlog.push(event.clone());
         }
         let _ = self.tx.send(event);
+        drop(backlog);
+        if let Some(problem) = storage_error {
+            self.warn_storage(problem);
+        }
     }
 }
 
 struct Inner {
     data_dir: PathBuf,
-    config: Mutex<Config>,
+    /// Benchmark harnesses inherit a copy of the user's configuration.
+    inherited_config: Mutex<Option<Config>>,
     sessions: Mutex<HashMap<String, Arc<Live>>>,
     /// The auto-retry setting, shared with the provider of every session: switching it reaches
     /// the ones that are running, even one that is waiting between two attempts.
@@ -433,8 +442,20 @@ fn opening_of(req: &StartRequest) -> Result<Opening, String> {
 }
 
 /// Runs a session: takes its messages one at a time and works on each until the session is closed.
+struct WorkerExit(Arc<Live>);
+
+impl Drop for WorkerExit {
+    fn drop(&mut self) {
+        self.0.log.lock().unwrap().take();
+        self.0.lock.lock().unwrap().take();
+        self.0.finished.cancel();
+    }
+}
+
 fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedReceiver<Input>) {
+    let exit = WorkerExit(worker.clone());
     tokio::spawn(async move {
+        let _exit = exit;
         loop {
             // A session that is closed takes no more messages, one that was already waiting included.
             let message = tokio::select! {
@@ -443,13 +464,10 @@ fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedR
                 message = inbox.recv() => message,
             };
             let Some(input) = message else { break };
-            let cancel = CancellationToken::new();
-            *worker.cancel.lock().unwrap() = cancel.clone();
-            // Closed just before the line above: `shut` cancelled the token this one replaced.
+            let cancel = worker.cancel.lock().unwrap().clone();
             if worker.closed.is_cancelled() {
                 break;
             }
-            worker.set_status(SessionStatus::Running);
             match input {
                 Input::Message {
                     text,
@@ -477,7 +495,7 @@ fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedR
             worker.set_status(SessionStatus::Idle);
         }
         agent.sess.jobs.kill_all();
-        worker.lock.lock().unwrap().take();
+        drop(agent);
     });
 }
 
@@ -516,7 +534,7 @@ impl Harness {
         Self {
             inner: Arc::new(Inner {
                 data_dir,
-                config: Mutex::new(config),
+                inherited_config: Mutex::new(None),
                 sessions: Mutex::new(HashMap::new()),
                 auto_retry,
                 stand_ins: AtomicBool::new(false),
@@ -528,11 +546,11 @@ impl Harness {
     /// so that benchmark runs do not mix with the user's own. It never retries without end: a
     /// benchmark has to finish.
     pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
-        let config = self.inner.config.lock().unwrap().clone();
+        let config = self.config();
         Self {
             inner: Arc::new(Inner {
                 data_dir,
-                config: Mutex::new(config),
+                inherited_config: Mutex::new(Some(config)),
                 sessions: Mutex::new(HashMap::new()),
                 auto_retry: Arc::default(),
                 stand_ins: AtomicBool::new(false),
@@ -544,8 +562,48 @@ impl Harness {
         self.inner.data_dir.join("config.json")
     }
 
+    fn config(&self) -> Config {
+        let inherited = self.inner.inherited_config.lock().unwrap();
+        if let Some(config) = inherited.as_ref() {
+            return config.clone();
+        }
+        let config = Config::load(&self.config_path());
+        self.inner
+            .auto_retry
+            .store(config.auto_retry, Ordering::Relaxed);
+        config
+    }
+
+    fn update_config<T>(
+        &self,
+        change: impl FnOnce(&mut Config) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let path = self.config_path();
+        let cannot = |error| format!("could not save the configuration: {error}");
+        let mut inherited = self.inner.inherited_config.lock().unwrap();
+        std::fs::create_dir_all(&self.inner.data_dir).map_err(cannot)?;
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))
+            .map_err(cannot)?;
+        lock.lock().map_err(cannot)?;
+        let mut config = inherited.clone().unwrap_or_else(|| Config::load(&path));
+        let result = change(&mut config)?;
+        config.save(&path).map_err(cannot)?;
+        self.inner
+            .auto_retry
+            .store(config.auto_retry, Ordering::Relaxed);
+        if inherited.is_some() {
+            *inherited = Some(config);
+        }
+        Ok(result)
+    }
+
     pub fn state(&self) -> AppState {
-        let cfg = self.inner.config.lock().unwrap();
+        let cfg = self.config();
         let mut providers: Vec<ProviderInfo> = PROVIDERS
             .iter()
             .map(|d| ProviderInfo {
@@ -591,22 +649,22 @@ impl Harness {
 
     /// Stores (or, with an empty key, removes) an API key.
     pub fn set_key(&self, provider: &str, key: &str) -> Result<(), String> {
-        let mut cfg = self.inner.config.lock().unwrap();
-        // The file's own endpoint may be given its key before it is written there.
-        if provider != CUSTOM && !cfg.knows(provider) {
-            return Err(format!("unknown provider {provider:?}"));
-        }
-        // A key removed is gone from the environment too, for Sage; one given turns it back on.
-        if key.trim().is_empty() {
-            cfg.keys.remove(provider);
-            cfg.env_off.insert(provider.to_string());
-        } else {
-            cfg.keys
-                .insert(provider.to_string(), key.trim().to_string());
-            cfg.env_off.remove(provider);
-        }
-        cfg.save(&self.config_path())
-            .map_err(|e| format!("could not save the configuration: {e}"))
+        self.update_config(|cfg| {
+            // The file's own endpoint may be given its key before it is written there.
+            if provider != CUSTOM && !cfg.knows(provider) {
+                return Err(format!("unknown provider {provider:?}"));
+            }
+            // A key removed is gone from the environment too, for Sage; one given turns it back on.
+            if key.trim().is_empty() {
+                cfg.keys.remove(provider);
+                cfg.env_off.insert(provider.to_string());
+            } else {
+                cfg.keys
+                    .insert(provider.to_string(), key.trim().to_string());
+                cfg.env_off.remove(provider);
+            }
+            Ok(())
+        })
     }
 
     /// Adds an OpenAI-compatible endpoint of the user's own, with its key when it asks for one,
@@ -618,22 +676,18 @@ impl Harness {
         models: &[String],
         key: &str,
     ) -> Result<String, String> {
-        let mut cfg = self.inner.config.lock().unwrap();
-        let id = cfg.add_provider(name, base_url, models)?;
-        if !key.trim().is_empty() {
-            cfg.keys.insert(id.clone(), key.trim().to_string());
-        }
-        cfg.save(&self.config_path())
-            .map_err(|e| format!("could not save the configuration: {e}"))?;
-        Ok(id)
+        self.update_config(|cfg| {
+            let id = cfg.add_provider(name, base_url, models)?;
+            if !key.trim().is_empty() {
+                cfg.keys.insert(id.clone(), key.trim().to_string());
+            }
+            Ok(id)
+        })
     }
 
     /// Takes one of the user's own endpoints away. Sessions already running on it keep running.
     pub fn remove_provider(&self, id: &str) -> Result<(), String> {
-        let mut cfg = self.inner.config.lock().unwrap();
-        cfg.remove_provider(id)?;
-        cfg.save(&self.config_path())
-            .map_err(|e| format!("could not save the configuration: {e}"))
+        self.update_config(|cfg| cfg.remove_provider(id))
     }
 
     pub fn set_defaults(
@@ -646,21 +700,21 @@ impl Harness {
             EffortPolicy::parse(e)
                 .ok_or_else(|| format!("unknown effort {e:?}; use low, high, max or ratchet"))?;
         }
-        let mut cfg = self.inner.config.lock().unwrap();
-        // A saved model is its provider's: with another provider and no model named, none is kept,
-        // or the old provider's model would be asked of the new one.
-        if model.is_none()
-            && provider
-                .as_ref()
-                .is_some_and(|next| cfg.provider.as_ref() != Some(next))
-        {
-            cfg.model = None;
-        }
-        cfg.provider = provider.or(cfg.provider.take());
-        cfg.model = model.or(cfg.model.take());
-        cfg.effort = effort.or(cfg.effort.take());
-        cfg.save(&self.config_path())
-            .map_err(|e| format!("could not save the configuration: {e}"))
+        self.update_config(|cfg| {
+            // A saved model is its provider's: with another provider and no model named, none is kept,
+            // or the old provider's model would be asked of the new one.
+            if model.is_none()
+                && provider
+                    .as_ref()
+                    .is_some_and(|next| cfg.provider.as_ref() != Some(next))
+            {
+                cfg.model = None;
+            }
+            cfg.provider = provider.or(cfg.provider.take());
+            cfg.model = model.or(cfg.model.take());
+            cfg.effort = effort.or(cfg.effort.take());
+            Ok(())
+        })
     }
 
     /// Switches auto-retry: with it, a request the provider turned away for a reason that passes
@@ -668,12 +722,10 @@ impl Harness {
     /// session is stopped, instead of ending the run after a few attempts. Takes effect at once,
     /// in the sessions that are running too.
     pub fn set_auto_retry(&self, on: bool) -> Result<(), String> {
-        let mut cfg = self.inner.config.lock().unwrap();
-        cfg.auto_retry = on;
-        cfg.save(&self.config_path())
-            .map_err(|e| format!("could not save the configuration: {e}"))?;
-        self.inner.auto_retry.store(on, Ordering::Relaxed);
-        Ok(())
+        self.update_config(|cfg| {
+            cfg.auto_retry = on;
+            Ok(())
+        })
     }
 
     fn system_path(&self) -> PathBuf {
@@ -800,17 +852,10 @@ impl Harness {
         if opening_of(&req)?.task.is_empty() {
             return Err("the task is empty".into());
         }
-        let resolved = self
-            .inner
-            .config
-            .lock()
-            .unwrap()
-            .resolve(req.provider.as_deref(), req.model.as_deref())?;
+        let cfg = self.config();
+        let resolved = cfg.resolve(req.provider.as_deref(), req.model.as_deref())?;
         let provider = self.client(&resolved)?;
-        let effort = req
-            .effort
-            .clone()
-            .or_else(|| self.inner.config.lock().unwrap().effort.clone());
+        let effort = req.effort.clone().or(cfg.effort);
         self.launch(req, provider, &resolved.id, &resolved.model, effort)
     }
 
@@ -960,21 +1005,23 @@ impl Harness {
             .create(true)
             .append(true)
             .open(dir.join("events.jsonl"))
-            .ok();
+            .map_err(|e| format!("Could not open the session log: {e}"))?;
         let live = Arc::new(Live {
             dir,
             meta: Mutex::new(meta.clone()),
             events: Mutex::new(Vec::new()),
             seq: AtomicU64::new(0),
             tx,
-            log: Mutex::new(log),
+            log: Mutex::new(Some(log)),
             input,
             cancel: Mutex::new(CancellationToken::new()),
             closed: CancellationToken::new(),
+            finished: CancellationToken::new(),
             approvals: approvals.clone(),
             lock: Mutex::new(Some(lock)),
+            storage_warned: AtomicBool::new(false),
         });
-        live.save_meta();
+        live.save_meta(&meta)?;
         live.emit(EventKind::SessionStart {
             id: id.clone(),
             title: meta.title.clone(),
@@ -1033,12 +1080,12 @@ impl Harness {
 
     /// Sends a follow-up message to an idle session, switching on the skills named that it does not
     /// have yet. Its system prompt is already sent, so they go in front of this message instead.
-    pub fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
+    #[cfg(all(test, unix))]
+    fn send_with_skills(&self, id: &str, text: &str, skills: &[String]) -> Result<(), String> {
         self.send_with(id, text, skills, &[], Changes::default())
     }
 
-    /// `send_with_skills`, and with the message whatever else is to change from it onwards: the
-    /// model, the effort, the autonomy. The conversation is kept, so another model is sent all of
+    /// Sends a follow-up, optionally changing the skills, model, effort, or autonomy. The conversation is kept, so another model is sent all of
     /// it. The mode cannot change: the system prompt and the tools of a session are sent already.
     ///
     /// A message that starts with `/goal` is a command (see `goal`): `/goal <condition>` sets the
@@ -1097,7 +1144,7 @@ impl Harness {
                     "this session is played by a stand-in: it has no model to change".into(),
                 );
             }
-            let resolved = self.inner.config.lock().unwrap().resolve(
+            let resolved = self.config().resolve(
                 Some(changes.provider.as_deref().unwrap_or(&provider)),
                 changes.model.as_deref(),
             )?;
@@ -1114,8 +1161,11 @@ impl Harness {
             Some(other) => return Err(format!("unknown autonomy {other:?}; use auto or ask")),
             None => None,
         };
-        {
+        let saved = {
             let mut meta = live.meta.lock().unwrap();
+            if live.closed.is_cancelled() {
+                return Err("the session has ended".into());
+            }
             if meta.status == SessionStatus::Running {
                 return Err("the session is still working; stop it first or wait".into());
             }
@@ -1132,10 +1182,14 @@ impl Harness {
                 meta.effort = effort.label();
             }
             // Mark it running now so a second message cannot slip in before the worker picks this one up.
+            *live.cancel.lock().unwrap() = CancellationToken::new();
             meta.status = SessionStatus::Running;
             meta.updated = now_ms();
+            live.save_meta(&meta)
+        };
+        if let Err(problem) = saved {
+            live.warn_storage(problem);
         }
-        live.save_meta();
         let typed = text.trim().to_string();
         let input = match command {
             Some(goal::Command::Set(condition)) => {
@@ -1186,7 +1240,7 @@ impl Harness {
 
     /// Ends a session for good: stops its current run, kills its background jobs and frees its
     /// memory. The log stays on disk and can still be replayed.
-    pub fn close(&self, id: &str) -> Result<(), String> {
+    pub async fn close(&self, id: &str) -> Result<(), String> {
         let live = self
             .inner
             .sessions
@@ -1195,12 +1249,13 @@ impl Harness {
             .remove(id)
             .ok_or_else(|| format!("session {id} is not running in this process"))?;
         live.shut();
+        live.finished.cancelled().await;
         Ok(())
     }
 
     /// Closes every session this process runs, as the app does when it quits. What each has
     /// stored by then is enough to continue it: a run in progress is ended and its snapshot written.
-    pub fn close_all(&self) -> usize {
+    pub async fn close_all(&self) -> usize {
         let all: Vec<Arc<Live>> = self
             .inner
             .sessions
@@ -1211,6 +1266,9 @@ impl Harness {
             .collect();
         for live in &all {
             live.shut();
+        }
+        for live in &all {
+            live.finished.cancelled().await;
         }
         all.len()
     }
@@ -1223,11 +1281,18 @@ impl Harness {
             return Err("a session needs a title".into());
         }
         if let Ok(live) = self.live(id) {
-            live.meta.lock().unwrap().title = title;
-            live.save_meta();
-            return Ok(live.meta.lock().unwrap().clone());
+            let mut meta = live.meta.lock().unwrap();
+            if live.closed.is_cancelled() {
+                return Err(format!("session {id} is closing"));
+            }
+            let mut changed = meta.clone();
+            changed.title = title;
+            live.save_meta(&changed)?;
+            *meta = changed;
+            return Ok(meta.clone());
         }
-        let path = self.unclaimed(id)?.join("meta.json");
+        let (dir, lock) = self.unclaimed(id)?;
+        let path = dir.join("meta.json");
         // The file as it is, not as this build types it: what a newer build stored in it is kept.
         let mut meta = std::fs::read_to_string(&path)
             .ok()
@@ -1236,41 +1301,46 @@ impl Harness {
             .ok_or_else(|| format!("no session {id}"))?;
         meta["title"] = title.into();
         let body = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
-        std::fs::write(&path, body).map_err(|e| format!("could not rename session {id}: {e}"))?;
+        resume::write_atomic(&path, body.as_bytes())
+            .map_err(|e| format!("could not rename session {id}: {e}"))?;
+        drop(lock);
         self.stored(id).ok_or_else(|| format!("no session {id}"))
     }
 
     /// Deletes a session for good: its conversation, its log and what its commands printed. The
     /// folder it worked in is not touched. A run in progress is stopped first, by whoever asks:
     /// what a run still writes as it ends would come back into a directory being removed.
-    pub fn delete(&self, id: &str) -> Result<(), String> {
-        let dir = match self.live(id) {
-            Ok(live) => {
-                if live.meta.lock().unwrap().status == SessionStatus::Running {
+    pub async fn delete(&self, id: &str) -> Result<(), String> {
+        let closing = {
+            let mut sessions = self.inner.sessions.lock().unwrap();
+            if let Some(live) = sessions.get(id) {
+                let meta = live.meta.lock().unwrap();
+                if meta.status == SessionStatus::Running {
                     return Err(format!("session {id} is running: stop it first"));
                 }
-                self.close(id)?;
-                // Its log is open for appending for as long as anything holds the session.
-                live.log.lock().unwrap().take();
-                live.dir.clone()
+                live.shut();
             }
-            Err(_) => self.unclaimed(id)?,
+            sessions.remove(id)
         };
+        if let Some(live) = closing {
+            live.finished.cancelled().await;
+        }
+        let (dir, _lock) = self.unclaimed(id)?;
         std::fs::remove_dir_all(&dir).map_err(|e| format!("could not delete session {id}: {e}"))
     }
 
     /// The directory of a stored session that no process is running.
-    fn unclaimed(&self, id: &str) -> Result<PathBuf, String> {
+    fn unclaimed(&self, id: &str) -> Result<(PathBuf, SessionLock), String> {
         let dir = self.session_dir(id)?;
         if !dir.join("meta.json").is_file() {
             return Err(format!("no session {id}"));
         }
-        if SessionLock::held(&dir) {
-            return Err(format!(
-                "session {id} is running in another process: close it there first"
-            ));
+        let lock = SessionLock::acquire(&dir)
+            .map_err(|error| format!("cannot claim session {id}: {error}"))?;
+        if !dir.join("meta.json").is_file() {
+            return Err(format!("no session {id}"));
         }
-        Ok(dir)
+        Ok((dir, lock))
     }
 
     pub fn approve(&self, id: &str, approval: u64, allow: bool) -> Result<(), String> {
@@ -1398,41 +1468,6 @@ impl Harness {
             .map_err(|_| format!("no saved output {handle} in session {id}"))?;
         Ok(crate::text::clean(&bytes))
     }
-
-    /// Sub-directories of `path`, for the in-app folder picker.
-    pub fn list_dir(&self, path: Option<&str>) -> Result<DirListing, String> {
-        let dir = match path.map(str::trim).filter(|p| !p.is_empty()) {
-            Some("~") => home_dir(),
-            Some(p) => p
-                .strip_prefix("~/")
-                .map(|rest| home_dir().join(rest))
-                .unwrap_or_else(|| PathBuf::from(p)),
-            None => home_dir(),
-        };
-        let dir = crate::util::canonical(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        if !dir.is_dir() {
-            return Err(format!("{} is not a directory", dir.display()));
-        }
-        let mut dirs: Vec<DirEntry> = std::fs::read_dir(&dir)
-            .map_err(|e| format!("{}: {e}", dir.display()))?
-            .flatten()
-            .filter(|e| e.path().is_dir())
-            .filter_map(|e| {
-                let name = e.file_name().into_string().ok()?;
-                (!name.starts_with('.')).then(|| DirEntry {
-                    path: e.path().to_string_lossy().into_owned(),
-                    name,
-                })
-            })
-            .collect();
-        dirs.sort_by_key(|a| a.name.to_lowercase());
-        Ok(DirListing {
-            is_git: dir.join(".git").exists(),
-            parent: dir.parent().map(|p| p.to_string_lossy().into_owned()),
-            path: dir.to_string_lossy().into_owned(),
-            dirs,
-        })
-    }
 }
 
 /// Continuing sessions that are stored.
@@ -1516,6 +1551,10 @@ impl Harness {
             return Ok(live.clone());
         }
         let cannot = |why: String| format!("session {id} cannot be continued: {why}");
+        if !dir.join("meta.json").is_file() {
+            return Err(format!("no session {id}"));
+        }
+        let lock = SessionLock::acquire(&dir).map_err(cannot)?;
         let mut meta = std::fs::read_to_string(dir.join("meta.json"))
             .ok()
             .and_then(|t| serde_json::from_str::<SessionMeta>(&t).ok())
@@ -1531,11 +1570,10 @@ impl Harness {
         if !Path::new(&meta.cwd).is_dir() {
             return Err(cannot(format!("its folder {} is gone", meta.cwd)));
         }
-        let lock = SessionLock::acquire(&dir).map_err(cannot)?;
         let provider = match stand_in {
             Some(stand_in) => Provider::Mock(stand_in),
             None => {
-                let config = self.inner.config.lock().unwrap();
+                let config = self.config();
                 match config.resolve(Some(&meta.provider), Some(&meta.model)) {
                     Ok(resolved) => self.client(&resolved)?,
                     // The message names another model: that one is used, and the stored one need not resolve.
@@ -1593,7 +1631,11 @@ impl Harness {
 
         // The log as it was: what a subscriber is shown first, and where the numbering goes on from.
         let log_path = dir.join("events.jsonl");
-        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let text = match std::fs::read_to_string(&log_path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(cannot(format!("cannot read its log: {error}"))),
+        };
         let backlog: Vec<Event> = text
             .lines()
             .filter_map(|l| serde_json::from_str(l).ok())
@@ -1606,7 +1648,7 @@ impl Harness {
             .map_err(|e| cannot(format!("cannot open its log: {e}")))?;
         // A write cut short leaves a line with no end: the next event must not join it.
         if !text.is_empty() && !text.ends_with('\n') {
-            let _ = writeln!(log);
+            writeln!(log).map_err(|e| cannot(format!("cannot repair its log: {e}")))?;
         }
 
         meta.status = SessionStatus::Idle;
@@ -1626,15 +1668,17 @@ impl Harness {
             input,
             cancel: Mutex::new(CancellationToken::new()),
             closed: CancellationToken::new(),
+            finished: CancellationToken::new(),
             approvals: approvals.clone(),
             lock: Mutex::new(Some(lock)),
+            storage_warned: AtomicBool::new(false),
         });
         let goal = live.meta.lock().unwrap().goal.clone();
         let sink: Arc<dyn Sink> = live.clone();
         let (mut agent, answered) =
             Agent::restore(provider, sess, cfg, sink, approvals, snapshot, goal);
         agent.keep_snapshots(live.dir.join(resume::SNAPSHOT), setup);
-        live.save_meta();
+        live.save_meta(&live.meta.lock().unwrap())?;
         live.emit(EventKind::Resumed { cut_off, answered });
         spawn_worker(live.clone(), agent, inbox);
         sessions.insert(id.to_string(), live.clone());
@@ -1650,3 +1694,73 @@ impl Default for Harness {
 
 #[cfg(all(test, unix))]
 mod tests;
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    fn scratch() -> PathBuf {
+        std::env::temp_dir().join(format!("sage-persistence-{}", rand_hex(8)))
+    }
+
+    #[test]
+    fn two_harnesses_keep_each_others_configuration_changes() {
+        let data = scratch();
+        let a = Harness::at(data.clone());
+        let b = Harness::at(data.clone());
+        a.set_key("openai", "test-a").unwrap();
+        b.set_key("deepseek", "test-b").unwrap();
+        a.set_auto_retry(true).unwrap();
+        let config = Config::load(&a.config_path());
+        assert_eq!(
+            config.keys.get("openai").map(String::as_str),
+            Some("test-a")
+        );
+        assert_eq!(
+            config.keys.get("deepseek").map(String::as_str),
+            Some("test-b")
+        );
+        assert!(b.state().auto_retry);
+        std::fs::remove_dir_all(data).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stopping_a_queued_run_cancels_it_before_the_first_request() {
+        let data = scratch();
+        let cwd = data.join("work");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let harness = Harness::at(data.clone());
+        let provider = MockProvider::new(vec![Box::new(|_| {
+            panic!("queued run contacted its provider")
+        })]);
+        let meta = harness
+            .start_scripted(
+                StartRequest {
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    task: "Say hello".into(),
+                    without: vec!["survey".into()],
+                    ..Default::default()
+                },
+                provider,
+            )
+            .unwrap();
+        harness.stop(&meta.id).unwrap();
+        let (_, mut feed) = harness.subscribe(&meta.id).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let EventKind::Finish { status, .. } = feed.recv().await.unwrap().kind {
+                    break status;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(status, FinishStatus::Stopped);
+        assert_eq!(harness.close_all().await, 1);
+        let dir = harness.session_dir(&meta.id).unwrap();
+        assert!(!SessionLock::held(&dir));
+        assert!(!resume::read(&dir).unwrap().in_run);
+        harness.delete(&meta.id).await.unwrap();
+        std::fs::remove_dir_all(data).unwrap();
+    }
+}

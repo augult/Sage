@@ -441,11 +441,13 @@ impl OpenAiProvider {
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.trim().parse::<u64>().ok());
-            let text = tokio::time::timeout(self.idle_timeout, resp.text())
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or_default();
+            let text = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(ProviderError::Cancelled),
+                read = tokio::time::timeout(self.idle_timeout, resp.text()) => {
+                    read.ok().and_then(Result::ok).unwrap_or_default()
+                }
+            };
             return Err(ProviderError::Http {
                 status: status.as_u16(),
                 message: error_message(&text),
@@ -915,6 +917,46 @@ mod tests {
             "{:?}",
             answer.err().map(|e| e.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn stop_interrupts_a_stalled_error_body() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        let stop = cancel.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            whole_request(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 10\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            stop.cancel();
+            std::future::pending::<()>().await;
+        });
+        let provider =
+            OpenAiProvider::new(&format!("http://{address}/v1"), "k", "m", Dialect::OpenAi)
+                .unwrap();
+        let answer = tokio::time::timeout(
+            Duration::from_secs(5),
+            provider.chat(
+                ChatRequest {
+                    messages: &[Message::user("hi")],
+                    tools: &json!([]),
+                    effort: Effort::High,
+                    max_tokens: 64,
+                    reasoning_cap: 0,
+                },
+                &mut |_| {},
+                &cancel,
+            ),
+        )
+        .await;
+        server.abort();
+        assert!(matches!(answer, Ok(Err(ProviderError::Cancelled))));
     }
 
     #[tokio::test]

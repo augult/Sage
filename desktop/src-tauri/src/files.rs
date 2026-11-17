@@ -3,6 +3,7 @@
 //! by a path that climbs out of it or through a link that leads out of it.
 
 use serde::Serialize;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 /// A longer file is not one to edit in a text box.
@@ -99,13 +100,32 @@ pub fn read(root: &Path, path: &str) -> Result<String, String> {
         .map_err(|_| format!("{path} is not text"))
 }
 
-/// Writes `text` to the file at `path`, which is there already.
-pub fn write(root: &Path, path: &str, text: &str) -> Result<(), String> {
-    let (_, file) = within(root, path)?;
-    if !file.is_file() {
+/// Writes the edited text only if the file still has the contents the editor read.
+pub fn write(root: &Path, path: &str, text: &str, expected: &str) -> Result<(), String> {
+    let (_, full) = within(root, path)?;
+    if !full.is_file() {
         return Err(format!("{path} is not a file"));
     }
-    std::fs::write(&file, text).map_err(|e| format!("cannot write {path}: {e}"))
+    let cannot = |e| format!("cannot write {path}: {e}");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&full)
+        .map_err(cannot)?;
+    file.lock().map_err(cannot)?;
+    let mut current = Vec::new();
+    (&mut file)
+        .take(expected.len() as u64 + 1)
+        .read_to_end(&mut current)
+        .map_err(cannot)?;
+    if current != expected.as_bytes() {
+        return Err(format!(
+            "{path} changed on disk. Reopen it before saving your edits."
+        ));
+    }
+    file.rewind().map_err(cannot)?;
+    file.write_all(text.as_bytes()).map_err(cannot)?;
+    file.set_len(text.len() as u64).map_err(cannot)
 }
 
 /// Where a new entry named by `path` would go: its folder has to be there and under the root, the
@@ -208,12 +228,19 @@ mod tests {
         assert_eq!(names("src/deep"), [("src/deep/main.rs".to_string(), false)]);
 
         assert_eq!(read(&root, "src/deep/main.rs").unwrap(), "fn main() {}\n");
-        write(&root, "b.txt", "two\n").unwrap();
+        write(&root, "b.txt", "two\n", "one\n").unwrap();
+        assert!(
+            write(&root, "b.txt", "lost\n", "one\n")
+                .unwrap_err()
+                .contains("changed on disk")
+        );
         assert_eq!(read(&root, "b.txt").unwrap(), "two\n");
         assert!(read(&root, "blob.bin").unwrap_err().contains("not text"));
         assert!(
-            write(&root, "new.txt", "x").is_err()
-                && write(&root, "src", "x").unwrap_err().contains("not a file")
+            write(&root, "new.txt", "x", "").is_err()
+                && write(&root, "src", "x", "")
+                    .unwrap_err()
+                    .contains("not a file")
         );
 
         for outside in ["../secret.txt", base.join("secret.txt").to_str().unwrap()] {
@@ -222,7 +249,9 @@ mod tests {
                 "{outside}"
             );
             assert!(
-                write(&root, outside, "x").unwrap_err().contains("outside"),
+                write(&root, outside, "x", "")
+                    .unwrap_err()
+                    .contains("outside"),
                 "{outside}"
             );
         }

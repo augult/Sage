@@ -233,7 +233,7 @@ enum Command {
     Help,
     List,
     Check(Vec<&'static Task>),
-    Run(Options),
+    Run(Box<Options>),
 }
 
 fn list_of(value: &str) -> Vec<String> {
@@ -318,7 +318,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
     } else if check {
         Command::Check(opt.tasks)
     } else {
-        Command::Run(opt)
+        Command::Run(Box::new(opt))
     })
 }
 
@@ -792,7 +792,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
                     }
                 }
             }
-            let _ = shared.harness.close(&meta.id);
+            let _ = shared.harness.close(&meta.id).await;
         }
     }
     judged(shared, job, &ws, run).await

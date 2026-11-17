@@ -55,7 +55,7 @@ watchUnsaved(() => [
   })),
 ]);
 
-export function mountSettings(main, app) {
+export function mountSettings(main, app, section) {
   const live = h('div.contents');
   const dataFolder = h('section.panel', h('h2.section-title', 'Data folder'), h('div.data-path.mono', tilde(app.state.data_dir, app.state.home)));
   main.append(
@@ -87,6 +87,11 @@ export function mountSettings(main, app) {
   }
 
   draw();
+  if (section === 'settings-keys') {
+    const keys = live.querySelector('#settings-keys');
+    keys.scrollIntoView({ block: 'start' });
+    (keys.querySelector('input') ?? keys.querySelector('#add-provider'))?.focus({ preventScroll: true });
+  }
   return {};
 }
 

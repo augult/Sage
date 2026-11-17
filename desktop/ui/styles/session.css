@@ -805,6 +805,9 @@ button.row-line:focus-visible {
   flex-wrap: wrap;
   gap: 4px;
   padding: 8px 8px 0;
+  max-height: min(120px, 20vh);
+  overflow-y: auto;
+  align-content: start;
 }
 
 .file-chip {
@@ -836,8 +839,8 @@ button.row-line:focus-visible {
   display: grid;
   flex: none;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   margin-right: -3px;
   padding: 0;
   border: 0;

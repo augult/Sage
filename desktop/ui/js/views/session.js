@@ -75,17 +75,19 @@ export function mountSession(main, side, app, meta) {
     api.stopSession(entry.id).catch((problem) => {
       stopping = false;
       render();
-      throw problem;
+      fail(problem);
     });
   }
 
   // Follow-up box. Typing ahead is fine; sending waits for the run to end.
+  let draftRevision = 0;
   const box = h('textarea', {
     id: 'followup',
     rows: 1,
     'aria-label': 'Follow-up message',
     placeholder: 'Follow-up',
     oninput: () => {
+      draftRevision++;
       fitBox(box);
       markIdle(sendButton, box);
     },
@@ -130,17 +132,23 @@ export function mountSession(main, side, app, meta) {
     const text = own ? answer : box.value.trim();
     if (!text || sendButton.disabled || sendButton.hidden) return;
     const before = messages();
+    const revision = draftRevision;
+    const sentSkills = picked;
+    const sentFiles = files.paths();
     sending = true;
     sendError.hidden = true;
     mic.stop();
     render();
     try {
-      await api.sendMessage(entry.id, text, picked, changes(), files.paths());
+      await api.sendMessage(entry.id, text, sentSkills, changes(), sentFiles);
       // A session from an earlier launch has been brought back by the message: follow it from here.
       store.resume(entry);
-      if (!own) box.value = '';
-      skills.clear();
-      files.clear();
+      if (!own && draftRevision === revision) {
+        if (!gone) box.value = '';
+        else if (drafts.get(entry.id) === box.value) drafts.delete(entry.id);
+      }
+      skills.remove(sentSkills);
+      files.remove(sentFiles);
       fitBox(box);
       awaitingRun = before;
       pinned = true;

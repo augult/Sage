@@ -20,6 +20,10 @@ export function codeView(session) {
   const unfolded = new Set(['']);
   let file = null;
   let saved = '';
+  let original = '';
+  let saving = null;
+  let gutterCount = 0;
+  let editorVersion = 0;
   // How the open file ends its lines. The text box only knows `\n`; what is written gets these back.
   let eol = '\n';
   // A name being typed in the tree: `{ kind: 'rename', path }` or `{ kind: 'new', folder, dir }`.
@@ -55,9 +59,12 @@ export function codeView(session) {
   /** The gutter and the Save button follow the text. */
   function mark() {
     const count = text.value.split('\n').length;
-    if (lines.childElementCount !== count) lines.replaceChildren(...Array.from({ length: count }, (_, at) => h('span', String(at + 1))));
+    if (gutterCount !== count) {
+      gutterCount = count;
+      lines.textContent = Array.from({ length: count }, (_, at) => at + 1).join('\n');
+    }
     lines.scrollTop = text.scrollTop;
-    save.disabled = !dirty();
+    save.disabled = Boolean(saving) || !dirty();
     name.classList.toggle('is-unsaved', dirty());
   }
 
@@ -65,12 +72,6 @@ export function codeView(session) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       if (dirty()) write().catch(() => {});
-    } else if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      event.preventDefault();
-      // As the file itself indents.
-      const indent = /^\t/m.test(text.value) ? '\t' : '  ';
-      if (!document.execCommand('insertText', false, indent)) text.setRangeText(indent, text.selectionStart, text.selectionEnd, 'end');
-      mark();
     }
   }
 
@@ -80,9 +81,11 @@ export function codeView(session) {
   }
 
   function show(path, content) {
+    editorVersion++;
     file = path;
+    original = content;
     eol = content.includes('\r\n') ? '\r\n' : '\n';
-    saved = content.replace(/\r\n/g, '\n');
+    saved = content.replace(/\r\n?/g, '\n');
     text.value = saved;
     text.scrollTop = text.scrollLeft = 0;
     showName();
@@ -95,8 +98,10 @@ export function codeView(session) {
 
   /** Nothing open any more: its file is gone. */
   function close() {
+    opening++;
+    editorVersion++;
     file = null;
-    saved = text.value = '';
+    original = saved = text.value = '';
     bar.hidden = editor.hidden = true;
     empty.hidden = false;
     mark();
@@ -106,35 +111,49 @@ export function codeView(session) {
   /** Opens the file at `path`, once what was typed in the one open now is saved or let go. */
   async function open(path) {
     const asked = ++opening;
-    if (path === file || !(await settleUnsaved())) return;
+    editorVersion++;
+    if ((path === file && error.hidden) || !(await settleUnsaved())) return;
     try {
       const content = await api.readFile(session.id, path);
       // Another file was asked for meanwhile: the last one asked for is the one to show.
+      if (asked !== opening) return;
+      // Typing can resume while an earlier request to open the next file is still in flight.
+      if (dirty() && !(await settleUnsaved())) return;
       if (asked !== opening) return;
       show(path, content);
       // Its folders unfold, so the tree shows where it is.
       const parts = path.split('/').slice(0, -1);
       await Promise.all(parts.map((_, at) => unfold(parts.slice(0, at + 1).join('/'))));
     } catch (problem) {
-      fail(problem);
+      if (asked === opening) fail(problem);
     }
   }
 
   function write() {
+    if (saving) return saving;
     const [path, content] = [file, text.value];
+    const output = content.replace(/\n/g, eol);
+    editorVersion++;
     error.hidden = true;
-    return track(
-      api.writeFile(session.id, path, content.replace(/\n/g, eol)).then(
+    saving = track(
+      api.writeFile(session.id, path, output, original).then(
         () => {
-          if (file === path) saved = content;
-          mark();
+          if (file === path) {
+            original = output;
+            saved = content;
+          }
         },
         (problem) => {
           fail(problem);
           throw problem;
         },
-      ),
+      ).finally(() => {
+        saving = null;
+        mark();
+      }),
     );
+    mark();
+    return saving;
   }
 
   async function list(path) {
@@ -233,6 +252,8 @@ export function codeView(session) {
       for (const path of [...listed.keys()]) if (moved(path, from, to) !== null) listed.delete(path);
       const now = file === null ? null : moved(file, from, to);
       if (now !== null) {
+        opening++;
+        editorVersion++;
         file = now;
         showName();
       }
@@ -327,7 +348,21 @@ export function codeView(session) {
     const row = event.target.closest?.('.tree-row');
     if (!row || naming) return;
     const entry = { path: row.dataset.path, dir: row.dataset.dir === 'true' };
-    if (event.key === 'F2') {
+    if (['ArrowUp', 'ArrowDown', 'Home', 'End', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      const rows = [...tree.querySelectorAll('button.tree-row')];
+      const at = rows.indexOf(row);
+      if (event.key === 'ArrowRight') {
+        if (entry.dir && !unfolded.has(entry.path)) unfold(entry.path).catch(fail);
+        else if (entry.dir && rows[at + 1]?.dataset.path.startsWith(`${entry.path}/`)) rows[at + 1].focus();
+      } else if (event.key === 'ArrowLeft') {
+        if (unfolded.has(entry.path)) toggle(entry.path);
+        else rows.find((item) => item.dataset.path === parentOf(entry.path))?.focus();
+      } else {
+        const next = { ArrowUp: at - 1, ArrowDown: at + 1, Home: 0, End: rows.length - 1 }[event.key];
+        rows[next]?.focus();
+      }
+    } else if (event.key === 'F2') {
       event.preventDefault();
       startRename(entry.path);
     } else if (event.key === 'Delete') {
@@ -365,6 +400,7 @@ export function codeView(session) {
           style: `padding-left:${6 + depth * 12}px`,
           dataset: { path: entry.path, dir: String(entry.dir) },
           'aria-expanded': entry.dir ? String(shown) : null,
+          'aria-level': depth + 1,
           'aria-current': entry.path === file ? 'true' : null,
           onclick: renaming ? null : () => (entry.dir ? toggle(entry.path) : open(entry.path)),
           oncontextmenu: (event) => menuAt(event, entry),
@@ -380,15 +416,21 @@ export function codeView(session) {
 
   function draw() {
     const at = tree.querySelector(':focus')?.dataset.path;
-    tree.replaceChildren(...rows('', 0));
+    const fragment = document.createDocumentFragment();
+    for (const row of rows('', 0)) fragment.append(row);
+    tree.replaceChildren(fragment);
     if (at !== undefined && !naming) tree.querySelector(`[data-path="${CSS.escape(at)}"]`)?.focus();
   }
 
   /** Reads again what is shown: the folders that are unfolded, and the open file unless it has unsaved text. */
+  let refreshes = 0;
   async function refresh() {
+    const refreshId = ++refreshes;
+    const [path, version] = [file, editorVersion];
     try {
       const folders = [...unfolded].filter((path) => path === '' || listed.has(path));
       const found = await Promise.allSettled(folders.map((path) => api.listDir(session.id, path)));
+      if (refreshId !== refreshes) return;
       folders.forEach((path, at) => {
         // A folder that is gone folds away.
         if (found[at].status === 'fulfilled') {
@@ -401,12 +443,12 @@ export function codeView(session) {
       if (found[0].status === 'rejected') throw found[0].reason;
       // A name being typed keeps its box.
       if (!naming) draw();
-      if (file !== null && !dirty()) {
-        const content = await api.readFile(session.id, file);
-        if (!dirty() && content.replace(/\r\n/g, '\n') !== saved) show(file, content);
+      if (path !== null && file === path && version === editorVersion && !dirty() && !saving) {
+        const content = await api.readFile(session.id, path);
+        if (refreshId === refreshes && version === editorVersion && !dirty() && content !== original) show(path, content);
       }
     } catch (problem) {
-      fail(problem);
+      if (refreshId === refreshes && version === editorVersion) fail(problem);
     }
   }
 
@@ -431,6 +473,8 @@ export function codeView(session) {
     open,
     refresh,
     unmount() {
+      opening++;
+      refreshes++;
       closeContextMenu();
       unwatch();
     },

@@ -152,6 +152,7 @@ pub struct Agent {
     /// Where the conversation and the rest of what continuing needs are stored after each reply
     /// (`checkpoint`), with how the session was set up.
     keep: Option<(PathBuf, Setup)>,
+    snapshot_warned: bool,
     /// Said in front of the next message: the session was brought back after a restart.
     restored: Option<String>,
     /// Protected files and required deliverables read mechanically off the session's task.
@@ -237,6 +238,7 @@ impl Agent {
             goal: None,
             shown: None,
             keep: None,
+            snapshot_warned: false,
             restored: None,
         }
     }
@@ -288,7 +290,8 @@ impl Agent {
     }
 
     /// The session's goal, if it has one: met or not.
-    pub fn goal(&self) -> Option<&Goal> {
+    #[cfg(all(test, unix))]
+    fn goal(&self) -> Option<&Goal> {
         self.goal.as_ref()
     }
 
@@ -1302,13 +1305,21 @@ impl Agent {
 
     /// Writes the snapshot, if this agent keeps one. A snapshot that cannot be written costs only
     /// the chance to continue after a restart, never the run.
-    fn save_point(&self, in_run: bool) {
+    fn save_point(&mut self, in_run: bool) {
         let Some((path, setup)) = &self.keep else {
             return;
         };
-        if let Ok(body) = serde_json::to_vec(&self.checkpoint(in_run, setup)) {
-            let _ = resume::write_atomic(path, &body);
+        let result = serde_json::to_vec(&self.checkpoint(in_run, setup))
+            .map_err(std::io::Error::other)
+            .and_then(|body| resume::write_atomic(path, &body));
+        if let Err(error) = &result
+            && !self.snapshot_warned
+        {
+            self.sink.emit(EventKind::Error {
+                message: format!("Could not save the session snapshot: {error}"),
+            });
         }
+        self.snapshot_warned = result.is_err();
     }
 
     /// An agent as the snapshot left it: the conversation, the turn counter and the stats, the

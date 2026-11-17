@@ -387,11 +387,15 @@ impl Session {
         let scratch =
             std::env::temp_dir().join(format!("sage-scratch-{}", crate::util::rand_hex(6)));
         let _ = std::fs::create_dir_all(&scratch);
-        let mut shell_env = non_interactive_env();
+        let shell_env = non_interactive_env();
         #[cfg(unix)]
-        if scratch.is_dir() {
-            shell_env.push(("TMPDIR".to_string(), scratch.to_string_lossy().into_owned()));
-        }
+        let shell_env = {
+            let mut env = shell_env;
+            if scratch.is_dir() {
+                env.push(("TMPDIR".to_string(), scratch.to_string_lossy().into_owned()));
+            }
+            env
+        };
         Ok(Self {
             ws,
             seen: Seen::default(),

@@ -18,6 +18,12 @@
   --inspector-w: clamp(360px, var(--code-w, clamp(360px, 42vw, 760px)), calc(100vw - var(--left-w) - 360px));
 }
 
+@media (min-width: 1600px) {
+  :root[data-panel="github"][data-view="session"] {
+    --inspector-w: 360px;
+  }
+}
+
 :root[data-sidebar="off"] {
   --left-w: 0px;
 }

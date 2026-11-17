@@ -22,7 +22,7 @@ const BROWSE = 'skills';
  *
  * Gives `menu` and `chips` for the bar to hold; `key(event)` for the box's keydown, true when the
  * key was the menu's; `take()` for a box about to be sent, true when a command was all there was
- * in it; `clear()` for once they have gone with a message; and `refresh()` for when the list, the
+ * in it; `remove(sent)` for skills sent with a message; and `refresh()` for when the list, the
  * lock or the mode may have changed.
  */
 export function skillCommands({ box, list, usable = () => true, locked = () => [], value = [], onChange }) {
@@ -207,9 +207,10 @@ export function skillCommands({ box, list, usable = () => true, locked = () => [
       setBox(rest);
       return !rest.trim();
     },
-    clear() {
-      if (!chosen.length) return;
-      chosen = [];
+    remove(sent) {
+      const remaining = chosen.filter((name) => !sent.includes(name));
+      if (remaining.length === chosen.length) return;
+      chosen = remaining;
       paint();
       report();
     },

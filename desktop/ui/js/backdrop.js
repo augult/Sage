@@ -73,7 +73,7 @@ function blur(rgb, width, height) {
  * The colour is an offset from the grey of that brightness, scaled back until it fits in range, so
  * the pixel comes out exactly as bright as the band says, however saturated it went in.
  */
-export function press(rgb, [low, high], saturation) {
+function press(rgb, [low, high], saturation) {
   for (let i = 0; i < rgb.length; i += 3) {
     const luma = 0.299 * rgb[i] + 0.587 * rgb[i + 1] + 0.114 * rgb[i + 2];
     const target = low + (high - low) * (luma / 255) ** 0.8;

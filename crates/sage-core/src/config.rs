@@ -236,35 +236,15 @@ impl Config {
         let body = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         // A file `load` could not read (a slip in an edit by hand) was taken for an empty one. It is
         // kept beside the new one rather than written over with everything it held, keys and all.
-        if std::fs::read_to_string(path).is_ok_and(|old| {
-            !old.trim().is_empty() && serde_json::from_str::<Config>(&old).is_err()
-        }) {
-            let kept = path.with_extension("json.unreadable");
-            if std::fs::copy(path, &kept).is_ok() {
-                #[cfg(unix)]
-                let _ = std::fs::set_permissions(
-                    &kept,
-                    std::os::unix::fs::PermissionsExt::from_mode(0o600),
-                );
+        match std::fs::read(path) {
+            Ok(old) if !old.is_empty() && serde_json::from_slice::<Config>(&old).is_err() => {
+                crate::resume::write_atomic(&path.with_extension("json.unreadable"), &old)?;
             }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(path)?;
-            // `mode` only applies when the file is created; tighten an existing one before the keys go in.
-            std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-            f.write_all(body.as_bytes())?;
-        }
-        #[cfg(not(unix))]
-        std::fs::write(path, body)?;
-        Ok(())
+        crate::resume::write_atomic(path, body.as_bytes())
     }
 
     pub fn key_for(&self, id: &str, key_env: &str) -> Option<String> {

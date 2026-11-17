@@ -319,7 +319,7 @@ async fn rename_session(
 /// Deletes a session's record for good. The folder it worked in is not touched.
 #[tauri::command]
 async fn delete_session(harness: State<'_, Harness>, id: String) -> Reply<()> {
-    harness.delete(&id)
+    harness.delete(&id).await
 }
 
 #[tauri::command]
@@ -473,13 +473,18 @@ fn session_cwd(harness: &Harness, id: &str) -> Reply<PathBuf> {
 /// Where the session's workspace stands with git: branch, remote, what is uncommitted or unpushed.
 #[tauri::command]
 async fn git_state(harness: State<'_, Harness>, id: String) -> Reply<git::GitState> {
-    Ok(git::state(&session_cwd(&harness, &id)?).await)
+    git::state(&session_cwd(&harness, &id)?).await
 }
 
 /// Commits what is uncommitted in the session's workspace under `message` and pushes its branch.
 #[tauri::command]
-async fn git_push(harness: State<'_, Harness>, id: String, message: String) -> Reply<git::Pushed> {
-    git::push(&session_cwd(&harness, &id)?, &message).await
+async fn git_push(
+    harness: State<'_, Harness>,
+    id: String,
+    message: String,
+    revision: String,
+) -> Reply<git::Pushed> {
+    git::push(&session_cwd(&harness, &id)?, &message, &revision).await
 }
 
 /// What a directory of the session's folder holds; `path` is from the folder's root.
@@ -505,8 +510,9 @@ async fn write_file(
     id: String,
     path: String,
     text: String,
+    expected: String,
 ) -> Reply<()> {
-    files::write(&session_cwd(&harness, &id)?, &path, &text)
+    files::write(&session_cwd(&harness, &id)?, &path, &text, &expected)
 }
 
 /// Makes an empty file, or a folder when `dir`, in the session's folder.
@@ -574,11 +580,7 @@ async fn subscribe(
 /// server it left in the background) would go on running after the app has gone. Each session has
 /// stored what continuing it needs, so the next launch can pick it up.
 fn close_sessions(harness: &Harness) {
-    // `close` only signals the session tasks, and they do the killing and write what a run that
-    // is ended leaves: leave them a moment for it.
-    if harness.close_all() > 0 {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
+    tauri::async_runtime::block_on(harness.close_all());
 }
 
 fn main() {

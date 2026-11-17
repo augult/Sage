@@ -7,11 +7,11 @@ brief remains the specification. Everything the UI needs is on `sage_core::harne
 
 - `crates/sage-core/src/harness.rs`: `Harness::new()`, `state()`, `set_key`, `set_defaults`,
   `start(StartRequest)`, `demo()`, `stop`, `approve`, `subscribe(id)` (backlog plus a
-  `broadcast::Receiver<Event>`), `events(id)`, `meta(id)`, `list()`, `read_output(id, handle)`,
-  `list_dir(path)`; for skills and instructions `skills(cwd)`, `skill_file`, `save_skill`,
-  `delete_skill`, `send_with_skills`, `instructions()`, `set_system_prompt`,
+  `broadcast::Receiver<Event>`), `events(id)`, `meta(id)`, `list()`, `read_output(id, handle)`.
+  For skills and instructions use `skills(cwd)`, `skill_file`, `save_skill`,
+  `delete_skill`, `send_with`, `instructions()`, `set_system_prompt`,
   `set_global_instructions`; types `SessionMeta`, `SessionStatus`, `StartRequest`, `AppState`,
-  `DirListing`, `Instructions`, and `skills::SkillInfo`.
+  `Instructions`, and `skills::SkillInfo`.
 - `crates/sage-core/src/events.rs`: `Event { seq, ts, type, …fields }` (flattened; `type` is
   snake_case), `Stats`, `FinishStatus`, `CacheVerdict`. `delta` events are transient streaming text;
   a `retry` event voids what was streamed for that turn.
@@ -52,18 +52,17 @@ the built-in back), `instructions()` (`{ system, system_default, system_custom, 
 `set_system_prompt(template?)` (nothing resets to the built-in) and `set_global_instructions(text)`
 (empty deletes the file).
 
-For the GitHub tab: `git_state(id)` (where the session's workspace stands: `{ repo, branch, remote,
-url, github, upstream, ahead, files, commits }`, `github` being `owner/name` when the remote is on
-github.com, `commits` the latest twelve as `{ hash, subject, when }`, of which the first `ahead`
-are unpushed) and
-`git_push(id, message)` (commits what is uncommitted under `message`, then pushes the branch,
-setting its upstream; `{ commit, remote, branch, pushed }`). Both run the user's own `git`, with
-the user's credentials (`src/git.rs`).
+The GitHub tab reads `git_state(id)` with the branch, remote, session-relative changed paths, and
+latest commits with individual `unpushed` flags. It passes the displayed state's revision to
+`git_push(id, message, revision)`. The command commits the reviewed paths inside the session
+folder and pushes the branch. Both commands run the user's Git with their credentials
+(`src/git.rs`).
 
 For the Code tab (`src/files.rs`): `list_dir(id, path?)` (what a directory of the session's folder
 holds, folders first, without `.git`: `[{ name, path, dir }]`), `read_file(id, path)` (its text; a
-file over 1 MB or not UTF-8 is refused) and `write_file(id, path, text)` (to a file that is there
-already). Paths are from the folder's root, and nothing outside it is reached.
+file over 1 MB or not UTF-8 is refused) and `write_file(id, path, text, expected)`. Saving checks
+that the file on disk still has the contents the editor opened. Paths are relative to the session
+folder.
 
 For attachments: `pick_files(start?)` (the system's file dialog; the chosen paths, or none).
 `start_session` takes them as `req.files` and `send_message` as `files`: each must be a file that

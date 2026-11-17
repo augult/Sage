@@ -126,7 +126,7 @@ async fn keys_defaults_and_start_validation() {
     );
     // Another provider with no model named: the first provider's model is not carried over to it.
     h.set_defaults(Some("deepseek".into()), None, None).unwrap();
-    assert_eq!(h.inner.config.lock().unwrap().model, None);
+    assert_eq!(h.config().model, None);
     h.set_defaults(Some("openrouter".into()), Some("z-ai/glm-5.3".into()), None)
         .unwrap();
 
@@ -243,8 +243,8 @@ async fn scripted_sessions_can_switch_mechanisms_off_and_be_closed() {
 
     // Closing frees the session; its log can still be replayed, and it is listed as stored: a
     // stand-in's cannot be continued.
-    h.close(&meta.id).unwrap();
-    assert!(h.close(&meta.id).is_err() && !h.is_live(&meta.id));
+    h.close(&meta.id).await.unwrap();
+    assert!(h.close(&meta.id).await.is_err() && !h.is_live(&meta.id));
     let stored = h.meta(&meta.id).unwrap();
     assert_eq!(
         (stored.status, stored.why_closed.as_deref()),
@@ -820,36 +820,6 @@ fn what_was_stored_before_there_were_skills_still_loads() {
     );
 }
 
-#[tokio::test]
-async fn folder_picker_lists_visible_directories() {
-    let h = harness("dirs");
-    let root = h.inner.data_dir.join("tree");
-    for d in ["beta", "Alpha", ".hidden", "gamma/.git"] {
-        std::fs::create_dir_all(root.join(d)).unwrap();
-    }
-    std::fs::write(root.join("file.txt"), "").unwrap();
-    let listing = h.list_dir(Some(root.to_str().unwrap())).unwrap();
-    assert_eq!(
-        listing
-            .dirs
-            .iter()
-            .map(|d| d.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["Alpha", "beta", "gamma"]
-    );
-    assert!(listing.parent.is_some() && !listing.is_git);
-    assert!(
-        h.list_dir(Some(root.join("gamma").to_str().unwrap()))
-            .unwrap()
-            .is_git
-    );
-    assert!(
-        h.list_dir(Some(root.join("file.txt").to_str().unwrap()))
-            .is_err()
-    );
-    assert!(h.list_dir(None).is_ok());
-}
-
 type Seen = Arc<Mutex<Vec<Vec<crate::provider::Message>>>>;
 
 /// Scripted replies that keep what each request carried, so that a test can count them.
@@ -1334,14 +1304,20 @@ async fn a_session_is_renamed_and_deleted_unless_it_runs_or_another_process_has_
             .unwrap_err()
             .contains("another process")
     );
-    assert!(other.delete(&id).unwrap_err().contains("another process"));
+    assert!(
+        other
+            .delete(&id)
+            .await
+            .unwrap_err()
+            .contains("another process")
+    );
 
     // Not while it runs; once it does not, it goes with everything it stored, and the folder stays.
     h.live(&id).unwrap().set_status(SessionStatus::Running);
-    assert!(h.delete(&id).unwrap_err().contains("stop it first"));
+    assert!(h.delete(&id).await.unwrap_err().contains("stop it first"));
     assert!(h.is_live(&id) && session_dir(&h, &id).is_dir());
     h.live(&id).unwrap().set_status(SessionStatus::Idle);
-    h.delete(&id).unwrap();
+    h.delete(&id).await.unwrap();
     assert!(
         !h.is_live(&id)
             && !session_dir(&h, &id).exists()
@@ -1349,12 +1325,12 @@ async fn a_session_is_renamed_and_deleted_unless_it_runs_or_another_process_has_
             && h.meta(&id).is_err()
     );
     assert!(Path::new(&cwd).join("n.txt").is_file());
-    assert!(h.delete(&id).unwrap_err().contains("no session"));
+    assert!(h.delete(&id).await.unwrap_err().contains("no session"));
 
     // Stored: renamed in its file, where what this build does not know of is kept, and deleted.
     let id = start(&h);
     until_idle(&h, &id).await;
-    h.close(&id).unwrap();
+    h.close(&id).await.unwrap();
     listed_free(&other).await;
     let path = session_dir(&h, &id).join("meta.json");
     let mut meta: serde_json::Value =
@@ -1372,13 +1348,13 @@ async fn a_session_is_renamed_and_deleted_unless_it_runs_or_another_process_has_
         (&kept["title"], &kept["from_a_newer_build"], &kept["id"]),
         (&json!("Stored and renamed"), &json!(7), &json!(id))
     );
-    other.delete(&id).unwrap();
+    other.delete(&id).await.unwrap();
     assert!(!session_dir(&h, &id).exists() && other.list().is_empty());
 
     // An id is a name in the sessions folder, never a path out of it.
     for bad in ["", "..", "../ws", "a/b", "a\\b"] {
         assert!(
-            h.delete(bad).is_err() && h.rename(bad, "x").is_err(),
+            h.delete(bad).await.is_err() && h.rename(bad, "x").is_err(),
             "{bad:?}"
         );
     }
@@ -1752,6 +1728,7 @@ async fn a_snapshot_cut_off_in_the_middle_of_a_run_is_made_valid_and_the_model_i
         .map(|c| c.id.clone())
         .collect();
     assert_eq!(calls.len(), 2);
+    h.close(&id).await.unwrap();
     drop(h);
 
     let second = Harness::at(dir.parent().unwrap().parent().unwrap().to_path_buf());
@@ -1951,7 +1928,7 @@ async fn a_real_session_comes_back_through_the_current_configuration() {
         (h.meta(&id).unwrap().status, h.is_live(&id)),
         (SessionStatus::Idle, true)
     );
-    h.close(&id).unwrap();
+    h.close(&id).await.unwrap();
 
     // Its provider is there: the session comes back idle, with nothing sent anywhere.
     edit(&own);
@@ -1993,6 +1970,7 @@ async fn a_log_that_was_cut_short_does_not_swallow_the_next_event() {
     until_idle(&h, &id).await;
     let data = h.inner.data_dir.clone();
     let log = session_dir(&h, &id).join("events.jsonl");
+    h.close(&id).await.unwrap();
     drop(h);
     let mut text = std::fs::read_to_string(&log).unwrap();
     text.push_str("{\"seq\": 99, \"ts\": 1, \"type\": \"fin");
@@ -2038,8 +2016,8 @@ async fn closing_every_session_leaves_each_one_continuable_and_frees_it() {
         .unwrap()
         .id;
     until_idle(&h, &id).await;
-    assert_eq!(h.close_all(), 1);
-    assert_eq!((h.close_all(), h.is_live(&id)), (0, false));
+    assert_eq!(h.close_all().await, 1);
+    assert_eq!((h.close_all().await, h.is_live(&id)), (0, false));
     assert_eq!(
         listed_free(&h).await.status,
         SessionStatus::Resumable,

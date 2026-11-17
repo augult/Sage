@@ -592,7 +592,9 @@ const TEST_SUBCOMMAND: &[&str] = &[
 ];
 
 fn base(word: &str) -> &str {
-    word.rsplit('/').next().unwrap_or(word)
+    word.rsplit(['/', std::path::MAIN_SEPARATOR])
+        .next()
+        .unwrap_or(word)
 }
 
 /// `run_tests.sh`, `test_calc.py`, `check`: a file whose name says it tests something.
@@ -727,7 +729,7 @@ pub fn test_like(cmd: &str) -> bool {
             .iter()
             .any(|a| matches!(*a, "test" | "tests" | "check" | "verify")),
         // A script run directly: `./run_tests.sh`, `bin/test`.
-        _ => first.contains('/') && test_name(first),
+        _ => first.contains(['/', std::path::MAIN_SEPARATOR]) && test_name(first),
     }
 }
 

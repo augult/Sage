@@ -602,7 +602,7 @@ async fn main() -> ExitCode {
         eprintln!("error: {msg}");
         ExitCode::from(2)
     };
-    match args.first().map(String::as_str) {
+    let status = match args.first().map(String::as_str) {
         None | Some("-h" | "--help" | "help") => {
             println!("{HELP}");
             ExitCode::SUCCESS
@@ -770,7 +770,9 @@ async fn main() -> ExitCode {
             }
         },
         Some(other) => fail(format!("unknown command {other:?}; try `sage --help`")),
-    }
+    };
+    h.close_all().await;
+    status
 }
 
 #[cfg(test)]

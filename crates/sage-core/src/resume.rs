@@ -66,13 +66,22 @@ pub struct Snapshot {
 
 /// Writes `bytes` to `path` so that a reader sees the old file or the new one, never half of one.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let temporary = path.with_extension("json.tmp");
-    let mut file = File::create(&temporary)?;
-    file.write_all(bytes)?;
-    // The rename must not outlive the data it points at if the machine goes down.
-    file.sync_data()?;
+    let temporary = path.with_extension(format!("{}.tmp", crate::util::rand_hex(8)));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
     drop(file);
-    std::fs::rename(&temporary, path)
+    let result = written.and_then(|()| std::fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// What the snapshot in `dir` is, or why there is none to be had.
@@ -142,14 +151,15 @@ impl SessionLock {
                 let _ = File::open(&path).and_then(|mut f| f.read_to_string(&mut pid));
                 let who = pid.trim().parse::<u32>().map_or_else(
                     |_| "another process".to_string(),
-                    |pid| format!("process {pid}"),
+                    |pid| format!("another process (PID {pid})"),
                 );
                 Err(format!(
                     "it is open in {who}: only one process can run a session at a time"
                 ))
             }
-            // A file system that cannot lock: the session is used without the protection.
-            Err(TryLockError::Error(_)) => Ok(Self { _file: file }),
+            Err(TryLockError::Error(error)) => {
+                Err(format!("cannot lock {}: {error}", path.display()))
+            }
         }
     }
 

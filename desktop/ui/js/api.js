@@ -50,14 +50,14 @@ export const api = {
   setSystemPrompt: (template) => invoke('set_system_prompt', { template }),
   /** Empty deletes the file. */
   setGlobalInstructions: (text) => invoke('set_global_instructions', { text }),
-  /** Where a session's workspace stands with git: `{ repo, branch, remote, url, github, upstream, ahead, files, commits }`. */
+  /** The session's current Git state and its preview revision. */
   gitState: (id) => invoke('git_state', { id }),
-  /** Commits what is uncommitted under `message` and pushes the branch: `{ commit, remote, branch, pushed }`. */
-  gitPush: (id, message) => invoke('git_push', { id, message }),
+  /** Commits the reviewed workspace changes and pushes the branch. */
+  gitPush: (id, message, revision) => invoke('git_push', { id, message, revision }),
   /** What a directory of the session's folder holds: `[{ name, path, dir }]`. Paths are from the folder's root. */
   listDir: (id, path = '') => invoke('list_dir', { id, path }),
   readFile: (id, path) => invoke('read_file', { id, path }),
-  writeFile: (id, path, text) => invoke('write_file', { id, path, text }),
+  writeFile: (id, path, text, expected) => invoke('write_file', { id, path, text, expected }),
   /** An empty file, or a folder when `dir`, at `path`; nothing may be there yet. */
   createEntry: (id, path, dir) => invoke('create_entry', { id, path, dir }),
   renameEntry: (id, from, to) => invoke('rename_entry', { id, from, to }),

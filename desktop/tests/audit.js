@@ -171,6 +171,27 @@
         expect(tree.width <= pane.width * 0.45, `Tree occupies ${tree.width}/${pane.width}px`);
         expect(editor.width >= 120, `Editor is only ${editor.width}px wide`);
       });
+      await check('Many attachments leave the conversation and composer actions usable', async () => {
+        const text = document.querySelector('#followup');
+        const attach = document.querySelector('#attach');
+        text.value = 'First line\nSecond\nThird\nFourth\nFifth';
+        text.dispatchEvent(new Event('input', { bubbles: true }));
+        attach.dispatchEvent(new CustomEvent('attach', {
+          detail: Array.from({ length: 14 }, (_, i) => `/example/a-very-long-attachment-name-${i}.txt`),
+        }));
+        await settle();
+        try {
+          const send = document.querySelector('#send-followup');
+          const { x, y, width, height } = send.getBoundingClientRect();
+          expect(document.querySelector('.timeline-scroll').clientHeight > 0, 'Attachments collapsed the timeline');
+          expect(send.contains(document.elementFromPoint(x + width / 2, y + height / 2)), 'Send is not reachable');
+        } finally {
+          let remove;
+          while ((remove = document.querySelector('.attached .file-remove'))) remove.click();
+          text.value = '';
+          text.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
       document.querySelector('#tab-github').click();
       await waitFor(() => document.querySelector('.push-row'));
       await check('GitHub long paths stay within the inspector', () => {
@@ -178,6 +199,29 @@
         for (const el of document.querySelectorAll('.push-row, .push-target, .git-foot, .commit')) {
           const box = el.getBoundingClientRect();
           expect(box.right <= pane.right + 1 && box.left >= pane.left - 1, `${el.className} overflows inspector`);
+        }
+      });
+      await check('A delayed refresh stays with the file it originally read', async () => {
+        const editor = () => document.querySelector('#code-text');
+        let finishRefresh;
+        window.uiFixture.readFile = (path) => path === 'src/Navigation.js'
+          ? 'Second file\n'
+          : new Promise((resolve) => { finishRefresh = resolve; });
+        try {
+          document.querySelector('.push-revert').click();
+          document.querySelector('#revert-go').click();
+          await waitFor(() => finishRefresh);
+          document.querySelector('#tab-code').click();
+          document.querySelector('[data-path="src"]').click();
+          await waitFor(() => document.querySelector('[data-path="src/Navigation.js"]'));
+          document.querySelector('[data-path="src/Navigation.js"]').click();
+          await waitFor(() => editor()?.value === 'Second file\n');
+          finishRefresh('Late change to the first file\n');
+          await settle();
+          expect(editor()?.value === 'Second file\n', 'The first file overwrote the second file’s buffer');
+        } finally {
+          finishRefresh?.('');
+          delete window.uiFixture.readFile;
         }
       });
     }

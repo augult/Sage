@@ -25,7 +25,7 @@ export function chip(glyph, name, title, onRemove) {
 
 /**
  * `start()` is the folder the system's dialog opens at; `value` the paths attached already;
- * `onChange(paths)` runs when one is added or taken off. Gives `{ button, list, paths(), clear() }`.
+ * `onChange(paths)` runs when one is added or taken off.
  */
 export function attachments({ start, value = [], onChange }) {
   let paths = [...value];
@@ -42,9 +42,10 @@ export function attachments({ start, value = [], onChange }) {
   }
 
   async function pick() {
-    set([...paths, ...(await api.pickFiles(start() || null))]);
+    const picked = await api.pickFiles(start() || null);
+    set([...paths, ...picked]);
   }
 
   set(paths);
-  return { button, list, paths: () => paths, clear: () => set([]) };
+  return { button, list, paths: () => paths, remove: (sent) => set(paths.filter((path) => !sent.includes(path))) };
 }

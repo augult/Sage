@@ -40,10 +40,14 @@ provider dialog scrolling/actions, the scrolled Settings action hit target,
 composer bounds, all five viewport-bounded picker menus, no native titles,
 tooltip delay/edge clamping/modal rendering/pointer-events/dismissal/removal,
 late-title migration, focused-radio descriptions, inspector arrow-key navigation,
-and (with `rich`) file-editor and GitHub layout. The 17 audit assertions run after
+and (with `rich`) file-editor, attachments and GitHub layout. The audit assertions run after
 the original 16 checks. Finite entry animations settle before hover checks, because
 a real scroll during an animation is intentionally supposed to dismiss a tooltip.
 Use `/?test&audit&rich` at 940×600 and 1320×860 in both appearances.
+
+CI also runs the suites headlessly at both of those sizes, full HD, 1440p and 4K.
+To run it locally, run `npm install --no-save --no-package-lock playwright@1.63.0`,
+`npx playwright install chromium`, then `node check-browser.mjs` in this directory.
 
 Tests wait for app mounting and fonts, use real navigation and tab clicks,
 and compare rendered element bounds/computed styles. A failed assertion is

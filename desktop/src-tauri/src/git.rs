@@ -3,9 +3,11 @@
 //! fails with git's own message instead.
 
 use serde::Serialize;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Component, Path};
 use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 
 /// The longest any one git command may take. Only a push over a slow link comes close.
 const TIMEOUT: Duration = Duration::from_secs(120);
@@ -32,12 +34,16 @@ pub struct GitState {
     pub github: Option<String>,
     /// The branch follows a branch on the remote.
     pub upstream: bool,
+    /// The name of the branch on that remote.
+    pub push_branch: Option<String>,
     /// Commits here that the remote does not have.
     pub ahead: u32,
     /// Uncommitted changes, untracked files included.
     pub files: Vec<ChangedFile>,
-    /// The latest commits of what is checked out, newest first. The first `ahead` are unpushed.
+    /// The latest commits of what is checked out, newest first.
     pub commits: Vec<Commit>,
+    /// The branch and changes that the user saw before pushing.
+    pub revision: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -48,6 +54,7 @@ pub struct Commit {
     pub subject: String,
     /// How long ago, as git words it: "3 hours ago".
     pub when: String,
+    pub unpushed: bool,
 }
 
 /// How many commits `state` lists.
@@ -65,6 +72,10 @@ pub struct Pushed {
 
 /// Runs `git` in `cwd`. Gives back what it printed, or what it said went wrong.
 async fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
+    run_git(cwd, args, None).await
+}
+
+async fn run_git(cwd: &Path, args: &[&str], input: Option<String>) -> Result<String, String> {
     let mut cmd = tokio::process::Command::new("git");
     cmd.args(args)
         .current_dir(cwd)
@@ -78,8 +89,26 @@ async fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     // CREATE_NO_WINDOW: no console flashing up behind the app.
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
-    let name = args.first().copied().unwrap_or_default();
-    let output = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
+    let name = args
+        .iter()
+        .find(|arg| !arg.starts_with('-'))
+        .copied()
+        .unwrap_or_default();
+    let run = async {
+        let Some(input) = input else {
+            return cmd.output().await;
+        };
+        let mut child = cmd.stdin(Stdio::piped()).spawn()?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let send = async move { stdin.write_all(input.as_bytes()).await };
+        let (sent, output) = tokio::join!(send, child.wait_with_output());
+        let output = output?;
+        if output.status.success() {
+            sent?;
+        }
+        Ok(output)
+    };
+    let output = match tokio::time::timeout(TIMEOUT, run).await {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => return Err(format!("cannot run git: {e}")),
         Err(_) => {
@@ -90,7 +119,8 @@ async fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
         }
     };
     if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        return String::from_utf8(output.stdout)
+            .map_err(|_| format!("git {name} returned text that is not UTF-8"));
     }
     let said = [&output.stderr, &output.stdout]
         .into_iter()
@@ -190,7 +220,7 @@ async fn remote_for(cwd: &Path, branch: Option<&str>) -> Option<String> {
         .map(|name| name.to_string())
 }
 
-pub async fn state(cwd: &Path) -> GitState {
+pub async fn state(cwd: &Path) -> Result<GitState, String> {
     if git(cwd, &["rev-parse", "--is-inside-work-tree"])
         .await
         .is_ok_and(|out| out.trim() == "true")
@@ -202,7 +232,7 @@ pub async fn state(cwd: &Path) -> GitState {
             .filter(|name| !name.is_empty());
         let remote = remote_for(cwd, branch.as_deref()).await;
         let url = match &remote {
-            Some(name) => git(cwd, &["remote", "get-url", name])
+            Some(name) => git(cwd, &["remote", "get-url", "--push", name])
                 .await
                 .ok()
                 .map(|url| url.trim().to_string()),
@@ -211,71 +241,122 @@ pub async fn state(cwd: &Path) -> GitState {
         let upstream = git(cwd, &["rev-parse", "--abbrev-ref", "@{upstream}"])
             .await
             .is_ok();
-        // Without a branch to compare with, whatever no branch of the remote has is ahead.
-        let unpushed = match (&remote, upstream) {
-            (_, true) => git(cwd, &["rev-list", "--count", "@{upstream}..HEAD"]).await,
-            (Some(name), false) => {
-                git(
-                    cwd,
-                    &[
-                        "rev-list",
-                        "--count",
-                        "HEAD",
-                        "--not",
-                        &format!("--remotes={name}"),
-                    ],
-                )
-                .await
-            }
-            (None, false) => Err(String::new()),
+        let mut push_branch = branch.clone();
+        if let Some(branch) = branch.as_deref()
+            && upstream
+            && let Ok(target) =
+                git(cwd, &["config", "--get", &format!("branch.{branch}.merge")]).await
+            && let Some(target) = target.trim().strip_prefix("refs/heads/")
+        {
+            push_branch = Some(target.to_string());
+        }
+        // Without an upstream, compare to the known branches of the selected remote.
+        let remembered = remote.as_ref().map(|name| format!("--remotes={name}"));
+        let comparison = match (upstream, remembered.as_deref()) {
+            (true, _) => vec!["HEAD", "--not", "@{upstream}"],
+            (false, Some(remote_refs)) => vec!["HEAD", "--not", remote_refs],
+            _ => Vec::new(),
         };
-        let files = git(
+        let head = git(cwd, &["rev-parse", "--verify", "HEAD"]).await.ok();
+        let (mut ahead, mut unpushed) = (0, HashSet::new());
+        if head.is_some() && !comparison.is_empty() {
+            let mut count = vec!["rev-list", "--count"];
+            count.extend_from_slice(&comparison);
+            ahead = git(cwd, &count)
+                .await?
+                .trim()
+                .parse()
+                .map_err(|e| format!("Invalid Git commit count: {e}"))?;
+            if ahead > 0 {
+                let mut recent = vec!["rev-list", "-n", LISTED_COMMITS];
+                recent.extend_from_slice(&comparison);
+                unpushed.extend(git(cwd, &recent).await?.lines().map(String::from));
+            }
+        }
+        let prefix = git(cwd, &["rev-parse", "--show-prefix"]).await?;
+        let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix);
+        // A move across the session boundary is shown only as the in-scope addition or deletion.
+        let status = git(
             cwd,
-            &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            &[
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--no-renames",
+                "--",
+                ".",
+            ],
         )
-        .await
-        .map(|out| parse_status(&out))
-        .unwrap_or_default();
-        // Nothing yet in a repository without a commit.
-        let log = git(
-            cwd,
-            &["log", "-n", LISTED_COMMITS, "--format=%h%x1f%s%x1f%cr"],
-        )
-        .await
-        .unwrap_or_default();
+        .await?;
+        let mut files = parse_status(&status);
+        for file in &mut files {
+            file.path = file
+                .path
+                .strip_prefix(prefix)
+                .ok_or("Git returned a path outside this session.")?
+                .to_string();
+        }
+        let revision = format!(
+            "{:016x}",
+            sage_core::util::fnv64(
+                &serde_json::to_vec(&(&branch, &remote, &url, &push_branch, &head, ahead, &files))
+                    .map_err(|e| e.to_string())?
+            )
+        );
+        let log = if head.is_some() {
+            git(
+                cwd,
+                &[
+                    "log",
+                    "-n",
+                    LISTED_COMMITS,
+                    "--format=%H%x1f%h%x1f%cr%x1f%s",
+                ],
+            )
+            .await?
+        } else {
+            String::new()
+        };
         let commits = log
             .lines()
             .filter_map(|line| {
-                let mut parts = line.splitn(3, '\u{1f}');
+                let mut parts = line.splitn(4, '\u{1f}');
+                let unpushed = unpushed.contains(parts.next()?);
                 Some(Commit {
                     hash: parts.next()?.to_string(),
-                    subject: parts.next()?.to_string(),
                     when: parts.next()?.to_string(),
+                    subject: parts.next()?.to_string(),
+                    unpushed,
                 })
             })
             .collect();
-        GitState {
+        Ok(GitState {
             repo: true,
             branch,
             github: url.as_deref().and_then(github_slug),
             url: url.as_deref().map(without_credentials),
             remote,
             upstream,
-            ahead: unpushed
-                .ok()
-                .and_then(|count| count.trim().parse().ok())
-                .unwrap_or(0),
+            push_branch,
+            ahead,
             files,
             commits,
-        }
+            revision,
+        })
     } else {
-        GitState::default()
+        Ok(GitState::default())
     }
 }
 
 /// Commits whatever is uncommitted under `message`, then pushes the branch to its remote.
-pub async fn push(cwd: &Path, message: &str) -> Result<Pushed, String> {
-    let before = state(cwd).await;
+pub async fn push(cwd: &Path, message: &str, revision: &str) -> Result<Pushed, String> {
+    let before = state(cwd).await?;
+    if before.revision != revision {
+        return Err(
+            "Git changed since the preview. Review the refreshed list and try again.".into(),
+        );
+    }
     if !before.repo {
         return Err("Not a git repository.".into());
     }
@@ -285,14 +366,53 @@ pub async fn push(cwd: &Path, message: &str) -> Result<Pushed, String> {
     let Some(remote) = before.remote else {
         return Err("No remote to push to.".into());
     };
+    let destination = before.push_branch.unwrap_or_else(|| branch.clone());
     let mut commit = None;
     if !before.files.is_empty() {
         let message = message.trim();
         if message.is_empty() {
             return Err("No commit message.".into());
         }
-        git(cwd, &["add", "--all"]).await?;
-        git(cwd, &["commit", "--quiet", "--message", message]).await?;
+        // Register new paths so --only can commit them without including unrelated staged work.
+        let mut new_paths = String::new();
+        let mut paths = String::new();
+        for file in &before.files {
+            paths.push_str(&file.path);
+            paths.push('\0');
+            if file.status == "untracked" {
+                new_paths.push_str(&file.path);
+                new_paths.push('\0');
+            }
+        }
+        if !new_paths.is_empty() {
+            run_git(
+                cwd,
+                &[
+                    "--literal-pathspecs",
+                    "add",
+                    "--intent-to-add",
+                    "--pathspec-from-file=-",
+                    "--pathspec-file-nul",
+                ],
+                Some(new_paths),
+            )
+            .await?;
+        }
+        run_git(
+            cwd,
+            &[
+                "--literal-pathspecs",
+                "commit",
+                "--only",
+                "--quiet",
+                "--message",
+                message,
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ],
+            Some(paths),
+        )
+        .await?;
         commit = git(cwd, &["rev-parse", "--short", "HEAD"])
             .await
             .ok()
@@ -302,32 +422,38 @@ pub async fn push(cwd: &Path, message: &str) -> Result<Pushed, String> {
         return Ok(Pushed {
             commit,
             remote,
-            branch,
+            branch: destination,
             pushed: false,
         });
     }
-    if before.upstream {
-        git(cwd, &["push", "--quiet"]).await?;
-    } else {
-        git(
-            cwd,
-            &["push", "--quiet", "--set-upstream", &remote, &branch],
-        )
-        .await?;
+    let refs = format!("refs/heads/{branch}:refs/heads/{destination}");
+    let mut args = vec!["push", "--quiet"];
+    if !before.upstream {
+        args.push("--set-upstream");
     }
+    args.extend(["--", &remote, &refs]);
+    git(cwd, &args).await?;
     Ok(Pushed {
         commit,
         remote,
-        branch,
+        branch: destination,
         pushed: true,
     })
 }
 
 /// Puts the file at `path` back as the last commit has it, in the index and on disk.
 pub async fn discard(cwd: &Path, path: &str) -> Result<(), String> {
+    if path.is_empty()
+        || Path::new(path)
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err("Choose a file within the session folder.".into());
+    }
     git(
         cwd,
         &[
+            "--literal-pathspecs",
             "restore",
             "--source=HEAD",
             "--staged",
@@ -343,6 +469,10 @@ pub async fn discard(cwd: &Path, path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn push_current(cwd: &Path, message: &str) -> Result<Pushed, String> {
+        push(cwd, message, &state(cwd).await?.revision).await
+    }
 
     #[test]
     fn remotes_are_shown_without_credentials_and_github_ones_by_owner_and_name() {
@@ -422,7 +552,7 @@ mod tests {
         .unwrap();
         std::fs::write(work.join("a.txt"), "one\n").unwrap();
 
-        let found = state(&work).await;
+        let found = state(&work).await.unwrap();
         assert_eq!(
             (
                 found.repo,
@@ -443,10 +573,10 @@ mod tests {
 
         // Uncommitted changes need a message; with one they are committed and pushed.
         assert_eq!(
-            push(&work, "  ").await,
+            push_current(&work, "  ").await,
             Err("No commit message.".to_string())
         );
-        let done = push(&work, "Add a").await.unwrap();
+        let done = push_current(&work, "Add a").await.unwrap();
         assert!(done.pushed && done.commit.is_some());
         assert_eq!(
             (done.remote.as_str(), done.branch.as_str()),
@@ -461,10 +591,10 @@ mod tests {
         );
 
         // The branch now follows the remote's, and with nothing new nothing is pushed.
-        let found = state(&work).await;
+        let found = state(&work).await.unwrap();
         assert!(found.upstream && found.ahead == 0 && found.files.is_empty());
         assert_eq!(
-            push(&work, "").await.unwrap(),
+            push_current(&work, "").await.unwrap(),
             Pushed {
                 commit: None,
                 remote: "origin".into(),
@@ -476,7 +606,7 @@ mod tests {
         // A commit made some other way is pushed as it is, with no message asked for.
         std::fs::write(work.join("a.txt"), "two\n").unwrap();
         assert_eq!(
-            state(&work).await.files,
+            state(&work).await.unwrap().files,
             [ChangedFile {
                 path: "a.txt".into(),
                 status: "modified"
@@ -485,7 +615,7 @@ mod tests {
         discard(&work, "a.txt").await.unwrap();
         // As the commit has it, with whatever line ending git checks it out with here.
         assert!(
-            state(&work).await.files.is_empty()
+            state(&work).await.unwrap().files.is_empty()
                 && std::fs::read_to_string(work.join("a.txt"))
                     .unwrap()
                     .trim_end()
@@ -498,8 +628,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let found = state(&work).await;
+        let found = state(&work).await.unwrap();
         assert_eq!(found.ahead, 1);
+        assert!(found.commits[0].unpushed && !found.commits[1].unpushed);
         assert_eq!(
             found
                 .commits
@@ -514,7 +645,7 @@ mod tests {
                 .iter()
                 .all(|commit| !commit.hash.is_empty() && commit.when.ends_with("ago"))
         );
-        let done = push(&work, "").await.unwrap();
+        let done = push_current(&work, "").await.unwrap();
         assert!(done.pushed && done.commit.is_none());
         assert_eq!(
             git(&origin, &["log", "--format=%s", "main"])
@@ -522,6 +653,55 @@ mod tests {
                 .unwrap()
                 .trim(),
             "Change a\nAdd a"
+        );
+
+        let nested = work.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(work.join("a.txt"), "outside the session\n").unwrap();
+        git(&work, &["add", "--", "a.txt"]).await.unwrap();
+        std::fs::write(nested.join("inside.txt"), "inside the session\n").unwrap();
+        let preview = state(&nested).await.unwrap();
+        assert_eq!(preview.files.len(), 1);
+        assert_eq!(preview.files[0].path, "inside.txt");
+        std::fs::write(nested.join("second.txt"), "added after preview\n").unwrap();
+        assert!(
+            push(&nested, "Stale preview", &preview.revision)
+                .await
+                .unwrap_err()
+                .contains("since the preview")
+        );
+        push_current(&nested, "Commit session files").await.unwrap();
+        assert_eq!(
+            git(
+                &origin,
+                &["diff-tree", "--no-commit-id", "--name-only", "-r", "main"]
+            )
+            .await
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+            ["nested/inside.txt", "nested/second.txt"]
+        );
+        assert_eq!(
+            git(&work, &["diff", "--cached", "--name-only"])
+                .await
+                .unwrap()
+                .trim(),
+            "a.txt"
+        );
+        std::fs::remove_file(nested.join("second.txt")).unwrap();
+        git(&nested, &["add", "-u", "--", "second.txt"])
+            .await
+            .unwrap();
+        push_current(&nested, "Delete the second file")
+            .await
+            .unwrap();
+        assert_eq!(
+            git(&work, &["diff", "--cached", "--name-only"])
+                .await
+                .unwrap()
+                .trim(),
+            "a.txt"
         );
 
         std::fs::remove_dir_all(&base).unwrap();

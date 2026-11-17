@@ -165,11 +165,16 @@ fn ask_tool() -> Value {
     )
 }
 
+#[cfg(unix)]
+const SHELL_DESCRIPTION: &str = "Run a Bash command in the workspace and return its output. The working directory and exported variables persist for foreground commands. Stdin is closed.";
+#[cfg(not(unix))]
+const SHELL_DESCRIPTION: &str = "Run a cmd.exe command in the workspace and return its output. Each call starts a new shell, so directory and environment changes are local to that call. Stdin is closed.";
+
 fn sage_tools(watch: bool, job: bool, ask: bool) -> Value {
     let mut tools = vec![
         tool(
             "shell",
-            "Run a bash command in the workspace. `cd` and exported variables persist between calls; stdin is closed.",
+            SHELL_DESCRIPTION,
             json!({
                 "cmd": {"type": "string"},
                 "expect_exit": {"type": "string", "description": "Predicted exit code: \"0\", another code, \"nonzero\" or \"any\"."},
@@ -268,7 +273,7 @@ fn classic_tools(ask: bool) -> Value {
     let mut tools = json!([
         tool(
             "shell",
-            "Run a bash command in the workspace and return its output. `cd` and exported variables persist between calls; stdin is closed.",
+            SHELL_DESCRIPTION,
             json!({
                 "cmd": {"type": "string"},
                 "timeout": {"type": "integer", "description": "Seconds before the command is moved to the background (default 120)."},
