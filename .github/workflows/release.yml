@@ -86,8 +86,9 @@ jobs:
           @"
           # Sage $env:VERSION
 
-          Includes the latest chat/sidebar spacing, aligned session titles, balanced menu padding,
-          Economy/Code/GitHub tabs before a session is selected, and value-only Mode/Autonomy/Effort controls.
+          Prosage is removed: Sage now has two modes, Ecosage and Default. On a 36-task Python, Rust and Go
+          benchmark, Ecosage solved as many tasks as OpenCode at about 60% of its cost and time. Sessions
+          saved as Prosage reopen as Ecosage. Replies cut off for overthinking are now priced correctly.
 
           ## Windows 10/11 (64-bit)
           - **Sage_$env:VERSION`_x64-setup.exe**: recommended installer.
