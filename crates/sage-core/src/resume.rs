@@ -197,7 +197,7 @@ mod tests {
         let who = match std::fs::read_to_string(dir.join(LOCK)) {
             Ok(stored_pid) => {
                 assert_eq!(stored_pid, pid);
-                format!("process {pid}")
+                format!("another process (PID {pid})")
             }
             Err(_) => "another process".to_string(),
         };
