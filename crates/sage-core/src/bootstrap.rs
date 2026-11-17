@@ -11,6 +11,11 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+/// A target line of a Makefile: `name:`, not a `name := value` assignment.
+static MAKE_TARGET: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?m)^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:[^=]|$)").expect("valid regex")
+});
+
 const PROBED_TOOLS: &[&str] = &[
     "python3", "python", "pip", "uv", "node", "npm", "pnpm", "yarn", "bun", "deno", "cargo",
     "rustc", "go", "java", "mvn", "gradle", "gcc", "g++", "clang", "make", "cmake", "docker",
@@ -67,8 +72,7 @@ fn manifest_note(root: &Path, name: &str) -> Option<String> {
         }
         "Makefile" | "makefile" | "GNUmakefile" => {
             let text = manifest_text(&root.join(name))?;
-            let re = regex::Regex::new(r"(?m)^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:[^=]|$)").ok()?;
-            let mut targets: Vec<&str> = re
+            let mut targets: Vec<&str> = MAKE_TARGET
                 .captures_iter(&text)
                 .filter_map(|c| c.get(1).map(|m| m.as_str()))
                 .filter(|t| !t.starts_with('.'))

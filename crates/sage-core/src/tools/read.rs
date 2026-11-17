@@ -9,6 +9,13 @@ use crate::workspace::SeenCheck;
 use regex::Regex;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::LazyLock;
+
+/// Lines that open with a control-flow word, which are never a definition.
+static CONTROL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:if|elif|else|for|while|switch|case|match|return|catch|except|await|yield|throw|raise|new|with|assert|del|not|defer|go|do|typeof|delete|print)\b")
+        .expect("valid regex")
+});
 
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_COLS: usize = 400;
@@ -221,10 +228,9 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
         ),
     ];
     let res: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
-    let control = Regex::new(r"^\s*(?:if|elif|else|for|while|switch|case|match|return|catch|except|await|yield|throw|raise|new|with|assert|del|not|defer|go|do|typeof|delete|print)\b").unwrap();
     let mut found: Vec<(usize, usize)> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        if control.is_match(line) || !res.iter().any(|r| r.is_match(line)) {
+        if CONTROL.is_match(line) || !res.iter().any(|r| r.is_match(line)) {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
