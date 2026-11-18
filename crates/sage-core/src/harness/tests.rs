@@ -302,8 +302,7 @@ async fn the_system_template_and_the_users_instructions_can_be_edited_and_reset(
         !fresh.system_custom && fresh.system == fresh.system_default && fresh.global.is_empty()
     );
     assert!(
-        fresh.system_default.starts_with("You are Sage")
-            && fresh.system_default.contains("{watch}")
+        fresh.system_default.starts_with("You are Sage") && !fresh.system_default.contains('{')
     );
 
     h.set_system_prompt(Some("You are terse. {watch}")).unwrap();

@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// The built-in Sage prompt, as a template. `{chain}`, `{watch}` and `{finish}` are filled in
-/// according to whether test runs are watched automatically.
+/// The built-in Sage prompt. It has no placeholders; a user's own template may still use
+/// `{chain}`, `{watch}`, `{finish}` and `{review}`, which are filled in according to whether test
+/// runs are watched automatically.
 const SYSTEM_SAGE: &str = include_str!("../prompts/system.md");
 
 /// The review step of the built-in template, for a template saved with the `{review}` placeholder.
@@ -442,26 +443,19 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_describes_the_mechanisms_that_are_switched_on() {
+    fn the_built_in_prompt_has_no_placeholders_and_reads_the_same_for_every_watch_setting() {
         let auto = system_prompt(&Features::ecosage());
         let promoted = system_prompt(&Features::ecosage().without("preflight").unwrap());
         let manual = system_prompt(&Features::ecosage().without("auto_watch").unwrap());
         assert!(
-            auto.contains("Tests are watched for you")
-                && auto.contains("the task names")
-                && !auto.contains("`watch`")
+            auto.starts_with("You are Sage")
+                && auto.contains("Sage may run a test command named in the task")
         );
         assert!(
-            promoted.contains("Tests are watched for you") && !promoted.contains("the task names")
+            !default_template().contains('{'),
+            "a placeholder in the built-in template"
         );
-        assert!(
-            manual.contains("`watch` any check you would otherwise re-run")
-                && !manual.contains("watched for you")
-        );
-        for prompt in [auto, promoted, manual] {
-            assert!(!prompt.contains('{'), "a placeholder was left in: {prompt}");
-        }
-        assert!(auto.contains("Re-read your changes once (`git diff`"));
+        assert!(auto == promoted && auto == manual);
         assert_eq!(
             system_prompt(&Features::ecosage().without("scripts").unwrap()),
             SYSTEM_CLASSIC
@@ -472,12 +466,6 @@ mod tests {
     fn a_template_is_filled_in_where_it_has_placeholders() {
         let auto = Features::ecosage();
         let manual = Features::ecosage().without("auto_watch").unwrap();
-        for placeholder in ["{chain}", "{watch}", "{finish}"] {
-            assert!(
-                default_template().contains(placeholder),
-                "the built-in template lost {placeholder}"
-            );
-        }
         for features in [
             auto,
             manual,
@@ -488,8 +476,7 @@ mod tests {
                 system_prompt(&features)
             );
         }
-        // A template saved while the review step was a placeholder still gets that step, as the built-in one has it.
-        assert!(default_template().contains(SELF_CHECK));
+        // A user's template may still use the placeholders, the review step's included.
         assert_eq!(
             render("Step: {review}", &auto),
             format!("Step: {SELF_CHECK}")
