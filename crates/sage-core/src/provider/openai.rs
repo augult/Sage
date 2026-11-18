@@ -79,6 +79,20 @@ impl Dialect {
         }
     }
 
+    /// Whether earlier reasoning goes back to this vendor with the conversation.
+    pub fn replays_reasoning(&self) -> bool {
+        self.reasoning_key().is_some()
+    }
+
+    /// Whether the vendor streams the model's reasoning as it goes. One that does not can be silent
+    /// for minutes while the model thinks, so its stream is given longer before it counts as stalled.
+    fn streams_reasoning(&self) -> bool {
+        !matches!(
+            self,
+            Dialect::OpenAiPlatform | Dialect::Anthropic | Dialect::Gemini
+        )
+    }
+
     /// The field of an assistant message that earlier reasoning goes back in, where the vendor
     /// takes it back at all.
     fn reasoning_key(&self) -> Option<&'static str> {
@@ -166,6 +180,10 @@ pub struct OpenAiProvider {
 }
 
 const MAX_BACKOFF_SECS: u64 = 60;
+/// How long a stream that carries the reasoning may send nothing before it counts as stalled.
+const STALLED_SECS: u64 = 120;
+/// The same for a vendor that keeps the reasoning to itself and is silent while the model thinks.
+const SILENT_THINKING_SECS: u64 = 300;
 
 impl OpenAiProvider {
     pub fn new(
@@ -186,7 +204,13 @@ impl OpenAiProvider {
             dialect,
             max_retries: 8,
             keep_retrying: Arc::default(),
-            idle_timeout: Duration::from_secs(300),
+            // A stream that has carried the reasoning as it went and then stops has stalled: it is
+            // given up on and asked for again well before a silent thinker would be.
+            idle_timeout: Duration::from_secs(if dialect.streams_reasoning() {
+                STALLED_SECS
+            } else {
+                SILENT_THINKING_SECS
+            }),
             api_key: api_key.to_string(),
             client,
             extras: Mutex::default(),
@@ -525,12 +549,22 @@ fn u64_at(v: &Value, path: &[&str]) -> Option<u64> {
 }
 
 /// Reads a `usage` object in any of the shapes providers send: chat completions, DeepSeek's cache
-/// fields, the Responses API (`input_tokens`, `output_tokens_details`) and Anthropic's cache reads.
+/// fields, the Responses API (`input_tokens`, `output_tokens_details`) and Anthropic's Messages API.
 /// The benchmark's metering proxy reads other harnesses' traffic with this too, so every harness
 /// is counted the same way.
 pub fn parse_usage(u: &Value) -> Usage {
+    // Anthropic's `input_tokens` are only what was neither read from the cache nor written to it:
+    // the prompt is all three. The Responses API's `input_tokens` already include the cached ones.
+    let anthropic_input = || {
+        let read = u64_at(u, &["cache_read_input_tokens"]);
+        let written = u64_at(u, &["cache_creation_input_tokens"]);
+        (read.is_some() || written.is_some()).then(|| {
+            u64_at(u, &["input_tokens"]).unwrap_or(0) + read.unwrap_or(0) + written.unwrap_or(0)
+        })
+    };
     Usage {
         prompt: u64_at(u, &["prompt_tokens"])
+            .or_else(anthropic_input)
             .or_else(|| u64_at(u, &["input_tokens"]))
             .unwrap_or(0),
         cached: u64_at(u, &["prompt_tokens_details", "cached_tokens"])
@@ -1446,5 +1480,10 @@ mod tests {
                 "{u}"
             );
         }
+        // Anthropic counts the cache apart from `input_tokens`: the prompt is all of it.
+        let anthropic = serde_json::json!({"input_tokens": 10, "cache_read_input_tokens": 60,
+            "cache_creation_input_tokens": 30, "output_tokens": 40});
+        let usage = parse_usage(&anthropic);
+        assert_eq!((usage.prompt, usage.cached, usage.output), (100, 60, 40));
     }
 }

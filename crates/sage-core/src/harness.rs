@@ -489,7 +489,7 @@ fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedR
                     retune,
                 } => {
                     agent.retune(retune);
-                    agent.goal_command(&shown, command);
+                    agent.goal_command(&shown, command).await;
                 }
             }
             worker.set_status(SessionStatus::Idle);

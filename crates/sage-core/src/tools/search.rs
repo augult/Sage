@@ -3,6 +3,7 @@
 use super::{StepOutput, str_arg, u64_arg};
 use crate::anchors::push_anchored;
 use crate::state::Session;
+use crate::workspace::Workspace;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
@@ -126,22 +127,50 @@ fn scan(walk: ignore::Walk, matcher: &RegexMatcher, cap: usize, started: Instant
     s
 }
 
-pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
+/// What a search needs of the session, owned, so that it can run on a thread of its own.
+struct Scope {
+    ws: Workspace,
+    cap: usize,
+    anchors: bool,
+}
+
+impl Scope {
+    fn of(sess: &Session) -> Self {
+        Self {
+            ws: sess.ws.clone(),
+            cap: sess.limits.search_matches,
+            anchors: sess.features.anchors,
+        }
+    }
+}
+
+/// `run` on a blocking thread: a search of a large tree can take seconds, and the runtime has other
+/// sessions to serve meanwhile.
+pub async fn run_off_thread(sess: &Session, args: &Value) -> StepOutput {
+    let (scope, args) = (Scope::of(sess), args.clone());
+    tokio::task::spawn_blocking(move || search(&scope, &args))
+        .await
+        .unwrap_or_else(|e| StepOutput::error(format!("the search failed: {e}")))
+}
+
+pub fn run(sess: &Session, args: &Value) -> StepOutput {
+    search(&Scope::of(sess), args)
+}
+
+fn search(scope: &Scope, args: &Value) -> StepOutput {
+    let ws = &scope.ws;
     let pattern = str_arg(args, "pattern").filter(|p| !p.is_empty());
     let glob = str_arg(args, "glob")
         .map(str::trim)
         .filter(|g| !g.is_empty());
-    let root = sess.ws.resolve(
+    let root = ws.resolve(
         str_arg(args, "path")
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .unwrap_or("."),
     );
     if !root.exists() {
-        return StepOutput::error(format!(
-            "no such file or directory: {}",
-            sess.ws.display(&root)
-        ));
+        return StepOutput::error(format!("no such file or directory: {}", ws.display(&root)));
     }
     let walk = match walker(&root, glob) {
         Ok(w) => w,
@@ -161,7 +190,7 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
             if entry.file_type().is_some_and(|t| t.is_file()) {
                 total += 1;
                 if files.len() < MAX_LISTED_FILES {
-                    files.push(sess.ws.display(entry.path()));
+                    files.push(ws.display(entry.path()));
                 }
             }
             if started.elapsed() > TIME_BUDGET {
@@ -198,7 +227,7 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
             Err(e) => return StepOutput::error(format!("cannot search for {pattern:?}: {e}")),
         },
     };
-    let cap = sess.limits.search_matches;
+    let cap = scope.cap;
     let mut found = scan(walk, &matcher, cap, started);
     // Code pasted as a pattern is a valid regex that means something else: `divide(a, b)` is a
     // group, and matches no parenthesis. Before reporting that there is nothing, look for the text.
@@ -231,15 +260,15 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
         let scope = glob.map(|g| format!(" matching {g}")).unwrap_or_default();
         return StepOutput::ok(format!(
             "[no matches for {label} in {}{scope}]",
-            sess.ws.display(&root)
+            ws.display(&root)
         ));
     }
 
     let context = u64_arg(args, "context").unwrap_or(0).min(6) as usize;
-    let anchors = sess.features.anchors;
+    let anchors = scope.anchors;
     let mut out = String::new();
     for file in &hits {
-        out.push_str(&sess.ws.display(&file.path));
+        out.push_str(&ws.display(&file.path));
         out.push('\n');
         // A file that is not UTF-8 throughout has no lines to count context in: its matches alone.
         let content = if context == 0 {
@@ -364,8 +393,8 @@ mod tests {
 
     #[test]
     fn finds_matches_with_anchors_respecting_gitignore_but_not_hiding_dotfiles() {
-        let mut s = fixture(Features::ecosage());
-        let out = run(&mut s, &json!({"pattern": "divide"}));
+        let s = fixture(Features::ecosage());
+        let out = run(&s, &json!({"pattern": "divide"}));
         let o = &out.observation;
         assert!(
             o.contains(&format!(
@@ -390,9 +419,9 @@ mod tests {
 
     #[test]
     fn code_pasted_as_a_pattern_is_found_and_brace_globs_work() {
-        let mut s = fixture(Features::ecosage());
+        let s = fixture(Features::ecosage());
         // As a regex this is a group that matches `dividea, b`: nothing. The text is there.
-        let out = run(&mut s, &json!({"pattern": "divide(a, b)"}));
+        let out = run(&s, &json!({"pattern": "divide(a, b)"}));
         assert!(
             out.observation.contains("|def divide(a, b):")
                 && out.observation.ends_with(
@@ -403,22 +432,22 @@ mod tests {
         );
         // A regex that matches is left a regex, and one that finds nothing either way says so plainly.
         assert!(
-            run(&mut s, &json!({"pattern": "divide\\(a, \\w\\)"}))
+            run(&s, &json!({"pattern": "divide\\(a, \\w\\)"}))
                 .observation
                 .ends_with("[1 match in 1 file]")
         );
         assert_eq!(
-            run(&mut s, &json!({"pattern": "multiply(a, b)"})).observation,
+            run(&s, &json!({"pattern": "multiply(a, b)"})).observation,
             "[no matches for /multiply(a, b)/ in .]"
         );
 
-        let out = run(&mut s, &json!({"glob": "**/*.{py,yml}"}));
+        let out = run(&s, &json!({"glob": "**/*.{py,yml}"}));
         assert!(
             out.observation.ends_with("[3 files]") && out.observation.contains("ci.yml"),
             "{}",
             out.observation
         );
-        let out = run(&mut s, &json!({"glob": "*.{py,yml}, *.bin"}));
+        let out = run(&s, &json!({"glob": "*.{py,yml}, *.bin"}));
         assert!(
             out.observation.ends_with("[4 files]"),
             "{}",
@@ -429,8 +458,8 @@ mod tests {
 
     #[test]
     fn smart_case_glob_path_and_context() {
-        let mut s = fixture(Features::ecosage());
-        let out = run(&mut s, &json!({"pattern": "Divide", "glob": "*.py"}));
+        let s = fixture(Features::ecosage());
+        let out = run(&s, &json!({"pattern": "Divide", "glob": "*.py"}));
         assert!(
             out.observation.ends_with("[1 match in 1 file]"),
             "{}",
@@ -438,7 +467,7 @@ mod tests {
         );
 
         let out = run(
-            &mut s,
+            &s,
             &json!({"pattern": "return a / b", "path": "src", "context": 1}),
         );
         let o = &out.observation;
@@ -451,7 +480,7 @@ mod tests {
             "{o}"
         );
 
-        let none = run(&mut s, &json!({"pattern": "zzz_not_here", "glob": "*.py"}));
+        let none = run(&s, &json!({"pattern": "zzz_not_here", "glob": "*.py"}));
         assert_eq!(none.status, StepStatus::Ok);
         assert_eq!(
             none.observation,
@@ -461,8 +490,8 @@ mod tests {
 
     #[test]
     fn invalid_regex_falls_back_to_literal_and_glob_alone_lists_files() {
-        let mut s = fixture(Features::ecosage());
-        let out = run(&mut s, &json!({"pattern": "divide(4, 2"}));
+        let s = fixture(Features::ecosage());
+        let out = run(&s, &json!({"pattern": "divide(4, 2"}));
         assert!(
             out.observation.contains("searched literally")
                 && out.observation.contains("test_calc.py"),
@@ -470,26 +499,26 @@ mod tests {
             out.observation
         );
 
-        let files = run(&mut s, &json!({"glob": "**/*.py"}));
+        let files = run(&s, &json!({"glob": "**/*.py"}));
         assert_eq!(
             files.observation,
             "src/calc.py\ntests/test_calc.py\n[2 files]"
         );
-        assert_eq!(run(&mut s, &json!({})).status, StepStatus::Error);
+        assert_eq!(run(&s, &json!({})).status, StepStatus::Error);
         assert_eq!(
-            run(&mut s, &json!({"pattern": "x", "path": "missing"})).status,
+            run(&s, &json!({"pattern": "x", "path": "missing"})).status,
             StepStatus::Error
         );
     }
 
     #[test]
     fn caps_output_and_says_how_much_is_missing() {
-        let mut s = test_session("search-cap", Features::ecosage());
+        let s = test_session("search-cap", Features::ecosage());
         for f in 0..5 {
             let body: String = (0..40).map(|i| format!("needle {i}\n")).collect();
             std::fs::write(s.ws.root.join(format!("f{f}.txt")), body).unwrap();
         }
-        let out = run(&mut s, &json!({"pattern": "needle"}));
+        let out = run(&s, &json!({"pattern": "needle"}));
         assert!(out.observation.contains("… 20 more matches in this file"));
         assert!(out.observation.ends_with("[60 of 200 matches shown, in 5 files — narrow with path, glob or a tighter pattern]"), "{}", out.observation);
         assert_eq!(out.observation.matches("|needle").count(), 60);

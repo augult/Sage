@@ -5,12 +5,12 @@ use crate::changes::Baseline;
 use crate::economy::Prices;
 use crate::tools::jobs::Jobs;
 use crate::watches::{WatchSpec, Watches};
-use crate::workspace::{Seen, Workspace, fingerprint};
+use crate::workspace::{Fingerprint, Seen, Workspace, fingerprint_off_thread};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Switches for each mechanism, so that any of them can be ablated and measured. `classic()` is a
 /// conventional tool loop used as the baseline in A/B runs.
@@ -246,14 +246,17 @@ pub struct Evidence {
     /// Human-readable description of the most recent change.
     pub last_change: String,
     /// Workspace fingerprint as of the last time it was computed.
-    fingerprint: Option<u64>,
+    fingerprint: Option<Fingerprint>,
+    /// The workspace is too large to see whole, so a change a command makes may go unseen.
+    partial_view: bool,
     /// How often `finish` has been refused for lack of a check since the last change.
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
 }
 
-const FINGERPRINT_BUDGET: Duration = Duration::from_millis(400);
+/// Said after "verified by …" where the workspace is too large to see every change a command makes.
+const PARTIAL_VIEW: &str = " (the workspace is too large to see every change a command makes)";
 
 impl Evidence {
     pub fn fresh(&self) -> bool {
@@ -267,9 +270,20 @@ impl Evidence {
     /// What stands behind a `fresh` state, in words.
     pub fn verified_by(&self) -> String {
         match &self.verified {
-            Some((_, by)) if self.epoch > 0 => format!("verified by {by}"),
+            Some((_, by)) if self.epoch > 0 => format!("verified by {by}{}", self.caveat()),
             _ => "no changes were made".to_string(),
         }
+    }
+
+    /// What a claim of verification has to add: nothing, unless the last look at the workspace
+    /// could not see all of it.
+    pub fn caveat(&self) -> &'static str {
+        if self.partial_view { PARTIAL_VIEW } else { "" }
+    }
+
+    fn look(&mut self, now: Fingerprint) {
+        self.partial_view = !now.complete;
+        self.fingerprint = Some(now);
     }
 
     /// A tool changed files itself.
@@ -281,17 +295,17 @@ impl Evidence {
     }
 
     /// Call before running a command whose effect on the workspace is unknown.
-    pub fn before_command(&mut self, ws: &Workspace) {
+    pub async fn before_command(&mut self, ws: &Workspace) {
         if self.fingerprint.is_none() {
-            self.fingerprint = Some(fingerprint(&ws.root, FINGERPRINT_BUDGET));
+            self.look(fingerprint_off_thread(&ws.root).await);
         }
     }
 
     /// Call after such a command. Returns true if it changed the workspace.
-    pub fn after_command(&mut self, ws: &Workspace, cmd: &str) -> bool {
-        let now = fingerprint(&ws.root, FINGERPRINT_BUDGET);
+    pub async fn after_command(&mut self, ws: &Workspace, cmd: &str) -> bool {
+        let now = fingerprint_off_thread(&ws.root).await;
         let changed = self.fingerprint.is_some_and(|before| before != now);
-        self.fingerprint = Some(now);
+        self.look(now);
         if changed {
             self.epoch += 1;
             self.refusals = 0;
@@ -365,6 +379,9 @@ pub struct Session {
     pub dialects: HashMap<PathBuf, bool>,
     spill_seq: u32,
     pub shell_env: Vec<(String, String)>,
+    /// When the time budget of the run in progress runs out, where it has one. Nothing a tool waits
+    /// for is waited for past it.
+    pub deadline: Option<Instant>,
     /// Per-session scratch directory for `TMPDIR`, outside `dir` so `$TMPDIR/..` never exposes `exam/`.
     scratch: PathBuf,
 }
@@ -415,6 +432,7 @@ impl Session {
             dialects: HashMap::new(),
             spill_seq: 0,
             shell_env,
+            deadline: None,
             scratch,
         })
     }
@@ -460,6 +478,18 @@ impl Session {
             .into_iter()
             .map(|(path, already)| (PathBuf::from(path), already))
             .collect();
+    }
+
+    /// `limit`, or what is left of the run's time budget where that is less: never under a second,
+    /// so that whatever was asked for is still started.
+    pub fn within_budget(&self, limit: Duration) -> Duration {
+        match self.deadline {
+            Some(at) => limit.min(
+                at.saturating_duration_since(Instant::now())
+                    .max(Duration::from_secs(1)),
+            ),
+            None => limit,
+        }
     }
 
     /// Allocates the next `out:N` handle and the file behind it.
@@ -542,8 +572,8 @@ pub(crate) fn test_session(name: &str, features: Features) -> Session {
 mod tests {
     use super::*;
 
-    #[test]
-    fn evidence_goes_stale_on_change_and_fresh_on_pass() {
+    #[tokio::test]
+    async fn evidence_goes_stale_on_change_and_fresh_on_pass() {
         let mut s = test_session("evidence", Features::ecosage());
         assert!(s.evidence.fresh(), "nothing changed yet, nothing to verify");
 
@@ -553,14 +583,14 @@ mod tests {
         assert!(s.evidence.fresh());
 
         // A command that does not touch files leaves the evidence fresh…
-        s.evidence.before_command(&s.ws);
-        assert!(!s.evidence.after_command(&s.ws, "git status"));
+        s.evidence.before_command(&s.ws).await;
+        assert!(!s.evidence.after_command(&s.ws, "git status").await);
         assert!(s.evidence.fresh());
 
         // …one that does makes it stale again.
-        s.evidence.before_command(&s.ws);
+        s.evidence.before_command(&s.ws).await;
         std::fs::write(s.ws.root.join("gen.txt"), "x").unwrap();
-        assert!(s.evidence.after_command(&s.ws, "make gen"));
+        assert!(s.evidence.after_command(&s.ws, "make gen").await);
         assert!(!s.evidence.fresh());
         assert_eq!(s.evidence.last_change, "`make gen`");
     }

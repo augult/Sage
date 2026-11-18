@@ -49,6 +49,11 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     } else {
         wait
     };
+    // Not past the run's time budget.
+    let wait = match wait {
+        0 => 0,
+        wait => sess.within_budget(Duration::from_secs(wait)).as_secs(),
+    };
 
     let job = sess.jobs.get_mut(&id).expect("checked above");
     if bool_arg(args, "kill") && job.run.exit.borrow().is_none() {

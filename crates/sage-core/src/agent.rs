@@ -2,7 +2,7 @@
 
 use crate::attach;
 use crate::bootstrap;
-use crate::changes;
+use crate::changes::{self, Baseline};
 use crate::context::Context;
 use crate::contract::Contract;
 use crate::economy::{peak_multiplier, prices_for};
@@ -22,6 +22,7 @@ use crate::watches;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -139,8 +140,9 @@ pub struct Agent {
     /// Replies in a row that carried a single call, and how often that may still be pointed out.
     solo_streak: u32,
     solo_hints: u8,
-    /// The `job` tool was in the list sent with the previous request.
-    offered_job_tool: bool,
+    /// What the workspace held before the session began, while git is still being asked (see
+    /// `opening`).
+    pending_baseline: Option<tokio::task::JoinHandle<Option<Baseline>>>,
     /// What `retune` changed, to be said in the log once the message it came with is in it.
     announce: Vec<EventKind>,
     /// Files the user attached to the message that comes next, by path.
@@ -197,6 +199,56 @@ const LONG_THOUGHT_CHARS: usize = 96_000;
 const LAST_REPLY_NOTE: &str = "Your next reply is the last one the budget allows. Start nothing new: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands.";
 /// How often mechanical contract violations may hold one message's `finish`.
 const CONTRACT_HOLDS: u8 = 3;
+/// Said after the last cut a run allows for reasoning without acting.
+const WRAP_UP_NOTE: &str = "Your next reply is the last one this run allows. Act now instead of planning: call `finish` in it and say in the summary what is done, how it was checked, and what is unfinished or unchecked. It is accepted as it stands.";
+
+/// What a request streamed, attempt by attempt, so that what the provider was paid for and never
+/// reported (a reply cut off, given up on, or made again after a failure) can be booked by estimate.
+#[derive(Default)]
+struct Streamed {
+    /// Bytes of reasoning and of text the attempt in progress has streamed.
+    reasoning: AtomicU64,
+    content: AtomicU64,
+    /// The same of attempts that streamed something and then failed, and how many there were.
+    lost_reasoning: AtomicU64,
+    lost_content: AtomicU64,
+    lost_attempts: AtomicU64,
+}
+
+impl Streamed {
+    fn seen(&self, reasoning: bool, bytes: usize) {
+        let counter = if reasoning {
+            &self.reasoning
+        } else {
+            &self.content
+        };
+        counter.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    /// The attempt in progress is over without a report: what it streamed is lost.
+    fn retried(&self) {
+        let reasoning = self.reasoning.swap(0, Ordering::Relaxed);
+        let content = self.content.swap(0, Ordering::Relaxed);
+        if reasoning + content > 0 {
+            self.lost_reasoning.fetch_add(reasoning, Ordering::Relaxed);
+            self.lost_content.fetch_add(content, Ordering::Relaxed);
+            self.lost_attempts.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The attempt in progress reasoned at least `bytes`, whatever reached the stream.
+    fn at_least(&self, bytes: usize) {
+        self.reasoning.fetch_max(bytes as u64, Ordering::Relaxed);
+    }
+}
+
+/// Waits until `deadline`, or for ever where there is none.
+async fn until(deadline: Option<Instant>) {
+    match deadline {
+        Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
+        None => std::future::pending().await,
+    }
+}
 
 impl Agent {
     pub fn new(
@@ -232,7 +284,7 @@ impl Agent {
             chain_hints: 2,
             solo_streak: 0,
             solo_hints: 2,
-            offered_job_tool: false,
+            pending_baseline: None,
             announce: Vec::new(),
             attached: Vec::new(),
             goal: None,
@@ -303,7 +355,7 @@ impl Agent {
 
     /// A `/goal` message that is no task: it goes in the log as the user's, is answered from here
     /// and costs no request to the model.
-    pub fn goal_command(&mut self, shown: &str, command: goal::Command) {
+    pub async fn goal_command(&mut self, shown: &str, command: goal::Command) {
         self.sink.emit(EventKind::User {
             text: shown.trim().to_string(),
             skills: Vec::new(),
@@ -332,7 +384,7 @@ impl Agent {
             },
         };
         self.sink.emit(event);
-        self.save_point(false);
+        self.save_point(false).await;
     }
 
     pub fn effort(&self) -> Effort {
@@ -368,24 +420,31 @@ impl Agent {
         let ev = &self.sess.evidence;
         match &ev.verified {
             _ if ev.epoch == 0 => "no changes were made".to_string(),
-            Some((epoch, by)) if *epoch == ev.epoch => format!("verified by {by}"),
+            Some((epoch, by)) if *epoch == ev.epoch => format!("verified by {by}{}", ev.caveat()),
             _ => format!("not checked since {}", ev.last_change),
         }
     }
 
     /// Trims old observations when the context limit demands it or the price vector says it pays.
-    fn maybe_decay(&mut self) {
-        let (droppable_bytes, suffix_bytes) = self.ctx.decay_estimate(KEEP_RECENT_MESSAGES);
+    /// `turns_used` replies of this run have come, and `landing` is the last one it allows.
+    fn maybe_decay(&mut self, turns_used: u32, landing: bool, run_started: Instant) {
+        let over_limit = self.stats.context_tokens > self.cfg.context_limit;
+        // On the last reply a trim saves one reading of what it drops and re-buys all that follows.
+        if landing && !over_limit {
+            return;
+        }
+        let (droppable_bytes, suffix_bytes) = self
+            .ctx
+            .decay_estimate(KEEP_RECENT_MESSAGES, self.provider.replays_reasoning());
         let (droppable, suffix) = (droppable_bytes / 4, suffix_bytes / 4);
         if droppable < MIN_DECAY_TOKENS {
             return;
         }
-        let over_limit = self.stats.context_tokens > self.cfg.context_limit;
-        // With no better information, expect about as many turns again as have already passed.
+        let left = self.replies_left(turns_used, run_started);
         let pays = self
             .sess
             .prices
-            .is_some_and(|p| p.decay_pays_off(droppable, suffix, self.turn.max(4) as f64));
+            .is_some_and(|p| p.decay_pays_off(droppable, suffix, left));
         if !over_limit && !pays {
             return;
         }
@@ -403,6 +462,68 @@ impl Agent {
             dropped_tokens: d.dropped_bytes / 4,
             reason: reason.to_string(),
         });
+    }
+
+    /// The replies this run can still be expected to ask for, the next one included: with no better
+    /// information about as many again as it has had (at least four), and never more than its turn
+    /// limit and the time it has left allow at the pace so far.
+    fn replies_left(&self, turns_used: u32, run_started: Instant) -> f64 {
+        let mut left = f64::from(
+            turns_used
+                .max(4)
+                .min(self.cfg.max_turns.saturating_sub(turns_used)),
+        );
+        if let (Some(at), true) = (self.sess.deadline, turns_used > 0) {
+            let per_reply = run_started.elapsed().as_secs_f64() / f64::from(turns_used);
+            if per_reply > 0.0 {
+                left = left
+                    .min(at.saturating_duration_since(Instant::now()).as_secs_f64() / per_reply);
+            }
+        }
+        left.max(1.0)
+    }
+
+    /// How a run that reached its `what` ("time budget", "turn limit") ends.
+    fn out_of_budget(&self, what: &str) -> Outcome {
+        Outcome {
+            status: FinishStatus::Budget,
+            summary: format!("Stopped: the {what} was reached before the task was finished."),
+            verified: self.sess.evidence.fresh(),
+            evidence: self.evidence_text(),
+        }
+    }
+
+    /// Books what a request cost beyond the usage the provider reported: attempts that streamed
+    /// and were then made again and, where it was `cut` off, the attempt in progress, which ended
+    /// before any report. Each is booked as its prompt (`estimate`: its tokens, and of them those
+    /// the cache likely held) and the text it streamed, at four bytes a token.
+    fn book_unreported(&mut self, streamed: &Streamed, cut: bool, estimate: (u64, u64)) {
+        if cut {
+            streamed.retried();
+        }
+        let attempts = streamed.lost_attempts.load(Ordering::Relaxed);
+        if attempts == 0 {
+            return;
+        }
+        let reasoning = streamed.lost_reasoning.load(Ordering::Relaxed).div_ceil(4);
+        let content = streamed.lost_content.load(Ordering::Relaxed).div_ceil(4);
+        let (prompt, cached) = estimate;
+        self.count_usage(
+            Usage {
+                prompt: prompt * attempts,
+                cached: cached * attempts,
+                output: reasoning + content,
+                reasoning,
+            },
+            0,
+        );
+    }
+
+    /// Puts what git said the workspace held before the session in place, once it has answered.
+    async fn settle_baseline(&mut self) {
+        if let Some(task) = self.pending_baseline.take() {
+            self.sess.baseline = task.await.ok().flatten();
+        }
     }
 
     fn stall_notes(&mut self, r: &ScriptResult) -> Vec<String> {
@@ -484,9 +605,13 @@ impl Agent {
     async fn opening(&mut self, task: &str, cancel: &CancellationToken) -> String {
         let features = self.cfg.features;
         // Before anything of the session's own can be in the workspace. What a check of the work
-        // is shown of it is only what changed after this.
+        // is shown of it is only what changed after this. Git is asked while the rest of the first
+        // message is put together and the first reply is coming, and is waited for only before
+        // the first command runs (`settle_baseline`).
         if features.gate || self.goal.is_some() {
-            self.sess.baseline = changes::baseline(&self.sess.ws.root).await;
+            let root = self.sess.ws.root.clone();
+            self.pending_baseline =
+                Some(tokio::spawn(async move { changes::baseline(&root).await }));
         }
         let mut parts: Vec<String> = Vec::new();
         if features.bootstrap {
@@ -520,6 +645,7 @@ impl Agent {
         // A test command the task names is run before the model has spent anything on it. Only
         // where commands run unasked anyway.
         let preflight = if features.bootstrap && self.cfg.autonomy == Autonomy::Auto {
+            self.settle_baseline().await;
             watches::preflight(&mut self.sess, task, cancel).await
         } else {
             None
@@ -558,6 +684,7 @@ impl Agent {
         cancel: &CancellationToken,
     ) -> Outcome {
         let run_started = Instant::now();
+        self.sess.deadline = self.cfg.time_budget.map(|budget| run_started + budget);
         let elapsed_before = self.stats.elapsed_ms;
         let features = self.cfg.features;
         let task = text.trim().to_string();
@@ -602,7 +729,7 @@ impl Agent {
         }
         self.ctx.push(Message::user(composed));
         self.budget_marks = 0;
-        self.save_point(true);
+        self.save_point(true).await;
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) =
             (0u32, 0u32, 1u32, 1u32, 3u32);
@@ -610,6 +737,12 @@ impl Agent {
         let mut only_reasoned = 0u32;
         let mut slowest = Duration::ZERO;
         let mut end_checks = EndChecks::default();
+        // Cut off for thinking without acting as often as that is allowed, the model gets one more
+        // reply, the last of the run, to act or to report in (`wrap_up`); once it has come, the run
+        // ends (`wrapped`).
+        let (mut wrap_up, mut wrapped) = (false, false);
+        let tools = prompt::tool_schemas(&features, self.cfg.interactive);
+        let tools_tokens = crate::text::est_tokens(&tools.to_string());
         let outcome = loop {
             if cancel.is_cancelled() {
                 break Outcome {
@@ -619,27 +752,24 @@ impl Agent {
                     evidence: self.evidence_text(),
                 };
             }
-            let out_of_time = self
-                .cfg
-                .time_budget
-                .is_some_and(|b| run_started.elapsed() >= b);
+            let out_of_time = self.sess.deadline.is_some_and(|at| Instant::now() >= at);
             if turns_used >= self.cfg.max_turns || out_of_time {
-                let what = if out_of_time {
+                break self.out_of_budget(if out_of_time {
                     "time budget"
                 } else {
                     "turn limit"
-                };
+                });
+            }
+            if wrapped {
                 break Outcome {
                     status: FinishStatus::Budget,
-                    summary: format!(
-                        "Stopped: the {what} was reached before the task was finished."
-                    ),
+                    summary: "Stopped: the model was cut off three times in a row for reasoning without acting, and the reply it was given after that was the last.".into(),
                     verified: self.sess.evidence.fresh(),
                     evidence: self.evidence_text(),
                 };
             }
-            self.maybe_decay();
-            let landing = self.last_reply(run_started, turns_used, slowest);
+            let landing = wrap_up || self.last_reply(run_started, turns_used, slowest);
+            self.maybe_decay(turns_used, landing, run_started);
             let turn_started = Instant::now();
             self.turn += 1;
             turns_used += 1;
@@ -650,16 +780,22 @@ impl Agent {
                 effort: self.effort.as_str().to_string(),
             });
 
-            // A longer tool list changes the very start of the prompt, just as a rewritten message does.
-            let jobs = self.sess.jobs.any_started();
-            let tools_stable = std::mem::replace(&mut self.offered_job_tool, jobs) == jobs;
-            let prefix_stable = self
-                .ctx
-                .check_prefix(self.provider.wire_messages(&self.ctx.messages))
-                && tools_stable;
+            let wire = self.provider.wire_messages(&self.ctx.messages);
+            // What this request comes to if it ends before the provider says: its prompt, and of
+            // that what the cache held of the request before it.
+            let prompt_estimate = crate::text::est_tokens(&wire) + tools_tokens;
+            let prefix_stable = self.ctx.check_prefix(wire);
+            let estimate = (
+                prompt_estimate,
+                if prefix_stable {
+                    self.ctx.last_prompt().min(prompt_estimate)
+                } else {
+                    0
+                },
+            );
             let request = ChatRequest {
                 messages: &self.ctx.messages,
-                tools: prompt::tool_schemas(&features, jobs, self.cfg.interactive),
+                tools,
                 effort: self.effort,
                 max_tokens: self.cfg.max_tokens,
                 reasoning_cap: if self.effort == Effort::Max {
@@ -669,36 +805,64 @@ impl Agent {
                 },
             };
             let sink = self.sink.clone();
+            let streamed = Arc::new(Streamed::default());
+            let tally = streamed.clone();
             let mut on_delta = move |d: Delta| match d {
-                Delta::Reasoning(text) => sink.emit(EventKind::Delta {
-                    turn,
-                    channel: Channel::Reasoning,
-                    text,
-                }),
-                Delta::Content(text) => sink.emit(EventKind::Delta {
-                    turn,
-                    channel: Channel::Content,
-                    text,
-                }),
+                Delta::Reasoning(text) => {
+                    tally.seen(true, text.len());
+                    sink.emit(EventKind::Delta {
+                        turn,
+                        channel: Channel::Reasoning,
+                        text,
+                    })
+                }
+                Delta::Content(text) => {
+                    tally.seen(false, text.len());
+                    sink.emit(EventKind::Delta {
+                        turn,
+                        channel: Channel::Content,
+                        text,
+                    })
+                }
                 Delta::Retry {
                     attempt,
                     wait_ms,
                     reason,
-                } => sink.emit(EventKind::Retry {
-                    turn,
-                    attempt,
-                    wait_ms,
-                    reason,
-                }),
+                } => {
+                    tally.retried();
+                    sink.emit(EventKind::Retry {
+                        turn,
+                        attempt,
+                        wait_ms,
+                        reason,
+                    })
+                }
             };
             let asked = Instant::now();
-            let reply = self.provider.chat(request, &mut on_delta, cancel).await;
+            let provider = self.provider.clone();
+            let deadline = self.sess.deadline;
+            // The time budget holds inside a reply too: one still coming when it runs out is cut.
+            let reply = tokio::select! {
+                reply = provider.chat(request, &mut on_delta, cancel) => Some(reply),
+                _ = until(deadline) => None,
+            };
             let model_ms = asked.elapsed().as_millis() as u64;
             self.stats.model_ms += model_ms;
+            let Some(reply) = reply else {
+                self.book_unreported(&streamed, true, estimate);
+                break self.out_of_budget("time budget");
+            };
             let resp = match reply {
-                Ok(r) => r,
-                Err(ProviderError::Cancelled) => continue,
+                Ok(r) => {
+                    self.book_unreported(&streamed, false, estimate);
+                    r
+                }
+                Err(ProviderError::Cancelled) => {
+                    self.book_unreported(&streamed, true, estimate);
+                    continue;
+                }
                 Err(ProviderError::Degenerate) if loop_retries > 0 => {
+                    self.book_unreported(&streamed, true, estimate);
                     loop_retries -= 1;
                     let msg = "Your last reply got stuck repeating itself and was cut off. Do not think it through again: send the next tool call now.";
                     self.note("loop", msg);
@@ -707,18 +871,12 @@ impl Agent {
                 }
                 Err(ProviderError::Overthinking(chars)) if overthinking_left > 0 => {
                     overthinking_left -= 1;
-                    // The stream was cut before the provider reported usage: count what was seen,
-                    // priced like every other request.
+                    // The stream was cut before the provider reported usage: what was seen is
+                    // booked, priced like every other request.
+                    streamed.at_least(chars);
+                    self.book_unreported(&streamed, true, estimate);
                     let tokens = chars as u64 / 4;
-                    self.count_usage(
-                        Usage {
-                            output: tokens,
-                            reasoning: tokens,
-                            ..Usage::default()
-                        },
-                        0,
-                    );
-                    let msg = format!(
+                    let mut msg = format!(
                         "Your last reply was cut off after about {tokens} tokens of thinking with no tool call. Do not work the whole task out in your head: send the first tool calls now and think between steps, with their results in front of you."
                     );
                     self.note("overthinking", &msg);
@@ -732,10 +890,19 @@ impl Agent {
                         });
                         self.effort = lower;
                     }
+                    if overthinking_left == 0 {
+                        wrap_up = true;
+                        self.note("harness", WRAP_UP_NOTE);
+                        msg = format!("{msg}\n{WRAP_UP_NOTE}");
+                    }
                     self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
                 Err(e) => {
+                    if let ProviderError::Overthinking(chars) = e {
+                        streamed.at_least(chars);
+                    }
+                    self.book_unreported(&streamed, true, estimate);
                     self.sink.emit(EventKind::Error {
                         message: e.to_string(),
                     });
@@ -747,6 +914,10 @@ impl Agent {
                     };
                 }
             };
+            wrapped = wrap_up;
+            // What the workspace held before the session is taken while the first reply is coming,
+            // and has to be in before anything of the reply runs.
+            self.settle_baseline().await;
 
             self.stats.retries += resp.retries;
             self.stats.prompt_tokens += resp.usage.prompt;
@@ -833,7 +1004,7 @@ impl Agent {
                 tool_call_id: None,
             });
             // The reply is paid for: a run that dies while its calls run keeps it.
-            self.save_point(true);
+            self.save_point(true).await;
 
             if calls.is_empty() {
                 // A reply the output limit cut off is not an answer, whatever text it got to.
@@ -995,7 +1166,7 @@ impl Agent {
                     .append_to_last(&format!("\n--- harness ---\n{}", footer.join("\n")));
             }
             self.emit_stats(run_started, elapsed_before);
-            self.save_point(true);
+            self.save_point(true).await;
 
             // A question ends the run: the answer is the user's next message.
             if let Some(asked) = result.asked {
@@ -1044,7 +1215,9 @@ impl Agent {
         };
 
         self.stats.elapsed_ms = elapsed_before + run_started.elapsed().as_millis() as u64;
-        self.save_point(false);
+        self.settle_baseline().await;
+        self.sess.deadline = None;
+        self.save_point(false).await;
         self.sink.emit(EventKind::Stats {
             stats: self.stats.clone(),
         });
@@ -1168,25 +1341,32 @@ impl Agent {
             epoch: self.sess.evidence.epoch,
         };
         let asked = Instant::now();
-        let answer = goal::ask(&self.provider, &material, cancel).await;
+        // Not past the time budget, as no reply of the run is.
+        let answer = tokio::select! {
+            answer = goal::ask(&self.provider, &material, cancel) => Ok(answer),
+            _ = until(self.sess.deadline) => Err("the time budget ran out before it was answered"),
+        };
         self.stats.model_ms += asked.elapsed().as_millis() as u64;
         let verdict = match answer {
-            Err(ProviderError::Cancelled) => {
-                *outcome = Outcome {
-                    status: FinishStatus::Stopped,
-                    summary: "Stopped by the user.".into(),
-                    verified: self.sess.evidence.fresh(),
-                    evidence: self.evidence_text(),
-                };
-                return None;
-            }
-            Err(e) => Err(e.to_string()),
-            Ok(answer) => {
-                self.count_usage(answer.usage, answer.retries);
-                answer
-                    .verdict
-                    .ok_or_else(|| "its answer did not start with MET or NOT MET".to_string())
-            }
+            Err(late) => Err(late.to_string()),
+            Ok(answer) => match answer {
+                Err(ProviderError::Cancelled) => {
+                    *outcome = Outcome {
+                        status: FinishStatus::Stopped,
+                        summary: "Stopped by the user.".into(),
+                        verified: self.sess.evidence.fresh(),
+                        evidence: self.evidence_text(),
+                    };
+                    return None;
+                }
+                Err(e) => Err(e.to_string()),
+                Ok(answer) => {
+                    self.count_usage(answer.usage, answer.retries);
+                    answer
+                        .verdict
+                        .ok_or_else(|| "its answer did not start with MET or NOT MET".to_string())
+                }
+            },
         };
         let note = match verdict {
             Ok(Verdict::Met(reasons)) => {
@@ -1305,13 +1485,19 @@ impl Agent {
 
     /// Writes the snapshot, if this agent keeps one. A snapshot that cannot be written costs only
     /// the chance to continue after a restart, never the run.
-    fn save_point(&mut self, in_run: bool) {
+    /// The file is written and synced on a blocking thread: the runtime goes on serving the other
+    /// sessions meanwhile, and this one waits, so that snapshots land in the order they were taken.
+    async fn save_point(&mut self, in_run: bool) {
         let Some((path, setup)) = &self.keep else {
             return;
         };
-        let result = serde_json::to_vec(&self.checkpoint(in_run, setup))
-            .map_err(std::io::Error::other)
-            .and_then(|body| resume::write_atomic(path, &body));
+        let path = path.clone();
+        let result = match serde_json::to_vec(&self.checkpoint(in_run, setup)) {
+            Ok(body) => tokio::task::spawn_blocking(move || resume::write_atomic(&path, &body))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e))),
+            Err(e) => Err(std::io::Error::other(e)),
+        };
         if let Err(error) = &result
             && !self.snapshot_warned
         {

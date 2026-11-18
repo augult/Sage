@@ -117,6 +117,11 @@ impl Context {
         stable
     }
 
+    /// The prompt tokens the provider reported for the last request answered.
+    pub fn last_prompt(&self) -> u64 {
+        self.prev_prompt
+    }
+
     /// Forgets what the last request looked like. For a conversation handed to another model:
     /// nothing of it is cached there, so its first request is a first request again.
     pub fn forget_cache(&mut self) {
@@ -150,8 +155,10 @@ impl Context {
     }
 
     /// Bytes that decaying everything but the last `keep_recent` messages would drop, and the bytes
-    /// from the first affected message to the end (what would have to be re-bought at the miss price).
-    pub fn decay_estimate(&self, keep_recent: usize) -> (u64, u64) {
+    /// from the first affected message to the end (what would have to be re-bought at the miss price):
+    /// text, tool calls with their arguments, and the reasoning where it goes back to the provider
+    /// (`with_reasoning`).
+    pub fn decay_estimate(&self, keep_recent: usize, with_reasoning: bool) -> (u64, u64) {
         let limit = self.messages.len().saturating_sub(keep_recent);
         let mut droppable = 0u64;
         let mut first: Option<usize> = None;
@@ -168,7 +175,15 @@ impl Context {
             .map(|f| {
                 self.messages[f..]
                     .iter()
-                    .map(|m| (m.content.len() + m.reasoning.as_ref().map_or(0, String::len)) as u64)
+                    .map(|m| {
+                        let reasoning = m.reasoning.as_ref().filter(|_| with_reasoning);
+                        let calls: usize = m
+                            .tool_calls
+                            .iter()
+                            .map(|c| c.id.len() + c.name.len() + c.arguments.len())
+                            .sum();
+                        (m.content.len() + reasoning.map_or(0, String::len) + calls) as u64
+                    })
                     .sum()
             })
             .unwrap_or(0);
@@ -277,12 +292,33 @@ mod tests {
         c.push_tool("a", "x".repeat(4000), "[a]".into());
         c.push_tool("b", "y".repeat(100), "[b]".into());
         c.push_tool("c", "z".repeat(3000), "[c]".into());
-        let (droppable, suffix) = c.decay_estimate(1);
+        let (droppable, suffix) = c.decay_estimate(1, true);
         assert_eq!(
             droppable, 3997,
             "only the big old result; the small one is not worth it and the last is kept"
         );
         assert_eq!(suffix, 4000 + 100 + 3000);
+        // What the model wrote in its calls is re-bought too; its reasoning only where it is sent back.
+        let mut c = Context::new("sys");
+        c.push(Message::user("task"));
+        c.push_tool("old", "x".repeat(4000), "[old]".into());
+        c.push(Message {
+            role: Role::Assistant,
+            content: String::new(),
+            reasoning: Some("r".repeat(500)),
+            tool_calls: vec![crate::provider::ToolCall {
+                id: "a".into(),
+                name: "write".into(),
+                arguments: "w".repeat(2000),
+            }],
+            tool_call_id: None,
+        });
+        c.push_tool("a", "y".repeat(10), "[a]".into());
+        c.push(Message::user("more"));
+        let (droppable, without) = c.decay_estimate(1, false);
+        assert_eq!(droppable, 4000 - 5);
+        assert_eq!(without, 4000 + (1 + 5 + 2000) + 10 + 4);
+        assert_eq!(c.decay_estimate(1, true).1, without + 500);
         c.append_to_last("\n--- harness ---\nnote");
         assert!(c.messages.last().unwrap().content.ends_with("note"));
     }

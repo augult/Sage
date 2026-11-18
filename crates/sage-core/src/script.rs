@@ -429,7 +429,7 @@ impl Runner<'_> {
         let out = match tool {
             Tool::Shell => tools::shell::run(self.sess, args, self.cancel).await,
             Tool::Read => tools::read::run(self.sess, args),
-            Tool::Search => tools::search::run(self.sess, args),
+            Tool::Search => tools::search::run_off_thread(self.sess, args).await,
             Tool::Edit => tools::edit::run(self.sess, args).await,
             Tool::Write => tools::write::run(self.sess, args).await,
             Tool::Job => tools::job::run(self.sess, args, self.cancel).await,
@@ -784,7 +784,10 @@ mod tests {
             &mut s,
             &[
                 ("edit", json!({"path": "n.txt", "old": "1", "new": "3"})),
-                ("shell", json!({"cmd": "grep -qx 2 n.txt"})),
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx 2 n.txt", "expect_exit": "0"}),
+                ),
                 finish.clone(),
             ],
             true,
@@ -808,7 +811,10 @@ mod tests {
         let (res, _, events) = run_as(
             &mut s,
             &[
-                ("shell", json!({"cmd": "grep -qx 2 n.txt"})),
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx 2 n.txt", "expect_exit": "0"}),
+                ),
                 ("write", json!({"path": "b.txt", "content": "x"})),
                 finish.clone(),
             ],
@@ -1092,6 +1098,59 @@ mod tests {
                 "unverified: no check passed after the write of third.txt"
             )
         );
+    }
+
+    #[tokio::test]
+    async fn a_test_run_that_writes_ignored_build_output_is_watched_and_not_run_twice() {
+        let mut s = test_session("script-build-output", Features::ecosage());
+        let root = s.ws.root.clone();
+        let git = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["init", "-q"])
+            .status()
+            .unwrap();
+        assert!(git.success());
+        std::fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        std::fs::write(root.join("a.py"), "x = 1\n").unwrap();
+        let counter = s.dir.join("runs");
+        std::fs::write(
+            root.join("run_tests.sh"),
+            format!(
+                "mkdir -p build && date > build/report.txt && echo run >> '{}'\necho '3 passed'\n",
+                counter.display()
+            ),
+        )
+        .unwrap();
+        let runs = || {
+            std::fs::read_to_string(&counter)
+                .map(|t| t.lines().count())
+                .unwrap_or(0)
+        };
+        let tests = (
+            "shell",
+            json!({"cmd": "bash run_tests.sh", "expect_exit": "0"}),
+        );
+        // The build output is ignored, so the run left the workspace as it was: it becomes the watch.
+        run(&mut s, std::slice::from_ref(&tests)).await;
+        assert_eq!(
+            (s.evidence.epoch, s.watches.names(), runs()),
+            (0, "tests".to_string(), 1)
+        );
+        // After an edit, the model's own run is the watch's result: the tests are not run again.
+        run(
+            &mut s,
+            &[
+                (
+                    "edit",
+                    json!({"path": "a.py", "old": "x = 1", "new": "x = 2"}),
+                ),
+                tests,
+            ],
+        )
+        .await;
+        assert_eq!((s.evidence.epoch, runs()), (1, 2));
+        assert!(s.evidence.fresh());
     }
 
     #[tokio::test]

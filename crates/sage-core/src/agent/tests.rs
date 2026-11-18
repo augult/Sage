@@ -773,7 +773,7 @@ async fn repeated_failures_draw_a_note_and_three_surprises_raise_the_effort() {
 }
 
 #[tokio::test]
-async fn the_job_tool_is_offered_once_a_job_exists_at_the_price_of_one_cache_restart() {
+async fn a_background_job_costs_no_cache_restart_because_the_job_tool_is_always_offered() {
     let turns = vec![
         fixed(MockTurn::calls(
             "",
@@ -817,11 +817,11 @@ async fn the_job_tool_is_offered_once_a_job_exists_at_the_price_of_one_cache_res
         cache,
         vec![
             (true, CacheVerdict::First),
-            (false, CacheVerdict::Bust),
+            (true, CacheVerdict::Hit),
             (true, CacheVerdict::Hit)
         ]
     );
-    assert_eq!(r.agent.stats.cache_busts, 1);
+    assert_eq!(r.agent.stats.cache_busts, 0);
 }
 
 #[tokio::test]
@@ -1635,12 +1635,17 @@ async fn an_answer_in_prose_is_checked_against_the_goal_too() {
 #[tokio::test]
 async fn goal_commands_are_answered_by_the_session_and_cost_no_request() {
     let mut r = rig("agent-goal-command", AgentConfig::new("mock"), vec![]);
-    r.agent.goal_command("/goal", goal::Command::Show);
+    r.agent.goal_command("/goal", goal::Command::Show).await;
     r.agent
-        .goal_command("/goal tests pass", goal::Command::Set("tests pass".into()));
-    r.agent.goal_command("/goal", goal::Command::Show);
-    r.agent.goal_command("/goal clear", goal::Command::Clear);
-    r.agent.goal_command("/goal clear", goal::Command::Clear);
+        .goal_command("/goal tests pass", goal::Command::Set("tests pass".into()))
+        .await;
+    r.agent.goal_command("/goal", goal::Command::Show).await;
+    r.agent
+        .goal_command("/goal clear", goal::Command::Clear)
+        .await;
+    r.agent
+        .goal_command("/goal clear", goal::Command::Clear)
+        .await;
     assert!(requests(&r).is_empty() && r.agent.goal().is_none());
     let log: Vec<String> = events(&r)
         .iter()
@@ -1990,4 +1995,179 @@ async fn contract_holds_finish_in_ecosage_and_can_be_ablated() {
         )
         .await;
     assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
+}
+
+#[tokio::test]
+async fn a_reply_still_coming_when_the_time_budget_runs_out_is_cut_and_booked() {
+    let slow = MockTurn::calls(
+        &"thinking it over ".repeat(400),
+        vec![("read", json!({"path": "n.txt"}))],
+    );
+    let mut cfg = AgentConfig::new("mock");
+    cfg.features = Features::ecosage().without("bootstrap").unwrap();
+    cfg.time_budget = Some(Duration::from_secs(1));
+    let mut r = rig("agent-deadline", cfg, vec![]);
+    let mut provider = MockProvider::new(vec![fixed(slow)]);
+    // About ten seconds of streaming.
+    provider.chunk_delay_ms = 20;
+    r.agent.provider = Arc::new(Provider::Mock(provider));
+    let started = Instant::now();
+    let out = r
+        .agent
+        .run("Read n.txt.".into(), &CancellationToken::new())
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.status, FinishStatus::Budget);
+    assert!(out.summary.contains("time budget"), "{}", out.summary);
+    // What the cut reply streamed, and its prompt, are in the figures.
+    assert!(r.agent.stats.output_tokens > 0 && r.agent.stats.prompt_tokens > 0);
+    assert_eq!(
+        r.agent.sess.deadline, None,
+        "the next message starts afresh"
+    );
+}
+
+#[tokio::test]
+async fn after_the_last_cut_for_reasoning_without_acting_the_next_reply_is_the_last() {
+    let cut = || fixed(MockTurn::fail(ProviderError::Overthinking(70_000)));
+    let read = || {
+        fixed(MockTurn::calls(
+            "",
+            vec![("read", json!({"path": "n.txt"}))],
+        ))
+    };
+    // It acts but does not finish: the run ends there, as out of its budget.
+    let mut r = rig(
+        "agent-wrap-up",
+        AgentConfig::new("mock"),
+        vec![cut(), cut(), cut(), read(), read()],
+    );
+    let out = r
+        .agent
+        .run("How long is n.txt?".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(out.status, FinishStatus::Budget);
+    assert!(
+        out.summary.contains("cut off three times"),
+        "{}",
+        out.summary
+    );
+    let sent = requests(&r);
+    assert_eq!(sent.len(), 4);
+    assert!(
+        sent[3].last().unwrap().content.contains(WRAP_UP_NOTE),
+        "{:?}",
+        sent[3].last()
+    );
+    // It finishes: taken as it stands, as on the last reply of any budget.
+    let mut r = rig(
+        "agent-wrap-up-finish",
+        AgentConfig::new("mock"),
+        vec![cut(), cut(), cut(), finish()],
+    );
+    let out = r
+        .agent
+        .run("How long is n.txt?".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(out.status, FinishStatus::Done);
+    // Cut a fourth time, it fails as before.
+    let mut r = rig(
+        "agent-wrap-up-fails",
+        AgentConfig::new("mock"),
+        vec![cut(), cut(), cut(), cut()],
+    );
+    let out = r
+        .agent
+        .run("How long is n.txt?".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(out.status, FinishStatus::Error);
+}
+
+#[tokio::test]
+async fn what_a_cut_or_failed_reply_streamed_is_booked() {
+    let looped = MockTurn {
+        reasoning: "a".repeat(4000),
+        ..MockTurn::fail(ProviderError::Degenerate)
+    };
+    let mut r = rig(
+        "agent-booked",
+        AgentConfig::new("mock"),
+        vec![fixed(looped), finish()],
+    );
+    r.agent
+        .run("How long is n.txt?".into(), &CancellationToken::new())
+        .await;
+    let (mut prompt, mut output) = (0, 0);
+    for e in events(&r) {
+        if let EventKind::Model { usage, .. } = e {
+            prompt += usage.prompt;
+            output += usage.output;
+        }
+    }
+    // Beside the reply that finished: the one that looped, its 1,000 tokens and its prompt.
+    assert_eq!(r.agent.stats.output_tokens, output + 1000);
+    assert_eq!(r.agent.stats.reasoning_tokens, 1000);
+    assert!(r.agent.stats.prompt_tokens > prompt);
+
+    // An attempt that streamed and then failed is booked; one that failed before a word is not.
+    let mut r = rig("agent-booked-retries", AgentConfig::new("mock"), vec![]);
+    let streamed = Streamed::default();
+    streamed.seen(true, 400);
+    streamed.retried();
+    streamed.retried();
+    streamed.seen(false, 80);
+    r.agent.book_unreported(&streamed, false, (1000, 900));
+    let s = &r.agent.stats;
+    assert_eq!(
+        (
+            s.prompt_tokens,
+            s.cached_tokens,
+            s.output_tokens,
+            s.reasoning_tokens
+        ),
+        (1000, 900, 100, 100)
+    );
+}
+
+#[tokio::test]
+async fn old_observations_are_trimmed_only_where_enough_replies_are_left_to_pay_for_it() {
+    let glm = |r: &mut Rig| {
+        r.agent.sess.prices = prices_for("glm-5.3");
+        // Old, bulky results, then a dozen recent messages that are kept as they are.
+        for i in 0..4 {
+            r.agent
+                .ctx
+                .push_tool(&format!("old{i}"), "x".repeat(40_000), "[old]".into());
+        }
+        for i in 0..KEEP_RECENT_MESSAGES {
+            r.agent
+                .ctx
+                .push_tool(&format!("new{i}"), "y".repeat(5_000), "[new]".into());
+        }
+    };
+    let decays = |r: &Rig| {
+        events(r)
+            .iter()
+            .filter(|e| matches!(e, EventKind::Decay { .. }))
+            .count()
+    };
+    let started = Instant::now();
+    // Many replies left: it pays.
+    let mut r = rig("agent-decay-pays", AgentConfig::new("mock"), vec![]);
+    glm(&mut r);
+    r.agent.maybe_decay(10, false, started);
+    assert_eq!(decays(&r), 1);
+    // The last reply of the budget, or one more after this: it would not.
+    for (name, landing, max_turns) in [("last", true, 80), ("one-left", false, 11)] {
+        let mut cfg = AgentConfig::new("mock");
+        cfg.max_turns = max_turns;
+        let mut r = rig(&format!("agent-decay-{name}"), cfg, vec![]);
+        glm(&mut r);
+        r.agent.maybe_decay(10, landing, started);
+        assert_eq!(decays(&r), 0, "{name}");
+    }
 }

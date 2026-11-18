@@ -402,6 +402,19 @@ const SKIP_DIRS: &[&str] = &[
     ".gradle",
     ".idea",
     ".ruff_cache",
+    ".hypothesis",
+    ".nox",
+    ".build",
+    "_build",
+    ".dart_tool",
+    ".stack-work",
+    "dist-newstyle",
+    ".zig-cache",
+    "zig-cache",
+    ".parcel-cache",
+    ".turbo",
+    ".svelte-kit",
+    ".nuxt",
 ];
 
 /// True for a path inside one of the directories that hold derived files (caches, dependencies).
@@ -409,7 +422,11 @@ pub(crate) fn derived(path: &str) -> bool {
     path.split('/').any(|part| SKIP_DIRS.contains(&part))
 }
 
-const FINGERPRINT_MAX_FILES: u32 = 20_000;
+/// Files a fingerprint walks at most. Past that, what git says has changed stands in for the rest.
+const FINGERPRINT_MAX_FILES: u32 = 100_000;
+/// A walk that takes longer than this stops, and is covered by git as past the cap.
+const FINGERPRINT_BUDGET: Duration = Duration::from_secs(2);
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Every file of a small workspace, relative to `root` and sorted. `None` when there are more than
 /// `max_files`: a larger tree is for the model to explore.
@@ -453,50 +470,195 @@ fn mix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// Order-independent digest of (path, size, mtime) for every file under `root`.
+/// Size and time of change, mixed.
+fn stat_hash(md: &std::fs::Metadata) -> u64 {
+    let mtime = md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    mix(md.len()) ^ mix(mtime).rotate_left(21)
+}
+
+/// What a look at the workspace found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fingerprint {
+    pub digest: u64,
+    /// Every file that counts was seen. False only for a tree too large to walk that is not a git
+    /// repository: there a change a command makes may go unnoticed.
+    pub complete: bool,
+}
+
+/// Order-independent digest of (path, size, mtime) for every file under `root` that is not ignored
+/// (`.gitignore`, `.ignore`, the derived directories): the build output and caches a test run
+/// writes are nobody's change.
 ///
-/// It is deliberately metadata-only: the question is "was anything touched", and it has to be cheap
-/// enough to ask after every shell command. Very large trees are sampled up to a cap and a time budget.
-pub fn fingerprint(root: &Path, budget: Duration) -> u64 {
-    let start = Instant::now();
-    let mut acc: u64 = 0;
-    let mut count: u32 = 0;
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .parents(false)
-        .follow_links(false)
-        .filter_entry(|e| {
-            !e.file_name()
-                .to_str()
-                .is_some_and(|n| SKIP_DIRS.contains(&n))
+/// It is deliberately metadata-only: the question is "was anything touched", and it is asked around
+/// every command. The walk goes in path order, so a tree too large for it is always cut at the same
+/// files; in a git repository, what git says has changed then stands in for the whole tree.
+pub fn fingerprint(root: &Path) -> Fingerprint {
+    fingerprint_within(root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET)
+}
+
+/// `fingerprint` on a blocking thread: a large tree takes a while, and the runtime has other
+/// sessions to serve meanwhile. One that could not be taken counts as unknown, never as unchanged.
+pub async fn fingerprint_off_thread(root: &Path) -> Fingerprint {
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || fingerprint(&root))
+        .await
+        .unwrap_or(Fingerprint {
+            digest: 0,
+            complete: false,
         })
-        .build();
-    for entry in walker.flatten() {
-        let Ok(md) = entry.metadata() else { continue };
-        if md.is_dir() {
-            continue;
-        }
-        let mtime = md
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let h = fnv64(entry.path().as_os_str().as_encoded_bytes())
-            ^ mix(md.len())
-            ^ mix(mtime).rotate_left(21);
-        acc = acc.wrapping_add(mix(h));
-        count += 1;
-        if count >= FINGERPRINT_MAX_FILES || (count.is_multiple_of(256) && start.elapsed() > budget)
-        {
+}
+
+fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerprint {
+    // The digest does not depend on the order files come in, so the walk takes them as the disk
+    // gives them, which is fastest. Only one that is cut short needs them in path order.
+    if let Some(digest) = walk_digest(root, max_files, budget) {
+        return Fingerprint {
+            digest,
+            complete: true,
+        };
+    }
+    if let Some(digest) = git_changes(root) {
+        return Fingerprint {
+            digest,
+            complete: true,
+        };
+    }
+    // No git to speak for the rest: the first files in path order, the same ones every time unless
+    // the clock cuts this walk too.
+    let start = Instant::now();
+    let (mut acc, mut count) = (0u64, 0u32);
+    for (path, md) in walk(root, true) {
+        if count >= max_files || (count.is_multiple_of(256) && start.elapsed() > budget) {
             break;
         }
+        acc = acc.wrapping_add(file_digest(&path, &md));
+        count += 1;
     }
-    acc ^ (count as u64)
+    Fingerprint {
+        digest: acc ^ u64::from(count),
+        complete: false,
+    }
+}
+
+/// The files under `root` that count, with their metadata: what is ignored and the derived
+/// directories are left out. `sorted` puts them in path order.
+fn walk(root: &Path, sorted: bool) -> impl Iterator<Item = (PathBuf, std::fs::Metadata)> {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder.hidden(false).follow_links(false).filter_entry(|e| {
+        !e.file_name()
+            .to_str()
+            .is_some_and(|n| SKIP_DIRS.contains(&n))
+    });
+    if sorted {
+        builder.sort_by_file_name(|a, b| a.cmp(b));
+    }
+    builder.build().flatten().filter_map(|entry| {
+        let md = entry.metadata().ok()?;
+        (!md.is_dir()).then(|| (entry.into_path(), md))
+    })
+}
+
+fn file_digest(path: &Path, md: &std::fs::Metadata) -> u64 {
+    mix(fnv64(path.as_os_str().as_encoded_bytes()) ^ stat_hash(md))
+}
+
+/// The digest of every file that counts, or `None` when there are more than `max_files` or the walk
+/// takes longer than `budget`.
+fn walk_digest(root: &Path, max_files: u32, budget: Duration) -> Option<u64> {
+    let start = Instant::now();
+    let (mut acc, mut count) = (0u64, 0u32);
+    for (path, md) in walk(root, false) {
+        if count >= max_files || (count.is_multiple_of(256) && start.elapsed() > budget) {
+            return None;
+        }
+        acc = acc.wrapping_add(file_digest(&path, &md));
+        count += 1;
+    }
+    Some(acc ^ u64::from(count))
+}
+
+/// `git -C root <args>`, looking only, given up on after `GIT_TIMEOUT`. Its output if it succeeded.
+fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(root)
+        .args(["-c", "core.quotepath=off"])
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: no console flashing up behind the desktop app.
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        out
+    });
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let out = reader.join().ok()?;
+    status.success().then_some(out)
+}
+
+/// Digest of what git says differs from the last commit below `root`, untracked files included,
+/// with the size and time of change of each such file, so that one changed again is told apart.
+/// The status letters are left out: staging a file changes nothing in the workspace. `None` outside
+/// a repository, or when git does not answer in time.
+fn git_changes(root: &Path) -> Option<u64> {
+    let top = git_output(root, &["rev-parse", "--show-toplevel"])?;
+    let top = PathBuf::from(String::from_utf8_lossy(&top).trim());
+    let status = git_output(
+        root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            ".",
+        ],
+    )?;
+    let mut acc = fnv64(b"git");
+    let mut entries = status.split(|b| *b == 0).filter(|e| !e.is_empty());
+    while let Some(entry) = entries.next() {
+        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+            continue;
+        };
+        // A rename or a copy is followed by the path it came from, as an entry of its own.
+        if code.contains(&b'R') || code.contains(&b'C') {
+            entries.next();
+        }
+        let file = top.join(String::from_utf8_lossy(path).as_ref());
+        let stat = std::fs::symlink_metadata(&file)
+            .map(|md| stat_hash(&md))
+            .unwrap_or(0);
+        acc = acc.wrapping_add(mix(fnv64(path) ^ stat));
+    }
+    Some(acc)
 }
 
 #[cfg(test)]
@@ -719,26 +881,95 @@ mod tests {
         let root = tmp("fp");
         fs::write(root.join("a.txt"), "one").unwrap();
         fs::create_dir_all(root.join("node_modules/x")).unwrap();
-        let budget = Duration::from_secs(2);
-        let f0 = fingerprint(&root, budget);
-        assert_eq!(
-            f0,
-            fingerprint(&root, budget),
-            "stable when nothing changed"
-        );
+        let f0 = fingerprint(&root);
+        assert!(f0.complete);
+        assert_eq!(f0, fingerprint(&root), "stable when nothing changed");
 
         fs::write(root.join("node_modules/x/big.js"), "ignored").unwrap();
-        assert_eq!(f0, fingerprint(&root, budget));
+        assert_eq!(f0, fingerprint(&root));
 
         fs::write(root.join("a.txt"), "three").unwrap();
-        let f1 = fingerprint(&root, budget);
+        let f1 = fingerprint(&root);
         assert_ne!(f0, f1);
 
         fs::write(root.join("b.txt"), "").unwrap();
-        let f2 = fingerprint(&root, budget);
+        let f2 = fingerprint(&root);
         assert_ne!(f1, f2);
 
         fs::remove_file(root.join("b.txt")).unwrap();
-        assert_eq!(f1, fingerprint(&root, budget));
+        assert_eq!(f1, fingerprint(&root));
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn what_a_repository_ignores_is_no_change() {
+        let root = tmp("fp-ignored");
+        git(&root, &["init", "-q"]);
+        fs::write(root.join(".gitignore"), "build/\n*.log\n").unwrap();
+        fs::write(root.join("a.txt"), "one").unwrap();
+        let f0 = fingerprint(&root);
+        // What a test run leaves behind: build output and logs the project ignores.
+        fs::create_dir_all(root.join("build/classes")).unwrap();
+        fs::write(root.join("build/classes/A.class"), "x").unwrap();
+        fs::write(root.join("test.log"), "ran").unwrap();
+        assert_eq!(f0, fingerprint(&root));
+        fs::write(root.join("a.txt"), "two").unwrap();
+        assert_ne!(f0, fingerprint(&root));
+    }
+
+    #[test]
+    fn a_tree_past_the_cap_is_covered_by_git_and_said_to_be_partial_without_it() {
+        let root = tmp("fp-cap");
+        for name in ["a", "b", "c", "d", "e"] {
+            fs::write(root.join(format!("{name}.txt")), name).unwrap();
+        }
+        // No repository: the same files are seen each time, a change past them is not, and it says so.
+        let budget = Duration::from_secs(60);
+        let f0 = fingerprint_within(&root, 2, budget);
+        assert!(!f0.complete);
+        assert_eq!(
+            f0,
+            fingerprint_within(&root, 2, budget),
+            "a cut in path order is stable"
+        );
+
+        git(&root, &["init", "-q"]);
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "start"]);
+        let g0 = fingerprint_within(&root, 2, budget);
+        assert!(g0.complete);
+        assert_eq!(g0, fingerprint_within(&root, 2, budget));
+        // The last file in path order, far past the cap: git sees it.
+        fs::write(root.join("e.txt"), "changed").unwrap();
+        let g1 = fingerprint_within(&root, 2, budget);
+        assert_ne!(g0, g1);
+        // Staging it changes nothing in the workspace; writing it again does.
+        git(&root, &["add", "e.txt"]);
+        assert_eq!(g1, fingerprint_within(&root, 2, budget));
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(root.join("e.txt"), "changed again!").unwrap();
+        assert_ne!(g1, fingerprint_within(&root, 2, budget));
+        // A new file anywhere, too.
+        fs::write(root.join("f.txt"), "new").unwrap();
+        assert_ne!(g1, fingerprint_within(&root, 2, budget));
     }
 }

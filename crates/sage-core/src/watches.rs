@@ -198,9 +198,13 @@ async fn run_within(
     cancel: &CancellationToken,
 ) -> (WatchReport, Option<i32>) {
     let w = sess.watches.items[idx].clone();
-    sess.evidence.before_command(&sess.ws);
+    // A run cut short by the time budget says nothing about the code: its result stays unknown.
+    let allowed = sess.within_budget(limit);
+    let budget_cut = allowed < limit;
+    let limit = allowed;
+    sess.evidence.before_command(&sess.ws).await;
     let result = exec(sess, &w.cmd, &w.cwd, StateKind::ReadOnly, limit, cancel).await;
-    sess.evidence.after_command(&sess.ws, &w.cmd);
+    sess.evidence.after_command(&sess.ws, &w.cmd).await;
 
     let (state, text, why, spill, code) = match result {
         Err(e) => (
@@ -228,13 +232,15 @@ async fn run_within(
             }
             ExecEnd::TimedOut(running) => {
                 kill_group(running.pid);
-                (
-                    WatchState::Fail,
-                    ex.text,
-                    format!("did not finish within {}s", limit.as_secs()),
-                    ex.spill,
-                    None,
-                )
+                let (state, why) = if budget_cut {
+                    (WatchState::Unknown, "the time budget ran out".to_string())
+                } else {
+                    (
+                        WatchState::Fail,
+                        format!("did not finish within {}s", limit.as_secs()),
+                    )
+                };
+                (state, ex.text, why, ex.spill, None)
             }
             ExecEnd::Cancelled => (
                 WatchState::Unknown,

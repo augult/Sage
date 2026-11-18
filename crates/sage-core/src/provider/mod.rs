@@ -250,6 +250,14 @@ impl Provider {
         matches!(self, Provider::Mock(_))
     }
 
+    /// Whether earlier reasoning goes back to the provider with the conversation.
+    pub fn replays_reasoning(&self) -> bool {
+        match self {
+            Provider::OpenAi(p) => p.dialect.replays_reasoning(),
+            Provider::Mock(_) => true,
+        }
+    }
+
     /// The serialised `messages` array as it goes on the wire, for the prefix-stability audit.
     pub fn wire_messages(&self, messages: &[Message]) -> String {
         match self {

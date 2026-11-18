@@ -382,6 +382,8 @@ fn usage_in(v: &Value) -> Option<Usage> {
     [
         v.get("usage"),
         v.get("response").and_then(|r| r.get("usage")),
+        // Anthropic's stream opens with the prompt's count in `message_start`.
+        v.get("message").and_then(|m| m.get("usage")),
     ]
     .into_iter()
     .flatten()
@@ -389,7 +391,9 @@ fn usage_in(v: &Value) -> Option<Usage> {
     .map(parse_usage)
 }
 
-/// Watches a response go by and keeps the usage it reports. In a stream the last report wins.
+/// Watches a response go by and keeps the usage it reports. A stream may report in parts (Anthropic
+/// counts the prompt when it starts and the output when it ends), and a later report never counts
+/// less than an earlier one: each figure is the largest reported.
 struct Scanner {
     sse: bool,
     buf: Vec<u8>,
@@ -427,7 +431,15 @@ impl Scanner {
             .as_ref()
             .and_then(usage_in)
         {
-            self.usage = Some(usage);
+            self.usage = Some(match self.usage {
+                Some(seen) => Usage {
+                    prompt: seen.prompt.max(usage.prompt),
+                    cached: seen.cached.max(usage.cached),
+                    output: seen.output.max(usage.output),
+                    reasoning: seen.reasoning.max(usage.reasoning),
+                },
+                None => usage,
+            });
         }
     }
 
@@ -1094,5 +1106,17 @@ mod tests {
             silent,
             json!({"stream": true, "stream_options": {"include_usage": true, "x": 1}})
         );
+    }
+
+    #[test]
+    fn an_anthropic_stream_is_counted_from_its_start_and_its_end() {
+        let mut scan = Scanner::new(true);
+        scan.feed(b"event: message_start\n");
+        scan.feed(br#"data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":60,"cache_creation_input_tokens":30,"output_tokens":1}}}"#);
+        scan.feed(b"\n\nevent: message_delta\n");
+        scan.feed(br#"data: {"type":"message_delta","usage":{"output_tokens":40}}"#);
+        scan.feed(b"\n\n");
+        let usage = scan.finish().unwrap();
+        assert_eq!((usage.prompt, usage.cached, usage.output), (100, 60, 40));
     }
 }

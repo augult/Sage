@@ -171,7 +171,7 @@ const SHELL_DESCRIPTION: &str = "Run a Bash command in the workspace and return 
 #[cfg(not(unix))]
 const SHELL_DESCRIPTION: &str = "Run a cmd.exe command in the workspace and return its output. Each call starts a new shell, so directory and environment changes are local to that call. Stdin is closed.";
 
-fn sage_tools(watch: bool, job: bool, ask: bool) -> Value {
+fn sage_tools(watch: bool, ask: bool) -> Value {
     let mut tools = vec![
         tool(
             "shell",
@@ -239,14 +239,14 @@ fn sage_tools(watch: bool, job: bool, ask: bool) -> Value {
             &["name"],
         ));
     }
-    if job {
-        tools.push(tool(
-            "job",
-            "Check on a background job: wait up to `wait` seconds or until its output contains `until`, then get its new output and status.",
-            json!({"id": {"type": "string"}, "wait": {"type": "integer"}, "until": {"type": "string"}, "kill": {"type": "boolean"}}),
-            &["id"],
-        ));
-    }
+    // Always offered: added only once a job exists, it would change the start of every request
+    // from then on and re-buy the whole conversation, which costs far more than carrying it.
+    tools.push(tool(
+        "job",
+        "Check on a background job: wait up to `wait` seconds or until its output contains `until`, then get its new output and status.",
+        json!({"id": {"type": "string"}, "wait": {"type": "integer"}, "until": {"type": "string"}, "kill": {"type": "boolean"}}),
+        &["id"],
+    ));
     if ask {
         tools.push(ask_tool());
     }
@@ -262,9 +262,9 @@ fn sage_tools(watch: bool, job: bool, ask: bool) -> Value {
     Value::Array(tools)
 }
 
-/// Indexed by `watch * 4 + job * 2 + ask`.
-static TOOLS_SAGE: LazyLock<[Value; 8]> =
-    LazyLock::new(|| std::array::from_fn(|i| sage_tools(i & 4 != 0, i & 2 != 0, i & 1 != 0)));
+/// Indexed by `watch * 2 + ask`.
+static TOOLS_SAGE: LazyLock<[Value; 4]> =
+    LazyLock::new(|| std::array::from_fn(|i| sage_tools(i & 2 != 0, i & 1 != 0)));
 
 /// Without `ask`, and with it.
 static TOOLS_CLASSIC: LazyLock<[Value; 2]> =
@@ -344,23 +344,22 @@ pub fn system_prompt(features: &Features) -> &'static str {
     SAGE[watching].as_str()
 }
 
-/// The tool list for a request. `watch` is offered only where the model has to register its checks
-/// itself, and `job` only once the session has a background job (`jobs`). Lengthening the list
-/// re-buys the whole prompt once, which is cheaper than carrying an unused schema on every turn of
-/// every session. Any tool still runs when called by name, offered or not. `ask` is offered only
-/// where someone is present to answer (`interactive`).
-pub fn tool_schemas(features: &Features, jobs: bool, interactive: bool) -> &'static Value {
+/// The tool list of a session's requests, the same for all of them: a list that changed would
+/// change the start of the prompt and re-buy all of it. `watch` is offered only where the model has
+/// to register its checks itself, and `ask` only where someone is present to answer
+/// (`interactive`). Any tool still runs when called by name, offered or not.
+pub fn tool_schemas(features: &Features, interactive: bool) -> &'static Value {
     if !features.scripts {
         return &TOOLS_CLASSIC[usize::from(interactive)];
     }
     let watch = features.watches && !features.auto_watch;
-    &TOOLS_SAGE[usize::from(watch) * 4 + usize::from(jobs) * 2 + usize::from(interactive)]
+    &TOOLS_SAGE[usize::from(watch) * 2 + usize::from(interactive)]
 }
 
 /// Rough size in tokens of what every request starts with: system prompt plus tool schemas.
 pub fn prefix_tokens(features: &Features) -> u64 {
     crate::text::est_tokens(system_prompt(features))
-        + crate::text::est_tokens(&tool_schemas(features, false, false).to_string())
+        + crate::text::est_tokens(&tool_schemas(features, false).to_string())
 }
 
 #[cfg(test)]
@@ -368,8 +367,8 @@ mod tests {
     use super::*;
     use crate::tools::Tool;
 
-    fn names(features: &Features, jobs: bool) -> Vec<&'static str> {
-        tool_schemas(features, jobs, false)
+    fn names(features: &Features) -> Vec<&'static str> {
+        tool_schemas(features, false)
             .as_array()
             .unwrap()
             .iter()
@@ -381,7 +380,7 @@ mod tests {
     fn every_advertised_tool_exists_and_the_prefix_stays_small() {
         let manual = Features::ecosage().without("auto_watch").unwrap();
         for features in [Features::ecosage(), manual, Features::classic()] {
-            for t in tool_schemas(&features, true, true).as_array().unwrap() {
+            for t in tool_schemas(&features, true).as_array().unwrap() {
                 let name = t["function"]["name"].as_str().unwrap();
                 assert_eq!(Tool::from_name(name).map(|t| t.name()), Some(name));
                 assert_eq!(t["function"]["parameters"]["type"], "object");
@@ -395,7 +394,7 @@ mod tests {
         assert!(ecosage < 2_300, "the Ecosage prefix is ~{ecosage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
         assert!(
-            !tool_schemas(&Features::classic(), false, false)
+            !tool_schemas(&Features::classic(), false)
                 .to_string()
                 .contains("expect")
         );
@@ -405,30 +404,21 @@ mod tests {
     fn a_tool_is_offered_only_where_it_is_needed() {
         let auto = Features::ecosage();
         let manual = Features::ecosage().without("auto_watch").unwrap();
+        // `job` from the first request on: added later, it would re-buy the whole prompt.
         assert_eq!(
-            names(&auto, false),
-            ["shell", "read", "search", "edit", "write", "finish"]
-        );
-        assert_eq!(
-            names(&auto, true),
+            names(&auto),
             ["shell", "read", "search", "edit", "write", "job", "finish"]
         );
         assert_eq!(
-            names(&manual, false),
+            names(&manual),
             [
-                "shell", "read", "search", "edit", "write", "watch", "finish"
+                "shell", "read", "search", "edit", "write", "watch", "job", "finish"
             ]
         );
-        assert_eq!(names(&manual, true).len(), 8);
-        // The baseline is a fixed list.
-        assert_eq!(
-            names(&Features::classic(), false),
-            names(&Features::classic(), true)
-        );
-        assert_eq!(names(&Features::classic(), false).len(), 7);
+        assert_eq!(names(&Features::classic()).len(), 7);
         // `ask` only where someone can answer, just before `finish`.
         let asking = |features: &Features| {
-            tool_schemas(features, false, true)
+            tool_schemas(features, true)
                 .as_array()
                 .unwrap()
                 .iter()
@@ -437,7 +427,9 @@ mod tests {
         };
         assert_eq!(
             asking(&auto),
-            ["shell", "read", "search", "edit", "write", "ask", "finish"]
+            [
+                "shell", "read", "search", "edit", "write", "job", "ask", "finish"
+            ]
         );
         assert_eq!(asking(&Features::classic())[6..], ["ask", "finish"]);
     }
@@ -583,8 +575,8 @@ mod tests {
 
     #[test]
     fn schemas_serialise_identically_every_time() {
-        let a = tool_schemas(&Features::ecosage(), false, false).to_string();
-        let b = tool_schemas(&Features::ecosage(), false, false).to_string();
+        let a = tool_schemas(&Features::ecosage(), false).to_string();
+        let b = tool_schemas(&Features::ecosage(), false).to_string();
         assert_eq!(a, b);
         assert!(a.find("\"shell\"").unwrap() < a.find("\"finish\"").unwrap());
     }

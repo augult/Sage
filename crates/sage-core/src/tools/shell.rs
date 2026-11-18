@@ -137,6 +137,32 @@ fn commands(cmd: &str) -> Vec<String> {
     parts
 }
 
+/// What exit 1 says of `cmd` where the whole of it is one program that answers with it: no match
+/// (`grep`, `rg`), files that differ (`diff`, `cmp`), a condition that is false (`test`). A leading
+/// `cd <dir> &&` is allowed. `None` for anything else, whose exit 1 is a failure.
+fn answer_of_one(cmd: &str) -> Option<&'static str> {
+    let cmd = cmd.trim();
+    let cmd = match cmd
+        .strip_prefix("cd ")
+        .and_then(|rest| rest.split_once("&&"))
+    {
+        Some((dir, rest)) if commands(dir).len() == 1 => rest,
+        _ => cmd,
+    };
+    let parts = commands(cmd);
+    let [only] = parts.as_slice() else {
+        return None;
+    };
+    let word = only.split_whitespace().find(|word| !word.contains('='))?;
+    match word.rsplit('/').next()? {
+        "grep" | "egrep" | "fgrep" | "rg" | "ag" | "ack" => Some("no match"),
+        "diff" | "cmp" => Some("they differ"),
+        // The shell's own `test`, not a project's script of that name (`./test`), whose 1 is a failure.
+        "test" | "[" | "[[" if word == "test" || word.starts_with('[') => Some("false"),
+        _ => None,
+    }
+}
+
 /// Commands whose damage cannot be undone from inside the workspace. A tripwire, not a sandbox.
 pub fn danger(cmd: &str) -> Option<&'static str> {
     let c = cmd.to_ascii_lowercase();
@@ -222,13 +248,18 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     let timeout = timeout
         .unwrap_or(sess.limits.default_timeout_secs)
         .clamp(1, sess.limits.max_timeout_secs);
+    // Not past the run's time budget: what is still running then goes on as a background job.
+    let timeout = sess
+        .within_budget(Duration::from_secs(timeout))
+        .as_secs()
+        .max(1);
     let cwd = sess.ws.cwd.clone();
 
     if bool_arg(args, "background") {
         return start_background(sess, &cmd, &cwd, cancel).await;
     }
 
-    sess.evidence.before_command(&sess.ws);
+    sess.evidence.before_command(&sess.ws).await;
     let ex = match exec(
         sess,
         &cmd,
@@ -242,7 +273,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         Ok(ex) => ex,
         Err(e) => return StepOutput::error(format!("could not start the shell: {e}")),
     };
-    sess.evidence.after_command(&sess.ws, &cmd);
+    sess.evidence.after_command(&sess.ws, &cmd).await;
     let lines = squeeze(&ex.text);
     let shown_all = ex.text.len() as u64;
 
@@ -283,9 +314,19 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             let verdict = guard::check(expect.as_ref(), exit.code, &ex.text);
             let ok = exit.code == Some(0);
             let dur = fmt_duration(ex.ms);
+            // Unpredicted, `grep` that finds nothing or `diff` of files that differ has answered,
+            // not failed: what follows it in the reply still runs.
+            let answer = (sess.features.receipts && !verdict.explicit && exit.code == Some(1))
+                .then(|| answer_of_one(&cmd))
+                .flatten();
+            let held = verdict.held || answer.is_some();
             let mut out = StepOutput {
                 explicit: verdict.explicit,
-                violations: verdict.violations.clone(),
+                violations: if answer.is_some() {
+                    Vec::new()
+                } else {
+                    verdict.violations.clone()
+                },
                 shell: Some(ShellMeta {
                     cmd: cmd.clone(),
                     ok,
@@ -323,8 +364,12 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 return out;
             }
 
-            if verdict.held {
-                let head = format!("[ok] {} · {dur}", exit_text(exit, ex.masked));
+            if held {
+                let head = format!(
+                    "[ok] {}{} · {dur}",
+                    exit_text(exit, ex.masked),
+                    answer.map(|a| format!(" ({a})")).unwrap_or_default()
+                );
                 // Hiding a short output saves little and costs a turn if the model wanted it after all.
                 let small = lines.len() <= 30 && ex.text.len() <= 2_000;
                 out.observation = if lines.is_empty() {
@@ -599,6 +644,50 @@ mod tests {
             !out.shell.unwrap().ok,
             "exit 1 is not a passing check even though the prediction held"
         );
+    }
+
+    #[tokio::test]
+    async fn a_search_that_finds_nothing_has_answered_not_failed() {
+        let mut s = test_session("answers", Features::ecosage());
+        std::fs::write(s.ws.root.join("a.py"), "x = 1\n").unwrap();
+        std::fs::write(s.ws.root.join("b.py"), "x = 2\n").unwrap();
+        for (cmd, word) in [
+            ("grep -n old_name a.py", "no match"),
+            ("cd . && grep -q old_name a.py", "no match"),
+            ("diff a.py b.py", "they differ"),
+            ("test -f missing.txt", "false"),
+        ] {
+            let out = sh(&mut s, json!({ "cmd": cmd })).await;
+            assert_eq!(out.status, StepStatus::Ok, "{cmd}");
+            assert!(
+                out.observation
+                    .starts_with(&format!("[ok] exit 1 ({word}) · ")),
+                "{cmd}: {}",
+                out.observation
+            );
+            assert!(out.violations.is_empty() && !out.shell.unwrap().ok, "{cmd}");
+        }
+        // Anything else that exits non-zero has failed: an error of grep itself (2), a line of
+        // several commands, or a project's own script named `test`.
+        std::fs::write(s.ws.root.join("test"), "exit 1\n").unwrap();
+        for cmd in [
+            "grep -n x no-such-file",
+            "grep -c old_name a.py; exit 1",
+            "grep -q x a.py && grep -q old_name a.py",
+            "sh ./test",
+            "false",
+        ] {
+            let out = sh(&mut s, json!({ "cmd": cmd })).await;
+            assert_eq!(out.status, StepStatus::Surprise, "{cmd}");
+        }
+        assert_eq!(answer_of_one("./test"), None);
+        // A prediction is checked as it was made.
+        let out = sh(
+            &mut s,
+            json!({"cmd": "grep -n old_name a.py", "expect_exit": "0"}),
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Surprise);
     }
 
     #[tokio::test]

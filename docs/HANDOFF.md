@@ -1,5 +1,38 @@
 # Handoff: Sage
 
+## Fifteenth session: performance and correctness audit (18 November 2026)
+
+An audit of what makes a session slower, costlier or wrong, and fixes for all of it. No live runs;
+`cargo test` has 273 tests (9 new), Clippy and rustfmt are clean.
+
+- **Change detection** (`workspace.rs`, `state.rs`): the fingerprint skipped edits past its first
+  20,000 files (10 of 30 directories of a 30,000-file tree) and, cut by its 400 ms clock, gave
+  different answers with nothing changed. It now skips what git ignores, walks every file up to
+  100,000, and past that (or past 2 s) takes git's status of the tree instead; outside git it says
+  the view is partial (`verified by … (the workspace is too large …)`). It runs on a blocking
+  thread. 30,000 files: 72 ms; 111,000 in a repository: 290 ms.
+- **Tests that write build output** were counted as a change: never adopted as the watch, and run a
+  second time when the model ran them. Ignored files are no change now; a few more derived
+  directories (`.build`, `_build`, `.dart_tool`, `.hypothesis`, …) are skipped outright.
+- **Time budget** (`agent.rs`, `tools/`, `watches.rs`): it was checked only between replies, so runs
+  overran a 20-minute budget by up to 185 s while external harnesses are killed on time. The model
+  request, the goal check, commands, watches and `job` waits are now held to what is left.
+- **`grep`, `rg`, `diff`, `cmp`, `test` exiting 1** with no prediction are an answer (`[ok] exit 1
+  (no match)`), not a surprise that halts the rest of the reply.
+- **`job` is always offered**: adding it mid-session re-bought the whole prompt (4 busts in 53
+  DeepSeek runs); carrying its ~70 tokens is about 100 times cheaper.
+- **Decay** counts the replies the run has left (turn limit and time), never trims on the last
+  reply, and counts tool-call arguments in what a trim re-buys.
+- **Cost of cut replies**: a reply cut for looping, for the time budget or by the user, and attempts
+  that streamed and were then retried, are booked by estimate (prompt and streamed text); one cut
+  for overthinking now books its prompt too.
+- **Overthinking**: after the third cut in a row the next reply is the run's last (`finish` taken as
+  it stands) instead of the fourth cut failing the run unreported.
+- **Smaller**: the bench proxy reads Anthropic's usage (cache counted apart from `input_tokens`,
+  reported in two parts of a stream); the start-up `git status` runs while the first reply is
+  coming; `search` and snapshot writes run off the async runtime; a stream that carries reasoning is
+  given up on after 120 s of silence instead of 300 s.
+
 Read this first. State: 17 November 2026, after the fourteenth session, which **took Prosage
 out** (next section). What follows about Prosage is the record of earlier sessions.
 
