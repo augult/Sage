@@ -71,6 +71,10 @@
   overflow-wrap: anywhere;
 }
 
+.stream-text {
+  white-space: pre-wrap;
+}
+
 .prose h3 {
   margin-top: 6px;
   font-size: 16px;

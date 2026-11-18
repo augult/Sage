@@ -65,12 +65,8 @@ const block = (node) => BLOCKS[node.type](node);
 
 /** `text` as prose. `caret` puts the mark of text still arriving at its end. */
 export function prose(text, { caret = false } = {}) {
-  const el = h('div.prose', parse(text).map(block));
   if (caret) {
-    // After the last words, wherever they are: in a paragraph, in a list item, or at the very start.
-    let last = el;
-    while (last.lastElementChild && /^(P|UL|OL|LI|BLOCKQUOTE|H[3-6])$/.test(last.lastElementChild.tagName)) last = last.lastElementChild;
-    last.append(h('span.caret'));
+    return h('div.prose', h('div.stream-text', text, h('span.caret')));
   }
-  return el;
+  return h('div.prose', parse(text).map(block));
 }

@@ -114,8 +114,11 @@ pub struct Completed {
     pub cwd: std::path::PathBuf,
     pub code: Option<i32>,
     pub ms: u64,
-    /// The whole cleaned output.
+    /// The bounded display excerpt.
     pub text: String,
+    pub output_complete: bool,
+    /// The complete cleaned output, loaded only when a predicate needs it.
+    pub predicate_text: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]

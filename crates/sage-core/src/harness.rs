@@ -92,6 +92,8 @@ pub struct StartRequest {
     #[serde(default)]
     pub max_turns: Option<u32>,
     #[serde(default)]
+    pub max_requests: Option<u32>,
+    #[serde(default)]
     pub time_budget_secs: Option<u64>,
     /// True when a person is present to answer questions and approvals.
     #[serde(default)]
@@ -973,6 +975,7 @@ impl Harness {
         if let Some(n) = req.max_turns {
             cfg.max_turns = n.max(1);
         }
+        cfg.max_requests = req.max_requests;
         cfg.time_budget = req
             .time_budget_secs
             .filter(|s| *s > 0)
@@ -1377,8 +1380,14 @@ impl Harness {
 
     /// Stored events of any session, running or past.
     pub fn events(&self, id: &str) -> Result<Vec<Event>, String> {
+        self.events_since(id, 0)
+    }
+
+    pub fn events_since(&self, id: &str, after: u64) -> Result<Vec<Event>, String> {
         if let Ok(live) = self.live(id) {
-            return Ok(live.events.lock().unwrap().clone());
+            let backlog = live.events.lock().unwrap();
+            let start = backlog.partition_point(|event| event.seq <= after);
+            return Ok(backlog[start..].to_vec());
         }
         if id.contains(['/', '\\', '.']) {
             return Err("invalid session id".into());
@@ -1392,7 +1401,8 @@ impl Harness {
         let text = std::fs::read_to_string(&path).map_err(|_| format!("no session {id}"))?;
         Ok(text
             .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
+            .filter_map(|l| serde_json::from_str::<Event>(l).ok())
+            .filter(|event| event.seq > after)
             .collect())
     }
 

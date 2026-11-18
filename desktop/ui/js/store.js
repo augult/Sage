@@ -52,13 +52,18 @@ export function open(meta) {
  * subscribes; later calls repair a feed that lagged. Live events wait in the queue meanwhile and
  * are applied afterwards, where `apply` drops the ones the stored log already covered.
  */
-async function sync(entry) {
+async function sync(entry, incremental = false) {
   if (entry.syncing) return;
   entry.syncing = true;
   try {
-    const stored = entry.live && !entry.subscribed ? await api.subscribe(entry.id, (event) => receive(entry, event)) : await api.sessionEvents(entry.id);
-    entry.subscribed = entry.live;
-    entry.model = replay(entry.meta, stored);
+    if (incremental && entry.model && entry.subscribed) {
+      const stored = await api.sessionEvents(entry.id, entry.model.lastSeq);
+      for (const event of stored) apply(entry.model, event);
+    } else {
+      const stored = entry.live && !entry.subscribed ? await api.subscribe(entry.id, (event) => receive(entry, event)) : await api.sessionEvents(entry.id);
+      entry.subscribed = entry.live;
+      entry.model = replay(entry.meta, stored);
+    }
     if (!entry.live) seal(entry.model);
     entry.error = null;
   } catch (error) {
@@ -98,12 +103,12 @@ function receive(entry, event) {
   entry.lastLive = event.seq;
   if (lagged) {
     entry.queue.push(event);
-    sync(entry);
+    sync(entry, true);
   } else if (apply(entry.model, event)) {
-    notify(entry);
+    notify(entry, event);
   }
 }
 
-function notify(entry) {
-  for (const listener of listeners) listener(entry);
+function notify(entry, event) {
+  for (const listener of listeners) listener(entry, event);
 }

@@ -204,13 +204,7 @@ impl OpenAiProvider {
             dialect,
             max_retries: 8,
             keep_retrying: Arc::default(),
-            // A stream that has carried the reasoning as it went and then stops has stalled: it is
-            // given up on and asked for again well before a silent thinker would be.
-            idle_timeout: Duration::from_secs(if dialect.streams_reasoning() {
-                STALLED_SECS
-            } else {
-                SILENT_THINKING_SECS
-            }),
+            idle_timeout: Duration::from_secs(SILENT_THINKING_SECS),
             api_key: api_key.to_string(),
             client,
             extras: Mutex::default(),
@@ -281,10 +275,8 @@ impl OpenAiProvider {
         )
     }
 
-    pub fn body(&self, req: &ChatRequest<'_>) -> Value {
+    fn body_options(&self, req: &ChatRequest<'_>) -> Map<String, Value> {
         let mut b = Map::new();
-        b.insert("model".into(), json!(self.model));
-        b.insert("messages".into(), self.wire_messages(req.messages));
         if req.tools.as_array().is_some_and(|t| !t.is_empty()) {
             b.insert("tools".into(), req.tools.clone());
         }
@@ -378,7 +370,15 @@ impl OpenAiProvider {
                 }
             }
         }
-        Value::Object(b)
+        b
+    }
+
+    pub fn body(&self, req: &ChatRequest<'_>) -> Value {
+        let mut body = Map::new();
+        body.insert("model".into(), json!(self.model));
+        body.insert("messages".into(), self.wire_messages(req.messages));
+        body.extend(self.body_options(req));
+        Value::Object(body)
     }
 
     pub async fn chat(
@@ -387,12 +387,44 @@ impl OpenAiProvider {
         on_delta: DeltaSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let body = serde_json::to_vec(&self.body(&req))
-            .map_err(|e| ProviderError::Protocol(e.to_string()))?;
+        self.chat_with(req, on_delta, cancel, None, None).await
+    }
+
+    pub(crate) async fn chat_with(
+        &self,
+        req: ChatRequest<'_>,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+        wire: Option<&str>,
+        max_attempts: Option<u32>,
+    ) -> Result<ChatResponse, ProviderError> {
+        let body = if let Some(wire) = wire {
+            #[derive(serde::Serialize)]
+            struct Body<'a> {
+                model: &'a str,
+                messages: &'a serde_json::value::RawValue,
+                #[serde(flatten)]
+                options: Map<String, Value>,
+            }
+            serde_json::from_str(wire).and_then(|messages| {
+                serde_json::to_vec(&Body {
+                    model: &self.model,
+                    messages,
+                    options: self.body_options(&req),
+                })
+            })
+        } else {
+            serde_json::to_vec(&self.body(&req))
+        }
+        .map_err(|e| ProviderError::Protocol(e.to_string()))?;
         let fallback_prompt = est_tokens(std::str::from_utf8(&body).unwrap_or(""));
         let mut attempt = 0u32;
         loop {
+            if cancel.is_cancelled() {
+                return Err(ProviderError::Cancelled);
+            }
             attempt += 1;
+            on_delta(Delta::Attempt);
             match self
                 .attempt(&body, req.reasoning_cap, on_delta, cancel)
                 .await
@@ -406,6 +438,7 @@ impl OpenAiProvider {
                 }
                 Err(e)
                     if e.retryable()
+                        && max_attempts.is_none_or(|limit| attempt < limit)
                         && (attempt <= self.max_retries
                             || self.keep_retrying.load(Ordering::Relaxed)) =>
                 {
@@ -431,6 +464,14 @@ impl OpenAiProvider {
                 }
                 Err(e) => return Err(e),
             }
+        }
+    }
+
+    fn stream_timeout(&self, saw_reasoning: bool) -> Duration {
+        if saw_reasoning && self.dialect.streams_reasoning() {
+            self.idle_timeout.min(Duration::from_secs(STALLED_SECS))
+        } else {
+            self.idle_timeout
         }
     }
 
@@ -487,15 +528,16 @@ impl OpenAiProvider {
         };
         let mut ended = false;
         'read: loop {
+            let idle = self.stream_timeout(!acc.reasoning.is_empty());
             let next = tokio::select! {
-                n = tokio::time::timeout(self.idle_timeout, stream.next()) => n,
+                n = tokio::time::timeout(idle, stream.next()) => n,
                 _ = cancel.cancelled() => return Err(ProviderError::Cancelled),
             };
             let chunk = match next {
                 Err(_) => {
                     return Err(ProviderError::Network(format!(
                         "no data from provider for {}s",
-                        self.idle_timeout.as_secs()
+                        idle.as_secs()
                     )));
                 }
                 Ok(None) => break,
@@ -841,13 +883,26 @@ mod tests {
         OpenAiProvider::new("https://example.invalid/v1/", "k", "m", dialect).unwrap()
     }
 
+    #[test]
+    fn only_a_stream_that_started_sending_reasoning_gets_the_shorter_idle_timeout() {
+        let deepseek = provider(Dialect::DeepSeek);
+        assert_eq!(deepseek.stream_timeout(false), Duration::from_secs(300));
+        assert_eq!(deepseek.stream_timeout(true), Duration::from_secs(120));
+        for dialect in [Dialect::OpenAiPlatform, Dialect::Anthropic, Dialect::Gemini] {
+            assert_eq!(
+                provider(dialect).stream_timeout(true),
+                Duration::from_secs(300)
+            );
+        }
+    }
+
     fn feed(lines: &[&str]) -> Result<(ChatResponse, Vec<String>), ProviderError> {
         let mut acc = Accum::default();
         let mut seen = Vec::new();
         let mut sink = |d: Delta| match d {
             Delta::Reasoning(t) => seen.push(format!("r:{t}")),
             Delta::Content(t) => seen.push(format!("c:{t}")),
-            Delta::Retry { .. } => {}
+            Delta::Attempt | Delta::Retry { .. } => {}
         };
         for l in lines {
             if acc.feed_line(l.as_bytes(), &mut sink)? {

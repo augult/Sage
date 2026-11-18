@@ -695,7 +695,7 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         if !model_call {
             metered.other_requests += 1;
             false
-        } else if metered.turns + *in_flight >= meter.max_turns {
+        } else if metered.turns + metered.failed + *in_flight >= meter.max_turns {
             metered.refused += 1;
             true
         } else {

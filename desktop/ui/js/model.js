@@ -98,6 +98,7 @@ function parseArguments(text) {
 // Every field the inspector reads, so a `stats` event that lacks one still renders.
 const NO_STATS = {
   turns: 0,
+  requests: 0,
   steps: 0,
   skipped: 0,
   surprises: 0,

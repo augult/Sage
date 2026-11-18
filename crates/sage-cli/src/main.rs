@@ -184,7 +184,7 @@ impl Printer {
             String::new()
         };
         [
-            format!("turns {} · steps {}{skipped} · surprises {}{preds}{checks}", s.turns, s.steps, s.surprises),
+            format!("turns {} · requests {} · steps {}{skipped} · surprises {}{preds}{checks}", s.turns, s.requests, s.steps, s.surprises),
             format!("tokens: in {} ({} cached) · out {} ({} thinking) · {cost}", k(s.prompt_tokens), pct(s.cached_tokens, s.prompt_tokens), k(s.output_tokens), k(s.reasoning_tokens)),
             format!(
                 "time {} (model {}, tools {}) · output kept out of context {} · repairs {} · retries {} · cache misses {}",
@@ -282,6 +282,7 @@ impl Printer {
                     FinishStatus::Yielded => p.cyan("◂ handed back"),
                     FinishStatus::Stopped => p.yellow("■ stopped"),
                     FinishStatus::Budget => p.yellow("■ out of budget"),
+                    FinishStatus::Incomplete => p.yellow("■ incomplete"),
                     FinishStatus::Error => p.red("✗ failed"),
                 };
                 eprintln!("{head} {}", p.dim(&format!("({evidence})")));
@@ -705,6 +706,7 @@ async fn main() -> ExitCode {
                     (_, Some(FinishStatus::Yielded), _) => "handed back",
                     (_, Some(FinishStatus::Stopped), _) => "stopped",
                     (_, Some(FinishStatus::Budget), _) => "out of budget",
+                    (_, Some(FinishStatus::Incomplete), _) => "incomplete",
                     (_, Some(FinishStatus::Error), _) => "failed",
                     _ => "–",
                 };

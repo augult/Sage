@@ -83,6 +83,7 @@ pub struct AgentConfig {
     pub model: String,
     /// Model replies allowed per user message.
     pub max_turns: u32,
+    pub max_requests: Option<u32>,
     /// Output cap per reply, reasoning included: a ceiling on what one runaway reply can cost.
     pub max_tokens: u32,
     pub time_budget: Option<Duration>,
@@ -102,6 +103,7 @@ impl AgentConfig {
             effort: EffortPolicy::Ratchet(Effort::Low),
             model: model.to_string(),
             max_turns: 80,
+            max_requests: None,
             max_tokens: 32_000,
             time_budget: None,
             autonomy: Autonomy::Auto,
@@ -155,6 +157,8 @@ pub struct Agent {
     /// (`checkpoint`), with how the session was set up.
     keep: Option<(PathBuf, Setup)>,
     snapshot_warned: bool,
+    requests_before: u32,
+    journal: Option<resume::Journal>,
     /// Said in front of the next message: the session was brought back after a restart.
     restored: Option<String>,
     /// Protected files and required deliverables read mechanically off the session's task.
@@ -206,6 +210,7 @@ const WRAP_UP_NOTE: &str = "Your next reply is the last one this run allows. Act
 /// reported (a reply cut off, given up on, or made again after a failure) can be booked by estimate.
 #[derive(Default)]
 struct Streamed {
+    attempts: std::sync::atomic::AtomicU32,
     /// Bytes of reasoning and of text the attempt in progress has streamed.
     reasoning: AtomicU64,
     content: AtomicU64,
@@ -291,6 +296,8 @@ impl Agent {
             shown: None,
             keep: None,
             snapshot_warned: false,
+            requests_before: 0,
+            journal: None,
             restored: None,
         }
     }
@@ -416,9 +423,18 @@ impl Agent {
         });
     }
 
+    fn remaining_requests(&self) -> Option<u32> {
+        self.cfg
+            .max_requests
+            .map(|max| max.saturating_sub(self.stats.requests - self.requests_before))
+    }
+
     fn evidence_text(&self) -> String {
         let ev = &self.sess.evidence;
         match &ev.verified {
+            _ if !ev.caveat().is_empty() => {
+                format!("workspace verification is incomplete{}", ev.caveat())
+            }
             _ if ev.epoch == 0 => "no changes were made".to_string(),
             Some((epoch, by)) if *epoch == ev.epoch => format!("verified by {by}{}", ev.caveat()),
             _ => format!("not checked since {}", ev.last_change),
@@ -522,7 +538,11 @@ impl Agent {
     /// Puts what git said the workspace held before the session in place, once it has answered.
     async fn settle_baseline(&mut self) {
         if let Some(task) = self.pending_baseline.take() {
-            self.sess.baseline = task.await.ok().flatten();
+            let mut task = task;
+            self.sess.baseline = tokio::select! {
+                result = &mut task => result.ok().flatten(),
+                _ = until(self.sess.deadline) => { task.abort(); None }
+            };
         }
     }
 
@@ -646,7 +666,10 @@ impl Agent {
         // where commands run unasked anyway.
         let preflight = if features.bootstrap && self.cfg.autonomy == Autonomy::Auto {
             self.settle_baseline().await;
-            watches::preflight(&mut self.sess, task, cancel).await
+            let started = Instant::now();
+            let report = watches::preflight(&mut self.sess, task, cancel).await;
+            self.stats.tool_ms += started.elapsed().as_millis() as u64;
+            report
         } else {
             None
         };
@@ -684,6 +707,7 @@ impl Agent {
         cancel: &CancellationToken,
     ) -> Outcome {
         let run_started = Instant::now();
+        self.requests_before = self.stats.requests;
         self.sess.deadline = self.cfg.time_budget.map(|budget| run_started + budget);
         let elapsed_before = self.stats.elapsed_ms;
         let features = self.cfg.features;
@@ -768,7 +792,12 @@ impl Agent {
                     evidence: self.evidence_text(),
                 };
             }
-            let landing = wrap_up || self.last_reply(run_started, turns_used, slowest);
+            if self.remaining_requests() == Some(0) {
+                break self.out_of_budget("request limit");
+            }
+            let landing = wrap_up
+                || self.remaining_requests() == Some(1)
+                || self.last_reply(run_started, turns_used, slowest);
             self.maybe_decay(turns_used, landing, run_started);
             let turn_started = Instant::now();
             self.turn += 1;
@@ -780,7 +809,30 @@ impl Agent {
                 effort: self.effort.as_str().to_string(),
             });
 
-            let wire = self.provider.wire_messages(&self.ctx.messages);
+            let mut wire = self.provider.wire_messages(&self.ctx.messages);
+            let compaction_start = self.ctx.revision;
+            while crate::text::est_tokens(&wire) + tools_tokens > self.cfg.context_limit
+                && self.ctx.compact_oldest()
+            {
+                wire = self.provider.wire_messages(&self.ctx.messages);
+            }
+            if self.ctx.revision != compaction_start {
+                self.sess.seen.clear();
+                self.note(
+                    "context",
+                    "Dropped older exchanges to fit the request. Re-read any missing evidence.",
+                );
+            }
+            if crate::text::est_tokens(&wire) + tools_tokens > self.cfg.context_limit {
+                break Outcome {
+                    status: FinishStatus::Incomplete,
+                    summary:
+                        "The remaining task and recent conversation exceed the context budget."
+                            .into(),
+                    verified: false,
+                    evidence: self.evidence_text(),
+                };
+            }
             // What this request comes to if it ends before the provider says: its prompt, and of
             // that what the cache held of the request before it.
             let prompt_estimate = crate::text::est_tokens(&wire) + tools_tokens;
@@ -808,6 +860,9 @@ impl Agent {
             let streamed = Arc::new(Streamed::default());
             let tally = streamed.clone();
             let mut on_delta = move |d: Delta| match d {
+                Delta::Attempt => {
+                    tally.attempts.fetch_add(1, Ordering::Relaxed);
+                }
                 Delta::Reasoning(text) => {
                     tally.seen(true, text.len());
                     sink.emit(EventKind::Delta {
@@ -843,11 +898,12 @@ impl Agent {
             let deadline = self.sess.deadline;
             // The time budget holds inside a reply too: one still coming when it runs out is cut.
             let reply = tokio::select! {
-                reply = provider.chat(request, &mut on_delta, cancel) => Some(reply),
+                reply = provider.chat_with(request, &mut on_delta, cancel, self.ctx.last_wire(), self.remaining_requests()) => Some(reply),
                 _ = until(deadline) => None,
             };
             let model_ms = asked.elapsed().as_millis() as u64;
             self.stats.model_ms += model_ms;
+            self.stats.requests += streamed.attempts.load(Ordering::Relaxed);
             let Some(reply) = reply else {
                 self.book_unreported(&streamed, true, estimate);
                 break self.out_of_budget("time budget");
@@ -1167,6 +1223,13 @@ impl Agent {
             }
             self.emit_stats(run_started, elapsed_before);
             self.save_point(true).await;
+            if self
+                .sess
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                break self.out_of_budget("time budget");
+            }
 
             // A question ends the run: the answer is the user's next message.
             if let Some(asked) = result.asked {
@@ -1267,7 +1330,6 @@ impl Agent {
             || (!self.cfg.interactive && self.contract.has_required());
         if !self.cfg.features.contract
             || self.contract.is_empty()
-            || landing
             || !check_due
             || self.cfg.autonomy != Autonomy::Auto
         {
@@ -1278,12 +1340,10 @@ impl Agent {
             return None;
         }
         let detail = violations.join("; ");
-        if self.contract_holds >= CONTRACT_HOLDS {
+        if landing || self.contract_holds >= CONTRACT_HOLDS {
+            outcome.status = FinishStatus::Incomplete;
             outcome.verified = false;
-            outcome.evidence = format!(
-                "{}; contract unmet after {CONTRACT_HOLDS} holds: {detail}",
-                outcome.evidence
-            );
+            outcome.evidence = format!("{}; contract unmet: {detail}", outcome.evidence);
             self.note(
                 "contract",
                 &format!("left unmet after {CONTRACT_HOLDS} holds: {detail}"),
@@ -1324,9 +1384,23 @@ impl Agent {
         cancel: &CancellationToken,
     ) -> Option<String> {
         let text = self.goal.as_ref().filter(|goal| !goal.met)?.text.clone();
+        let max_attempts = self.remaining_requests();
+        if max_attempts == Some(0) {
+            let why = "the model request limit was reached";
+            self.sink.emit(goal_event(GoalState::Unchecked, text, why));
+            outcome.status = FinishStatus::Incomplete;
+            outcome.verified = false;
+            outcome
+                .evidence
+                .push_str("; goal could not be checked: the model request limit was reached");
+            return None;
+        }
         checks.goal += 1;
         self.stats.goal_checks += 1;
-        let changes = changes::changes(&self.sess).await;
+        let changes = tokio::select! {
+            report = changes::changes(&self.sess) => report,
+            _ = until(self.sess.deadline) => None,
+        };
         let evidence = if self.cfg.features.gate {
             self.evidence_text()
         } else {
@@ -1342,10 +1416,24 @@ impl Agent {
         };
         let asked = Instant::now();
         // Not past the time budget, as no reply of the run is.
-        let answer = tokio::select! {
-            answer = goal::ask(&self.provider, &material, cancel) => Ok(answer),
-            _ = until(self.sess.deadline) => Err("the time budget ran out before it was answered"),
+        let streamed = Streamed::default();
+        let mut on_delta = |delta| match delta {
+            Delta::Attempt => {
+                streamed.attempts.fetch_add(1, Ordering::Relaxed);
+            }
+            Delta::Reasoning(text) => streamed.seen(true, text.len()),
+            Delta::Content(text) => streamed.seen(false, text.len()),
+            Delta::Retry { .. } => streamed.retried(),
         };
+        let prompt =
+            crate::text::est_tokens(&self.provider.wire_messages(&goal::messages(&material)));
+        let answer = tokio::select! {
+            biased;
+            _ = until(self.sess.deadline) => Err("the time budget ran out before it was answered"),
+            answer = goal::ask(&self.provider, &material, cancel, &mut on_delta, max_attempts) => Ok(answer),
+        };
+        self.stats.requests += streamed.attempts.load(Ordering::Relaxed);
+        self.book_unreported(&streamed, !matches!(&answer, Ok(Ok(_))), (prompt, 0));
         self.stats.model_ms += asked.elapsed().as_millis() as u64;
         let verdict = match answer {
             Err(late) => Err(late.to_string()),
@@ -1387,9 +1475,13 @@ impl Agent {
                 } else {
                     format!(" after {} checks", checks.goal)
                 };
+                outcome.status = FinishStatus::Incomplete;
+                outcome.verified = false;
                 format!("goal not met{after}: {}", one_line(&reasons, 160))
             }
             Err(why) => {
+                outcome.status = FinishStatus::Incomplete;
+                outcome.verified = false;
                 self.sink.emit(goal_event(GoalState::Unchecked, text, &why));
                 format!("goal could not be checked: {}", one_line(&why, 160))
             }
@@ -1451,6 +1543,13 @@ impl Agent {
     /// again), the evidence, the turn's streak counters, what is queued for the next message
     /// (`announce`, `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
     pub fn checkpoint(&self, in_run: bool, setup: &Setup) -> Snapshot {
+        let mut snapshot = self.checkpoint_state(in_run, setup);
+        snapshot.messages = self.ctx.messages.clone();
+        snapshot.stubs = self.ctx.stubs().to_vec();
+        snapshot
+    }
+
+    fn checkpoint_state(&self, in_run: bool, setup: &Setup) -> Snapshot {
         Snapshot {
             version: resume::VERSION,
             saved: now_ms(),
@@ -1465,11 +1564,12 @@ impl Agent {
             .to_string(),
             interactive: self.cfg.interactive,
             max_turns: self.cfg.max_turns,
+            max_requests: self.cfg.max_requests,
             time_budget_secs: self.cfg.time_budget.map(|d| d.as_secs()),
             effort_policy: self.cfg.effort.label(),
             effort: self.effort.as_str().to_string(),
-            messages: self.ctx.messages.clone(),
-            stubs: self.ctx.stubs().to_vec(),
+            messages: Vec::new(),
+            stubs: Vec::new(),
             turn: self.turn,
             stats: self.stats.clone(),
             edits: self
@@ -1492,12 +1592,17 @@ impl Agent {
             return;
         };
         let path = path.clone();
-        let result = match serde_json::to_vec(&self.checkpoint(in_run, setup)) {
-            Ok(body) => tokio::task::spawn_blocking(move || resume::write_atomic(&path, &body))
-                .await
-                .unwrap_or_else(|e| Err(std::io::Error::other(e))),
-            Err(e) => Err(std::io::Error::other(e)),
-        };
+        let state = self.checkpoint_state(in_run, setup);
+        let revision = self.ctx.revision;
+        let previous = self.journal.take().filter(|j| j.revision == revision);
+        let from = previous.as_ref().map_or(0, |j| j.entries);
+        let messages = self.ctx.messages[from..].to_vec();
+        let stubs = self.ctx.stubs()[from..].to_vec();
+        let result = tokio::task::spawn_blocking(move || {
+            resume::write_checkpoint(&path, state, previous, revision, messages, stubs)
+        })
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e)));
         if let Err(error) = &result
             && !self.snapshot_warned
         {
@@ -1506,6 +1611,7 @@ impl Agent {
             });
         }
         self.snapshot_warned = result.is_err();
+        self.journal = result.ok();
     }
 
     /// An agent as the snapshot left it: the conversation, the turn counter and the stats, the
@@ -1530,6 +1636,7 @@ impl Agent {
         };
         cfg.interactive = snap.interactive;
         cfg.max_turns = snap.max_turns;
+        cfg.max_requests = snap.max_requests;
         cfg.time_budget = snap.time_budget_secs.map(Duration::from_secs);
         if let Some(policy) = EffortPolicy::parse(&snap.effort_policy) {
             cfg.effort = policy;

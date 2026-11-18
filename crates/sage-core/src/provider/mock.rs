@@ -105,6 +105,7 @@ impl MockProvider {
         on_delta: DeltaSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
+        on_delta(Delta::Attempt);
         let idx = self.cursor.fetch_add(1, Ordering::SeqCst);
         self.requests.lock().unwrap().push(req.messages.to_vec());
         self.shapes.lock().unwrap().push(Shape {

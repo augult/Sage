@@ -287,8 +287,25 @@ export function mountSession(main, side, app, meta) {
   }
 
   let frame = 0;
-  const unlisten = store.onChange((changed) => {
-    if (changed === entry) frame ||= requestAnimationFrame(() => ((frame = 0), render()));
+  let streamTurn = null;
+  let fullRender = false;
+  const unlisten = store.onChange((changed, event) => {
+    if (changed !== entry) return;
+    fullRender ||= event?.type !== 'delta' || (streamTurn !== null && streamTurn !== event.turn);
+    if (event?.type === 'delta') streamTurn = event.turn;
+    frame ||= requestAnimationFrame(() => {
+      frame = 0;
+      const turn = entry.model?.turns.get(streamTurn);
+      const patched = !fullRender && timeline.stream(turn);
+      fullRender = false;
+      streamTurn = null;
+      if (patched) {
+        follow();
+        tick();
+      } else {
+        render();
+      }
+    });
   });
   const ticker = setInterval(tick, 200);
   render();

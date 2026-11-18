@@ -31,7 +31,7 @@ export const api = {
   /** Deletes a session's record for good; its folder is not touched. Refused while the session runs. */
   deleteSession: (id) => invoke('delete_session', { id }),
   approve: (id, approval, allow) => invoke('approve', { id, approval, allow }),
-  sessionEvents: (id) => invoke('session_events', { id }),
+  sessionEvents: (id, after) => invoke('session_events', { id, after }),
   readOutput: (id, handle) => invoke('read_output', { id, handle }),
   /** The folder chosen in the system's dialog, opened at `start`; null when it was dismissed. */
   pickFolder: (start) => invoke('pick_folder', { start }),

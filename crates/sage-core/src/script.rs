@@ -310,7 +310,9 @@ impl Runner<'_> {
             && !self.sess.watches.items.is_empty()
             && !self.cancel.is_cancelled()
         {
+            let started = Instant::now();
             let (reports, text) = watches::run_stale(self.sess, self.cancel).await;
+            self.stats.tool_ms += started.elapsed().as_millis() as u64;
             if self.emit_watches(&reports) {
                 res.surprised = true;
             }
@@ -428,8 +430,10 @@ impl Runner<'_> {
         let epoch_before = self.sess.evidence.epoch;
         let out = match tool {
             Tool::Shell => tools::shell::run(self.sess, args, self.cancel).await,
-            Tool::Read => tools::read::run(self.sess, args),
-            Tool::Search => tools::search::run_off_thread(self.sess, args).await,
+            Tool::Read => tools::read::run_spill_off_thread(self.sess, args)
+                .await
+                .unwrap_or_else(|| tools::read::run(self.sess, args)),
+            Tool::Search => tools::search::run_off_thread(self.sess, args, self.cancel).await,
             Tool::Edit => tools::edit::run(self.sess, args).await,
             Tool::Write => tools::write::run(self.sess, args).await,
             Tool::Job => tools::job::run(self.sess, args, self.cancel).await,
@@ -457,10 +461,10 @@ impl Runner<'_> {
                     .evidence
                     .passed(format!("`{}`", one_line(&meta.cmd, 100)));
             }
-            // A run that left the workspace alone is also the current result of any watch on that
-            // command, and the model's own test command becomes a watch here.
-            if let (Some(run), true) = (&meta.completed, self.sess.evidence.epoch == epoch_before) {
-                let seen = watches::observe(self.sess, &meta.cmd, run);
+            // An explicit run satisfies a standing check only for the state it observed. It still
+            // counts as an attempt if it changed the workspace.
+            if let Some(run) = &meta.completed {
+                let seen = watches::observe(self.sess, &meta.cmd, run, epoch_before);
                 for r in &seen.reports {
                     self.sink.emit(EventKind::Watch {
                         turn: self.turn,
@@ -516,8 +520,7 @@ impl Runner<'_> {
             .retain(|w| !(w.auto && w.cmd == cmd && w.cwd == cwd));
         let idx = self.sess.watches.set(&name, cmd, cwd, expect);
         let report = watches::run_one(self.sess, idx, self.cancel).await;
-        self.sess.watches.items[idx].epoch = self.sess.evidence.epoch;
-        if self.sess.watches.all_pass() {
+        if self.sess.watches.all_pass_at(self.sess.evidence.epoch) {
             let names = self.sess.watches.names();
             self.sess.evidence.passed(format!("watch {names}"));
         }
@@ -576,13 +579,13 @@ impl Runner<'_> {
         if self.sess.features.watches && !self.sess.watches.items.is_empty() {
             let (reports, text) = watches::run_stale(self.sess, self.cancel).await;
             self.emit_watches(&reports);
-            if !self.sess.watches.all_pass() {
+            if !self.sess.watches.all_pass_at(self.sess.evidence.epoch) {
                 let not_passing: Vec<&watches::Watch> = self
                     .sess
                     .watches
                     .items
                     .iter()
-                    .filter(|w| w.state != WatchState::Pass)
+                    .filter(|w| w.state != WatchState::Pass || w.epoch != self.sess.evidence.epoch)
                     .collect();
                 let names = not_passing
                     .iter()
@@ -632,9 +635,25 @@ impl Runner<'_> {
                 });
                 return StepOutput::ok("[done] accepted without verification");
             }
-            let head = format!("[SURPRISE] finish refused: watch {names} is not passing.");
+            let why = if self
+                .sess
+                .watches
+                .items
+                .iter()
+                .any(|w| w.state == WatchState::Fail)
+            {
+                "is not passing"
+            } else {
+                "has no current passing result"
+            };
+            let head = format!("[SURPRISE] finish refused: watch {names} {why}.");
             let mut detail = if text.is_empty() {
-                "Its output has not changed since it was last shown.".to_string()
+                if why == "is not passing" {
+                    "Its output has not changed since it was last shown.".to_string()
+                } else {
+                    "A check changed the workspace. Run a read-only check of the final files."
+                        .to_string()
+                }
             } else {
                 text
             };

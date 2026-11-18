@@ -5,13 +5,14 @@ use crate::anchors::push_anchored;
 use crate::state::Session;
 use crate::workspace::Workspace;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
-use grep_searcher::sinks::UTF8;
-use grep_searcher::{BinaryDetection, SearcherBuilder};
+use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkMatch};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use serde_json::Value;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 const MAX_PER_FILE: usize = 20;
 const MAX_COUNTED: usize = 5_000;
@@ -60,8 +61,9 @@ fn walker(root: &Path, glob: Option<&str>) -> Result<ignore::Walk, String> {
 
 struct FileHits {
     path: PathBuf,
-    lines: Vec<(usize, String)>,
+    lines: Vec<(usize, bool, String)>,
     more: usize,
+    partial: bool,
 }
 
 #[derive(Default)]
@@ -70,64 +72,161 @@ struct Scan {
     shown: usize,
     total: usize,
     files_with_hits: usize,
-    timed_out: bool,
+    partial: bool,
 }
 
-/// Searches every file of `walk`, keeping at most `cap` matching lines.
-fn scan(walk: ignore::Walk, matcher: &RegexMatcher, cap: usize, started: Instant) -> Scan {
+struct SearchBudget {
+    deadline: Instant,
+    cancel: CancellationToken,
+}
+
+impl SearchBudget {
+    fn expired(&self) -> bool {
+        self.cancel.is_cancelled() || Instant::now() >= self.deadline
+    }
+}
+
+struct BoundedReader<'a> {
+    file: std::fs::File,
+    budget: &'a SearchBudget,
+}
+
+impl Read for BoundedReader<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.budget.expired() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "search budget expired",
+            ));
+        }
+        self.file.read(bytes)
+    }
+}
+
+struct FileSink {
+    lines: Vec<(usize, bool, String)>,
+    shown: usize,
+    count: usize,
+    cap: usize,
+    context: usize,
+    last_hit: usize,
+    stop_after_context: bool,
+    anchors: bool,
+    partial: bool,
+}
+
+impl FileSink {
+    fn save(&mut self, line: usize, matched: bool, bytes: &[u8]) {
+        let text = String::from_utf8_lossy(bytes);
+        let text = text.trim_end_matches(['\n', '\r']);
+        let mut rendered = String::new();
+        if self.anchors {
+            push_anchored(&mut rendered, "", line, text, MAX_COLS);
+        } else {
+            rendered = format!("{line}: {}\n", crate::util::truncate_chars(text, MAX_COLS));
+        }
+        self.lines.push((line, matched, rendered));
+    }
+}
+
+impl Sink for FileSink {
+    type Error = io::Error;
+
+    fn matched(&mut self, _: &Searcher, found: &SinkMatch<'_>) -> io::Result<bool> {
+        let line = found.line_number().unwrap_or(0) as usize;
+        if self.stop_after_context && self.shown == self.cap && line > self.last_hit + self.context
+        {
+            self.partial = true;
+            return Ok(false);
+        }
+        self.count += 1;
+        if self.shown < self.cap {
+            self.save(line, true, found.bytes());
+            self.shown += 1;
+            self.last_hit = line;
+        } else if line <= self.last_hit + self.context {
+            self.save(line, false, found.bytes());
+        }
+        self.partial |= self.count >= 2_000
+            || (self.stop_after_context && self.shown == self.cap && self.context == 0);
+        Ok(!self.partial)
+    }
+
+    fn context(&mut self, _: &Searcher, found: &SinkContext<'_>) -> io::Result<bool> {
+        let line = found.line_number().unwrap_or(0) as usize;
+        if self.shown < self.cap || line <= self.last_hit + self.context {
+            self.save(line, false, found.bytes());
+        }
+        if self.stop_after_context && self.shown == self.cap && line >= self.last_hit + self.context
+        {
+            self.partial = true;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
+fn scan(
+    walk: ignore::Walk,
+    matcher: &RegexMatcher,
+    scope: &Scope,
+    context: usize,
+    budget: &SearchBudget,
+) -> Scan {
+    let cap = scope.cap;
     let mut searcher = SearcherBuilder::new()
         .binary_detection(BinaryDetection::quit(b'\x00'))
         .line_number(true)
+        .before_context(context)
+        .after_context(context)
+        .heap_limit(Some(1024 * 1024))
         .build();
-    let mut s = Scan::default();
-    for entry in walk.flatten() {
+    let mut scan = Scan::default();
+    for entry in walk {
+        if budget.expired() || scan.shown >= cap || scan.total >= MAX_COUNTED {
+            scan.partial = true;
+            break;
+        }
+        let Ok(entry) = entry else {
+            scan.partial = true;
+            continue;
+        };
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
-        if started.elapsed() > TIME_BUDGET {
-            s.timed_out = true;
-            break;
-        }
-        if s.total >= MAX_COUNTED {
-            break;
-        }
-        let mut found: Vec<(usize, String)> = Vec::new();
-        let mut count = 0usize;
-        let _ = searcher.search_path(
-            matcher,
-            entry.path(),
-            UTF8(|lnum, line| {
-                count += 1;
-                if found.len() < MAX_PER_FILE {
-                    found.push((
-                        lnum as usize,
-                        line.trim_end_matches(['\n', '\r']).to_string(),
-                    ));
-                }
-                Ok(count < 2_000)
-            }),
-        );
-        if count == 0 {
+        let room = cap - scan.shown;
+        let mut sink = FileSink {
+            lines: Vec::new(),
+            shown: 0,
+            count: 0,
+            cap: room.min(MAX_PER_FILE),
+            context,
+            last_hit: 0,
+            stop_after_context: room <= MAX_PER_FILE,
+            anchors: scope.anchors,
+            partial: false,
+        };
+        let result = std::fs::File::open(entry.path()).and_then(|file| {
+            searcher.search_reader(matcher, BoundedReader { file, budget }, &mut sink)
+        });
+        let partial = sink.partial || result.is_err();
+        scan.partial |= partial;
+        if sink.shown == 0 {
             continue;
         }
-        s.files_with_hits += 1;
-        s.total += count;
-        let room = cap.saturating_sub(s.shown);
-        if room > 0 {
-            found.truncate(room);
-            s.shown += found.len();
-            let more = count - found.len();
-            s.hits.push(FileHits {
-                path: entry.path().to_path_buf(),
-                lines: found,
-                more,
-            });
-        }
+        scan.total += sink.count;
+        scan.shown += sink.shown;
+        scan.files_with_hits += 1;
+        scan.hits.push(FileHits {
+            path: entry.into_path(),
+            lines: sink.lines,
+            more: sink.count - sink.shown,
+            partial,
+        });
     }
-    s
+    scan
 }
 
-/// What a search needs of the session, owned, so that it can run on a thread of its own.
 struct Scope {
     ws: Workspace,
     cap: usize,
@@ -146,18 +245,33 @@ impl Scope {
 
 /// `run` on a blocking thread: a search of a large tree can take seconds, and the runtime has other
 /// sessions to serve meanwhile.
-pub async fn run_off_thread(sess: &Session, args: &Value) -> StepOutput {
+pub async fn run_off_thread(
+    sess: &Session,
+    args: &Value,
+    cancel: &CancellationToken,
+) -> StepOutput {
     let (scope, args) = (Scope::of(sess), args.clone());
-    tokio::task::spawn_blocking(move || search(&scope, &args))
+    let budget = SearchBudget {
+        deadline: Instant::now() + sess.within_budget(TIME_BUDGET),
+        cancel: cancel.clone(),
+    };
+    tokio::task::spawn_blocking(move || search(&scope, &args, &budget))
         .await
         .unwrap_or_else(|e| StepOutput::error(format!("the search failed: {e}")))
 }
 
 pub fn run(sess: &Session, args: &Value) -> StepOutput {
-    search(&Scope::of(sess), args)
+    search(
+        &Scope::of(sess),
+        args,
+        &SearchBudget {
+            deadline: Instant::now() + TIME_BUDGET,
+            cancel: CancellationToken::new(),
+        },
+    )
 }
 
-fn search(scope: &Scope, args: &Value) -> StepOutput {
+fn search(scope: &Scope, args: &Value, budget: &SearchBudget) -> StepOutput {
     let ws = &scope.ws;
     let pattern = str_arg(args, "pattern").filter(|p| !p.is_empty());
     let glob = str_arg(args, "glob")
@@ -176,7 +290,6 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
         Ok(w) => w,
         Err(e) => return StepOutput::error(e),
     };
-    let started = Instant::now();
 
     let Some(pattern) = pattern else {
         if glob.is_none() {
@@ -185,29 +298,31 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
             );
         }
         let mut files: Vec<String> = Vec::new();
-        let mut total = 0usize;
-        for entry in walk.flatten() {
-            if entry.file_type().is_some_and(|t| t.is_file()) {
-                total += 1;
-                if files.len() < MAX_LISTED_FILES {
-                    files.push(ws.display(entry.path()));
-                }
-            }
-            if started.elapsed() > TIME_BUDGET {
+        let mut partial = false;
+        for entry in walk {
+            if budget.expired() || files.len() == MAX_LISTED_FILES {
+                partial = true;
                 break;
             }
+            if let Ok(entry) = entry {
+                if entry.file_type().is_some_and(|t| t.is_file()) {
+                    files.push(ws.display(entry.path()));
+                }
+            } else {
+                partial = true;
+            }
         }
-        if files.is_empty() {
+        if files.is_empty() && !partial {
             return StepOutput::ok(format!("[no files match {}]", glob.unwrap_or("")));
         }
         let mut out = files.join("\n");
-        out.push_str(&if total > files.len() {
+        out.push_str(&if partial {
             format!(
-                "\n[{} of {total} files shown — narrow the glob or path]",
+                "\n[{} files shown; listing incomplete — narrow the glob or path]",
                 files.len()
             )
         } else {
-            format!("\n[{total} files]")
+            format!("\n[{} files]", files.len())
         });
         return StepOutput::ok(out);
     };
@@ -227,20 +342,22 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
             Err(e) => return StepOutput::error(format!("cannot search for {pattern:?}: {e}")),
         },
     };
-    let cap = scope.cap;
-    let mut found = scan(walk, &matcher, cap, started);
+    let context = u64_arg(args, "context").unwrap_or(0).min(6) as usize;
+    let mut found = scan(walk, &matcher, scope, context, budget);
     // Code pasted as a pattern is a valid regex that means something else: `divide(a, b)` is a
     // group, and matches no parenthesis. Before reporting that there is nothing, look for the text.
     let mut why_literal = "not a valid regex";
     if found.hits.is_empty()
         && !literal
-        && !found.timed_out
+        && !found.partial
         && regex::escape(pattern) != pattern
         && let (Ok(m), Ok(walk)) = (build(true), walker(&root, glob))
     {
-        let retry = scan(walk, &m, cap, started);
+        let retry = scan(walk, &m, scope, context, budget);
         if !retry.hits.is_empty() {
             (found, literal, why_literal) = (retry, true, "as a regex it matches nothing");
+        } else {
+            found.partial |= retry.partial;
         }
     }
     let Scan {
@@ -248,7 +365,7 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
         shown,
         total,
         files_with_hits,
-        timed_out,
+        partial,
     } = found;
 
     let label = if literal {
@@ -259,63 +376,36 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
     if hits.is_empty() {
         let scope = glob.map(|g| format!(" matching {g}")).unwrap_or_default();
         return StepOutput::ok(format!(
-            "[no matches for {label} in {}{scope}]",
-            ws.display(&root)
+            "[no matches for {label} in {}{scope}{}]",
+            ws.display(&root),
+            if partial {
+                " so far; search incomplete"
+            } else {
+                ""
+            }
         ));
     }
 
-    let context = u64_arg(args, "context").unwrap_or(0).min(6) as usize;
-    let anchors = scope.anchors;
     let mut out = String::new();
     for file in &hits {
         out.push_str(&ws.display(&file.path));
         out.push('\n');
-        // A file that is not UTF-8 throughout has no lines to count context in: its matches alone.
-        let content = if context == 0 {
-            None
-        } else {
-            std::fs::read_to_string(&file.path).ok()
-        };
-        if let Some(content) = content {
-            let all: Vec<&str> = content.lines().collect();
-            let mut last_printed = 0usize;
-            for (ln, _) in &file.lines {
-                let from = ln.saturating_sub(context).max(last_printed + 1).max(1);
-                let to = (ln + context).min(all.len());
-                if last_printed > 0 && from > last_printed + 1 {
-                    out.push_str("  …\n");
-                }
-                for l in from..=to {
-                    let prefix = if file.lines.iter().any(|(m, _)| *m == l) {
-                        "> "
-                    } else {
-                        "  "
-                    };
-                    if anchors {
-                        push_anchored(&mut out, prefix, l, all[l - 1], MAX_COLS);
-                    } else {
-                        out.push_str(&format!(
-                            "{prefix}{l}: {}\n",
-                            crate::util::truncate_chars(all[l - 1], MAX_COLS)
-                        ));
-                    }
-                }
-                last_printed = last_printed.max(to);
+        let mut last = 0;
+        for (line, matched, text) in &file.lines {
+            if context != 0 && last != 0 && *line > last + 1 {
+                out.push_str("  …\n");
             }
-        } else {
-            for (ln, text) in &file.lines {
-                if anchors {
-                    push_anchored(&mut out, "  ", *ln, text, MAX_COLS);
-                } else {
-                    out.push_str(&format!(
-                        "  {ln}: {}\n",
-                        crate::util::truncate_chars(text, MAX_COLS)
-                    ));
-                }
-            }
+            let prefix = if context != 0 && *matched { "> " } else { "  " };
+            out.push_str(prefix);
+            out.push_str(text);
+            last = *line;
         }
-        if file.more > 0 {
-            out.push_str(&format!("  … {} more matches in this file\n", file.more));
+        if file.more > 0 || file.partial {
+            out.push_str(&format!(
+                "  … {}{} more matches in this file\n",
+                file.more,
+                if file.partial { "+" } else { "" }
+            ));
         }
     }
     let plural = |n: usize, word: &str| {
@@ -330,15 +420,11 @@ fn search(scope: &Scope, args: &Value) -> StepOutput {
     } else {
         String::new()
     };
-    out.push_str(&if shown < total || timed_out {
+    out.push_str(&if shown < total || partial {
         format!(
             "[{shown} of {}{} matches shown, in {} — narrow with path, glob or a tighter pattern]",
             total,
-            if total >= MAX_COUNTED || timed_out {
-                "+"
-            } else {
-                ""
-            },
+            if partial { "+" } else { "" },
             plural(files_with_hits, "file")
         )
     } else {
@@ -520,7 +606,7 @@ mod tests {
         }
         let out = run(&s, &json!({"pattern": "needle"}));
         assert!(out.observation.contains("… 20 more matches in this file"));
-        assert!(out.observation.ends_with("[60 of 200 matches shown, in 5 files — narrow with path, glob or a tighter pattern]"), "{}", out.observation);
+        assert!(out.observation.ends_with("[60 of 100+ matches shown, in 3 files — narrow with path, glob or a tighter pattern]"), "{}", out.observation);
         assert_eq!(out.observation.matches("|needle").count(), 60);
     }
 }

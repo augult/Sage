@@ -23,6 +23,7 @@ pub enum ExecEnd {
     /// Still running when the timeout expired; the caller decides whether to keep or kill it.
     TimedOut(Running),
     Cancelled,
+    Budget,
 }
 
 pub struct Exec {
@@ -30,6 +31,8 @@ pub struct Exec {
     /// Cleaned output (escape codes and redraws removed), as the model is shown it (`Session::shown`).
     pub text: String,
     pub total_bytes: u64,
+    pub output_complete: bool,
+    drained: bool,
     pub ms: u64,
     pub spill: String,
     /// The reported exit code comes from an earlier stage of a pipeline whose last stage exited 0.
@@ -53,6 +56,20 @@ pub async fn exec(
     timeout: Duration,
     cancel: &CancellationToken,
 ) -> std::io::Result<Exec> {
+    let allowed = sess.within_budget(timeout);
+    let budget_cut = allowed < timeout;
+    if allowed.is_zero() {
+        return Ok(Exec {
+            end: ExecEnd::Budget,
+            text: String::new(),
+            total_bytes: 0,
+            output_complete: false,
+            drained: false,
+            ms: 0,
+            spill: String::new(),
+            masked: false,
+        });
+    }
     let (spill, spill_path) = sess.next_spill();
     let state_path = sess.shell_state();
     let mode = match state {
@@ -60,12 +77,13 @@ pub async fn exec(
         StateKind::ReadOnly => StateMode::ReadOnly(&state_path),
     };
     let mut run = spawn(cmd, cwd, &sess.shell_env, mode, &spill_path)?;
-    let waited = wait_exit(&mut run.exit, timeout, cancel).await;
+    let waited = wait_exit(&mut run.exit, sess.within_budget(allowed), cancel).await;
     let ms = run.started.elapsed().as_millis() as u64;
     let mut masked = false;
+    let mut drained = false;
     let end = match waited {
         Waited::Exited(mut exit) => {
-            drain(&mut run.readers).await;
+            drained = drain(&mut run.readers).await;
             if state == StateKind::Session {
                 adopt_cwd(sess);
             }
@@ -80,6 +98,10 @@ pub async fn exec(
             kill_group(run.pid);
             ExecEnd::Cancelled
         }
+        Waited::TimedOut if budget_cut || sess.within_budget(timeout).is_zero() => {
+            kill_group(run.pid);
+            ExecEnd::Budget
+        }
         Waited::TimedOut => {
             super::jobs::detach(&spill_path);
             let (raw, _) = run.buf.lock().unwrap().snapshot();
@@ -88,23 +110,67 @@ pub async fn exec(
                 end: ExecEnd::TimedOut(run),
                 text: sess.shown(clean(&raw)),
                 total_bytes,
+                output_complete: false,
+                drained: false,
                 ms,
                 spill,
                 masked: false,
             });
         }
     };
-    let (raw, _) = run.buf.lock().unwrap().snapshot();
-    let total_bytes = run.buf.lock().unwrap().total;
+    let buf = run.buf.lock().unwrap();
+    let (raw, truncated) = buf.snapshot();
+    let total_bytes = buf.total;
     // After a `cd` has been followed, so that paths come out relative to where the next call runs.
     Ok(Exec {
         end,
         text: sess.shown(clean(&raw)),
         total_bytes,
+        output_complete: drained && !truncated,
+        drained,
         ms,
         spill,
         masked,
     })
+}
+
+impl Exec {
+    /// Recover a complete capture for predicates without expanding the model's excerpt.
+    pub async fn predicate_text(&self, sess: &Session, needed: bool) -> Option<String> {
+        const MAX_PREDICATE_BYTES: u64 = 16 * 1024 * 1024;
+        if !needed
+            || self.output_complete
+            || !self.drained
+            || self.total_bytes > MAX_PREDICATE_BYTES
+        {
+            return None;
+        }
+        let path = sess.spill_path(&self.spill)?;
+        let ws = sess.ws.clone();
+        let shorten = sess.features.short_paths;
+        let total = self.total_bytes;
+        tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .ok()?
+                .take(total + 1)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            if bytes.len() as u64 != total {
+                return None;
+            }
+            let text = clean(&bytes);
+            Some(if shorten {
+                ws.shorten(&text).into_owned()
+            } else {
+                text
+            })
+        })
+        .await
+        .ok()
+        .flatten()
+    }
 }
 
 /// Follows a `cd` the command performed, if it left the shell in a directory that still exists.
@@ -154,7 +220,11 @@ fn answer_of_one(cmd: &str) -> Option<&'static str> {
         return None;
     };
     let word = only.split_whitespace().find(|word| !word.contains('='))?;
-    match word.rsplit('/').next()? {
+    let program = word
+        .strip_prefix("/usr/bin/")
+        .or_else(|| word.strip_prefix("/bin/"))
+        .unwrap_or(word);
+    match program {
         "grep" | "egrep" | "fgrep" | "rg" | "ag" | "ack" => Some("no match"),
         "diff" | "cmp" => Some("they differ"),
         // The shell's own `test`, not a project's script of that name (`./test`), whose 1 is a failure.
@@ -248,18 +318,13 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     let timeout = timeout
         .unwrap_or(sess.limits.default_timeout_secs)
         .clamp(1, sess.limits.max_timeout_secs);
-    // Not past the run's time budget: what is still running then goes on as a background job.
-    let timeout = sess
-        .within_budget(Duration::from_secs(timeout))
-        .as_secs()
-        .max(1);
     let cwd = sess.ws.cwd.clone();
 
     if bool_arg(args, "background") {
         return start_background(sess, &cmd, &cwd, cancel).await;
     }
 
-    sess.evidence.before_command(&sess.ws).await;
+    sess.evidence.before_command(&sess.ws, sess.deadline).await;
     let ex = match exec(
         sess,
         &cmd,
@@ -273,11 +338,27 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         Ok(ex) => ex,
         Err(e) => return StepOutput::error(format!("could not start the shell: {e}")),
     };
-    sess.evidence.after_command(&sess.ws, &cmd).await;
+    if matches!(ex.end, ExecEnd::Budget) {
+        sess.evidence
+            .changed("a command stopped at the time budget");
+    } else {
+        sess.evidence
+            .after_command(&sess.ws, &cmd, sess.deadline)
+            .await;
+    }
     let lines = squeeze(&ex.text);
     let shown_all = ex.text.len() as u64;
 
+    let needs_output = expect.as_ref().is_some_and(Expect::has_output_predicates)
+        || sess.watches.items.iter().any(|watch| {
+            watch
+                .expect
+                .as_ref()
+                .is_some_and(Expect::has_output_predicates)
+        });
+    let predicate_text = ex.predicate_text(sess, needs_output).await;
     match ex.end {
+        ExecEnd::Budget => StepOutput::error("the run's time budget expired"),
         ExecEnd::Cancelled => StepOutput {
             status: StepStatus::Error,
             observation: "[cancelled] stopped by the user".into(),
@@ -311,7 +392,12 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             }
         }
         ExecEnd::Exited(exit) => {
-            let verdict = guard::check(expect.as_ref(), exit.code, &ex.text);
+            let verdict = guard::check_capture(
+                expect.as_ref(),
+                exit.code,
+                predicate_text.as_deref().unwrap_or(&ex.text),
+                ex.output_complete || predicate_text.is_some(),
+            );
             let ok = exit.code == Some(0);
             let dur = fmt_duration(ex.ms);
             // Unpredicted, `grep` that finds nothing or `diff` of files that differ has answered,
@@ -453,6 +539,8 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                     code: exit.code,
                     ms: ex.ms,
                     text: ex.text,
+                    output_complete: ex.output_complete,
+                    predicate_text,
                 });
             }
             out
@@ -479,7 +567,12 @@ async fn start_background(
         Err(e) => return StepOutput::error(format!("could not start the shell: {e}")),
     };
     // Give it a moment: a server that dies on startup should be reported now, not three turns later.
-    let early = wait_exit(&mut running.exit, Duration::from_millis(1200), cancel).await;
+    let early = wait_exit(
+        &mut running.exit,
+        sess.within_budget(Duration::from_millis(100)),
+        cancel,
+    )
+    .await;
     if matches!(early, Waited::Exited(_)) {
         drain(&mut running.readers).await;
     }
@@ -774,6 +867,33 @@ mod tests {
         assert!(out.observation.contains("warming up"));
         assert_eq!(s.jobs.running().len(), 1);
         s.jobs.kill_all();
+    }
+
+    #[tokio::test]
+    async fn a_foreground_command_is_killed_when_the_run_budget_expires() {
+        let mut s = test_session("shell-deadline", Features::ecosage());
+        s.deadline = Some(std::time::Instant::now() + Duration::from_millis(100));
+        let result = sh(&mut s, json!({"cmd": "sleep 0.4; echo late > late.txt"})).await;
+        assert_eq!(result.status, StepStatus::Error);
+        assert!(result.observation.contains("time budget"));
+        tokio::time::sleep(Duration::from_millis(450)).await;
+        assert!(!s.ws.root.join("late.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn an_output_predicate_sees_the_middle_of_the_capture() {
+        let mut s = test_session("shell-complete-output", Features::ecosage());
+        let result = sh(
+            &mut s,
+            json!({
+                "cmd": "yes row | head -n 85000; echo MIDDLE_MARKER; yes row | head -n 85000",
+                "expect_exit": 0,
+                "expect_lacks": "MIDDLE_MARKER"
+            }),
+        )
+        .await;
+        assert_eq!(result.status, StepStatus::Surprise);
+        assert!(result.observation.contains("MIDDLE_MARKER"));
     }
 
     #[tokio::test]

@@ -85,6 +85,7 @@ function economy(model) {
     bar(s.model_ms, s.model_ms + s.tool_ms, 'quiet', 'good'),
     stat('Kept out of context', bytes(s.hidden_bytes)),
     stat('Repairs', s.repairs),
+    stat('Requests', s.requests),
     stat('Retries', s.retries),
     stat('Cache misses', s.cache_misses, s.cache_busts > 0 && plural(s.cache_busts, 'bust')),
   );

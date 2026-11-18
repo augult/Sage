@@ -11,15 +11,27 @@ use tokio_util::sync::CancellationToken;
 
 const MAX_WAIT_SECS: u64 = 900;
 
-fn contains(haystack: &str, needle: &str) -> bool {
-    if needle.len() > 2
-        && needle.starts_with('/')
-        && needle.ends_with('/')
-        && let Ok(re) = regex::Regex::new(&needle[1..needle.len() - 1])
-    {
-        return re.is_match(haystack);
+enum Pattern {
+    Regex(regex::Regex),
+    Literal(String),
+}
+
+impl Pattern {
+    fn new(needle: &str) -> Self {
+        needle
+            .strip_prefix('/')
+            .and_then(|p| p.strip_suffix('/'))
+            .filter(|p| !p.is_empty())
+            .and_then(|p| regex::Regex::new(p).ok())
+            .map_or_else(|| Self::Literal(needle.to_lowercase()), Self::Regex)
     }
-    haystack.to_lowercase().contains(&needle.to_lowercase())
+
+    fn matches(&self, text: &str) -> bool {
+        match self {
+            Self::Regex(regex) => regex.is_match(text),
+            Self::Literal(needle) => text.to_lowercase().contains(needle),
+        }
+    }
 }
 
 pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -> StepOutput {
@@ -50,41 +62,71 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         wait
     };
     // Not past the run's time budget.
-    let wait = match wait {
-        0 => 0,
-        wait => sess.within_budget(Duration::from_secs(wait)).as_secs(),
-    };
+    let wait = sess.within_budget(Duration::from_secs(wait));
+    let kill_wait = sess.within_budget(Duration::from_secs(3));
+    let spill_path = sess
+        .jobs
+        .get_mut(&id)
+        .map(|job| job.spill.clone())
+        .and_then(|spill| sess.spill_path(&spill));
 
     let job = sess.jobs.get_mut(&id).expect("checked above");
     if bool_arg(args, "kill") && job.run.exit.borrow().is_none() {
         kill_group(job.run.pid);
         let mut rx = job.run.exit.clone();
-        let _ = tokio::time::timeout(Duration::from_secs(3), rx.wait_for(|e| e.is_some())).await;
+        let _ = tokio::time::timeout(kill_wait, rx.wait_for(|e| e.is_some())).await;
     }
 
     let start_offset = job.read_offset;
-    let deadline = Instant::now() + Duration::from_secs(wait);
+    let deadline = Instant::now() + wait;
+    let pattern = until.as_deref().map(Pattern::new);
+    // Read the spill incrementally and only recheck when the collector announces new bytes.
+    // Arbitrary regexes may require the whole prefix. Keep that work bounded.
+    const MATCH_BYTES: u64 = 1024 * 1024;
+    let mut capture = Vec::new();
+    let mut spill = None;
+    let mut scanned = None;
     let mut matched = false;
+    let mut partial = false;
+    let mut output_open = pattern.is_some();
     loop {
         let exited = job.run.exit.borrow().is_some();
-        if let Some(pattern) = &until {
-            // Matched against everything so far: text that appeared before the model asked still counts.
-            let so_far = shown(
-                &sess.features,
-                &sess.ws,
-                clean(&job.run.buf.lock().unwrap().snapshot().0),
-            );
-            if contains(&so_far, pattern) {
-                matched = true;
-                break;
+        let total = *job.run.output.borrow_and_update();
+        if let Some(pattern) = &pattern
+            && scanned != Some(total)
+        {
+            use tokio::io::AsyncReadExt;
+            scanned = Some(total);
+            if spill.is_none()
+                && let Some(path) = &spill_path
+            {
+                spill = tokio::fs::File::open(path).await.ok();
+            }
+            if let Some(file) = &mut spill
+                && capture.len() < MATCH_BYTES as usize
+            {
+                let available = total.min(MATCH_BYTES).saturating_sub(capture.len() as u64);
+                let _ = file.take(available).read_to_end(&mut capture).await;
+                matched = pattern.matches(&shown(&sess.features, &sess.ws, clean(&capture)));
+            }
+            partial = capture.len() as u64 != total;
+            if !matched && partial {
+                let excerpt = job.run.buf.lock().unwrap().snapshot().0;
+                matched = pattern.matches(&shown(&sess.features, &sess.ws, clean(&excerpt)));
             }
         }
-        if exited || Instant::now() >= deadline {
+        if matched || (exited && !output_open) || Instant::now() >= deadline {
             break;
         }
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(150)) => {}
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => break,
             _ = cancel.cancelled() => break,
+            updated = job.run.output.changed(), if output_open => {
+                output_open = updated.is_ok();
+            }
+            updated = job.run.exit.changed(), if !exited => {
+                if updated.is_err() { break; }
+            }
         }
     }
 
@@ -107,6 +149,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     };
     let waited_for = match (&until, matched) {
         (Some(p), true) => format!(" · output contains {p:?}"),
+        (Some(p), false) if partial => format!(" · {p:?} was not found in the available output"),
         (Some(p), false) => format!(" · {p:?} has not appeared"),
         _ => String::new(),
     };

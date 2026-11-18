@@ -260,11 +260,12 @@ const PARTIAL_VIEW: &str = " (the workspace is too large to see every change a c
 
 impl Evidence {
     pub fn fresh(&self) -> bool {
-        self.epoch == 0
-            || self
-                .verified
-                .as_ref()
-                .is_some_and(|(e, _)| *e == self.epoch)
+        !self.partial_view
+            && (self.epoch == 0
+                || self
+                    .verified
+                    .as_ref()
+                    .is_some_and(|(e, _)| *e == self.epoch))
     }
 
     /// What stands behind a `fresh` state, in words.
@@ -295,18 +296,44 @@ impl Evidence {
     }
 
     /// Call before running a command whose effect on the workspace is unknown.
-    pub async fn before_command(&mut self, ws: &Workspace) {
+    pub async fn before_command(&mut self, ws: &Workspace, deadline: Option<Instant>) {
         if self.fingerprint.is_none() {
-            self.look(fingerprint_off_thread(&ws.root).await);
+            self.refresh(ws, deadline, None).await;
         }
     }
 
     /// Call after such a command. Returns true if it changed the workspace.
-    pub async fn after_command(&mut self, ws: &Workspace, cmd: &str) -> bool {
-        let now = fingerprint_off_thread(&ws.root).await;
+    pub async fn after_command(
+        &mut self,
+        ws: &Workspace,
+        cmd: &str,
+        deadline: Option<Instant>,
+    ) -> bool {
+        self.refresh(ws, deadline, Some(cmd)).await
+    }
+
+    async fn refresh(
+        &mut self,
+        ws: &Workspace,
+        deadline: Option<Instant>,
+        cmd: Option<&str>,
+    ) -> bool {
+        let now = match deadline {
+            Some(deadline) => {
+                tokio::time::timeout_at(deadline.into(), fingerprint_off_thread(&ws.root))
+                    .await
+                    .ok()
+            }
+            None => Some(fingerprint_off_thread(&ws.root).await),
+        };
+        let Some(now) = now else {
+            self.changed("the workspace scan exceeded the time budget");
+            self.partial_view = true;
+            return true;
+        };
         let changed = self.fingerprint.is_some_and(|before| before != now);
         self.look(now);
-        if changed {
+        if changed && let Some(cmd) = cmd {
             self.epoch += 1;
             self.refusals = 0;
             self.last_change = format!("`{}`", crate::util::one_line(cmd, 80));
@@ -484,10 +511,7 @@ impl Session {
     /// so that whatever was asked for is still started.
     pub fn within_budget(&self, limit: Duration) -> Duration {
         match self.deadline {
-            Some(at) => limit.min(
-                at.saturating_duration_since(Instant::now())
-                    .max(Duration::from_secs(1)),
-            ),
+            Some(at) => limit.min(at.saturating_duration_since(Instant::now())),
             None => limit,
         }
     }
@@ -583,14 +607,14 @@ mod tests {
         assert!(s.evidence.fresh());
 
         // A command that does not touch files leaves the evidence fresh…
-        s.evidence.before_command(&s.ws).await;
-        assert!(!s.evidence.after_command(&s.ws, "git status").await);
+        s.evidence.before_command(&s.ws, None).await;
+        assert!(!s.evidence.after_command(&s.ws, "git status", None).await);
         assert!(s.evidence.fresh());
 
         // …one that does makes it stale again.
-        s.evidence.before_command(&s.ws).await;
+        s.evidence.before_command(&s.ws, None).await;
         std::fs::write(s.ws.root.join("gen.txt"), "x").unwrap();
-        assert!(s.evidence.after_command(&s.ws, "make gen").await);
+        assert!(s.evidence.after_command(&s.ws, "make gen", None).await);
         assert!(!s.evidence.fresh());
         assert_eq!(s.evidence.last_change, "`make gen`");
     }

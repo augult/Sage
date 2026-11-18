@@ -14,6 +14,7 @@ pub struct Context {
     stubs: Vec<Option<String>>,
     prev_wire: Option<String>,
     prev_prompt: u64,
+    pub(crate) revision: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ impl Context {
             stubs: vec![None],
             prev_wire: None,
             prev_prompt: 0,
+            revision: 0,
         }
     }
 
@@ -41,6 +43,7 @@ impl Context {
             stubs,
             prev_wire: None,
             prev_prompt: 0,
+            revision: 0,
         }
     }
 
@@ -115,6 +118,10 @@ impl Context {
         };
         self.prev_wire = Some(wire);
         stable
+    }
+
+    pub(crate) fn last_wire(&self) -> Option<&str> {
+        self.prev_wire.as_deref()
     }
 
     /// The prompt tokens the provider reported for the last request answered.
@@ -214,7 +221,45 @@ impl Context {
                 self.stubs[i] = Some(stub);
             }
         }
+        if out.messages != 0 {
+            self.revision += 1;
+        }
         out
+    }
+
+    /// Drop the oldest sealed exchanges, keeping the system prompt, task, and latest exchange.
+    /// An assistant tool call and its results always move together.
+    pub(crate) fn compact_oldest(&mut self) -> bool {
+        let latest = self
+            .messages
+            .iter()
+            .rposition(|m| m.role == Role::User)
+            .unwrap_or(1);
+        let mut boundaries = self
+            .messages
+            .iter()
+            .enumerate()
+            .skip(2)
+            .filter(|(_, m)| m.role != Role::Tool)
+            .map(|(index, _)| index);
+        let Some(mut start) = boundaries.next() else {
+            return false;
+        };
+        let mut range = None;
+        for end in boundaries {
+            if start != latest {
+                range = Some(start..end);
+                break;
+            }
+            start = end;
+        }
+        let Some(range) = range else {
+            return false;
+        };
+        self.messages.drain(range.clone());
+        self.stubs.drain(range);
+        self.revision += 1;
+        true
     }
 }
 

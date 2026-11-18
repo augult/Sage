@@ -331,7 +331,18 @@ async fn approve(harness: State<'_, Harness>, id: String, approval: u64, allow: 
 /// line as it was written: `Harness::events` drops every line this build cannot type, and an event
 /// from a newer version of the engine should still reach the timeline.
 #[tauri::command]
-async fn session_events(harness: State<'_, Harness>, id: String) -> Reply<Vec<Value>> {
+async fn session_events(
+    harness: State<'_, Harness>,
+    id: String,
+    after: Option<u64>,
+) -> Reply<Vec<Value>> {
+    if let Some(seq) = after {
+        return harness
+            .events_since(&id, seq)?
+            .iter()
+            .map(|event| serde_json::to_value(event).map_err(|e| e.to_string()))
+            .collect();
+    }
     if !harness.is_live(&id) && !id.contains(['/', '\\', '.']) {
         let log = Path::new(&harness.state().data_dir)
             .join("sessions")

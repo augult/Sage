@@ -21,7 +21,7 @@ regex = "1.13"
 # native-tls: OS TLS on macOS/Windows, system OpenSSL on Linux. Smallest build and binary.
 reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "json", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net", "signal"] }
 tokio-util = "0.7"
 

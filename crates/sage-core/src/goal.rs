@@ -218,10 +218,12 @@ pub struct Answer {
 }
 
 /// Makes the request: no tools, the least thinking the provider allows, a small output cap.
-pub async fn ask(
+pub(crate) async fn ask(
     provider: &Provider,
     m: &Material<'_>,
     cancel: &CancellationToken,
+    on_delta: crate::provider::DeltaSink<'_>,
+    max_attempts: Option<u32>,
 ) -> Result<Answer, ProviderError> {
     let messages = messages(m);
     let tools = json!([]);
@@ -232,7 +234,9 @@ pub async fn ask(
         max_tokens: MAX_TOKENS,
         reasoning_cap: 0,
     };
-    let reply = provider.chat(request, &mut |_| {}, cancel).await?;
+    let reply = provider
+        .chat_with(request, on_delta, cancel, None, max_attempts)
+        .await?;
     Ok(Answer {
         verdict: parse_verdict(&reply.content),
         usage: reply.usage,

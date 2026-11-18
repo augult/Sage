@@ -49,6 +49,9 @@ pub struct Watch {
     digest: u64,
     /// Workspace epoch this watch last ran against.
     pub epoch: u64,
+    /// The epoch immediately after this command was last attempted. A command that mutates the
+    /// workspace remains stale, but repeating it on that same state cannot certify its old result.
+    attempted_at: Option<u64>,
     pub summary: String,
     /// Set up by the harness from the model's own test command, not by the `watch` tool.
     pub auto: bool,
@@ -100,6 +103,7 @@ impl Watches {
                 state: WatchState::Unknown,
                 digest: 0,
                 epoch: 0,
+                attempted_at: None,
                 summary: String::new(),
                 auto: s.auto,
                 named: s.named,
@@ -145,6 +149,7 @@ impl Watches {
             state: WatchState::Unknown,
             digest: 0,
             epoch: 0,
+            attempted_at: None,
             summary: String::new(),
             auto: false,
             named: false,
@@ -198,14 +203,30 @@ async fn run_within(
     cancel: &CancellationToken,
 ) -> (WatchReport, Option<i32>) {
     let w = sess.watches.items[idx].clone();
+    let started_epoch = sess.evidence.epoch;
     // A run cut short by the time budget says nothing about the code: its result stays unknown.
     let allowed = sess.within_budget(limit);
     let budget_cut = allowed < limit;
     let limit = allowed;
-    sess.evidence.before_command(&sess.ws).await;
+    sess.evidence.before_command(&sess.ws, sess.deadline).await;
     let result = exec(sess, &w.cmd, &w.cwd, StateKind::ReadOnly, limit, cancel).await;
-    sess.evidence.after_command(&sess.ws, &w.cmd).await;
+    if matches!(&result, Ok(ex) if matches!(ex.end, ExecEnd::Budget)) {
+        sess.evidence.changed("a watch stopped at the time budget");
+    } else {
+        sess.evidence
+            .after_command(&sess.ws, &w.cmd, sess.deadline)
+            .await;
+    }
 
+    let predicate_text = if let Ok(ex) = &result {
+        ex.predicate_text(
+            sess,
+            w.expect.as_ref().is_some_and(Expect::has_output_predicates),
+        )
+        .await
+    } else {
+        None
+    };
     let (state, text, why, spill, code) = match result {
         Err(e) => (
             WatchState::Fail,
@@ -216,7 +237,12 @@ async fn run_within(
         ),
         Ok(ex) => match ex.end {
             ExecEnd::Exited(exit) => {
-                let verdict = guard::check(w.expect.as_ref(), exit.code, &ex.text);
+                let verdict = guard::check_capture(
+                    w.expect.as_ref(),
+                    exit.code,
+                    predicate_text.as_deref().unwrap_or(&ex.text),
+                    ex.output_complete || predicate_text.is_some(),
+                );
                 let state = if verdict.held {
                     WatchState::Pass
                 } else {
@@ -242,6 +268,13 @@ async fn run_within(
                 };
                 (state, ex.text, why, ex.spill, None)
             }
+            ExecEnd::Budget => (
+                WatchState::Unknown,
+                ex.text,
+                "the run's time budget expired".to_string(),
+                ex.spill,
+                None,
+            ),
             ExecEnd::Cancelled => (
                 WatchState::Unknown,
                 ex.text,
@@ -252,6 +285,9 @@ async fn run_within(
         },
     };
 
+    sess.watches.items[idx].epoch = started_epoch;
+    sess.watches.items[idx].attempted_at =
+        (state != WatchState::Unknown).then_some(sess.evidence.epoch);
     (settle(sess, idx, state, &text, &why, Some(&spill)), code)
 }
 
@@ -352,10 +388,7 @@ pub async fn run_stale(
     cancel: &CancellationToken,
 ) -> (Vec<WatchReport>, String) {
     let stale: Vec<usize> = (0..sess.watches.items.len())
-        .filter(|i| {
-            sess.watches.items[*i].epoch != sess.evidence.epoch
-                || sess.watches.items[*i].state == WatchState::Unknown
-        })
+        .filter(|i| sess.watches.items[*i].attempted_at != Some(sess.evidence.epoch))
         .collect();
     if stale.is_empty() {
         return (Vec::new(), String::new());
@@ -367,18 +400,9 @@ pub async fn run_stale(
         }
         reports.push(run_one(sess, idx, cancel).await);
     }
-    // The batch is atomic: watches that write caches must not make each other look stale forever.
-    // One that was stopped part-way is no batch: a watch it did not get to still shows the result
-    // it had before the change, and stays stale so that it is run before anything is claimed.
-    if !cancel.is_cancelled() {
-        let epoch = sess.evidence.epoch;
-        for w in &mut sess.watches.items {
-            w.epoch = epoch;
-        }
-        if sess.watches.all_pass() {
-            let names = sess.watches.names();
-            sess.evidence.passed(format!("watch {names}"));
-        }
+    if !cancel.is_cancelled() && sess.watches.all_pass_at(sess.evidence.epoch) {
+        let names = sess.watches.names();
+        sess.evidence.passed(format!("watch {names}"));
     }
     let mut text: Vec<String> = reports
         .iter()
@@ -387,7 +411,14 @@ pub async fn run_stale(
         .collect();
     let quiet: Vec<&str> = reports
         .iter()
-        .filter(|r| r.detail.is_empty())
+        .filter(|r| {
+            r.detail.is_empty()
+                && sess
+                    .watches
+                    .items
+                    .iter()
+                    .any(|w| w.name == r.name && w.epoch == sess.evidence.epoch)
+        })
         .map(|r| r.name.as_str())
         .collect();
     if !quiet.is_empty() {
@@ -409,7 +440,7 @@ pub struct Observed {
 /// command takes the result as its own instead of running a second time. With `auto_watch`, the
 /// model's test command becomes a watch by itself, which is what lets a reply that only edits come
 /// back with the test result attached.
-pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
+pub fn observe(sess: &mut Session, cmd: &str, run: &Completed, observed_epoch: u64) -> Observed {
     let mut out = Observed::default();
     let cmd = without_cd(cmd, &run.cwd);
     let epoch = sess.evidence.epoch;
@@ -417,10 +448,11 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
         .filter(|i| sess.watches.items[*i].cmd == cmd && sess.watches.items[*i].cwd == run.cwd)
         .collect();
     for idx in &same {
-        let verdict = guard::check(
+        let verdict = guard::check_capture(
             sess.watches.items[*idx].expect.as_ref(),
             run.code,
-            &run.text,
+            run.predicate_text.as_deref().unwrap_or(&run.text),
+            run.output_complete || run.predicate_text.is_some(),
         );
         let state = if verdict.held {
             WatchState::Pass
@@ -435,7 +467,8 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
             &verdict.violations.join("; "),
             None,
         );
-        sess.watches.items[*idx].epoch = epoch;
+        sess.watches.items[*idx].epoch = observed_epoch;
+        sess.watches.items[*idx].attempted_at = Some(epoch);
         if report.change != WatchChange::Same {
             out.reports.push(report);
         }
@@ -443,7 +476,8 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
 
     // A runner that could not start (126, 127) says nothing about the code. Nor does a throwaway
     // script: one that lives outside the workspace is gone, or failing on purpose, soon after.
-    let promote = same.is_empty()
+    let promote = epoch == observed_epoch
+        && same.is_empty()
         && sess.features.auto_watch
         && run.ms <= AUTO_MAX_MS
         && !matches!(run.code, None | Some(126 | 127))
@@ -474,6 +508,7 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
     };
     let mut report = settle(sess, idx, state, &run.text, "", None);
     sess.watches.items[idx].epoch = epoch;
+    sess.watches.items[idx].attempted_at = Some(epoch);
 
     let shown = one_line(cmd, 80);
     let notice = match (previous, state) {
@@ -567,8 +602,7 @@ pub async fn preflight(
         sess.watches.remove(AUTO_NAME);
         return None;
     }
-    sess.watches.items[idx].epoch = sess.evidence.epoch;
-    if report.state == WatchState::Pass {
+    if sess.watches.all_pass_at(sess.evidence.epoch) {
         sess.evidence.passed(format!("watch {AUTO_NAME}"));
     }
     Some(report)
@@ -744,6 +778,10 @@ mod tests {
     use super::*;
     use crate::state::{Features, test_session};
 
+    fn observe_unchanged(sess: &mut Session, cmd: &str, run: &Completed) -> Observed {
+        observe(sess, cmd, run, sess.evidence.epoch)
+    }
+
     fn add(sess: &mut Session, name: &str, cmd: &str) -> usize {
         let cwd = sess.ws.cwd.clone();
         sess.watches.set(name, cmd, cwd, None)
@@ -878,6 +916,8 @@ mod tests {
             code: Some(code),
             ms: 40,
             text: text.to_string(),
+            output_complete: true,
+            predicate_text: None,
         }
     }
 
@@ -893,19 +933,27 @@ mod tests {
 
         // Not a test run, a runner that could not start, a slow run: none becomes a watch.
         let run = finished(&s, 0, "a.txt");
-        assert!(observe(&mut s, "ls", &run).notice.is_none());
+        assert!(observe_unchanged(&mut s, "ls", &run).notice.is_none());
         let run = finished(&s, 127, "bash: pytest: command not found");
-        assert!(observe(&mut s, "pytest -q", &run).notice.is_none());
+        assert!(
+            observe_unchanged(&mut s, "pytest -q", &run)
+                .notice
+                .is_none()
+        );
         let slow = Completed {
             ms: 90_000,
             ..finished(&s, 1, "FAILED")
         };
-        assert!(observe(&mut s, "pytest -q", &slow).notice.is_none());
+        assert!(
+            observe_unchanged(&mut s, "pytest -q", &slow)
+                .notice
+                .is_none()
+        );
         assert!(s.watches.items.is_empty());
 
         // The failing run the model made is the watch's first result.
         let run = finished(&s, 1, "FAIL: ok is missing");
-        let seen = observe(&mut s, "sh check.sh", &run);
+        let seen = observe_unchanged(&mut s, "sh check.sh", &run);
         assert!(
             seen.notice.as_deref().unwrap().starts_with(
                 "watch tests: FAIL · `sh check.sh` is now watched: it re-runs by itself"
@@ -930,7 +978,7 @@ mod tests {
         // The model running the same command itself updates the watch instead of duplicating the run.
         s.evidence.changed("edit");
         let run = finished(&s, 0, "PASS");
-        let seen = observe(&mut s, "sh check.sh", &run);
+        let seen = observe_unchanged(&mut s, "sh check.sh", &run);
         assert!(seen.reports.is_empty() && seen.notice.is_none());
         assert!(s.watches.all_pass_at(s.evidence.epoch));
         let (reports, _) = run_stale(&mut s, &cancel).await;
@@ -938,13 +986,13 @@ mod tests {
 
         // A narrower run of it changes nothing; a different test command takes its place.
         assert!(
-            observe(&mut s, "sh check.sh --only one", &run)
+            observe_unchanged(&mut s, "sh check.sh --only one", &run)
                 .notice
                 .is_none()
         );
         assert_eq!(s.watches.items[0].cmd, "sh check.sh");
         let run = finished(&s, 1, "1 failed");
-        let seen = observe(&mut s, "python3 -m unittest", &run);
+        let seen = observe_unchanged(&mut s, "python3 -m unittest", &run);
         assert_eq!(
             seen.notice.as_deref(),
             Some("watch tests: FAIL · it now follows `python3 -m unittest`.")
@@ -957,7 +1005,7 @@ mod tests {
         // `cd` into the directory it already runs in is not a different command.
         let run = finished(&s, 0, "OK");
         let wrapped = format!("cd {} && python3 -m unittest", s.ws.cwd.display());
-        let seen = observe(&mut s, &wrapped, &run);
+        let seen = observe_unchanged(&mut s, &wrapped, &run);
         assert!(seen.notice.is_none() && s.watches.items[0].state == WatchState::Pass);
     }
 
@@ -1012,7 +1060,7 @@ mod tests {
 
         // It is the check the task asked for: another test run of the model's does not take its place.
         let other = finished(&s, 1, "1 failed");
-        let seen = observe(&mut s, "python3 -m unittest", &other);
+        let seen = observe_unchanged(&mut s, "python3 -m unittest", &other);
         assert!(seen.notice.is_none() && seen.reports.is_empty());
         assert_eq!(
             (
@@ -1036,7 +1084,8 @@ mod tests {
         ] {
             assert!(throwaway(&scratch, &s.ws.root), "{scratch}");
             assert!(
-                observe(&mut s, &scratch, &run).notice.is_none() && s.watches.items.is_empty(),
+                observe_unchanged(&mut s, &scratch, &run).notice.is_none()
+                    && s.watches.items.is_empty(),
                 "{scratch}"
             );
         }
@@ -1045,7 +1094,7 @@ mod tests {
                 && !throwaway("npm test 2>&1 | tail -5", &s.ws.root)
         );
         assert!(
-            observe(&mut s, &format!("python3 {}", inside.display()), &run)
+            observe_unchanged(&mut s, &format!("python3 {}", inside.display()), &run)
                 .notice
                 .is_some()
         );
@@ -1067,6 +1116,19 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn a_later_watch_cannot_certify_an_earlier_result_against_its_changes() {
+        let mut s = test_session("watch-mutating-batch", Features::ecosage());
+        std::fs::write(s.ws.root.join("data.txt"), "good\n").unwrap();
+        add(&mut s, "checks", "grep -qx good data.txt");
+        add(&mut s, "mutates", "printf 'bad\\n' > data.txt");
+        s.evidence.changed("an edit");
+        let (reports, _) = run_stale(&mut s, &CancellationToken::new()).await;
+        assert_eq!(reports[0].state, WatchState::Pass);
+        assert!(!s.evidence.fresh());
+        assert!(!s.watches.all_pass_at(s.evidence.epoch));
     }
 
     #[tokio::test]
@@ -1131,10 +1193,15 @@ mod tests {
             Features::ecosage().without("auto-watch").unwrap(),
         );
         let run = finished(&s, 1, "FAILED");
-        assert!(observe(&mut s, "pytest -q", &run).notice.is_none() && s.watches.items.is_empty());
+        assert!(
+            observe_unchanged(&mut s, "pytest -q", &run)
+                .notice
+                .is_none()
+                && s.watches.items.is_empty()
+        );
 
         add(&mut s, "t", "pytest -q");
-        let seen = observe(&mut s, "pytest -q", &run);
+        let seen = observe_unchanged(&mut s, "pytest -q", &run);
         assert!(seen.notice.is_none());
         assert_eq!(
             (seen.reports[0].state, seen.reports[0].change),

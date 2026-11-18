@@ -478,7 +478,14 @@ fn stat_hash(md: &std::fs::Metadata) -> u64 {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    mix(md.len()) ^ mix(mtime).rotate_left(21)
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        mix(md.ctime() as u64).rotate_left(7) ^ mix(md.ctime_nsec() as u64)
+    };
+    #[cfg(not(unix))]
+    let changed = 0;
+    mix(md.len()) ^ mix(mtime).rotate_left(21) ^ changed
 }
 
 /// What a look at the workspace found.
@@ -643,6 +650,9 @@ fn git_changes(root: &Path) -> Option<u64> {
         ],
     )?;
     let mut acc = fnv64(b"git");
+    if let Some(head) = git_output(root, &["rev-parse", "--verify", "HEAD"]) {
+        acc ^= mix(fnv64(&head));
+    }
     let mut entries = status.split(|b| *b == 0).filter(|e| !e.is_empty());
     while let Some(entry) = entries.next() {
         let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
@@ -918,6 +928,21 @@ mod tests {
             .status
             .success();
         assert!(ok, "git {args:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fingerprint_detects_a_rewrite_with_same_size_and_restored_mtime() {
+        let root = tmp("fingerprint-ctime");
+        let path = root.join("data");
+        fs::write(&path, "old").unwrap();
+        let original = fingerprint(&root);
+        let mtime = path.metadata().unwrap().modified().unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(&path, "new").unwrap();
+        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_modified(mtime).unwrap();
+        assert_ne!(fingerprint(&root), original);
     }
 
     #[test]

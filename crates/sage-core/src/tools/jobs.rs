@@ -2,14 +2,13 @@
 //! memory, and keeping long-running commands alive as jobs instead of killing them at a timeout.
 
 use std::collections::VecDeque;
-use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::process::Command;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -20,44 +19,16 @@ const TAIL_CAP: usize = 256 * 1024;
 const SPILL_CAP: u64 = 256 * 1024 * 1024;
 
 /// Captured output: the first and last parts stay in memory, everything goes to the spill file.
+#[derive(Default)]
 pub struct OutBuf {
     head: Vec<u8>,
     tail: VecDeque<u8>,
     dropped: bool,
     pub total: u64,
-    file: Option<std::fs::File>,
-    spill_cap: u64,
 }
 
 impl OutBuf {
-    pub fn new(spill: &Path) -> Self {
-        Self {
-            head: Vec::new(),
-            tail: VecDeque::new(),
-            dropped: false,
-            total: 0,
-            file: std::fs::File::create(spill).ok(),
-            spill_cap: SPILL_CAP,
-        }
-    }
-
     pub fn push(&mut self, mut data: &[u8]) {
-        if let Some(f) = &mut self.file {
-            let room = self.spill_cap.saturating_sub(self.total);
-            if data.len() as u64 <= room {
-                let _ = f.write_all(data);
-            } else {
-                let _ = f.write_all(&data[..room as usize]);
-                let _ = f.write_all(
-                    format!(
-                        "\n[the output went on past {}: the rest was not kept]\n",
-                        crate::util::fmt_bytes(self.spill_cap)
-                    )
-                    .as_bytes(),
-                );
-                self.file = None;
-            }
-        }
         self.total += data.len() as u64;
         if self.head.len() < HEAD_CAP {
             let n = (HEAD_CAP - self.head.len()).min(data.len());
@@ -97,14 +68,22 @@ impl OutBuf {
 
     /// Bytes produced after `offset`, as far as they are still in memory.
     pub fn since(&self, offset: u64) -> Vec<u8> {
-        let retained = (self.head.len() + self.tail.len()) as u64;
-        let all: Vec<u8> = self.head.iter().chain(self.tail.iter()).copied().collect();
-        let wanted = self.total.saturating_sub(offset).min(retained) as usize;
-        if !self.dropped {
-            return all[all.len() - wanted..].to_vec();
+        let retained = self.head.len() + self.tail.len();
+        let wanted = self.total.saturating_sub(offset).min(retained as u64) as usize;
+        if self.dropped {
+            return self
+                .tail
+                .iter()
+                .skip(self.tail.len() - wanted.min(self.tail.len()))
+                .copied()
+                .collect();
         }
-        let tail_len = self.tail.len().min(wanted);
-        all[all.len() - tail_len..].to_vec()
+        self.head
+            .iter()
+            .chain(self.tail.iter())
+            .skip(retained - wanted)
+            .copied()
+            .collect()
     }
 }
 
@@ -118,6 +97,7 @@ pub struct Running {
     pub pid: Option<u32>,
     pub buf: Arc<Mutex<OutBuf>>,
     pub exit: watch::Receiver<Option<Exit>>,
+    pub output: watch::Receiver<u64>,
     pub readers: Vec<JoinHandle<()>>,
     pub started: Instant,
 }
@@ -253,14 +233,58 @@ fn shell_command(cmd: &str, _state: StateMode<'_>) -> Command {
     c
 }
 
-async fn pump<R: AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<OutBuf>>) {
+async fn pump<R: AsyncRead + Unpin>(mut reader: R, chunks: mpsc::Sender<Vec<u8>>) {
     let mut chunk = [0u8; 8192];
-    loop {
-        match reader.read(&mut chunk).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => buf.lock().unwrap().push(&chunk[..n]),
+    while let Ok(n) = reader.read(&mut chunk).await {
+        if n == 0 || chunks.send(chunk[..n].to_vec()).await.is_err() {
+            break;
         }
     }
+}
+
+async fn collect_output(
+    mut chunks: mpsc::Receiver<Vec<u8>>,
+    buf: Arc<Mutex<OutBuf>>,
+    output: watch::Sender<u64>,
+    path: std::path::PathBuf,
+    limit: u64,
+) {
+    let mut file = tokio::fs::File::create(path)
+        .await
+        .ok()
+        .map(|file| BufWriter::with_capacity(64 * 1024, file));
+    while let Some(chunk) = chunks.recv().await {
+        let (from, total) = {
+            let mut buf = buf.lock().unwrap();
+            let from = buf.total;
+            buf.push(&chunk);
+            (from, buf.total)
+        };
+        if let Some(writer) = &mut file {
+            let keep = limit.saturating_sub(from).min(chunk.len() as u64) as usize;
+            let mut result = writer.write_all(&chunk[..keep]).await;
+            if result.is_ok() && keep < chunk.len() {
+                let marker = format!(
+                    "\n[the output went on past {}: the rest was not kept]\n",
+                    crate::util::fmt_bytes(limit)
+                );
+                result = writer.write_all(marker.as_bytes()).await;
+            }
+            if result.is_ok() && (chunks.is_empty() || keep < chunk.len()) {
+                result = writer.flush().await;
+            }
+            if result.is_err() || keep < chunk.len() {
+                file = None;
+            }
+        }
+        if chunks.is_empty() {
+            output.send_replace(total);
+        }
+    }
+    if let Some(writer) = &mut file {
+        let _ = writer.flush().await;
+    }
+    output.send_replace(buf.lock().unwrap().total);
 }
 
 pub fn spawn(
@@ -283,13 +307,21 @@ pub fn spawn(
         .kill_on_drop(false);
     let mut child = c.spawn()?;
     let pid = child.id();
-    let buf = Arc::new(Mutex::new(OutBuf::new(spill)));
-    let mut readers = Vec::new();
+    let buf = Arc::new(Mutex::new(OutBuf::default()));
+    let (chunks, buffered) = mpsc::channel(16);
+    let (output, output_rx) = watch::channel(0);
+    let mut readers = vec![tokio::spawn(collect_output(
+        buffered,
+        buf.clone(),
+        output,
+        spill.to_owned(),
+        SPILL_CAP,
+    ))];
     if let Some(out) = child.stdout.take() {
-        readers.push(tokio::spawn(pump(out, buf.clone())));
+        readers.push(tokio::spawn(pump(out, chunks.clone())));
     }
     if let Some(err) = child.stderr.take() {
-        readers.push(tokio::spawn(pump(err, buf.clone())));
+        readers.push(tokio::spawn(pump(err, chunks)));
     }
     let (tx, rx) = watch::channel(None);
     tokio::spawn(async move {
@@ -315,6 +347,7 @@ pub fn spawn(
         pid,
         buf,
         exit: rx,
+        output: output_rx,
         readers,
         started: Instant::now(),
     })
@@ -352,13 +385,14 @@ pub async fn wait_exit(
 
 /// After the shell itself exits, give its output pipes a moment to drain. A process it left in the
 /// background may hold them open indefinitely, so this never waits long.
-pub async fn drain(readers: &mut Vec<JoinHandle<()>>) {
+pub async fn drain(readers: &mut Vec<JoinHandle<()>>) -> bool {
     let pending: Vec<JoinHandle<()>> = std::mem::take(readers);
-    let _ = tokio::time::timeout(
+    tokio::time::timeout(
         Duration::from_millis(250),
         futures_util::future::join_all(pending),
     )
-    .await;
+    .await
+    .is_ok_and(|results| results.iter().all(Result::is_ok))
 }
 
 /// Terminates the whole process group: politely first, then for certain.
@@ -467,14 +501,30 @@ mod tests {
         crate::util::canonical(&d).unwrap_or(d).join(name)
     }
 
-    #[test]
-    fn outbuf_keeps_head_and_tail_and_spills_everything() {
-        let path = spill("big.log");
-        let mut b = OutBuf::new(&path);
-        let line = format!("{}\n", "x".repeat(99));
-        for _ in 0..5_000 {
-            b.push(line.as_bytes());
+    async fn capture(path: &Path, limit: u64, line: &str, count: usize) -> Arc<Mutex<OutBuf>> {
+        let buf = Arc::new(Mutex::new(OutBuf::default()));
+        let (tx, rx) = mpsc::channel(16);
+        let writer = tokio::spawn(collect_output(
+            rx,
+            buf.clone(),
+            watch::channel(0).0,
+            path.to_owned(),
+            limit,
+        ));
+        for _ in 0..count {
+            tx.send(line.as_bytes().to_vec()).await.unwrap();
         }
+        drop(tx);
+        writer.await.unwrap();
+        buf
+    }
+
+    #[tokio::test]
+    async fn outbuf_keeps_head_and_tail_and_spills_everything() {
+        let path = spill("big.log");
+        let line = format!("{}\n", "x".repeat(99));
+        let buf = capture(&path, SPILL_CAP, &line, 5_000).await;
+        let b = buf.lock().unwrap();
         let (snap, dropped) = b.snapshot();
         assert!(dropped);
         assert!(snap.len() <= HEAD_CAP + TAIL_CAP + 1);
@@ -491,15 +541,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_spill_file_stops_growing_at_its_limit() {
+    #[tokio::test]
+    async fn the_spill_file_stops_growing_at_its_limit() {
         let path = spill("endless.log");
-        let mut b = OutBuf::new(&path);
-        b.spill_cap = 250;
         let line = format!("{}\n", "y".repeat(99));
-        for _ in 0..50 {
-            b.push(line.as_bytes());
-        }
+        let buf = capture(&path, 250, &line, 50).await;
+        let b = buf.lock().unwrap();
         let kept = std::fs::read_to_string(&path).unwrap();
         assert!(
             kept.starts_with(&line.repeat(2)) && kept.ends_with("the rest was not kept]\n"),

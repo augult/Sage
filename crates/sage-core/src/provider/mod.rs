@@ -165,6 +165,8 @@ pub struct ChatResponse {
 
 #[derive(Clone, Debug)]
 pub enum Delta {
+    /// An upstream model request has started.
+    Attempt,
     Reasoning(String),
     Content(String),
     /// The attempt failed and will be retried; anything streamed so far is void.
@@ -239,8 +241,19 @@ impl Provider {
         on_delta: DeltaSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
+        self.chat_with(req, on_delta, cancel, None, None).await
+    }
+
+    pub(crate) async fn chat_with(
+        &self,
+        req: ChatRequest<'_>,
+        on_delta: DeltaSink<'_>,
+        cancel: &CancellationToken,
+        wire: Option<&str>,
+        max_attempts: Option<u32>,
+    ) -> Result<ChatResponse, ProviderError> {
         match self {
-            Provider::OpenAi(p) => p.chat(req, on_delta, cancel).await,
+            Provider::OpenAi(p) => p.chat_with(req, on_delta, cancel, wire, max_attempts).await,
             Provider::Mock(p) => p.chat(req, on_delta, cancel).await,
         }
     }

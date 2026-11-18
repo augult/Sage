@@ -8,6 +8,7 @@ use crate::util::{fmt_bytes, fnv64};
 use crate::workspace::SeenCheck;
 use regex::Regex;
 use serde_json::Value;
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -44,7 +45,9 @@ fn parse_window(spec: &str, total: usize, window: usize) -> Result<(usize, usize
     {
         match (num(a), num(b)) {
             (Some(a), Some(b)) => (a, b),
-            (Some(a), None) if b.trim().is_empty() => (a, a + window - 1),
+            (Some(a), None) if b.trim().is_empty() => {
+                (a, a.saturating_add(window.saturating_sub(1)))
+            }
             _ => {
                 return Err(format!(
                     "could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\""
@@ -52,7 +55,7 @@ fn parse_window(spec: &str, total: usize, window: usize) -> Result<(usize, usize
             }
         }
     } else if let Some(a) = num(s.trim_end_matches('+')) {
-        (a, a + window - 1)
+        (a, a.saturating_add(window.saturating_sub(1)))
     } else {
         return Err(format!(
             "could not read `lines` {spec:?}; use e.g. \"120-260\" or \"-80\""
@@ -165,47 +168,206 @@ fn read_spill(sess: &Session, handle: &str, lines_arg: Option<&str>) -> StepOutp
             "{handle:?} is not an output handle (they look like out:3)"
         ));
     };
-    let Ok(md) = std::fs::metadata(&path) else {
-        return StepOutput::error(format!("no saved output {handle}"));
+    spill_window(
+        &path,
+        handle,
+        lines_arg,
+        sess.limits.read_lines,
+        sess.limits.read_chars,
+        |text| sess.shown(text),
+    )
+}
+
+pub(crate) async fn run_spill_off_thread(sess: &Session, args: &Value) -> Option<StepOutput> {
+    let handle = str_arg(args, "path")?.trim().strip_prefix("out:")?;
+    let handle = format!("out:{handle}");
+    let Some(path) = sess.spill_path(&handle) else {
+        return Some(StepOutput::error(format!(
+            "{handle:?} is not an output handle (they look like out:3)"
+        )));
     };
-    if md.len() > 4 * MAX_FILE_BYTES {
-        return StepOutput::error(format!(
-            "{handle} is {}; filter it with shell tools instead: {}",
-            fmt_bytes(md.len()),
-            path.display()
-        ));
+    let lines = line_argument(args);
+    let (read_lines, read_chars) = (sess.limits.read_lines, sess.limits.read_chars);
+    let ws = sess.ws.clone();
+    let shorten = sess.features.short_paths;
+    Some(
+        tokio::task::spawn_blocking(move || {
+            spill_window(
+                &path,
+                &handle,
+                lines.as_deref(),
+                read_lines,
+                read_chars,
+                |text| {
+                    if shorten {
+                        ws.shorten(&text).into_owned()
+                    } else {
+                        text
+                    }
+                },
+            )
+        })
+        .await
+        .unwrap_or_else(|error| StepOutput::error(format!("cannot read saved output: {error}"))),
+    )
+}
+
+const INDEX_STRIDE: usize = 256;
+
+/// Count ordinary captured lines without materializing them. ANSI string escapes can consume
+/// newlines, so those captures use the terminal cleaner before deciding what a line is.
+fn spill_offsets(input: impl Read) -> io::Result<Option<(usize, Vec<u64>)>> {
+    let mut reader = BufReader::new(input);
+    let mut offsets = vec![0];
+    let mut lines = 0usize;
+    let mut offset = 0u64;
+    let mut last = b'\n';
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        if chunk.contains(&0x1b) {
+            return Ok(None);
+        }
+        for (index, &byte) in chunk.iter().enumerate() {
+            if byte == b'\n' {
+                lines += 1;
+                if lines.is_multiple_of(INDEX_STRIDE) {
+                    offsets.push(offset + index as u64 + 1);
+                }
+            }
+        }
+        let len = chunk.len();
+        last = chunk[len - 1];
+        offset += len as u64;
+        reader.consume(len);
     }
-    // The file keeps what the command printed; the model is shown it as it was shown the excerpt.
-    let text = sess.shown(clean(&std::fs::read(&path).unwrap_or_default()));
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.is_empty() {
+    Ok((last == b'\n').then_some((lines, offsets)))
+}
+
+fn spill_window(
+    path: &Path,
+    handle: &str,
+    lines_arg: Option<&str>,
+    read_lines: usize,
+    read_chars: usize,
+    shown: impl Fn(String) -> String,
+) -> StepOutput {
+    render_spill(path, handle, lines_arg, read_lines, read_chars, shown).unwrap_or_else(|error| {
+        StepOutput::error(format!("cannot read saved output {handle}: {error}"))
+    })
+}
+
+fn render_spill(
+    path: &Path,
+    handle: &str,
+    lines_arg: Option<&str>,
+    read_lines: usize,
+    read_chars: usize,
+    shown: impl Fn(String) -> String,
+) -> io::Result<StepOutput> {
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len > 4 * MAX_FILE_BYTES {
+        return Ok(StepOutput::error(format!(
+            "{handle} is {}; filter it with shell tools instead: {}",
+            fmt_bytes(len),
+            path.display()
+        )));
+    }
+    let offsets = spill_offsets((&mut file).take(len))?;
+    let text;
+    let total = if let Some((total, _)) = &offsets {
+        *total
+    } else {
+        file.rewind()?;
+        let mut bytes = Vec::new();
+        (&mut file).take(len).read_to_end(&mut bytes)?;
+        text = clean(&bytes);
+        return Ok(spill_excerpt(
+            handle,
+            lines_arg,
+            read_lines,
+            read_chars,
+            text.lines().count(),
+            |from, to| {
+                Box::new(
+                    text.lines()
+                        .skip(from - 1)
+                        .take(to - from + 1)
+                        .map(|line| Ok(shown(line.to_owned()))),
+                )
+            },
+        ));
+    };
+    let (_, offsets) = offsets.unwrap();
+    Ok(spill_excerpt(
+        handle,
+        lines_arg,
+        read_lines,
+        read_chars,
+        total,
+        |from, to| {
+            let block = (from - 1) / INDEX_STRIDE;
+            let offset = offsets[block];
+            if let Err(error) = file.seek(SeekFrom::Start(offset)) {
+                return Box::new(std::iter::once(Err(error)));
+            }
+            Box::new(
+                BufReader::new(file.take(len - offset))
+                    .split(b'\n')
+                    .skip((from - 1) % INDEX_STRIDE)
+                    .take(to - from + 1)
+                    .map(move |line| line.map(|bytes| shown(clean(&bytes)))),
+            )
+        },
+    ))
+}
+
+fn spill_excerpt<'a>(
+    handle: &str,
+    lines_arg: Option<&str>,
+    read_lines: usize,
+    read_chars: usize,
+    total: usize,
+    window: impl FnOnce(usize, usize) -> Box<dyn Iterator<Item = io::Result<String>> + 'a>,
+) -> StepOutput {
+    if total == 0 {
         return StepOutput::ok(format!("{handle} · empty"));
     }
     let (from, to) = match lines_arg {
-        Some(spec) => match parse_window(spec, lines.len(), sess.limits.read_lines) {
+        Some(spec) => match parse_window(spec, total, read_lines) {
             Ok(w) => w,
             Err(e) => return StepOutput::error(e),
         },
-        None => (1, lines.len().min(sess.limits.read_lines)),
+        None => (1, total.min(read_lines)),
     };
-    let mut out = format!("{handle} · lines {from}-{to} of {}\n", lines.len());
+    let mut body = String::new();
     let mut chars = 0;
     let mut last = from;
-    for ln in from..=to {
-        let line = crate::util::truncate_chars(lines[ln - 1], MAX_COLS);
+    for (offset, line) in window(from, to).enumerate() {
+        let ln = from + offset;
+        let line = match line {
+            Ok(line) => crate::util::truncate_chars(&line, MAX_COLS),
+            Err(error) => {
+                return StepOutput::error(format!("cannot read saved output {handle}: {error}"));
+            }
+        };
         chars += line.len() + 1;
-        if chars > sess.limits.read_chars && ln > from {
+        if chars > read_chars && ln > from {
             break;
         }
-        out.push_str(&format!("{ln}|{line}\n"));
+        body.push_str(&format!("{ln}|{line}\n"));
         last = ln;
     }
-    if last < lines.len() {
+    let mut out = format!("{handle} · lines {from}-{last} of {total}\n{body}");
+    if last < total {
         out.push_str(&format!(
             "… {} more lines · next: lines \"{}-{}\"\n",
-            lines.len() - last,
+            total - last,
             last + 1,
-            (last + sess.limits.read_lines).min(lines.len())
+            (last + read_lines).min(total)
         ));
     }
     StepOutput {
@@ -281,14 +443,8 @@ fn find_symbol(lines: &[&str], name: &str) -> Vec<(usize, usize)> {
     found
 }
 
-pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
-    let Some(path_arg) = str_arg(args, "path")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    else {
-        return StepOutput::error("`path` is required");
-    };
-    let lines_arg = str_arg(args, "lines")
+fn line_argument(args: &Value) -> Option<String> {
+    str_arg(args, "lines")
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .map(String::from)
@@ -296,7 +452,17 @@ pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
             args.get("lines")
                 .and_then(Value::as_u64)
                 .map(|n| n.to_string())
-        });
+        })
+}
+
+pub fn run(sess: &mut Session, args: &Value) -> StepOutput {
+    let Some(path_arg) = str_arg(args, "path")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    else {
+        return StepOutput::error("`path` is required");
+    };
+    let lines_arg = line_argument(args);
     if path_arg.starts_with("out:") {
         return read_spill(sess, path_arg, lines_arg.as_deref());
     }
@@ -662,6 +828,8 @@ mod tests {
         );
         let out = run(&mut s, &json!({"path": "out:1", "lines": "598-600"}));
         assert!(out.observation.ends_with("600|line 600"));
+        let out = run(&mut s, &json!({"path": "out:1", "lines": "-2"}));
+        assert!(out.observation.ends_with("599|line 599\n600|line 600"));
         assert_eq!(
             run(&mut s, &json!({"path": "out:77"})).status,
             StepStatus::Error

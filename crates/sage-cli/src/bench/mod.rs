@@ -353,6 +353,9 @@ pub struct Run {
     pub stats: Stats,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external: Option<external::Detail>,
+    /// Failed attempts preceding this result, including their usage and elapsed time.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub prior_attempts: Vec<Run>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -669,6 +672,7 @@ fn outcome_name(status: FinishStatus) -> &'static str {
         FinishStatus::Yielded => "yielded",
         FinishStatus::Stopped => "stopped",
         FinishStatus::Budget => "budget",
+        FinishStatus::Incomplete => "incomplete",
         FinishStatus::Error => "error",
     }
 }
@@ -690,6 +694,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         cost_uncached: 0.0,
         stats: Stats::default(),
         external: None,
+        prior_attempts: Vec::new(),
     };
     let label = format!(
         "{}-{}-{}-{}",
@@ -726,6 +731,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         run.cost_uncached = u.cost_uncached;
         run.stats = Stats {
             turns: u.turns,
+            requests: u.turns + u.failed,
             prompt_tokens: u.prompt_tokens,
             cached_tokens: u.cached_tokens,
             output_tokens: u.output_tokens,
@@ -749,6 +755,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
         mode: Some(job.variant.mode.as_str().to_string()),
         autonomy: None,
         max_turns: Some(shared.max_turns),
+        max_requests: Some(shared.max_turns),
         time_budget_secs: Some(shared.time_budget),
         interactive: false,
         without: job.variant.without.clone(),
@@ -819,14 +826,20 @@ async fn run_job(shared: Arc<Shared>, job: Job) -> Option<Run> {
     {
         return None;
     }
-    let mut retry = 0;
+    let mut prior_attempts = Vec::new();
     let run = loop {
-        let run = attempt(&shared, &job, retry).await;
-        *shared.spent.lock().unwrap() += run.stats.cost;
-        if run.error.is_none() || retry >= shared.retries {
+        let retry = prior_attempts.len() as u32;
+        let mut run = attempt(&shared, &job, retry).await;
+        let within_budget = {
+            let mut spent = shared.spent.lock().unwrap();
+            *spent += run.stats.cost;
+            shared.max_cost.is_none_or(|limit| *spent < limit)
+        };
+        if run.error.is_none() || retry >= shared.retries || !within_budget {
+            run.prior_attempts = prior_attempts;
             break run;
         }
-        retry += 1;
+        prior_attempts.push(run);
     };
     if shared.progress {
         let n = {
@@ -888,7 +901,10 @@ fn cell(model: &str, task: &str, variant: &str, runs: &[&Run]) -> Cell {
             .iter()
             .filter(|r| r.outcome == "done" && !r.solved)
             .count(),
-        total_cost: done.iter().map(|r| r.stats.cost).sum(),
+        total_cost: runs
+            .iter()
+            .map(|r| r.stats.cost + r.prior_attempts.iter().map(|a| a.stats.cost).sum::<f64>())
+            .sum(),
         median: Medians {
             turns: med(|s| s.turns as f64),
             steps: med(|s| s.steps as f64),
@@ -2024,9 +2040,14 @@ u.urlopen(r).read()' "$1"; }"#;
                 ..Stats::default()
             },
             external: None,
+            prior_attempts: Vec::new(),
         };
+        let mut retried = run(3, 0.01, true, None);
+        retried
+            .prior_attempts
+            .push(run(2, 0.07, false, Some("provider failed")));
         let runs = [
-            run(3, 0.01, true, None),
+            retried,
             run(5, 0.03, false, None),
             run(4, 0.02, true, None),
             run(
@@ -2042,7 +2063,7 @@ u.urlopen(r).read()' "$1"; }"#;
             (c.median.turns, c.median.cost, c.median.cost_uncached),
             (4.0, 0.02, 0.04)
         );
-        assert!((c.total_cost - 0.06).abs() < 1e-12);
+        assert!((c.total_cost - 0.13).abs() < 1e-12);
         assert_eq!(median(vec![1.0, 9.0, 2.0, 4.0]), 3.0);
         assert_eq!(
             (delta(3.0, 5.0), delta(1.0, 0.0), num(2.5), num(3.0)),

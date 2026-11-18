@@ -32,6 +32,8 @@ pub enum FinishStatus {
     Stopped,
     /// A turn or time budget ran out.
     Budget,
+    /// A requested goal or task constraint could not be established.
+    Incomplete,
     Error,
 }
 
@@ -88,6 +90,9 @@ pub struct Choice {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
     pub turns: u32,
+    /// Upstream requests including attempts retried and independent goal checks.
+    #[serde(default)]
+    pub requests: u32,
     pub steps: u32,
     pub skipped: u32,
     pub surprises: u32,

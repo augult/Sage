@@ -85,6 +85,8 @@ export function outcomeLook(status, verified) {
       return { icon: 'stop', tone: 'plain', label: 'Stopped' };
     case 'budget':
       return { icon: 'stop', tone: 'alert', label: 'Out of budget' };
+    case 'incomplete':
+      return { icon: 'stop', tone: 'alert', label: 'Incomplete' };
     case 'error':
       return { icon: 'cross', tone: 'danger', label: 'Failed' };
     default:

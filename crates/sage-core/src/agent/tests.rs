@@ -1417,7 +1417,7 @@ async fn the_goal_is_checked_three_times_at_most_per_message_and_then_stays_unme
             r.agent.stats.goal_checks,
             requests(&r).len()
         ),
-        (FinishStatus::Done, 3, 3, 6)
+        (FinishStatus::Incomplete, 3, 3, 6)
     );
     assert!(
         out.evidence
@@ -1447,7 +1447,7 @@ async fn the_goal_is_checked_three_times_at_most_per_message_and_then_stays_unme
 }
 
 #[tokio::test]
-async fn a_check_that_fails_or_cannot_be_read_does_not_fail_the_run() {
+async fn a_check_that_fails_or_cannot_be_read_leaves_the_run_incomplete() {
     for (name, answer) in [
         (
             "agent-goal-fails",
@@ -1469,7 +1469,7 @@ async fn a_check_that_fails_or_cannot_be_read_does_not_fail_the_run() {
                 r.agent.stats.turns,
                 requests(&r).len()
             ),
-            (FinishStatus::Done, true, 1, 2),
+            (FinishStatus::Incomplete, false, 1, 2),
             "{name}"
         );
         assert!(
@@ -1489,7 +1489,7 @@ async fn a_check_that_fails_or_cannot_be_read_does_not_fail_the_run() {
         assert!(matches!(
             events(&r).last(),
             Some(EventKind::Finish {
-                status: FinishStatus::Done,
+                status: FinishStatus::Incomplete,
                 ..
             })
         ));
@@ -1566,7 +1566,7 @@ async fn on_the_last_reply_the_check_is_made_and_recorded_but_nothing_can_follow
     let out = r.agent.run(TASK.into(), &CancellationToken::new()).await;
     assert_eq!(
         (out.status, r.agent.stats.turns, requests(&r).len()),
-        (FinishStatus::Done, 2, 3)
+        (FinishStatus::Incomplete, 2, 3)
     );
     assert!(
         out.evidence
@@ -2169,5 +2169,71 @@ async fn old_observations_are_trimmed_only_where_enough_replies_are_left_to_pay_
         glm(&mut r);
         r.agent.maybe_decay(10, landing, started);
         assert_eq!(decays(&r), 0, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_missing_deliverable_on_the_last_reply_is_incomplete() {
+    let mut r = rig(
+        "agent-missing-final-deliverable",
+        AgentConfig {
+            max_turns: 1,
+            ..AgentConfig::new("mock")
+        },
+        vec![finish()],
+    );
+    let out = r
+        .agent
+        .run(
+            "Create `findings.json` with your findings.".into(),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(
+        (out.status, out.verified),
+        (FinishStatus::Incomplete, false)
+    );
+    assert!(out.evidence.contains("findings.json"));
+}
+
+#[tokio::test]
+async fn oversized_history_drops_sealed_exchanges_and_retains_the_task() {
+    let think = "reasoning ".repeat(2_000);
+    let mut turns: Vec<TurnFn> = (0..4)
+        .map(|_| {
+            fixed(MockTurn::calls(
+                &think,
+                vec![("read", json!({"path":"n.txt"}))],
+            ))
+        })
+        .collect();
+    turns.push(finish());
+    let mut r = rig(
+        "agent-bounded-history",
+        AgentConfig {
+            context_limit: 12_000,
+            ..AgentConfig::new("mock")
+        },
+        turns,
+    );
+    let outcome = r
+        .agent
+        .run("Read n.txt.".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(outcome.status, FinishStatus::Done);
+    let sent = requests(&r);
+    assert_eq!(sent.len(), 5);
+    let last = sent.last().unwrap();
+    assert!(last[1].content.contains("Read n.txt."));
+    assert!(last.iter().filter(|m| m.reasoning.is_some()).count() < 4);
+    for (i, message) in last
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| !m.tool_calls.is_empty())
+    {
+        assert_eq!(
+            last[i + 1].tool_call_id.as_deref(),
+            Some(message.tool_calls[0].id.as_str())
+        );
     }
 }

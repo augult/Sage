@@ -21,7 +21,7 @@ import { changesCard, chevron, fold, hasDetail, stepDetail, stepIcon, stepStat, 
 // How a step ended, when it was not simply fine.
 const STATE_WORDS = { surprise: 'surprise', error: 'failed', skipped: 'skipped', running: 'in background', denied: 'denied', unfinished: 'did not finish' };
 
-const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', error: 'Failed' };
+const RESULT_WORDS = { done: 'Done', yielded: 'Handed back', stopped: 'Stopped', budget: 'Out of budget', incomplete: 'Incomplete', error: 'Failed' };
 
 // Characters of a note that still read as one slim line.
 const LONG_NOTE = 140;
@@ -29,6 +29,15 @@ const LONG_NOTE = 140;
 export function createTimeline(container, ctx) {
   const views = [];
   return {
+    stream(turn) {
+      if (!turn?.live || turn.reply) return false;
+      const view = views.at(-1);
+      if (!turn.content.trim()) return view?.stream?.(turn) ?? false;
+      const key = `${turn.key}-text`;
+      if (view?.key !== key) return false;
+      view.update({ kind: 'text', key, sig: `${turn.rev}:${turn.streamRev}`, text: turn.content.trim(), streaming: true });
+      return true;
+    },
     update(items) {
       const blocks = gather(items, ctx);
       blocks.forEach((block, i) => {
@@ -148,12 +157,21 @@ function plainView(block, ctx) {
       return undrawable(now.kind, problem);
     }
   };
+  let previous = block;
   const view = {
     key: block.key,
     sig: block.sig,
     el: draw(block),
     update(next) {
       if (next.sig === view.sig) return;
+      const text = view.el.querySelector('.stream-text')?.firstChild;
+      if (text?.nodeType === Node.TEXT_NODE && next.streaming && previous.streaming && next.text.startsWith(previous.text)) {
+        text.appendData(next.text.slice(previous.text.length));
+        previous = next;
+        view.sig = next.sig;
+        return;
+      }
+      previous = next;
       const el = draw(next);
       view.el.replaceWith(el);
       Object.assign(view, { el, sig: next.sig });
@@ -301,6 +319,23 @@ function workView(block, ctx) {
   return {
     key: block.key,
     el,
+    stream(turn) {
+      const row = block.rows.at(-1);
+      if (block.live !== turn || row?.kind !== 'thought' || row.turn !== turn) return false;
+      const text = turn.reasoning.trim();
+      const old = row.text;
+      row.text = text;
+      if (!open) return true;
+      const view = rows.at(-1);
+      const node = view?.el.querySelector('.stream-text')?.firstChild;
+      if (view?.key === row.key && node?.nodeType === Node.TEXT_NODE && text.startsWith(old)) {
+        node.appendData(text.slice(old.length));
+        view.sig = rowSig(row);
+      } else {
+        syncRows();
+      }
+      return true;
+    },
     update(next) {
       block = next;
       head();

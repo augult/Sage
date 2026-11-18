@@ -1487,7 +1487,7 @@ async fn a_session_is_continued_by_another_harness_with_its_conversation_numberi
     assert_eq!(
         (ended.outcome, ended.goal.clone()),
         (
-            Some(FinishStatus::Done),
+            Some(FinishStatus::Incomplete),
             Some(Goal::new("n.txt is all upper case"))
         )
     );

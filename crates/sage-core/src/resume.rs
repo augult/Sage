@@ -1,11 +1,10 @@
 //! What a session keeps on disk so that it can be continued after the program has been restarted,
 //! and the lock that keeps two processes from running the same session.
 //!
-//! `snapshot.json` sits beside `meta.json` and `events.jsonl`. It is written whole (a temporary
-//! file, then a rename) after every model reply and when a run ends, so that a crash or a kill
-//! loses at most the turn in flight. It holds what continuing needs and nothing the workspace or
-//! the log can say: the conversation as sent, and the counters, policies and standing checks the
-//! agent would otherwise start empty with. The goal is in `meta.json`.
+//! Each checkpoint publishes `snapshot.json` atomically after appending and syncing its new
+//! conversation records. The snapshot names a committed prefix of the journal and stores the
+//! counters, policies, and standing checks. A rewrite of old messages starts a new journal.
+//! Older checkpoints embed the conversation directly. The goal is in `meta.json`.
 
 use crate::events::Stats;
 use crate::provider::Message;
@@ -13,14 +12,14 @@ use crate::state::SessionState;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 pub const SNAPSHOT: &str = "snapshot.json";
 pub const LOCK: &str = "session.lock";
 
 /// The version of the snapshot format this build writes and reads.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// How a session was set up, as far as `Features` cannot say: the mechanism lists it started with.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +45,8 @@ pub struct Snapshot {
     pub autonomy: String,
     pub interactive: bool,
     pub max_turns: u32,
+    #[serde(default)]
+    pub max_requests: Option<u32>,
     pub time_budget_secs: Option<u64>,
     /// The effort policy as `EffortPolicy::parse` reads it, and the level it has reached.
     pub effort_policy: String,
@@ -62,6 +63,95 @@ pub struct Snapshot {
     pub chain_hints: u8,
     pub solo_hints: u8,
     pub session: SessionState,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredSnapshot {
+    #[serde(flatten)]
+    state: Snapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    journal: Option<Journal>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Journal {
+    generation: String,
+    pub entries: usize,
+    #[serde(skip)]
+    pub revision: u64,
+}
+
+impl Journal {
+    fn name(&self) -> String {
+        format!("history-{}.jsonl", self.generation)
+    }
+}
+
+pub(crate) fn write_checkpoint(
+    path: &Path,
+    state: Snapshot,
+    previous: Option<Journal>,
+    revision: u64,
+    messages: Vec<Message>,
+    stubs: Vec<Option<String>>,
+) -> std::io::Result<Journal> {
+    let new_generation = previous.is_none();
+    let mut journal = previous.unwrap_or_else(|| Journal {
+        generation: crate::util::rand_hex(12),
+        entries: 0,
+        revision,
+    });
+    if new_generation || !messages.is_empty() {
+        let mut options = OpenOptions::new();
+        options.append(true).create_new(new_generation);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = BufWriter::new(options.open(path.with_file_name(journal.name()))?);
+        for entry in messages.iter().zip(&stubs) {
+            serde_json::to_writer(&mut file, &entry)?;
+            writeln!(file)?;
+        }
+        file.flush()?;
+        file.get_ref().sync_all()?;
+        if new_generation {
+            sync_parent(path)?;
+        }
+        journal.entries += messages.len();
+    }
+    let mut stored = StoredSnapshot {
+        state,
+        journal: Some(journal),
+    };
+    write_atomic(path, &serde_json::to_vec(&stored)?)?;
+    let journal = stored.journal.take().unwrap();
+    if new_generation && let Some(dir) = path.parent() {
+        sync_parent(path)?;
+        let name = journal.name();
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if entry.file_name().to_str().is_some_and(|file| {
+                file.strip_prefix("history-")
+                    .and_then(|s| s.strip_suffix(".jsonl"))
+                    .is_some_and(|id| id.len() == 24 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+                    && file != name
+            }) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(journal)
+}
+
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Writes `bytes` to `path` so that a reader sees the old file or the new one, never half of one.
@@ -94,13 +184,34 @@ pub fn read(dir: &Path) -> Result<Snapshot, String> {
             format!("its snapshot cannot be read: {e}")
         }
     })?;
-    let snapshot: Snapshot =
-        serde_json::from_str(&text).map_err(|e| format!("its snapshot cannot be read: {e}"))?;
+    let StoredSnapshot {
+        state: mut snapshot,
+        journal,
+    } = serde_json::from_str(&text).map_err(|e| format!("its snapshot cannot be read: {e}"))?;
     if snapshot.version > VERSION {
         return Err(format!(
             "its snapshot is version {}, from a newer Sage than this one ({VERSION})",
             snapshot.version
         ));
+    }
+    if let Some(journal) = journal {
+        if journal.generation.len() != 24
+            || !journal.generation.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err("its snapshot names an invalid history journal".into());
+        }
+        let file = File::open(dir.join(journal.name()))
+            .map_err(|e| format!("its history cannot be read: {e}"))?;
+        for line in BufReader::new(file).lines().take(journal.entries) {
+            let line = line.map_err(|e| format!("its history cannot be read: {e}"))?;
+            let (message, stub) = serde_json::from_str(&line)
+                .map_err(|e| format!("its history cannot be read: {e}"))?;
+            snapshot.messages.push(message);
+            snapshot.stubs.push(stub);
+        }
+        if snapshot.messages.len() != journal.entries {
+            return Err("its history ends before the saved checkpoint".into());
+        }
     }
     Ok(snapshot)
 }

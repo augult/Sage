@@ -236,6 +236,29 @@ fn output_contains(output: &str, needle: &str) -> bool {
     output.to_lowercase().contains(&needle.to_lowercase())
 }
 
+/// Checks a receipt without treating an excerpt as complete evidence.
+pub fn check_capture(
+    expect: Option<&Expect>,
+    exit: Option<i32>,
+    text: &str,
+    complete: bool,
+) -> Verdict {
+    if !complete && expect.is_some_and(Expect::has_output_predicates) {
+        let mut verdict = check(expect, exit, text);
+        verdict.held = false;
+        verdict.violations =
+            vec!["output was incomplete, so its prediction could not be verified".into()];
+        return verdict;
+    }
+    check(expect, exit, text)
+}
+
+impl Expect {
+    pub fn has_output_predicates(&self) -> bool {
+        !self.has.is_empty() || !self.lacks.is_empty()
+    }
+}
+
 /// Checks an outcome against a prediction. `exit` is `None` while a command is still running.
 pub fn check(expect: Option<&Expect>, exit: Option<i32>, output: &str) -> Verdict {
     let explicit = expect.is_some();
