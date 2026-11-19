@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_names_the_place_the_tools_and_the_files() {
-        let mut s = test_session("bootstrap", Features::ecosage().without("survey").unwrap());
+        let mut s = test_session("bootstrap", Features::sage().without("survey").unwrap());
         std::fs::create_dir_all(s.ws.root.join("src")).unwrap();
         std::fs::write(
             s.ws.root.join("package.json"),
@@ -279,7 +279,7 @@ mod tests {
         );
 
         // Where command output keeps its absolute paths, nothing is said about it.
-        s.features = Features::ecosage()
+        s.features = Features::sage()
             .without("survey")
             .unwrap()
             .without("short_paths")

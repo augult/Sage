@@ -45,7 +45,7 @@ sage resume <id> "and now the other one"
 
 `sage --help` lists every command and option.
 
-- **Modes.** Ecosage (the default) is everything above. `--mode default` is the conventional loop
+- **Modes.** Sage (the default) is everything above. `--mode default` is the conventional loop
   other harnesses run, one tool call after another. Any single mechanism can be switched off with
   `--without <name>` or on with `--with <name>`.
 - **Effort.** `-e ratchet` (Auto in the app, the default) starts at low and rises when surprises

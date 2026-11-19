@@ -83,7 +83,7 @@ pub struct StartRequest {
     /// `low`, `high`, `max`, `off`, or `ratchet[-low|-high]`.
     #[serde(default)]
     pub effort: Option<String>,
-    /// `ecosage` (default) or `default`, the conventional baseline loop.
+    /// `sage` (default) or `default`, the conventional baseline loop.
     #[serde(default)]
     pub mode: Option<String>,
     /// `auto` (default) or `ask`.
@@ -1606,7 +1606,7 @@ impl Harness {
 
         let ws = Workspace::new(Path::new(&meta.cwd))
             .map_err(|e| cannot(format!("cannot use {:?} as a workspace: {e}", meta.cwd)))?;
-        // A session stored before Prosage was taken out comes back as Ecosage, without the
+        // A session stored before Prosage was taken out comes back as Sage, without the
         // mechanisms that went with it.
         let current = |names: &[String]| -> Vec<String> {
             names
@@ -1618,7 +1618,7 @@ impl Harness {
         snapshot.setup.with = current(&snapshot.setup.with);
         snapshot.setup.without = current(&snapshot.setup.without);
         if snapshot.setup.mode.eq_ignore_ascii_case("prosage") {
-            snapshot.setup.mode = Mode::Ecosage.as_str().to_string();
+            snapshot.setup.mode = Mode::Sage.as_str().to_string();
         }
         let (features, mode) = features_of(&StartRequest {
             mode: Some(snapshot.setup.mode.clone()),

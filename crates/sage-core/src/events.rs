@@ -132,7 +132,7 @@ pub enum EventKind {
         provider: String,
         model: String,
         effort: String,
-        /// `ecosage` or `default` (the conventional loop).
+        /// `sage` or `default` (the conventional loop).
         mode: String,
         autonomy: String,
         /// True when a scripted stand-in is playing the model; all numbers are then fabricated.

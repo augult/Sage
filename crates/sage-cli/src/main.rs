@@ -30,7 +30,7 @@ OPTIONS for run
   -m, --model <name>       model id as the provider spells it
   -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises).
                            The same in every mode: a level you set is the level the run thinks at
-      --mode <name>        ecosage (default): few requests, at a little cost to the result
+      --mode <name>        sage (default): few requests, at a little cost to the result
                            default: the conventional loop of other harnesses, nothing of Sage's
       --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
       --with <name>        switch one mechanism on, e.g. watches in the default mode (repeatable)

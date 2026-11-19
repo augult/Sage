@@ -704,7 +704,7 @@ mod tests {
     const SRC: &str = "def divide(a, b):\n    return a / b\n\ndef add(a, b):\n    return a + b\n";
 
     fn fixture(name: &str, body: &str) -> (Session, std::path::PathBuf) {
-        let s = test_session(name, Features::ecosage());
+        let s = test_session(name, Features::sage());
         let p = s.ws.root.join("calc.txt");
         std::fs::write(&p, body).unwrap();
         (s, p)
@@ -1054,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_syntax_breaking_edit_is_reported_immediately() {
-        let s0 = test_session("edit-syntax", Features::ecosage());
+        let s0 = test_session("edit-syntax", Features::sage());
         let mut s = s0;
         let p = s.ws.root.join("conf.json");
         std::fs::write(&p, "{\n  \"a\": 1,\n  \"b\": 2\n}\n").unwrap();
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn refuses_to_write_outside_the_workspace() {
-        let mut s = test_session("edit-outside", Features::ecosage());
+        let mut s = test_session("edit-outside", Features::sage());
         let out = run(
             &mut s,
             &json!({"path": "/etc/hostname", "old": "x", "new": "y"}),

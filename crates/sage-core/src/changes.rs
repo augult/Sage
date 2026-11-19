@@ -221,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_what_the_session_changed_is_shown() {
-        let mut sess = test_session("changes-git", Features::ecosage());
+        let mut sess = test_session("changes-git", Features::sage());
         let root = sess.ws.root.clone();
         sh(
             &root,
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn without_git_the_edited_files_are_named() {
-        let mut sess = test_session("changes-plain", Features::ecosage());
+        let mut sess = test_session("changes-plain", Features::sage());
         sess.baseline = baseline(&sess.ws.root).await;
         assert!(sess.baseline.is_none(), "not a repository");
         assert_eq!(changes(&sess).await, None);

@@ -649,7 +649,7 @@ mod tests {
 
     #[tokio::test]
     async fn held_prediction_yields_a_receipt_not_the_output() {
-        let mut s = test_session("receipt", Features::ecosage());
+        let mut s = test_session("receipt", Features::sage());
         let out = sh(&mut s, json!({"cmd": "for i in $(seq 1 200); do echo \"test_$i passed\"; done; echo '200 passed in 1.2s'", "expect": {"exit": "0", "has": "passed"}})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(out.explicit);
@@ -676,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpredicted_success_shows_bounded_output_and_small_output_is_never_hidden() {
-        let mut s = test_session("implicit", Features::ecosage());
+        let mut s = test_session("implicit", Features::sage());
         let out = sh(&mut s, json!({"cmd": "seq 1 500"})).await;
         assert_eq!(out.status, StepStatus::Ok);
         assert!(!out.explicit);
@@ -698,7 +698,7 @@ mod tests {
 
     #[tokio::test]
     async fn violated_prediction_is_a_surprise_with_detail_and_code_context() {
-        let mut s = test_session("surprise", Features::ecosage());
+        let mut s = test_session("surprise", Features::sage());
         let body: String = (1..=30).map(|i| format!("line_{i} = {i}\n")).collect();
         std::fs::write(s.ws.root.join("calc.py"), body).unwrap();
         let out = sh(&mut s, json!({"cmd": "echo 'Traceback (most recent call last):'; echo '  File \"calc.py\", line 12, in f'; echo 'ZeroDivisionError'; exit 1", "expect": {"exit": "0"}})).await;
@@ -724,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn unpredicted_failure_is_marked_failed_and_expected_failure_is_ok() {
-        let mut s = test_session("failed", Features::ecosage());
+        let mut s = test_session("failed", Features::sage());
         let out = sh(&mut s, json!({"cmd": "echo boom >&2; exit 2"})).await;
         assert_eq!(out.status, StepStatus::Surprise);
         assert!(out.observation.starts_with("[FAILED] exit 2 · "));
@@ -741,7 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_search_that_finds_nothing_has_answered_not_failed() {
-        let mut s = test_session("answers", Features::ecosage());
+        let mut s = test_session("answers", Features::sage());
         std::fs::write(s.ws.root.join("a.py"), "x = 1\n").unwrap();
         std::fs::write(s.ws.root.join("b.py"), "x = 2\n").unwrap();
         for (cmd, word) in [
@@ -785,7 +785,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_test_run_piped_through_tail_cannot_pass_as_success() {
-        let mut s = test_session("masked", Features::ecosage());
+        let mut s = test_session("masked", Features::sage());
         let out = sh(
             &mut s,
             json!({"cmd": "sh -c 'echo FAILED 2 tests; exit 1' | tail -5", "expect_exit": "0"}),
@@ -813,7 +813,7 @@ mod tests {
 
     #[tokio::test]
     async fn cwd_and_exports_persist_between_calls() {
-        let mut s = test_session("cwd", Features::ecosage());
+        let mut s = test_session("cwd", Features::sage());
         std::fs::create_dir_all(s.ws.root.join("pkg")).unwrap();
         sh(&mut s, json!({"cmd": "cd pkg && export STAGE=two"})).await;
         assert!(s.ws.cwd.ends_with("pkg"));
@@ -831,7 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it() {
-        let mut s = test_session("detached", Features::ecosage());
+        let mut s = test_session("detached", Features::sage());
         let out = sh(&mut s, json!({"cmd": "sleep 2", "timeout": 1})).await;
         assert_eq!(out.status, StepStatus::Running);
         sh(&mut s, json!({"cmd": "export STAGE=later"})).await;
@@ -856,7 +856,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_hands_the_command_over_as_a_job_instead_of_killing_it() {
-        let mut s = test_session("timeout", Features::ecosage());
+        let mut s = test_session("timeout", Features::sage());
         let out = sh(
             &mut s,
             json!({"cmd": "echo warming up; sleep 20; echo done", "timeout": 1}),
@@ -871,7 +871,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_foreground_command_is_killed_when_the_run_budget_expires() {
-        let mut s = test_session("shell-deadline", Features::ecosage());
+        let mut s = test_session("shell-deadline", Features::sage());
         s.deadline = Some(std::time::Instant::now() + Duration::from_millis(100));
         let result = sh(&mut s, json!({"cmd": "sleep 0.4; echo late > late.txt"})).await;
         assert_eq!(result.status, StepStatus::Error);
@@ -882,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_output_predicate_sees_the_middle_of_the_capture() {
-        let mut s = test_session("shell-complete-output", Features::ecosage());
+        let mut s = test_session("shell-complete-output", Features::sage());
         let result = sh(
             &mut s,
             json!({
@@ -898,7 +898,7 @@ mod tests {
 
     #[tokio::test]
     async fn background_start_reports_immediate_crashes() {
-        let mut s = test_session("bg", Features::ecosage());
+        let mut s = test_session("bg", Features::sage());
         let out = sh(
             &mut s,
             json!({"cmd": "echo 'port in use' >&2; exit 1", "background": true}),

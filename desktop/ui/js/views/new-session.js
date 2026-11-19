@@ -2,7 +2,7 @@
 // middle the app's mark, one line that asks, and the chat bar a session has at its foot. In the
 // bar are the task and, along its foot, what attaches a file, the effort, the model, the
 // microphone and what starts. Under the bar is the folder the session will work in, the recent
-// ones to pick from and the way to another, with the mode and the autonomy beside it. Skills are
+// ones to pick from and the way to another, with the autonomy beside it. Skills are
 // commands typed into the task (js/views/skills.js). With no key configured the way to add one is
 // offered over the bar.
 
@@ -11,13 +11,13 @@ import { brandMark, h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { attachments } from './attach.js';
 import { barButton, chatBar, fitBox, markIdle, onSendKey } from './common.js';
-import { AUTONOMIES, MODES, effortOptions, modelOptions, modelPicker, picker, plainMode, settingPicker } from './controls.js';
+import { AUTONOMIES, effortOptions, modelOptions, modelPicker, picker, settingPicker } from './controls.js';
 import { dictation } from './dictate.js';
 import { skillCommands } from './skills.js';
 
 // What has been entered so far. It survives a trip to Settings and back; the skills start empty
 // for every new session.
-const draft = { cwd: null, provider: null, model: null, effort: null, mode: 'ecosage', autonomy: 'auto', task: '', skills: [], files: [] };
+const draft = { cwd: null, provider: null, model: null, effort: null, autonomy: 'auto', task: '', skills: [], files: [] };
 
 // What the folder menu offers besides folders: the way to another. No path is spelled so.
 const CHOOSE = ':choose';
@@ -126,15 +126,11 @@ export function mountNewSession(main, app) {
     onkeydown: (event) => skills.key(event) || onSendKey(event, start),
   });
 
-  // The skills on offer follow the folder: a project brings its own. The conventional loop takes none.
+  // The skills on offer follow the folder: a project brings its own.
   let skillList = [];
   let skillsAsked = 0;
-  const skills = skillCommands({ box: task, list: () => skillList, usable: () => !plainMode(draft.mode), value: draft.skills, onChange: (names) => (draft.skills = names) });
+  const skills = skillCommands({ box: task, list: () => skillList, value: draft.skills, onChange: (names) => (draft.skills = names) });
   const hint = h('span.chat-hint', 'Type / for skills');
-  function drawMode() {
-    hint.hidden = plainMode(draft.mode);
-    skills.refresh();
-  }
   async function loadSkills() {
     const asked = ++skillsAsked;
     const listed = await api.skills(draft.cwd || null).catch(() => []);
@@ -159,10 +155,10 @@ export function mountNewSession(main, app) {
     if (!draft.task.trim()) return fail('No task.');
     mic.stop();
     return guarded(startButton, async () => {
-      const { cwd, task, mode, autonomy } = draft;
-      const spentSkills = plainMode(mode) ? [] : draft.skills;
+      const { cwd, task, autonomy } = draft;
+      const spentSkills = draft.skills;
       const spentFiles = draft.files;
-      const meta = await api.startSession({ cwd, task, ...selection, effort: draft.effort ?? state.effort, mode, autonomy, skills: spentSkills, files: spentFiles });
+      const meta = await api.startSession({ cwd, task, ...selection, effort: draft.effort ?? state.effort, autonomy, skills: spentSkills, files: spentFiles });
       if (draft.task === task) draft.task = '';
       skills.remove(spentSkills);
       files.remove(spentFiles);
@@ -190,7 +186,7 @@ export function mountNewSession(main, app) {
         selection = choice;
         Object.assign(draft, choice);
       }, 'end'), mic.button, startButton],
-      under: [folderSlot, setting('mode', 'Mode', MODES, drawMode), setting('autonomy', 'Autonomy', AUTONOMIES), hint],
+      under: [folderSlot, setting('autonomy', 'Autonomy', AUTONOMIES), hint],
     }),
   );
 
@@ -200,7 +196,6 @@ export function mountNewSession(main, app) {
 
   main.append(h('div.new-body', hero, lead, bar));
   drawFolder();
-  drawMode();
   loadSkills();
   fitBox(task);
   markIdle(startButton, task);

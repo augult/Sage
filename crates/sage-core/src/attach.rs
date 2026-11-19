@@ -342,7 +342,7 @@ mod tests {
     fn a_task_names_files_in_backticks_or_plainly_and_a_command_is_not_a_file() {
         let s = test_session(
             "attach-names",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         for name in [
             "pager.py",
@@ -382,7 +382,7 @@ mod tests {
     fn nothing_outside_the_workspace_is_named() {
         let s = test_session(
             "attach-escape",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         put(&s, "inside.txt", "in\n");
         put(&s, "sub/deep.txt", "deep\n");
@@ -410,7 +410,7 @@ mod tests {
     async fn an_attached_file_is_read_output_and_counts_as_read() {
         let mut s = test_session(
             "attach-read",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         put(&s, "a.txt", "alpha\nbeta\n");
         put(&s, "b.txt", "gamma\n");
@@ -442,7 +442,7 @@ mod tests {
 
         // With nothing named, or switched off, there is nothing to add.
         assert!(attach(&mut s, "Tidy up.").is_none());
-        s.features = Features::ecosage()
+        s.features = Features::sage()
             .without("survey")
             .unwrap()
             .without("attach")
@@ -454,7 +454,7 @@ mod tests {
     fn only_small_text_files_are_attached_and_a_long_one_is_mentioned_with_its_length() {
         let mut s = test_session(
             "attach-size",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         put(&s, "long.txt", &numbered(MAX_FILE_LINES + 1));
         put(
@@ -512,7 +512,7 @@ mod tests {
     fn the_total_is_bounded_in_lines_and_in_files_and_credentials_stay_out() {
         let mut s = test_session(
             "attach-total",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         for name in ["a.txt", "b.txt", "c.txt"] {
             put(&s, name, &numbered(180));
@@ -534,7 +534,7 @@ mod tests {
 
         let mut s = test_session(
             "attach-count",
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
         );
         for i in 1..=6 {
             put(&s, &format!("f{i}.txt"), "x\n");
@@ -557,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_rest_of_a_small_workspace_follows_the_named_files_and_a_large_one_is_left_alone() {
-        let mut s = test_session("attach-survey", Features::ecosage());
+        let mut s = test_session("attach-survey", Features::sage());
         for (name, body) in [
             ("pkg/b.py", "b = 2\n"),
             ("pkg/a.py", "a = 1\n"),
@@ -594,7 +594,7 @@ mod tests {
             StepStatus::Ok
         );
 
-        let mut s = test_session("attach-survey-large", Features::ecosage());
+        let mut s = test_session("attach-survey-large", Features::sage());
         for i in 0..=SURVEY_TREE {
             put(&s, &format!("src/f{i}.py"), "x = 1\n");
         }

@@ -154,7 +154,7 @@ mod tests {
         let sess = Session::new(
             Workspace::new(&root).unwrap(),
             base.join("session"),
-            Features::ecosage().without("survey").unwrap(),
+            Features::sage().without("survey").unwrap(),
             None,
         )
         .unwrap();

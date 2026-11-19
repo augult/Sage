@@ -37,10 +37,10 @@ USAGE
 OPTIONS
   -p, --provider <id>      provider (default: the configured one)
   -m, --model <name>       model; repeat or separate with commas to compare several
-      --variants <list>    ecosage, default, no-<mechanism>, e.g. no-auto-watch (default: ecosage,default);
+      --variants <list>    sage, default, no-<mechanism>, e.g. no-auto-watch (default: sage,default);
                            add +skill (each task with its skill), +sys:<file> (system prompt template),
                            +effort:<level>, +no-<mechanism>, or +<mechanism> to switch one on, e.g.
-                           ecosage+skill+effort:max or default+watches
+                           sage+skill+effort:max or default+watches
                            ext:<name> for another harness, e.g. ext:mini, ext:opencode, ext:aider
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
@@ -113,12 +113,12 @@ impl Variant {
             }
             return Ok(Variant {
                 external: Some(harness.to_string()),
-                ..Variant::own(&name.to_ascii_lowercase(), Mode::Ecosage, vec![])
+                ..Variant::own(&name.to_ascii_lowercase(), Mode::Sage, vec![])
             });
         }
         let unknown = || {
             format!(
-                "unknown variant {s:?}: use ecosage, default, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +<mechanism>, +no-<mechanism>",
+                "unknown variant {s:?}: use sage, default, or no-<mechanism> with one of {}; modifiers +skill, +sys:<file>, +effort:<level>, +<mechanism>, +no-<mechanism>",
                 Features::NAMES.join(", ")
             )
         };
@@ -128,7 +128,7 @@ impl Variant {
                 .strip_prefix("no-")
                 .ok_or_else(unknown)?
                 .replace('-', "_");
-            Features::ecosage()
+            Features::sage()
                 .without(&mechanism)
                 .ok_or_else(unknown)?;
             Ok(mechanism)
@@ -137,7 +137,7 @@ impl Variant {
         let base = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut v = match base.as_str() {
             // `classic` is what `default` was called, and what earlier results name it.
-            "ecosage" | "default" | "classic" => Variant {
+            "sage" | "default" | "classic" => Variant {
                 mode: Mode::parse(&base).unwrap_or_default(),
                 ..Variant::default()
             },
@@ -210,7 +210,7 @@ impl Default for Options {
             provider: None,
             models: Vec::new(),
             variants: vec![
-                Variant::own("ecosage", Mode::Ecosage, vec![]),
+                Variant::own("sage", Mode::Sage, vec![]),
                 Variant::own("default", Mode::Plain, vec![]),
             ],
             tasks: TASKS.iter().collect(),
@@ -1277,8 +1277,8 @@ pub fn render(r: &Report) -> String {
                 "default"
             };
             let against =
-                if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "ecosage") {
-                    "ecosage"
+                if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "sage") {
+                    "sage"
                 } else {
                     plain
                 };
@@ -1472,7 +1472,7 @@ mod tests {
         }
         let h = harness("scripted");
         let Ok(Command::Run(opt)) = parse(&args(
-            "--scripted --tasks pager,report --variants ecosage,classic,no-auto-watch -n 2 -j 3",
+            "--scripted --tasks pager,report --variants sage,classic,no-auto-watch -n 2 -j 3",
         )) else {
             panic!("should parse")
         };
@@ -1502,13 +1502,13 @@ mod tests {
                 .take(3)
                 .map(|r| r.variant.as_str())
                 .collect::<Vec<_>>(),
-            ["ecosage", "classic", "no-auto-watch"]
+            ["sage", "classic", "no-auto-watch"]
         );
 
         let all = report
             .summary
             .iter()
-            .find(|c| c.task == ALL && c.variant == "ecosage")
+            .find(|c| c.task == ALL && c.variant == "sage")
             .unwrap();
         assert_eq!(
             (
@@ -1668,12 +1668,12 @@ mod tests {
         );
         assert_eq!(
             opt.variants[1],
-            Variant::own("no-receipts", Mode::Ecosage, vec!["receipts".into()])
+            Variant::own("no-receipts", Mode::Sage, vec!["receipts".into()])
         );
         assert!(!opt.variants[1].features().receipts && opt.variants[1].features().scripts);
         // Every mechanism has its variant, however its name is spelled.
         let Ok(Command::Run(opt)) = parse(&args(
-            "--variants ecosage,no-attach,no-short-paths,no-short_paths",
+            "--variants sage,no-attach,no-short-paths,no-short_paths",
         )) else {
             panic!("should parse")
         };
@@ -1698,7 +1698,7 @@ mod tests {
         // A mechanism can be switched on with `+<mechanism>`, e.g. in the conventional loop, and
         // `classic` is still read as `default`. Prosage is gone.
         let Ok(Command::Run(opt)) = parse(&args(
-            "--variants default+watches,ecosage+effort:low,default,classic",
+            "--variants default+watches,sage+effort:low,default,classic",
         )) else {
             panic!("should parse")
         };
@@ -1711,14 +1711,14 @@ mod tests {
             modes,
             [
                 (Mode::Plain, true, false),
-                (Mode::Ecosage, true, true),
+                (Mode::Sage, true, true),
                 (Mode::Plain, false, false),
                 (Mode::Plain, false, false)
             ]
         );
         assert!(parse(&args("--variants prosage")).is_err());
         let Ok(Command::Run(opt)) = parse(&args(
-            "--variants ecosage,ecosage+no-survey,no-survey+no-attach",
+            "--variants sage,sage+no-survey,no-survey+no-attach",
         )) else {
             panic!("should parse")
         };
@@ -1728,8 +1728,8 @@ mod tests {
                 .map(|v| (v.name.as_str(), v.features().attach, v.features().survey))
                 .collect::<Vec<_>>(),
             [
-                ("ecosage", true, true),
-                ("ecosage+no-survey", true, false),
+                ("sage", true, true),
+                ("sage+no-survey", true, false),
                 ("no-survey+no-attach", false, false)
             ]
         );
@@ -1741,7 +1741,7 @@ mod tests {
         for bad in [
             "--variants turbo",
             "--variants no-telepathy",
-            "--variants ecosage+review",
+            "--variants sage+review",
             "--variants no-review",
             "--variants no-lessons",
             "--tasks nope",
@@ -1757,7 +1757,7 @@ mod tests {
     #[test]
     fn external_variants_parse() {
         let Ok(Command::Run(opt)) = parse(&args(
-            "--variants ecosage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters",
+            "--variants sage,ext:mini,EXT:Open-Code_2 --external-dir /tmp/adapters",
         )) else {
             panic!("should parse")
         };
@@ -1769,12 +1769,12 @@ mod tests {
         assert_eq!(
             externals,
             [
-                ("ecosage", None),
+                ("sage", None),
                 ("ext:mini", Some("mini")),
                 ("ext:open-code_2", Some("open-code_2"))
             ]
         );
-        assert!(opt.variants[1].mode == Mode::Ecosage && opt.variants[1].without.is_empty());
+        assert!(opt.variants[1].mode == Mode::Sage && opt.variants[1].without.is_empty());
         assert_eq!(opt.external_dir, Some(PathBuf::from("/tmp/adapters")));
         assert_eq!(Options::default().external_dir, None);
         for bad in [
@@ -2024,7 +2024,7 @@ u.urlopen(r).read()' "$1"; }"#;
             seq: 0,
             model: "m".into(),
             task: "t".into(),
-            variant: "ecosage".into(),
+            variant: "sage".into(),
             repeat: 1,
             session: String::new(),
             outcome: "done".into(),
@@ -2057,7 +2057,7 @@ u.urlopen(r).read()' "$1"; }"#;
                 Some("provider returned HTTP 502: overloaded"),
             ),
         ];
-        let c = cell("m", "t", "ecosage", &runs.iter().collect::<Vec<_>>());
+        let c = cell("m", "t", "sage", &runs.iter().collect::<Vec<_>>());
         assert_eq!((c.runs, c.errors, c.solved, c.false_done), (3, 1, 2, 1));
         assert_eq!(
             (c.median.turns, c.median.cost, c.median.cost_uncached),
@@ -2136,7 +2136,7 @@ u.urlopen(r).read()' "$1"; }"#;
     }
 
     #[tokio::test]
-    async fn ecosage_recovers_live_benchmark_failure_modes_where_default_fails() {
+    async fn sage_recovers_live_benchmark_failure_modes_where_default_fails() {
         use sage_core::provider::Message;
         use sage_core::provider::mock::TurnFn;
 
@@ -2155,19 +2155,19 @@ u.urlopen(r).read()' "$1"; }"#;
         };
 
         // Scenario 1 (`audit`): a mode-blind model summarizes findings in `finish` with `epoch == 0`,
-        // and writes `findings.json` only if held by the harness. Ecosage enforces `contract` at zero
+        // and writes `findings.json` only if held by the harness. Sage enforces `contract` at zero
         // token cost.
         let audit = tasks::find("audit").unwrap();
         let audit_sol = audit.solution[0].1;
         for (label, mode, without, expect_solved) in [
             ("default", "default", vec![], false),
             (
-                "ecosage-no-contract",
-                "ecosage",
+                "sage-no-contract",
+                "sage",
                 vec!["contract".to_string()],
                 false,
             ),
-            ("ecosage", "ecosage", vec![], true),
+            ("sage", "sage", vec![], true),
         ] {
             let h = Harness::at(base.join(format!("s1-{label}")));
             let ws = base.join(format!("ws-s1-{label}"));
@@ -2232,7 +2232,7 @@ u.urlopen(r).read()' "$1"; }"#;
         // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
         let audit_clean = tasks::find("audit-clean").unwrap();
         for (label, mode, expect_solved) in
-            [("default", "default", false), ("ecosage", "ecosage", true)]
+            [("default", "default", false), ("sage", "sage", true)]
         {
             let h = Harness::at(base.join(format!("s2-{label}")));
             let ws = base.join(format!("ws-s2-{label}"));
@@ -2295,7 +2295,7 @@ u.urlopen(r).read()' "$1"; }"#;
         }
 
         // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
-        // Default accepts `finish` and fails when `test_pager.py` is restored; Ecosage's
+        // Default accepts `finish` and fails when `test_pager.py` is restored; Sage's
         // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
@@ -2306,7 +2306,7 @@ u.urlopen(r).read()' "$1"; }"#;
             .unwrap()
             .1;
         for (label, mode, expect_solved) in
-            [("default", "default", false), ("ecosage", "ecosage", true)]
+            [("default", "default", false), ("sage", "sage", true)]
         {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
@@ -2373,7 +2373,7 @@ u.urlopen(r).read()' "$1"; }"#;
             assert_eq!(solved, expect_solved, "s4 pager ({label}): tail={tail}");
         }
 
-        // Scenario 5 (`confdialect`): once the visible tests pass, Ecosage's tip asks for the spec to be
+        // Scenario 5 (`confdialect`): once the visible tests pass, Sage's tip asks for the spec to be
         // covered before `finish` but still accepts a direct one; this model takes it and misses §5.
         let conf = tasks::find("confdialect").unwrap();
         let conf_sol = conf.solution[0].1;
@@ -2381,7 +2381,7 @@ u.urlopen(r).read()' "$1"; }"#;
             "raise ConfError(\"continuation at the end of the file\", number)",
             "break",
         );
-        for (label, mode, expect_solved) in [("ecosage", "ecosage", false)] {
+        for (label, mode, expect_solved) in [("sage", "sage", false)] {
             let h = Harness::at(base.join(format!("s5-{label}")));
             let ws = base.join(format!("ws-s5-{label}"));
             materialize(&ws, conf.files).unwrap();
@@ -2397,7 +2397,7 @@ u.urlopen(r).read()' "$1"; }"#;
                             // Visible tests pass on `partial_conf`, which misses trailing-backslash error.
                             MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": pc.clone(), "overwrite": true}))])
                         } else if step == 1 && last.contains("`finish` is accepted now") {
-                            // Ecosage qualifies `finish` with spec coverage, while still accepting a direct finish.
+                            // Sage qualifies `finish` with spec coverage, while still accepting a direct finish.
                             assert!(last.contains("once every rule in the task and its spec is covered"), "{last}");
                             MockTurn::calls("", vec![("finish", json!({"summary": "Visible tests pass."}))])
                         } else if step < 11 {

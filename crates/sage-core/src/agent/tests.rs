@@ -970,7 +970,7 @@ async fn the_files_the_task_names_are_in_the_first_message_and_can_be_edited_at_
 
     // Switched off, the first message is what it used to be and the file has to be asked for.
     let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::ecosage().without("attach").unwrap();
+    cfg.features = Features::sage().without("attach").unwrap();
     let mut r = rig("agent-no-attach", cfg, vec![read(), fix()]);
     let out = r.agent.run(task.into(), &CancellationToken::new()).await;
     assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
@@ -1046,7 +1046,7 @@ async fn an_attached_file_and_the_failing_output_do_not_repeat_each_other() {
 
     // Without the attachment the lines come once as well, with the failing output.
     let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::ecosage().without("attach").unwrap();
+    cfg.features = Features::sage().without("attach").unwrap();
     let mut r = rig("agent-preflight-alone", cfg, turns());
     prepare(&r);
     r.agent.run(task.into(), &CancellationToken::new()).await;
@@ -1101,7 +1101,7 @@ async fn a_traceback_reaches_the_model_without_the_workspace_path_and_with_its_s
 
     // Switched off, the path is there in full, and the lines are found all the same.
     let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::ecosage().without("short-paths").unwrap();
+    cfg.features = Features::sage().without("short-paths").unwrap();
     let mut r = rig("agent-long-paths", cfg, turns());
     let root = r.agent.sess.ws.root.display().to_string();
     std::fs::write(r.agent.sess.ws.root.join("calc.py"), &body).unwrap();
@@ -1756,7 +1756,7 @@ async fn baseline_taken(name: &str, features: Features, goal: Option<&str>) -> b
 async fn the_baseline_of_the_uncommitted_work_is_taken_where_the_mode_tracks_changes_or_there_is_a_goal()
  {
     assert!(
-        baseline_taken("agent-baseline", Features::ecosage(), None).await,
+        baseline_taken("agent-baseline", Features::sage(), None).await,
         "taken whenever the mode tracks changes"
     );
     assert!(
@@ -1825,7 +1825,7 @@ async fn an_effort_the_user_fixed_is_kept_in_every_mode() {
         ))
     };
     for (name, features) in [
-        ("eco", Features::ecosage()),
+        ("sage", Features::sage()),
         ("default", Features::classic()),
     ] {
         let mut cfg = AgentConfig::new("mock");
@@ -1902,8 +1902,8 @@ async fn an_effort_the_user_fixed_is_kept_in_every_mode() {
     );
 }
 #[tokio::test]
-async fn contract_holds_finish_in_ecosage_and_can_be_ablated() {
-    // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: Ecosage holds `finish` until written.
+async fn contract_holds_finish_in_sage_and_can_be_ablated() {
+    // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: Sage holds `finish` until written.
     let premature = finish();
     let write_findings = fixed(MockTurn::calls(
         "",
@@ -1985,7 +1985,7 @@ async fn contract_holds_finish_in_ecosage_and_can_be_ablated() {
 
     // Ablating `contract` turns it off cleanly.
     let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::ecosage().without("contract").unwrap();
+    cfg.features = Features::sage().without("contract").unwrap();
     let mut r = rig("agent-contract-off", cfg, vec![finish()]);
     let out = r
         .agent
@@ -2004,7 +2004,7 @@ async fn a_reply_still_coming_when_the_time_budget_runs_out_is_cut_and_booked() 
         vec![("read", json!({"path": "n.txt"}))],
     );
     let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::ecosage().without("bootstrap").unwrap();
+    cfg.features = Features::sage().without("bootstrap").unwrap();
     cfg.time_budget = Some(Duration::from_secs(1));
     let mut r = rig("agent-deadline", cfg, vec![]);
     let mut provider = MockProvider::new(vec![fixed(slow)]);

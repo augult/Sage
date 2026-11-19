@@ -767,7 +767,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_file_that_holds_the_keys_is_not_shown_to_the_model() {
-        let mut s = test_session("script-keys", Features::ecosage());
+        let mut s = test_session("script-keys", Features::sage());
         let own = crate::config::data_dir().join("config.json");
         let list: Vec<(&str, Value)> = vec![(
             "shell",
@@ -797,7 +797,7 @@ mod tests {
     async fn on_the_last_reply_finish_is_taken_as_it_stands_and_says_what_is_known() {
         let finish = ("finish", json!({"summary": "half done"}));
         // Unchecked and behind a failed step: accepted all the same.
-        let mut s = test_session("script-landing", Features::ecosage());
+        let mut s = test_session("script-landing", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         let (res, _, events) = run_as(
             &mut s,
@@ -847,7 +847,7 @@ mod tests {
         assert!(res.finished.is_some() && !s.ws.root.join("b.txt").exists());
 
         // A failing watch is named; a passing one verifies.
-        let mut s = test_session("script-landing-watch", Features::ecosage());
+        let mut s = test_session("script-landing-watch", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         run(
             &mut s,
@@ -901,7 +901,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_reply_can_edit_check_and_finish() {
-        let mut s = test_session("script-happy", Features::ecosage());
+        let mut s = test_session("script-happy", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         let (res, stats, events) = run(
             &mut s,
@@ -932,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_surprise_halts_everything_after_it() {
-        let mut s = test_session("script-halt", Features::ecosage());
+        let mut s = test_session("script-halt", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         let (res, stats, events) = run(
             &mut s,
@@ -968,7 +968,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_read_does_not_cancel_its_neighbours_but_a_failed_edit_does() {
-        let mut s = test_session("script-probes", Features::ecosage());
+        let mut s = test_session("script-probes", Features::sage());
         std::fs::write(s.ws.root.join("a.txt"), "alpha\n").unwrap();
         let (_, _, events) = run(
             &mut s,
@@ -1003,7 +1003,7 @@ mod tests {
 
     #[tokio::test]
     async fn finish_needs_fresh_evidence_or_a_stated_reason() {
-        let mut s = test_session("script-gate", Features::ecosage());
+        let mut s = test_session("script-gate", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
 
         // Nothing changed yet: nothing to verify.
@@ -1121,7 +1121,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_test_run_that_writes_ignored_build_output_is_watched_and_not_run_twice() {
-        let mut s = test_session("script-build-output", Features::ecosage());
+        let mut s = test_session("script-build-output", Features::sage());
         let root = s.ws.root.clone();
         let git = std::process::Command::new("git")
             .arg("-C")
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[tokio::test]
     async fn watches_rerun_after_changes_and_gate_finish() {
-        let mut s = test_session("script-watch", Features::ecosage());
+        let mut s = test_session("script-watch", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         let (res, _, events) = run(
             &mut s,
@@ -1245,7 +1245,7 @@ mod tests {
 
     #[tokio::test]
     async fn dangerous_commands_are_refused_when_nobody_can_approve() {
-        let mut s = test_session("script-danger", Features::ecosage());
+        let mut s = test_session("script-danger", Features::sage());
         let (res, _, events) = run(
             &mut s,
             &[
@@ -1267,7 +1267,7 @@ mod tests {
 
     #[tokio::test]
     async fn approval_requests_wait_for_an_answer() {
-        let mut s = test_session("script-ask", Features::ecosage());
+        let mut s = test_session("script-ask", Features::sage());
         let sink = MemorySink::default();
         let mut stats = Stats::default();
         let cancel = CancellationToken::new();
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_test_run_becomes_a_watch_so_an_edit_alone_comes_back_checked() {
-        let mut s = test_session("script-auto", Features::ecosage());
+        let mut s = test_session("script-auto", Features::sage());
         std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
         std::fs::write(
             s.ws.root.join("check.sh"),
@@ -1418,7 +1418,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_watch_the_model_never_asked_for_can_be_waived_with_a_reason() {
-        let mut s = test_session("script-waive", Features::ecosage());
+        let mut s = test_session("script-waive", Features::sage());
         std::fs::write(
             s.ws.root.join("check.sh"),
             "echo 'FAIL: the service is unreachable'; exit 1\n",

@@ -37,7 +37,7 @@ Open either route in a browser:
 The audit suite reports `window.uiAuditResults` and emits `ui-audit-complete`.
 It checks Settings overflow, provider address/key readability, field bounds,
 provider dialog scrolling/actions, the scrolled Settings action hit target,
-composer bounds, all five viewport-bounded picker menus, no native titles,
+composer bounds, all four viewport-bounded picker menus, no native titles,
 tooltip delay/edge clamping/modal rendering/pointer-events/dismissal/removal,
 late-title migration, focused-radio descriptions, inspector arrow-key navigation,
 and (with `rich`) file-editor, attachments and GitHub layout. The audit assertions run after
@@ -69,7 +69,7 @@ const result = await new Promise(resolve => {
 ```
 
 The sample session is resumable so its composer is exercised. Checks cover
-value-only Mode/Autonomy/Effort controls, preserved accessible setting names,
+value-only Autonomy/Effort controls, preserved accessible setting names,
 changing and restoring every New-session setting, value-only active-session
 Autonomy/Effort controls; no-session Economy/Code/GitHub hit targets and empty text;
 no `list_dir`/`git_state` requests outside a session; repeated New session,

@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn finds_matches_with_anchors_respecting_gitignore_but_not_hiding_dotfiles() {
-        let s = fixture(Features::ecosage());
+        let s = fixture(Features::sage());
         let out = run(&s, &json!({"pattern": "divide"}));
         let o = &out.observation;
         assert!(
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn code_pasted_as_a_pattern_is_found_and_brace_globs_work() {
-        let s = fixture(Features::ecosage());
+        let s = fixture(Features::sage());
         // As a regex this is a group that matches `dividea, b`: nothing. The text is there.
         let out = run(&s, &json!({"pattern": "divide(a, b)"}));
         assert!(
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn smart_case_glob_path_and_context() {
-        let s = fixture(Features::ecosage());
+        let s = fixture(Features::sage());
         let out = run(&s, &json!({"pattern": "Divide", "glob": "*.py"}));
         assert!(
             out.observation.ends_with("[1 match in 1 file]"),
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn invalid_regex_falls_back_to_literal_and_glob_alone_lists_files() {
-        let s = fixture(Features::ecosage());
+        let s = fixture(Features::sage());
         let out = run(&s, &json!({"pattern": "divide(4, 2"}));
         assert!(
             out.observation.contains("searched literally")
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn caps_output_and_says_how_much_is_missing() {
-        let s = test_session("search-cap", Features::ecosage());
+        let s = test_session("search-cap", Features::sage());
         for f in 0..5 {
             let body: String = (0..40).map(|i| format!("needle {i}\n")).collect();
             std::fs::write(s.ws.root.join(format!("f{f}.txt")), body).unwrap();

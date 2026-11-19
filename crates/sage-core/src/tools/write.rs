@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn creates_files_and_parents_but_will_not_clobber_silently() {
-        let mut s = test_session("write", Features::ecosage());
+        let mut s = test_session("write", Features::sage());
         let out = run(
             &mut s,
             &json!({"path": "pkg/sub/notes.md", "content": "# Notes\n\nhello\n"}),
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_file_that_was_shown_whole_is_replaced_without_being_asked_twice() {
-        let mut s = test_session("write-seen", Features::ecosage());
+        let mut s = test_session("write-seen", Features::sage());
         let text: String = (1..=40).map(|n| format!("line {n}\n")).collect();
         std::fs::write(s.ws.root.join("long.txt"), &text).unwrap();
 
@@ -203,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn flags_unparseable_content_and_respects_the_write_policy() {
-        let mut s = test_session("write-check", Features::ecosage());
+        let mut s = test_session("write-check", Features::sage());
         let bad = run(&mut s, &json!({"path": "cfg.json", "content": "{\"a\": }"})).await;
         assert_eq!(bad.status, StepStatus::Surprise);
         assert!(

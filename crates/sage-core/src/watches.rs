@@ -789,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn reports_only_changes_and_announces_regressions() {
-        let mut s = test_session("watch", Features::ecosage());
+        let mut s = test_session("watch", Features::sage());
         let cancel = CancellationToken::new();
         std::fs::write(s.ws.root.join("ok"), "").unwrap();
         add(
@@ -842,7 +842,7 @@ mod tests {
 
     #[tokio::test]
     async fn watches_a_stopped_run_did_not_get_to_are_not_taken_as_run() {
-        let mut s = test_session("watch-stopped", Features::ecosage());
+        let mut s = test_session("watch-stopped", Features::sage());
         std::fs::write(s.ws.root.join("ok"), "").unwrap();
         add(&mut s, "a", "true");
         add(&mut s, "b", "test -f ok");
@@ -868,7 +868,7 @@ mod tests {
 
     #[tokio::test]
     async fn timing_noise_is_not_a_change_but_a_different_failure_is() {
-        let mut s = test_session("watch-digest", Features::ecosage());
+        let mut s = test_session("watch-digest", Features::sage());
         let cancel = CancellationToken::new();
         std::fs::write(s.ws.root.join("which"), "test_a").unwrap();
         add(
@@ -890,7 +890,7 @@ mod tests {
 
     #[tokio::test]
     async fn watches_do_not_move_the_session_and_can_be_replaced_or_removed() {
-        let mut s = test_session("watch-cwd", Features::ecosage());
+        let mut s = test_session("watch-cwd", Features::sage());
         let cancel = CancellationToken::new();
         add(&mut s, "w", "cd / && true");
         run_stale(&mut s, &cancel).await;
@@ -923,7 +923,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_models_test_run_becomes_a_watch_and_is_never_run_twice() {
-        let mut s = test_session("watch-auto", Features::ecosage());
+        let mut s = test_session("watch-auto", Features::sage());
         let cancel = CancellationToken::new();
         std::fs::write(
             s.ws.root.join("check.sh"),
@@ -1030,7 +1030,7 @@ mod tests {
             assert_eq!(named_in(task), None, "{task}");
         }
 
-        let mut s = test_session("watch-preflight", Features::ecosage());
+        let mut s = test_session("watch-preflight", Features::sage());
         let cancel = CancellationToken::new();
         std::fs::write(
             s.ws.root.join("check.sh"),
@@ -1073,7 +1073,7 @@ mod tests {
 
         // With no command named, the model's own test run is watched, but not a throwaway one:
         // a script outside the workspace, or one written on the spot.
-        let mut s = test_session("watch-throwaway", Features::ecosage());
+        let mut s = test_session("watch-throwaway", Features::sage());
         let run = finished(&s, 1, "AssertionError");
         let tmp = std::env::temp_dir().join("sage-scratch-verify_test.py");
         let inside = s.ws.root.join("tests/test_all.py");
@@ -1100,7 +1100,7 @@ mod tests {
         );
 
         // A command that cannot start is not kept, and the mechanism can be switched off.
-        let mut s = test_session("watch-preflight-missing", Features::ecosage());
+        let mut s = test_session("watch-preflight-missing", Features::sage());
         assert!(
             preflight(&mut s, "`./run_tests.sh` fails.", &cancel)
                 .await
@@ -1109,7 +1109,7 @@ mod tests {
         );
         let mut s = test_session(
             "watch-preflight-off",
-            Features::ecosage().without("preflight").unwrap(),
+            Features::sage().without("preflight").unwrap(),
         );
         assert!(
             preflight(&mut s, "`sh check.sh` fails.", &cancel)
@@ -1120,7 +1120,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_later_watch_cannot_certify_an_earlier_result_against_its_changes() {
-        let mut s = test_session("watch-mutating-batch", Features::ecosage());
+        let mut s = test_session("watch-mutating-batch", Features::sage());
         std::fs::write(s.ws.root.join("data.txt"), "good\n").unwrap();
         add(&mut s, "checks", "grep -qx good data.txt");
         add(&mut s, "mutates", "printf 'bad\\n' > data.txt");
@@ -1134,7 +1134,7 @@ mod tests {
     #[tokio::test]
     async fn a_watch_reports_paths_the_way_the_model_gives_them() {
         use crate::anchors::anchor;
-        let mut s = test_session("watch-short-paths", Features::ecosage());
+        let mut s = test_session("watch-short-paths", Features::sage());
         let cancel = CancellationToken::new();
         let root = s.ws.root.display().to_string();
         std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
@@ -1169,7 +1169,7 @@ mod tests {
 
         let mut s = test_session(
             "watch-long-paths",
-            Features::ecosage().without("short_paths").unwrap(),
+            Features::sage().without("short_paths").unwrap(),
         );
         let root = s.ws.root.display().to_string();
         std::fs::write(s.ws.root.join("calc.py"), "a = 1\nb = a / 0\n").unwrap();
@@ -1190,7 +1190,7 @@ mod tests {
     async fn without_auto_watch_only_requested_watches_adopt_a_run() {
         let mut s = test_session(
             "watch-manual",
-            Features::ecosage().without("auto-watch").unwrap(),
+            Features::sage().without("auto-watch").unwrap(),
         );
         let run = finished(&s, 1, "FAILED");
         assert!(

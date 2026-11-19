@@ -84,7 +84,7 @@
       }
     });
     await check('Picker menu stays in the viewport', async () => {
-      for (const id of ['mode', 'effort', 'model', 'folder', 'autonomy']) {
+      for (const id of ['effort', 'model', 'folder', 'autonomy']) {
         document.querySelector(`#pick-${id}`).click(); await settle();
         const menu = document.querySelector(`#pick-${id}-menu`), box = menu.getBoundingClientRect();
         expect(box.left >= 4 && box.right <= innerWidth - 4 && box.top >= 4 && box.bottom <= innerHeight - 4, `${id} menu outside viewport: ${JSON.stringify(box.toJSON())}`);

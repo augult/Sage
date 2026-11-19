@@ -233,7 +233,7 @@ async fn scripted_sessions_can_switch_mechanisms_off_and_be_closed() {
         .unwrap();
     assert_eq!(
         (meta.mode.as_str(), meta.simulated),
-        ("ecosage without auto-watch, survey", true)
+        ("sage without auto-watch, survey", true)
     );
     let done = until_idle(&h, &meta.id).await;
     assert_eq!(
@@ -359,7 +359,7 @@ async fn a_session_gets_its_system_prompt_once_and_later_skills_with_the_message
     };
 
     // Template, the user's instructions, the project's, then the skills in the order asked for.
-    let built_in = prompt::system_prompt(&Features::ecosage());
+    let built_in = prompt::system_prompt(&Features::sage());
     let expected = h.system_prompt(&req()).unwrap();
     let (user, project) = (prompt::USER_NOTE, prompt::project_note("AGENTS.md"));
     assert_eq!(
@@ -548,11 +548,11 @@ async fn a_session_runs_in_one_of_three_modes() {
     };
     // What each is called in the session's record. No mode chooses the effort for the user.
     for (asked, mode, effort) in [
-        (None, "ecosage", "ratchet-low"),
-        (Some("ecosage"), "ecosage", "ratchet-low"),
+        (None, "sage", "ratchet-low"),
+        (Some("sage"), "sage", "ratchet-low"),
         (Some("default"), "default", "ratchet-low"),
         (Some("classic"), "default", "ratchet-low"),
-        (Some("Ecosage"), "ecosage", "ratchet-low"),
+        (Some("Sage"), "sage", "ratchet-low"),
     ] {
         let meta = h
             .start_scripted(
@@ -570,13 +570,13 @@ async fn a_session_runs_in_one_of_three_modes() {
     assert_eq!(
         h.start_scripted(req(Some("turbo")), MockProvider::scripted(vec![]))
             .unwrap_err(),
-        "unknown mode \"turbo\"; use ecosage, default"
+        "unknown mode \"turbo\"; use sage, default"
     );
     // Prosage is gone: asking for it is an error like any unknown mode.
     assert_eq!(
         h.start_scripted(req(Some("prosage")), MockProvider::scripted(vec![]))
             .unwrap_err(),
-        "unknown mode \"prosage\"; use ecosage, default"
+        "unknown mode \"prosage\"; use sage, default"
     );
     // An effort that was chosen stands, and a mode can be run without a part of itself.
     let meta = h
@@ -584,21 +584,21 @@ async fn a_session_runs_in_one_of_three_modes() {
             StartRequest {
                 effort: Some("low".into()),
                 without: vec!["watches".into()],
-                ..req(Some("ecosage"))
+                ..req(Some("sage"))
             },
             MockProvider::scripted(vec![MockTurn::say("ok")]),
         )
         .unwrap();
     assert_eq!(
         (meta.mode.as_str(), meta.effort.as_str()),
-        ("ecosage without watches", "low")
+        ("sage without watches", "low")
     );
     // What is stored for a restart names the mode, so the session comes back as what it was.
     until_idle(&h, &meta.id).await;
     let setup = resume::read(&session_dir(&h, &meta.id)).unwrap().setup;
     assert_eq!(
         (setup.mode.as_str(), setup.without.as_slice()),
-        ("ecosage", &["watches".to_string()][..])
+        ("sage", &["watches".to_string()][..])
     );
     let back = features_of(&StartRequest {
         mode: Some(setup.mode),
@@ -609,13 +609,13 @@ async fn a_session_runs_in_one_of_three_modes() {
     assert_eq!(
         back,
         (
-            Features::ecosage().without("watches").unwrap(),
-            Mode::Ecosage
+            Features::sage().without("watches").unwrap(),
+            Mode::Sage
         )
     );
 
-    // Ecosage has every mechanism; the conventional loop has none.
-    assert_eq!(Mode::Ecosage.features(), Features::ecosage());
+    // Sage has every mechanism; the conventional loop has none.
+    assert_eq!(Mode::Sage.features(), Features::sage());
     assert_eq!(Mode::Plain.features(), Features::classic());
     assert!(
         Features::NAMES
@@ -779,7 +779,7 @@ fn what_was_stored_before_there_were_skills_still_loads() {
         cwd: "/".into(),
         provider: "p".into(),
         model: "m".into(),
-        mode: "ecosage".into(),
+        mode: "sage".into(),
         effort: "high".into(),
         simulated: false,
         created: 1,
@@ -804,7 +804,7 @@ fn what_was_stored_before_there_were_skills_still_loads() {
             .is_empty()
     );
 
-    let start = r#"{"seq":1,"ts":1,"type":"session_start","id":"s","title":"t","cwd":"/","provider":"p","model":"m","effort":"high","mode":"ecosage","autonomy":"auto","simulated":false}"#;
+    let start = r#"{"seq":1,"ts":1,"type":"session_start","id":"s","title":"t","cwd":"/","provider":"p","model":"m","effort":"high","mode":"sage","autonomy":"auto","simulated":false}"#;
     assert!(
         matches!(serde_json::from_str::<Event>(start).unwrap().kind, EventKind::SessionStart { skills, .. } if skills.is_empty())
     );
@@ -1171,7 +1171,7 @@ fn logs_and_metas_that_hold_what_was_retired_still_open() {
     let log = [
         line(
             1,
-            serde_json::json!({"type": "session_start", "id": id, "title": "t", "cwd": "/", "provider": "p", "model": "m", "effort": "high", "mode": "ecosage", "autonomy": "auto", "simulated": false}),
+            serde_json::json!({"type": "session_start", "id": id, "title": "t", "cwd": "/", "provider": "p", "model": "m", "effort": "high", "mode": "sage", "autonomy": "auto", "simulated": false}),
         ),
         line(2, serde_json::json!({"type": "user", "text": "hi"})),
         line(
@@ -1195,7 +1195,7 @@ fn logs_and_metas_that_hold_what_was_retired_still_open() {
         cwd: "/".into(),
         provider: "p".into(),
         model: "m".into(),
-        mode: "ecosage".into(),
+        mode: "sage".into(),
         effort: "high".into(),
         simulated: false,
         created: 1,
@@ -1430,7 +1430,7 @@ async fn run_with_a_goal_left_open(name: &str) -> (Harness, String, String, Seen
 }
 
 #[tokio::test]
-async fn a_session_stored_as_prosage_comes_back_as_ecosage_without_the_retired_mechanisms() {
+async fn a_session_stored_as_prosage_comes_back_as_sage_without_the_retired_mechanisms() {
     use crate::provider::mock::MockTurn;
     let h = harness("resume-prosage");
     let cwd = resume_workspace(&h);
@@ -1473,7 +1473,7 @@ async fn a_session_stored_as_prosage_comes_back_as_ecosage_without_the_retired_m
             setup.with.len(),
             setup.without.as_slice()
         ),
-        ("ecosage", 0, &["watches".to_string()][..])
+        ("sage", 0, &["watches".to_string()][..])
     );
 }
 

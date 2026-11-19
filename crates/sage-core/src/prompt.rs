@@ -378,8 +378,8 @@ mod tests {
 
     #[test]
     fn every_advertised_tool_exists_and_the_prefix_stays_small() {
-        let manual = Features::ecosage().without("auto_watch").unwrap();
-        for features in [Features::ecosage(), manual, Features::classic()] {
+        let manual = Features::sage().without("auto_watch").unwrap();
+        for features in [Features::sage(), manual, Features::classic()] {
             for t in tool_schemas(&features, true).as_array().unwrap() {
                 let name = t["function"]["name"].as_str().unwrap();
                 assert_eq!(Tool::from_name(name).map(|t| t.name()), Some(name));
@@ -387,11 +387,11 @@ mod tests {
             }
         }
         // The fixed prefix is paid for on every turn of every session: keep it lean.
-        let (ecosage, classic) = (
-            prefix_tokens(&Features::ecosage()),
+        let (sage, classic) = (
+            prefix_tokens(&Features::sage()),
             prefix_tokens(&Features::classic()),
         );
-        assert!(ecosage < 2_300, "the Ecosage prefix is ~{ecosage} tokens");
+        assert!(sage < 2_300, "the Sage prefix is ~{sage} tokens");
         assert!(classic < 800, "the classic prefix is ~{classic} tokens");
         assert!(
             !tool_schemas(&Features::classic(), false)
@@ -402,8 +402,8 @@ mod tests {
 
     #[test]
     fn a_tool_is_offered_only_where_it_is_needed() {
-        let auto = Features::ecosage();
-        let manual = Features::ecosage().without("auto_watch").unwrap();
+        let auto = Features::sage();
+        let manual = Features::sage().without("auto_watch").unwrap();
         // `job` from the first request on: added later, it would re-buy the whole prompt.
         assert_eq!(
             names(&auto),
@@ -436,9 +436,9 @@ mod tests {
 
     #[test]
     fn the_built_in_prompt_has_no_placeholders_and_reads_the_same_for_every_watch_setting() {
-        let auto = system_prompt(&Features::ecosage());
-        let promoted = system_prompt(&Features::ecosage().without("preflight").unwrap());
-        let manual = system_prompt(&Features::ecosage().without("auto_watch").unwrap());
+        let auto = system_prompt(&Features::sage());
+        let promoted = system_prompt(&Features::sage().without("preflight").unwrap());
+        let manual = system_prompt(&Features::sage().without("auto_watch").unwrap());
         assert!(
             auto.starts_with("You are Sage")
                 && auto.contains("Sage may run a test command named in the task")
@@ -449,19 +449,19 @@ mod tests {
         );
         assert!(auto == promoted && auto == manual);
         assert_eq!(
-            system_prompt(&Features::ecosage().without("scripts").unwrap()),
+            system_prompt(&Features::sage().without("scripts").unwrap()),
             SYSTEM_CLASSIC
         );
     }
 
     #[test]
     fn a_template_is_filled_in_where_it_has_placeholders() {
-        let auto = Features::ecosage();
-        let manual = Features::ecosage().without("auto_watch").unwrap();
+        let auto = Features::sage();
+        let manual = Features::sage().without("auto_watch").unwrap();
         for features in [
             auto,
             manual,
-            Features::ecosage().without("preflight").unwrap(),
+            Features::sage().without("preflight").unwrap(),
         ] {
             assert_eq!(
                 render(default_template(), &features),
@@ -575,8 +575,8 @@ mod tests {
 
     #[test]
     fn schemas_serialise_identically_every_time() {
-        let a = tool_schemas(&Features::ecosage(), false).to_string();
-        let b = tool_schemas(&Features::ecosage(), false).to_string();
+        let a = tool_schemas(&Features::sage(), false).to_string();
+        let b = tool_schemas(&Features::sage(), false).to_string();
         assert_eq!(a, b);
         assert!(a.find("\"shell\"").unwrap() < a.find("\"finish\"").unwrap());
     }

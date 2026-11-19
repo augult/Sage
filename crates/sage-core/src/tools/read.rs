@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn small_files_come_whole_with_anchors_and_large_ones_as_a_window() {
-        let mut s = test_session("read", Features::ecosage());
+        let mut s = test_session("read", Features::sage());
         std::fs::write(s.ws.root.join("a.txt"), "alpha\nbeta\n").unwrap();
         std::fs::write(s.ws.root.join("big.txt"), numbered(1000)).unwrap();
 
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn rereading_an_unchanged_window_costs_one_line_until_the_file_changes() {
-        let mut s = test_session("read-dedup", Features::ecosage());
+        let mut s = test_session("read-dedup", Features::sage());
         let p = s.ws.root.join("a.txt");
         std::fs::write(&p, numbered(20)).unwrap();
         s.step = 3;
@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn directories_missing_paths_binaries_and_empties_are_all_legible() {
-        let mut s = test_session("read-misc", Features::ecosage());
+        let mut s = test_session("read-misc", Features::sage());
         std::fs::create_dir_all(s.ws.root.join("src/util")).unwrap();
         std::fs::write(s.ws.root.join("src/main.rs"), "fn main() {}\n").unwrap();
         std::fs::write(s.ws.root.join("src/blob.bin"), [0u8, 1, 2, 3]).unwrap();
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn symbol_lookup_returns_just_the_definition() {
-        let mut s = test_session("read-symbol", Features::ecosage());
+        let mut s = test_session("read-symbol", Features::sage());
         let py = "import os\n\ndef helper(x):\n    return x\n\nclass Calc:\n    def divide(self, a, b):\n        if b == 0:\n            raise ValueError\n        return a / b\n\n    def add(self, a, b):\n        return a + b\n";
         std::fs::write(s.ws.root.join("calc.py"), py).unwrap();
         let out = run(&mut s, &json!({"path": "calc.py", "symbol": "Calc.divide"}));
@@ -818,7 +818,7 @@ mod tests {
 
     #[test]
     fn spilled_output_can_be_reopened_by_handle() {
-        let mut s = test_session("read-spill", Features::ecosage());
+        let mut s = test_session("read-spill", Features::sage());
         let (handle, path) = s.next_spill();
         std::fs::write(&path, numbered(600)).unwrap();
         let out = run(&mut s, &json!({"path": handle}));

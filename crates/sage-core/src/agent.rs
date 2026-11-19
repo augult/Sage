@@ -99,7 +99,7 @@ pub struct AgentConfig {
 impl AgentConfig {
     pub fn new(model: &str) -> Self {
         Self {
-            features: Features::ecosage(),
+            features: Features::sage(),
             effort: EffortPolicy::Ratchet(Effort::Low),
             model: model.to_string(),
             max_turns: 80,

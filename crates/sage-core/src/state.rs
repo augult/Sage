@@ -50,25 +50,25 @@ pub struct Features {
 
 /// What a session is run for.
 ///
-/// `Ecosage` spends as few requests and tokens as it can and gives up a little of the result for
+/// `Sage` spends as few requests and tokens as it can and gives up a little of the result for
 /// it. `Plain` is the loop every other harness runs, one tool call after another with nothing of
 /// Sage's around it; users know it as `default`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     #[default]
-    Ecosage,
+    Sage,
     #[serde(rename = "default")]
     Plain,
 }
 
 impl Mode {
-    pub const NAMES: &'static [&'static str] = &["ecosage", "default"];
+    pub const NAMES: &'static [&'static str] = &["sage", "default"];
 
     /// A mode by its name. `classic` is what `default` was called before.
     pub fn parse(name: &str) -> Option<Mode> {
         match name.trim().to_ascii_lowercase().as_str() {
-            "ecosage" => Some(Mode::Ecosage),
+            "sage" => Some(Mode::Sage),
             "default" | "classic" => Some(Mode::Plain),
             _ => None,
         }
@@ -76,21 +76,21 @@ impl Mode {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Mode::Ecosage => "ecosage",
+            Mode::Sage => "sage",
             Mode::Plain => "default",
         }
     }
 
     pub fn features(self) -> Features {
         match self {
-            Mode::Ecosage => Features::ecosage(),
+            Mode::Sage => Features::sage(),
             Mode::Plain => Features::classic(),
         }
     }
 }
 
 impl Features {
-    pub fn ecosage() -> Self {
+    pub fn sage() -> Self {
         Self {
             scripts: true,
             receipts: true,
@@ -598,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn evidence_goes_stale_on_change_and_fresh_on_pass() {
-        let mut s = test_session("evidence", Features::ecosage());
+        let mut s = test_session("evidence", Features::sage());
         assert!(s.evidence.fresh(), "nothing changed yet, nothing to verify");
 
         s.evidence.changed("edit a.py");
@@ -622,22 +622,22 @@ mod tests {
     #[test]
     fn every_mechanism_can_be_switched_off_by_name() {
         for name in Features::NAMES {
-            let without = Features::ecosage()
+            let without = Features::sage()
                 .without(name)
                 .unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));
-            assert_ne!(without, Features::ecosage(), "{name} is on in Ecosage");
+            assert_ne!(without, Features::sage(), "{name} is on in Sage");
             assert_eq!(
-                Features::ecosage().with(name),
-                Some(Features::ecosage()),
+                Features::sage().with(name),
+                Some(Features::sage()),
                 "{name}"
             );
             assert_eq!(
-                Features::ecosage().with(name).unwrap().without(name),
+                Features::sage().with(name).unwrap().without(name),
                 Some(without),
                 "{name}, on and off again"
             );
             assert_eq!(
-                Features::ecosage().without(&name.replace('_', "-")),
+                Features::sage().without(&name.replace('_', "-")),
                 Some(without),
                 "{name}, spelled with dashes"
             );
@@ -648,19 +648,19 @@ mod tests {
             );
         }
         assert!(
-            !Features::ecosage().without("attach").unwrap().attach
-                && !Features::ecosage()
+            !Features::sage().without("attach").unwrap().attach
+                && !Features::sage()
                     .without("short-paths")
                     .unwrap()
                     .short_paths
         );
-        assert_eq!(Features::ecosage().without("telepathy"), None);
-        assert!(Features::ecosage().with("telepathy").is_none());
+        assert_eq!(Features::sage().without("telepathy"), None);
+        assert!(Features::sage().with("telepathy").is_none());
     }
 
     #[test]
     fn command_output_loses_the_workspace_path_only_where_that_is_switched_on() {
-        let mut s = test_session("shown", Features::ecosage());
+        let mut s = test_session("shown", Features::sage());
         let root = s.ws.root.display().to_string();
         let raw = format!("  File \"{root}/pager.py\", line 3\nrootdir: {root}\n");
         assert_eq!(
@@ -669,7 +669,7 @@ mod tests {
         );
         assert_eq!(s.shown("3 passed".to_string()), "3 passed");
 
-        s.features = Features::ecosage().without("short_paths").unwrap();
+        s.features = Features::sage().without("short_paths").unwrap();
         assert_eq!(s.shown(raw.clone()), raw);
     }
 
@@ -677,14 +677,14 @@ mod tests {
     #[test]
     fn a_session_s_folder_is_closed_to_other_users() {
         use std::os::unix::fs::PermissionsExt;
-        let s = test_session("private", Features::ecosage());
+        let s = test_session("private", Features::sage());
         assert_eq!(
             std::fs::metadata(&s.dir).unwrap().permissions().mode() & 0o777,
             0o700
         );
         // One that was open, from before folders were made private, is closed when it is used again.
         std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let again = Session::new(s.ws.clone(), s.dir.clone(), Features::ecosage(), None).unwrap();
+        let again = Session::new(s.ws.clone(), s.dir.clone(), Features::sage(), None).unwrap();
         assert_eq!(
             std::fs::metadata(&again.dir).unwrap().permissions().mode() & 0o777,
             0o700
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn spill_handles_round_trip() {
-        let mut s = test_session("spill", Features::ecosage());
+        let mut s = test_session("spill", Features::sage());
         let (h1, p1) = s.next_spill();
         let (h2, _) = s.next_spill();
         assert_eq!((h1.as_str(), h2.as_str()), ("out:1", "out:2"));

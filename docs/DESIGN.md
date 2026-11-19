@@ -26,21 +26,21 @@ or off, over a set of tasks. Every claim above can be measured rather than belie
 
 ## Modes
 
-A session runs in one of two modes (`--mode`, the Mode picker of the app). The mode is fixed when
+A session runs in one of two modes (`--mode` on the CLI; the desktop app always uses Sage). The mode is fixed when
 the session starts: its system prompt and its tools are sent with the first request.
 
 | Mode | What it is for | What it does |
 |---|---|---|
-| **Ecosage** (`--mode ecosage`; the one a session gets unless told otherwise) | Few requests and little money, at a little cost to the result. | Everything in the table above. |
+| **Sage** (`--mode sage`; the one a session gets unless told otherwise) | Few requests and little money, at a little cost to the result. | Everything in the table above. |
 | **Default** (`--mode default`; `classic` in earlier results) | The loop every other harness runs, for those who want the app and not Sage's ways. | One tool call after another: no scripts, predictions, watches, finish gate or first-message survey. |
 
-Any mechanism in the table above can be switched off in Ecosage (`--without <name>`,
-`ecosage+no-<name>` in the bench) or on in the conventional loop (`--with <name>`,
+Any mechanism in the table above can be switched off in Sage (`--without <name>`,
+`sage+no-<name>` in the bench) or on in the conventional loop (`--with <name>`,
 `default+<name>`).
 
 Earlier versions had a third mode, Prosage, with blind examiners and referees beside the run. It
 was taken out: on the Python, Rust and Go benchmark of 17 November 2026 (DeepSeek V4.1 Flash) it
-solved fewer tasks than Ecosage, 41 of 72 against 44, at more than twice the cost. A session stored as Prosage comes back as Ecosage.
+solved fewer tasks than Sage, 41 of 72 against 44, at more than twice the cost. A session stored as Prosage comes back as Sage.
 
 **Effort is not part of the mode.** Every mode runs at the effort it is given. `ratchet` (Auto in
 the app) starts at `low` and rises on surprises; `low`, `high` and `max` are kept as they are set.
@@ -124,8 +124,8 @@ What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMA
 - **Benchmark**: `sage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
-  The latest comparison is the Python, Rust and Go run of 17 November 2026: Ecosage and OpenCode
-  44/72 each, Ecosage at about 60% of OpenCode's cost and time.
+  The latest comparison is the Python, Rust and Go run of 17 November 2026: Sage and OpenCode
+  44/72 each, Sage at about 60% of OpenCode's cost and time.
 - **Live models**: DeepSeek V4.1 Flash (and GLM-5.3, before the latest changes) run end to end
   through Logfare. Every other preset follows its vendor's documented contract and is untested.
 - **Desktop app**: Windows builds are published on GitHub Releases. It also builds on Linux and macOS. Its UI is

@@ -145,20 +145,16 @@ export function picker({ id, name, glyph, prefix, groups, value, empty = 'None',
   return wrap;
 }
 
-/** What a session can be run for. `title` is shown on hover. */
-export const MODES = [
-  { value: 'ecosage', label: 'Ecosage', title: 'Faster runs, lower cost' },
-  { value: 'default', label: 'Default', title: 'Standard tool-by-tool workflow' },
-];
+const MODE_LABELS = { sage: 'Sage', default: 'Default', classic: 'Default' };
 
 /** The conventional loop, which takes no skills. Sessions stored before it was renamed call it `classic`. */
 export const plainMode = (mode) => mode === 'default' || mode === 'classic';
 
-/** A session's mode as its record spells it (`ecosage without watches`), with the mode's name as the app shows it. */
+/** A session's mode as its record spells it (`sage without watches`), with the mode's name as the app shows it. */
 export function modeLabel(mode) {
   const [name, ...rest] = String(mode ?? '').split(' ');
-  const known = MODES.find((option) => option.value === (name === 'classic' ? 'default' : name));
-  return known ? [known.label, ...rest].join(' ') : mode;
+  const label = Object.hasOwn(MODE_LABELS, name) ? MODE_LABELS[name] : null;
+  return label ? [label, ...rest].join(' ') : mode;
 }
 
 export const AUTONOMIES = [

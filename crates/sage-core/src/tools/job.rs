@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn waits_until_text_appears_then_reports_only_new_output() {
-        let mut s = test_session("job", Features::ecosage());
+        let mut s = test_session("job", Features::sage());
         let cancel = CancellationToken::new();
         let started = shell::run(&mut s, &json!({"cmd": "echo booting; sleep 3; echo 'ready on :3000'; sleep 30", "background": true}), &cancel).await;
         assert!(started.observation.contains("booting"));
@@ -220,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn background_output_names_paths_the_way_other_output_does() {
-        let mut s = test_session("job-short-paths", Features::ecosage());
+        let mut s = test_session("job-short-paths", Features::sage());
         let cancel = CancellationToken::new();
         let root = s.ws.root.display().to_string();
         let started = shell::run(&mut s, &json!({"cmd": "echo \"serving $PWD/public\"; sleep 2; echo \"log: $PWD/server.log\"; sleep 30", "background": true}), &cancel).await;
@@ -248,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn reports_failures_missing_text_and_unknown_ids() {
-        let mut s = test_session("job-fail", Features::ecosage());
+        let mut s = test_session("job-fail", Features::sage());
         let cancel = CancellationToken::new();
         shell::run(
             &mut s,
