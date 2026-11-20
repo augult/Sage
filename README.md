@@ -62,6 +62,13 @@ sage resume <id> "and now the other one"
 - **Benchmarks.** `sage bench` runs Sage, or other harnesses such as OpenCode, on the same tasks and
   judges every run with hidden checks.
 
+## License and support
+
+[MIT](LICENSE): use it, change it, fork it, sell it, including commercially.
+
+Sage is shared as it is. Issues and pull requests are welcome, but I may not answer them, and
+updates may not come. If you need a change, fork it.
+
 ## More
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): how each mechanism works, sessions, goals, providers, releases.
