@@ -222,7 +222,7 @@ export function mountSession(main, side, app, meta) {
     effortSlot.replaceChildren(settingPicker('effort', 'Effort', effortOptions(effort), effort, (value) => choose({ effort: value })));
     // A stand-in has no model to change.
     modelSlot.replaceChildren(...(meta.simulated ? [] : [modelPicker(app.state, wanted.provider !== null ? wanted : meta, choose, 'end')]));
-    autonomySlot.replaceChildren(settingPicker('autonomy', 'Autonomy', AUTONOMIES, wanted.autonomy ?? meta.autonomy ?? 'auto', (value) => choose({ autonomy: value })));
+    autonomySlot.replaceChildren(settingPicker('autonomy', 'Permissions', AUTONOMIES, wanted.autonomy ?? meta.autonomy ?? 'auto', (value) => choose({ autonomy: value })));
   }
 
   let stopShown = '';

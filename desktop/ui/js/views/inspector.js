@@ -54,7 +54,7 @@ function session(model, { state, home, skills }) {
     fact('Effort', effortLabel(effort).replace(/^./, (first) => first.toUpperCase())),
     // The engine also reports ablations here, as "sage without <mechanism>".
     fact('Mode', modeLabel(mode)),
-    fact('Autonomy', autonomy === 'ask' ? 'Ask' : 'Auto'),
+    fact('Permissions', autonomy === 'ask' ? 'Ask first' : 'Act freely'),
     skills.length > 0 && fact('Skills', skills.join(', ')),
   );
 }

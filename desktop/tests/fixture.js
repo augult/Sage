@@ -74,7 +74,7 @@
     await go('#new-session', 'new');
     await check('New-session settings show only their selected values', async () => {
       expect(!document.querySelector('#pick-mode'), 'Mode setting should not be present');
-      for (const [key, name, next] of [['autonomy', 'Autonomy', 'ask'], ['effort', 'Effort', 'high']]) {
+      for (const [key, name, next] of [['autonomy', 'Permissions', 'ask'], ['effort', 'Effort', 'high']]) {
         const button = document.querySelector(`#pick-${key}`);
         const original = document.querySelector(`#pick-${key}-menu [aria-selected="true"]`).dataset.value;
         const assertValueOnly = () => {
@@ -90,7 +90,7 @@
           expect(document.querySelector(`#pick-${key}-menu [aria-selected="true"]`).dataset.value === value, `${name} did not update`);
         }
       }
-      return 'Autonomy and Effort are value-only, accessible, and still selectable; Mode setting is absent';
+      return 'Permissions and Effort are value-only, accessible, and still selectable; Mode setting is absent';
     });
     await check('No-session inspector has one complete panel', () => JSON.stringify(expectOnePanel()));
     for (const id of ['economy', 'code', 'github']) await check(`No-session ${id} tab is clickable and empty`, async () => {
@@ -119,12 +119,12 @@
     await waitFor(() => document.querySelector('.timeline .user-text'), 'Hello user bubble');
     await settle();
     await check('Active-session settings show only their selected values', () => {
-      for (const [key, name] of [['autonomy', 'Autonomy'], ['effort', 'Effort']]) {
+      for (const [key, name] of [['autonomy', 'Permissions'], ['effort', 'Effort']]) {
         const button = document.querySelector(`#pick-${key}`), value = button.querySelector('.pick-value').textContent;
         expect(button.textContent.trim() === value, `${name} includes a visible prefix: ${button.textContent}`);
         expect(button.getAttribute('aria-label') === `${name}: ${value}`, `${name} lost its accessible label`);
       }
-      return 'Autonomy and Effort are value-only with named accessible controls';
+      return 'Permissions and Effort are value-only with named accessible controls';
     });
     await check('Active-session tabs still render their own content', async () => {
       for (const id of ['economy', 'code', 'github', 'economy']) {

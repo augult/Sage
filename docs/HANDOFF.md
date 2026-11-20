@@ -29,6 +29,10 @@
   downloads per system, the `/` commands, scripting, providers and the desktop app.
   `docs/screenshots/desktop.jpg` is the New session view, taken from the browser fixture with its
   sample session, folder and model renamed; the older screenshots still show the name Presage.
+- **Permissions, not "Auto" twice.** The desktop app showed "Auto" for the effort and "Auto" for
+  the autonomy side by side. The autonomy picker is now called Permissions, as in the CLI's
+  `/permissions`, with the choices "Act freely" and "Ask first" (`AUTONOMIES` in
+  `views/controls.js`; the inspector says the same). The IPC field is still `autonomy`.
 - **Website** (augult/Harness): the download button asks GitHub for the latest release and links
   the file for the visitor's system (Windows the desktop installer, macOS and Linux the CLI); the
   copy of the 0.3.0 installer the site served is gone.
