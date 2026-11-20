@@ -213,7 +213,7 @@ export function providerOptions(providers, keep = null) {
 
 /** Plain-language descriptions shared by Settings and both composers. */
 function effortHint(value) {
-  if (String(value).startsWith('ratchet')) return 'Starts low; increases when needed';
+  if (String(value).startsWith('ratchet')) return 'Recommended: starts low and rises by itself when the task needs it';
   return { low: 'Faster, lighter reasoning', medium: 'Balanced speed and detail', high: 'More time for deeper reasoning', max: 'Most time for the hardest tasks' }[value] || 'Reasoning effort';
 }
 

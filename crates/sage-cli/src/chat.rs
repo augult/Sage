@@ -352,7 +352,10 @@ impl Completer for Complete {
             "skills" => view.skills.clone(),
             "resume" => view.sessions.clone(),
             "effort" => fixed(&[
-                ("auto", "starts low, rises when surprises pile up"),
+                (
+                    "auto",
+                    "recommended: starts low, rises by itself when the task needs it",
+                ),
                 ("low", "fast and cheap"),
                 ("high", "thinks more"),
                 ("max", "thinks most"),
@@ -1299,7 +1302,7 @@ impl Chat {
     fn effort(&mut self, arg: &str) {
         if arg.is_empty() {
             return self.note(&format!(
-                "effort {} · /effort auto, low, high or max",
+                "effort {} · /effort auto (recommended: it rises by itself when the task needs it), low, high or max",
                 self.effort_label()
             ));
         }

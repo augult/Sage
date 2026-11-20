@@ -20,6 +20,9 @@ it points at. The model's attention goes where reality differed, and nowhere els
 - **The cache keeps hitting.** History is append-only, so the provider's prompt cache stays warm,
   and old output is trimmed only when that costs less than keeping it.
 
+All of it serves one aim: the same work for less. Sage is built for cheap reasoning models and low
+bills, with fewer requests, fewer tokens and less waiting than a conventional agent loop.
+
 ## Results
 
 36 tasks from the Exercism polyglot set, 12 each in Python, Rust and Go, every task run twice per
@@ -33,9 +36,11 @@ requests a run.
 | GLM-5.3 | **Sage** | **31/72** | **$8.86** | **4.6 min** |
 | | OpenCode 1.19.5 | 19/72 | $21.65 | 11.5 min |
 
-One benchmark, run by me with Sage 0.3.0 on 17 November 2026; gaps of two or three runs are within
-chance. The method, the raw results and every other measurement are in
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Sage matched OpenCode on DeepSeek and solved more on GLM-5.3, for about 40 to 60% less money and time.
+That is one benchmark, run by me with Sage 0.3.0 on 17 November 2026, and gaps of two or three
+runs are within chance. On your own code the results can differ from other harnesses, in either
+direction, so the best test is your own work. The method, the raw results and every other
+measurement are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
@@ -80,7 +85,7 @@ No key yet? `/demo` plays a scripted run. Type `/` for the commands:
 | Command | |
 |---|---|
 | `/connect <provider>` | Store an API key. `/connect <url> <model>` adds any OpenAI-compatible endpoint, such as Ollama or LM Studio. |
-| `/model`, `/provider`, `/effort` | Switch what runs, and how hard it thinks: `auto` starts low and rises when surprises pile up. |
+| `/model`, `/provider`, `/effort` | Switch what runs, and how hard it thinks. `auto`, the default, is the recommended effort: it starts low and rises by itself when the task needs it. |
 | `/permissions ask` | Ask before every edit and command. |
 | `/goal <condition>` | Keep working until a separate check agrees the condition holds. |
 | `/sessions`, `/resume <id>` | Go back to earlier work. Sessions survive restarts; `sage -c` continues the last one in a folder. |
