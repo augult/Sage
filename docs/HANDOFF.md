@@ -22,16 +22,30 @@
 - **Release 0.3.2** adds CLI archives for Linux x64, macOS arm64 and Windows x64 to the Windows
   desktop installers (`release.yml`, job `cli`); the release notes are written in the publish job.
 - CI on `main` was red on rustfmt only (the mode rename); formatted.
-- **A session lock seen as held a moment too long:** `SessionLock::held` checked once, so a command
-  being started elsewhere in the process (between fork and exec, holding a copy of the lock file)
-  made a session look busy right after it was closed. `acquire` already waited for that instant;
-  `held` now does too (up to 50 ms). It failed
-  `stopping_a_queued_run_cancels_it_before_the_first_request` on Linux and macOS, now and then.
-- **Open, macOS:** the first macOS run of the tests (the release's CLI job) failed two more core
-  tests, both bash 3.2's doing: `tools::jobs::tests::cd_minus_stays_in_the_session_directory`
-  (`cd -` exits 1) and `tools::shell::tests::a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it`
-  (the syntax error is reported on line 2, not 3). Until they are fixed on a Mac, the release tests
-  on Linux and Windows and only smoke-tests the macOS binary with `sage demo`.
+- **macOS, fixed:** the first macOS run of the tests (the release's CLI job) failed three core
+  tests that had never run there. All three were faults users would meet, fixed in the code and
+  checked on GitHub's `macos-latest` runner (Apple silicon, `/bin/bash` 3.2):
+  - `tools::jobs::tests::cd_minus_stays_in_the_session_directory`: bash 3.2 ignores the `OLDPWD`
+    it inherits, so `cd -` failed with `OLDPWD not set`. Every command now starts with
+    `OLDPWD=$PWD` (`HOME_OLDPWD` in `tools/jobs.rs`).
+  - `tools::shell::tests::a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it`:
+    bash 3.2 numbers the lines of a `-c` string from 0, so with the state prelude on the command's
+    first line an error on line 3 was reported on line 2. `counts_lines_from_zero` asks bash once
+    (`echo $LINENO`); where it says 0, the prelude gets a line of its own. (Assigning `LINENO` is
+    no way round it: bash 5.2 ignores that for `-c` line numbers.)
+  - `harness::persistence_tests::stopping_a_queued_run_cancels_it_before_the_first_request`: the
+    session lock lasted until the last copy of its file was closed, and a command being started
+    at that moment (between fork and exec) holds one, so a session just closed could read as
+    `busy` and refuse to be continued. `SessionLock` now unlocks when dropped, and `held` after it
+    looks; `resume::tests::a_dropped_lock_is_free_at_once_while_a_copy_of_its_file_is_still_open`
+    holds a copy open across the drop and fails without the fix on Linux too. The same test also
+    failed on Linux in the 0.3.2 release run, which shipped with a narrower fix made on `main`
+    meanwhile: `held` asks again for up to 50 ms before it calls a lock held. Both stay: the wait
+    still covers a holder that was killed and so never let go.
+  The release's CLI job tests macOS again and its notes say the tests passed on all three
+  platforms. CI also runs on `macos-latest`, with Clippy and tests for `sage-core` and `sage-cli`
+  only: the desktop app is not released for macOS, and macOS minutes are billed at ten times the
+  Linux rate on a private repository.
 
 ## Fifteenth session: performance and correctness audit (18 November 2026)
 

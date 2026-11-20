@@ -92,8 +92,6 @@ jobs:
           retention-days: 14
 
   # The `sage` command line, one archive per platform, with the README and the licence.
-  # Linux and Windows run the test suite; macOS is built and smoke-tested with the demo, since two
-  # core tests fail there (bash 3.2's `cd -` and its syntax-error line numbers: docs/HANDOFF.md).
   cli:
     strategy:
       fail-fast: false
@@ -104,7 +102,7 @@ jobs:
             test: true
           - os: macos-latest
             platform: aarch64-macos
-            test: false
+            test: true
           - os: windows-latest
             platform: x86_64-windows
             test: true
@@ -206,7 +204,7 @@ jobs:
 
           **SHA256SUMS.txt** has a SHA-256 checksum for every download.
 
-          Built from commit @SHA@. The tests passed on Linux and Windows before packaging; the macOS build was smoke-tested with the scripted demo. Nothing is code-signed, so Windows and macOS may warn about an unknown publisher.
+          Built from commit @SHA@. The tests passed on Linux, macOS and Windows before packaging, and each command-line build played the scripted demo end to end. Nothing is code-signed, so Windows and macOS may warn about an unknown publisher.
           NOTES
           sed -i -e 's/^          //' -e "s/@VERSION@/$VERSION/g" -e "s/@SHA@/$GITHUB_SHA/g" release/RELEASE-NOTES.md
 
