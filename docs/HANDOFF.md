@@ -22,6 +22,13 @@
 - **Release 0.3.2** adds CLI archives for Linux x64, macOS arm64 and Windows x64 to the Windows
   desktop installers (`release.yml`, job `cli`); the release notes are written in the publish job.
 - CI on `main` was red on rustfmt only (the mode rename); formatted.
+- **Open, macOS:** the first macOS run of the tests (the release's CLI job) failed three core tests,
+  none touched by this session: `tools::jobs::tests::cd_minus_stays_in_the_session_directory` (exit
+  1: bash 3.2 and `OLDPWD`), `tools::shell::tests::a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it`
+  (bash 3.2 reports the syntax error on line 2, not 3) and
+  `harness::persistence_tests::stopping_a_queued_run_cancels_it_before_the_first_request` (the
+  session lock still held right after the stop). Until they are fixed on a Mac, the release tests
+  on Linux and Windows and only smoke-tests the macOS binary with `sage demo`.
 
 ## Fifteenth session: performance and correctness audit (18 November 2026)
 

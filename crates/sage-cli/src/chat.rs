@@ -521,6 +521,20 @@ fn editor(view: &Shared, color: bool, history: PathBuf) -> Reedline {
                 .fg(Color::Fixed(16))
                 .on(Color::Fixed(ACCENT)),
         );
+    if let Some(dir) = history.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // What was typed can be as private as the keys beside it: readable by its owner alone.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(&history);
+        let _ = std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o600));
+    }
     let history: Box<FileBackedHistory> = match FileBackedHistory::with_file(1000, history) {
         Ok(file) => Box::new(file),
         Err(_) => Box::new(FileBackedHistory::new(1000).expect("an in-memory history")),
@@ -1142,6 +1156,11 @@ impl Chat {
             }
             return;
         }
+        if words.next().is_some() {
+            return self.fail(&format!(
+                "type /connect {first} alone: the key is then asked for, hidden (this line was not saved)"
+            ));
+        }
         let Some(info) = state.providers.iter().find(|p| p.id == first) else {
             return self.fail(&format!(
                 "no provider {first}; one of: {}",
@@ -1743,6 +1762,30 @@ impl Chat {
     }
 }
 
+/// `/connect <provider> <key>`: a key typed on the line, which the history must not keep.
+fn names_a_key(line: &str) -> bool {
+    let mut words = line.split_whitespace();
+    matches!(words.next(), Some("/connect" | "/login" | "/key"))
+        && words
+            .next()
+            .is_some_and(|w| !w.starts_with("http://") && !w.starts_with("https://"))
+        && words.next().is_some()
+}
+
+/// Takes `line` out of the history file. The file keeps what is on it when the history is next
+/// written: that writes only the lines typed since.
+fn forget(history: &Path, line: &str) {
+    let Ok(text) = std::fs::read_to_string(history) else {
+        return;
+    };
+    let kept: Vec<&str> = text.lines().filter(|l| l.trim() != line.trim()).collect();
+    let mut body = kept.join("\n");
+    if !body.is_empty() {
+        body.push('\n');
+    }
+    let _ = std::fs::write(history, body);
+}
+
 /// The end of a session id, which is what tells sessions of the same day apart.
 fn short(id: &str) -> &str {
     id.rsplit('-').next().unwrap_or(id)
@@ -1808,7 +1851,7 @@ pub async fn run(h: &Harness, args: &[String]) -> ExitCode {
         quitting: false,
     };
     let history = PathBuf::from(h.state().data_dir).join("history.txt");
-    let mut line_editor = editor(&view, color, history);
+    let mut line_editor = editor(&view, color, history.clone());
     chat.banner();
     if let Some(id) = &resume {
         chat.resume(id);
@@ -1828,7 +1871,13 @@ pub async fn run(h: &Harness, args: &[String]) -> ExitCode {
         eprintln!();
         let read = tokio::task::block_in_place(|| line_editor.read_line(&Line));
         let text = match read {
-            Ok(Signal::Success(text)) => text.replace("\\\n", "\n"),
+            Ok(Signal::Success(text)) => {
+                if names_a_key(&text) {
+                    let _ = line_editor.sync_history();
+                    forget(&history, &text);
+                }
+                text.replace("\\\n", "\n")
+            }
             Ok(Signal::CtrlC(typed)) => {
                 if typed.trim().is_empty() {
                     if chat.quitting {
@@ -1925,6 +1974,26 @@ mod tests {
             [dir.join("src/main.rs").to_string_lossy().into_owned()]
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_key_typed_on_the_line_is_taken_out_of_the_history() {
+        assert!(names_a_key("/connect openrouter sk-or-123"));
+        assert!(!names_a_key("/connect openrouter"));
+        assert!(!names_a_key("/connect http://localhost:11434/v1 qwen3"));
+        assert!(!names_a_key("connect openrouter sk"));
+        let file = std::env::temp_dir().join(format!("sage-history-{}", std::process::id()));
+        std::fs::write(
+            &file,
+            "fix the tests\n/connect openrouter sk-or-123\n/status\n",
+        )
+        .unwrap();
+        forget(&file, "/connect openrouter sk-or-123");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "fix the tests\n/status\n"
+        );
+        std::fs::remove_file(&file).unwrap();
     }
 
     #[test]
