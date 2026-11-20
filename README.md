@@ -3,7 +3,7 @@
 A coding agent harness for cheap reasoning models: a terminal CLI and a desktop app, written in
 Rust.
 
-[Website](https://harness-lyart.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
+[Website](https://sageharness.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
 [How it works](docs/DESIGN.md) · [Benchmarks](docs/BENCHMARKS.md)
 
 Before each command, the model says what it expects to happen, and Sage checks it mechanically. A
@@ -43,7 +43,7 @@ measurement are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 ## Install
 
 From the [latest release](https://github.com/augult/Sage/releases/latest), or the
-[website](https://harness-lyart.vercel.app), which picks the file for your system:
+[website](https://sageharness.vercel.app), which picks the file for your system:
 
 | System | File | What it is |
 |---|---|---|
