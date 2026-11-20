@@ -132,9 +132,17 @@ jobs:
         shell: bash
         run: cargo build --release -p sage-cli --locked
 
-      - name: Smoke test (the scripted demo, end to end)
+      # The binary itself: it starts everywhere, and where the tasks' bash and python3 are at hand,
+      # it solves the seven easy benchmark tasks offline, a stand-in playing the model.
+      - name: Smoke test
         shell: bash
-        run: SAGE_HOME="$RUNNER_TEMP/sage-home" target/release/sage demo
+        run: |
+          set -euo pipefail
+          target/release/sage --version
+          if [ "$RUNNER_OS" != Windows ]; then
+            SAGE_HOME="$RUNNER_TEMP/sage-home" target/release/sage bench --scripted --variants sage --tasks easy -n 1 | tee bench.txt
+            grep -E '^ALL +sage +7/7 ' bench.txt
+          fi
 
       - name: Package
         shell: bash
@@ -189,7 +197,7 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          - **An interactive CLI.** `sage` in a terminal opens a session in the current folder, with `/` commands: `/connect` stores an API key (or adds an OpenAI-compatible endpoint of your own, such as Ollama), `/model`, `/provider` and `/effort` switch what runs, `/permissions ask` asks before every edit and command, `/sessions` and `/resume` go back to earlier work, and `/goal`, `/init`, `/diff`, `/cost` and `/demo` do what they say. `@file` attaches a file, `!cmd` runs a command yourself, Tab completes, Ctrl-C stops a run. `sage -c` continues the last session in a folder.
+          - **An interactive CLI.** `sage` in a terminal opens a session in the current folder, with `/` commands: `/connect` stores an API key (or adds an OpenAI-compatible endpoint of your own, such as Ollama), `/model`, `/provider` and `/effort` switch what runs, `/permissions ask` asks before every edit and command, `/sessions` and `/resume` go back to earlier work, and `/goal`, `/init`, `/diff` and `/cost` do what they say. `@file` attaches a file, `!cmd` runs a command yourself, Tab completes, Ctrl-C stops a run. `sage -c` continues the last session in a folder.
           - **CLI downloads** for Linux (x64), macOS (Apple silicon) and Windows (x64).
           - **Runs that are faster, cheaper and more often right:** change detection that holds on large trees, the time budget kept inside a reply, `grep` or `diff` finding nothing no longer counted as a surprise, and a system prompt half as long.
           - The desktop app's mode picker is gone: Sage's own loop is the default, now called `sage`.
@@ -204,7 +212,7 @@ jobs:
 
           **SHA256SUMS.txt** has a SHA-256 checksum for every download.
 
-          Built from commit @SHA@. The tests passed on Linux, macOS and Windows before packaging, and each command-line build played the scripted demo end to end. Nothing is code-signed, so Windows and macOS may warn about an unknown publisher.
+          Built from commit @SHA@. The tests passed on Linux, macOS and Windows before packaging, and the Linux and macOS command lines each solved seven benchmark tasks offline with a scripted stand-in for the model. Nothing is code-signed, so Windows and macOS may warn about an unknown publisher.
           NOTES
           sed -i -e 's/^          //' -e "s/@VERSION@/$VERSION/g" -e "s/@SHA@/$GITHUB_SHA/g" release/RELEASE-NOTES.md
 

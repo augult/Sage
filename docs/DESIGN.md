@@ -110,7 +110,8 @@ their model lists are what each vendor documented on 11 November 2026 (Moonshot'
 The **Release desktop** GitHub Actions workflow (`release.yml`) builds everything a release ships:
 the Windows desktop app (installer and standalone executable, after the workspace's typecheck,
 Clippy and tests) and the CLI for Linux x64, macOS on Apple silicon and Windows x64 (each after the
-core and CLI tests and a `sage demo` played end to end). Dispatched on a development branch it is a
+core and CLI tests; on Linux and macOS it then solves the seven `easy` benchmark tasks offline, a
+scripted stand-in playing the model). Dispatched on a development branch it is a
 preflight: the files are kept as workflow artifacts and nothing is published. Dispatched on `main`
 it publishes the versioned GitHub release, with notes and SHA-256 checksums, once every job has
 passed. Existing release tags are never overwritten.
@@ -141,7 +142,8 @@ What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMA
   requests are open to collaborators only.
 - **Desktop app**: Windows builds are published on GitHub Releases. It also builds on Linux and macOS. Its UI is
   covered by a browser fixture with mock IPC (`desktop/tests/`).
-- **Walkthrough**: `sage demo` plays a scripted session through the real harness.
+- **Walkthrough**: a scripted session through the real harness (`Harness::demo`), kept for tests and
+  the desktop app's `SAGE_UI_AUTODEMO` screenshot hook. No command or menu offers it to users.
 - Not implemented: OS-level sandboxing of commands (there is a tripwire for catastrophic commands,
   nothing more).
 

@@ -6,8 +6,6 @@ Rust.
 [Website](https://harness-lyart.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
 [How it works](docs/DESIGN.md) · [Benchmarks](docs/BENCHMARKS.md)
 
-![Sage fixing a script in the terminal: one prediction fails, the fix is checked by a watched test](docs/screenshots/cli-run.png)
-
 Before each command, the model says what it expects to happen, and Sage checks it mechanically. A
 step that went as expected costs one line; only a surprise is shown in full, with the source lines
 it points at. The model's attention goes where reality differed, and nowhere else.
@@ -78,10 +76,6 @@ $ sage
 › fix the failing tests
 ```
 
-No key yet? `/demo` plays a scripted run. Type `/` for the commands:
-
-![The / menu in the terminal](docs/screenshots/cli-commands.png)
-
 | Command | |
 |---|---|
 | `/connect <provider>` | Store an API key. `/connect <url> <model>` adds any OpenAI-compatible endpoint, such as Ollama or LM Studio. |
@@ -123,8 +117,6 @@ through Logfare, have been tested end to end; the others follow their vendors' d
 The same engine in a window: sessions in a sidebar, every step and its output open to inspection,
 the diff and Git, skills and settings. Windows builds are released; it builds on Linux and macOS
 from source.
-
-![The desktop app, starting a new session](docs/screenshots/desktop.jpg)
 
 ## Status
 

@@ -14,7 +14,6 @@ import { brandMark, h, icon } from './dom.js';
 import { tilde } from './format.js';
 import * as panes from './panes.js';
 import * as themes from './themes.js';
-import { settleUnsaved } from './unsaved.js';
 import { MOD_KEY, closeButton, openDialog, sendKey, sendKeyLabel } from './views/common.js';
 import { useFolder } from './views/new-session.js';
 
@@ -226,9 +225,6 @@ export function mountMenuBar(bar, nav) {
       id: 'help',
       label: 'Help',
       items: () => [
-        item('walkthrough', 'Play the walkthrough', async () => {
-          if (await settleUnsaved()) await app.playDemo();
-        }),
         item('commands', 'Commands and keys', showCommands),
         RULE,
         item('about', 'About Sage', () => showAbout(app.state)),

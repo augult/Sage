@@ -16,7 +16,6 @@ sage — an expectation-driven agent harness
 USAGE
   sage [chat] [options] [task…]  an interactive session in this terminal, with /commands (/help lists them)
   sage run [options] <task…>     work on a task in a directory, unattended
-  sage demo                      play the scripted walkthrough (no key, no network)
   sage bench [options]           compare harness variants on built-in tasks (sage bench --help)
   sage skills [show <name>]      list skills, or print one
   sage prompt [options]          print the system prompt `run` would send with the same options
@@ -719,21 +718,6 @@ async fn main() -> ExitCode {
                         .await
                     }
                 }
-            }
-        },
-        Some("demo") => match h.demo() {
-            Err(e) => fail(e),
-            Ok(meta) => {
-                follow(
-                    &h,
-                    &meta.id,
-                    true,
-                    args.iter().any(|a| a == "-v" || a == "--verbose"),
-                    args.iter().any(|a| a == "--json"),
-                    false,
-                    0,
-                )
-                .await
             }
         },
         Some("bench") => bench::command(&h, &args[1..]).await,
