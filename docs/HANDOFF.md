@@ -1,5 +1,28 @@
 # Handoff: Sage
 
+## Sixteenth session: an interactive CLI, the licence and 0.3.2 (20 November 2026)
+
+- **`sage` in a terminal is a conversation** (`crates/sage-cli/src/chat.rs`): bare `sage`, `sage chat`
+  or `sage -c` (the last session in the folder) / `--resume <id>`. A reedline editor reads messages
+  and `/` commands, typing `/` or `@` opens a completion menu (commands with their arguments,
+  providers, models, skills, sessions, files), a footer under the line says where the next message
+  goes. Commands: help, new, clear, sessions, resume, rename, connect (hidden key entry, or
+  `/connect <base-url> <model>` for an endpoint of one's own), provider, model, effort, mode,
+  permissions (`ask` gives the core's approval requests a y/n key), skills, goal, init, cd, diff,
+  status, cost, verbose, demo, exit. `@path` attaches files, `!cmd` runs a command, a number answers
+  the last question's choices, Ctrl-C stops a run, twice at an empty prompt quits.
+- Enter on an open menu runs the picked command (`/sta` runs `/status`) but only inserts a picked file
+  (`enter_for`); `/connect ` with no argument runs as typed rather than picking the first provider.
+- Tested by hand through a real terminal emulator (xterm.js on a pty) with the demo and with a
+  stand-in OpenAI-compatible endpoint: approvals, a second message to a session, Ctrl-C mid-command,
+  continuing after a restart, answering a question by number. Screenshots:
+  `docs/screenshots/cli-commands.png`, `cli-run.png`.
+- **MIT licence**; the README says the project is shared as it is. The README also says plainly that
+  Sage edits and runs commands without asking unless `/permissions ask`.
+- **Release 0.3.2** adds CLI archives for Linux x64, macOS arm64 and Windows x64 to the Windows
+  desktop installers (`release.yml`, job `cli`); the release notes are written in the publish job.
+- CI on `main` was red on rustfmt only (the mode rename); formatted.
+
 ## Fifteenth session: performance and correctness audit (18 November 2026)
 
 An audit of what makes a session slower, costlier or wrong, and fixes for all of it. No live runs;

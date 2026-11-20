@@ -82,23 +82,7 @@ jobs:
           Get-ChildItem release/*.exe | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
-          } | Set-Content release/SHA256SUMS.txt -Encoding ascii
-          @"
-          # Sage $env:VERSION
-
-          - The Code editor rejects stale saves, and the composer preserves drafts typed while a message is sending.
-          - Concurrent settings saves preserve both changes. Stop and shutdown handle queued runs and slow provider responses more reliably.
-          - Git commits are scoped to the session folder. Sage asks for a fresh review if the Git preview is out of date.
-          - The Windows demo runs without a Unix shell. The desktop also improves keyboard navigation, API key setup, and layouts from the minimum window size to 4K.
-
-          ## Windows 10/11 (64-bit)
-          - **Sage_$env:VERSION`_x64-setup.exe**: recommended installer.
-          - **Sage_$env:VERSION`_x64.exe**: standalone app; requires Microsoft Edge WebView2 Runtime.
-          - **SHA256SUMS.txt**: SHA-256 checksums for both downloads.
-
-          Built from commit $env:GITHUB_SHA. Workspace typecheck, Clippy and tests passed on the Windows build runner before packaging.
-          These downloads are not code-signed; Windows may show an unknown-publisher warning.
-          "@ | Set-Content release/RELEASE-NOTES.md -Encoding utf8
+          } | Set-Content release/SHA256SUMS-windows.txt -Encoding ascii
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -107,8 +91,70 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The `sage` command line, one archive per platform, with the README and the licence.
+  cli:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: x86_64-linux
+          - os: macos-latest
+            platform: aarch64-macos
+          - os: windows-latest
+            platform: x86_64-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: |
+          toolchain=$(sed -n 's/^channel = "\(.*\)"\r*$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$toolchain" --profile minimal
+
+      - name: Install OpenSSL headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build and test
+        shell: bash
+        run: |
+          cargo test -p sage-cli -p sage-core --locked
+          cargo build --release -p sage-cli --locked
+
+      - name: Package
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"\r*$/\1/p' Cargo.toml | head -n 1)
+          name="sage-$version-$PLATFORM"
+          mkdir -p "stage/$name" release
+          cp README.md LICENSE "stage/$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/release/sage.exe "stage/$name/"
+            (cd stage && 7z a -tzip "../release/$name.zip" "$name" > /dev/null)
+          else
+            cp target/release/sage "stage/$name/"
+            "stage/$name/sage" --version
+            tar -C stage -czf "release/$name.tar.gz" "$name"
+          fi
+          ls -l release
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cli-${{ matrix.platform }}-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
-    needs: build
+    needs: [build, cli]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -122,19 +168,50 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: windows-release
+          pattern: '*-release'
           path: release
+          merge-multiple: true
+
+      - name: Write the release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release/RELEASE-NOTES.md <<'NOTES'
+          # Sage @VERSION@
+
+          - **An interactive CLI.** `sage` in a terminal opens a session in the current folder, with `/` commands: `/connect` stores an API key (or adds an OpenAI-compatible endpoint of your own, such as Ollama), `/model`, `/provider` and `/effort` switch what runs, `/permissions ask` asks before every edit and command, `/sessions` and `/resume` go back to earlier work, and `/goal`, `/init`, `/diff`, `/cost` and `/demo` do what they say. `@file` attaches a file, `!cmd` runs a command yourself, Tab completes, Ctrl-C stops a run. `sage -c` continues the last session in a folder.
+          - **CLI downloads** for Linux (x64), macOS (Apple silicon) and Windows (x64).
+          - **Runs that are faster, cheaper and more often right:** change detection that holds on large trees, the time budget kept inside a reply, `grep` or `diff` finding nothing no longer counted as a surprise, and a system prompt half as long.
+          - The desktop app's mode picker is gone: Sage's own loop is the default, now called `sage`.
+          - **MIT licensed.** Shared as it is: issues and pull requests are welcome but may go unanswered.
+
+          ## Command line
+          - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.
+
+          ## Windows desktop app (Windows 10/11, 64-bit)
+          - **Sage_@VERSION@_x64-setup.exe**: recommended installer.
+          - **Sage_@VERSION@_x64.exe**: standalone app; requires the Microsoft Edge WebView2 Runtime.
+
+          **SHA256SUMS.txt** has a SHA-256 checksum for every download.
+
+          Built from commit @SHA@. The tests passed on every platform before packaging. Nothing is code-signed, so Windows and macOS may warn about an unknown publisher.
+          NOTES
+          sed -i -e 's/^          //' -e "s/@VERSION@/$VERSION/g" -e "s/@SHA@/$GITHUB_SHA/g" release/RELEASE-NOTES.md
 
       - name: Verify assets and publish release
         shell: bash
         run: |
           set -euo pipefail
           cd release
-          sha256sum --check SHA256SUMS.txt
+          sha256sum --check SHA256SUMS-windows.txt
+          assets=("Sage_${VERSION}_x64-setup.exe" "Sage_${VERSION}_x64.exe"
+                  "sage-${VERSION}-x86_64-linux.tar.gz" "sage-${VERSION}-aarch64-macos.tar.gz"
+                  "sage-${VERSION}-x86_64-windows.zip")
+          ls -l "${assets[@]}"
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
           # Refuse existing tags, including tags without a release, so --target
           # cannot silently publish an older commit. No assets are overwritten.
           count=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')
           test "$count" = 0 || { echo "Tag $TAG already exists; refusing to overwrite it"; exit 1; }
-          gh release create "$TAG" \
-            "Sage_${VERSION}_x64-setup.exe" "Sage_${VERSION}_x64.exe" SHA256SUMS.txt \
+          gh release create "$TAG" "${assets[@]}" SHA256SUMS.txt \
             --target "$GITHUB_SHA" --title "Sage $VERSION" --notes-file RELEASE-NOTES.md --latest

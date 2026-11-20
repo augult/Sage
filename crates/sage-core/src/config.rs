@@ -380,7 +380,7 @@ impl Config {
             .ok_or_else(|| {
                 let envs: Vec<&str> = PROVIDERS.iter().map(|d| d.key_env).collect();
                 format!(
-                    "no provider has an API key yet. Add one in Settings, or set one of: {}",
+                    "no provider has an API key yet. Add one in Settings (desktop app) or with `sage key <provider>`, or set one of: {}",
                     envs.join(", ")
                 )
             })?;

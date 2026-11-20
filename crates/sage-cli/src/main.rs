@@ -1,6 +1,7 @@
 //! `sage`: run the harness from a terminal.
 
 mod bench;
+mod chat;
 
 use sage_core::events::{CacheVerdict, Event, EventKind, FinishStatus, GoalState, Stats};
 use sage_core::harness::{Changes, Harness, SessionStatus, StartRequest};
@@ -13,6 +14,7 @@ const HELP: &str = "\
 sage — an expectation-driven agent harness
 
 USAGE
+  sage [chat] [options] [task…]  an interactive session in this terminal, with /commands (/help lists them)
   sage run [options] <task…>     work on a task in a directory, unattended
   sage demo                      play the scripted walkthrough (no key, no network)
   sage bench [options]           compare harness variants on built-in tasks (sage bench --help)
@@ -45,6 +47,11 @@ OPTIONS for run
   -v, --verbose            also print the model's reasoning and every observation
       --json               print the final result as JSON on stdout
       --events             print every event as a JSON line on stdout
+
+OPTIONS for chat: those of run, and
+  -c, --continue           continue the most recent session in this folder
+  -r, --resume <id>        continue a stored session
+      --ask                ask before every edit and command (/permissions changes it)
 
 OPTIONS for resume
   -p, --provider <id>      continue on another provider (the session keeps its conversation)
@@ -153,6 +160,25 @@ struct Printer {
     paint: Paint,
     verbose: bool,
     pending: Option<(String, String, Option<String>)>,
+    /// Columns an observation line is cut to; 0 leaves it whole.
+    width: usize,
+}
+
+/// Each line of `text` cut to `width` columns (0: as it is).
+fn fit(text: &str, width: usize) -> String {
+    if width == 0 {
+        return text.to_string();
+    }
+    text.lines()
+        .map(|line| {
+            if line.chars().count() > width {
+                format!("{}…", line.chars().take(width - 1).collect::<String>())
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl Printer {
@@ -245,9 +271,9 @@ impl Printer {
                 match status {
                     StepStatus::Surprise | StepStatus::Error | StepStatus::Denied | StepStatus::Running => {
                         if !violations.is_empty() {
-                            eprintln!("        {}", p.red(&violations.join("; ")));
+                            eprintln!("        {}", p.red(&fit(&violations.join("; "), self.width.saturating_sub(8))));
                         }
-                        eprintln!("{}", p.dim(&indent(observation, "        | ", if self.verbose { 60 } else { 12 })));
+                        eprintln!("{}", p.dim(&fit(&indent(observation, "        | ", if self.verbose { 60 } else { 12 }), self.width)));
                     }
                     StepStatus::Ok if self.verbose => eprintln!("{}", p.dim(&indent(observation, "        | ", 30))),
                     _ => {}
@@ -521,6 +547,7 @@ async fn follow(
         },
         verbose,
         pending: None,
+        width: 0,
     };
     let mut f = Follower {
         printer,
@@ -574,6 +601,7 @@ fn replay(h: &Harness, id: &str, verbose: bool) -> ExitCode {
                 },
                 verbose,
                 pending: None,
+                width: 0,
             };
             let mut stats = Stats::default();
             let mut simulated = false;
@@ -604,6 +632,18 @@ async fn main() -> ExitCode {
         ExitCode::from(2)
     };
     let status = match args.first().map(String::as_str) {
+        // In a terminal, `sage` alone is a conversation; anywhere else it says how it is used.
+        None if std::io::stdin().is_terminal() && std::io::stderr().is_terminal() => {
+            chat::run(&h, &[]).await
+        }
+        Some("chat") => chat::run(&h, &args[1..]).await,
+        Some(first)
+            if matches!(first, "-c" | "--continue" | "-r" | "--resume" | "--ask")
+                || (first.starts_with('-')
+                    && !matches!(first, "-h" | "--help" | "-V" | "--version")) =>
+        {
+            chat::run(&h, &args).await
+        }
         None | Some("-h" | "--help" | "help") => {
             println!("{HELP}");
             ExitCode::SUCCESS
@@ -859,6 +899,7 @@ mod tests {
                 paint: Paint { on: false },
                 verbose: false,
                 pending: None,
+                width: 0,
             },
             events: false,
             after: 5,

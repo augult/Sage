@@ -15,6 +15,10 @@ Details: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
+**CLI (Linux x64, macOS on Apple silicon, Windows x64):** download the archive for your system from
+the [latest release](https://github.com/augult/Sage/releases/latest), unpack it and put `sage` on
+your `PATH`. The binaries are not signed: on macOS, run `xattr -d com.apple.quarantine sage` once.
+
 **Windows desktop app:** download `Sage_<version>_x64-setup.exe` from the
 [latest release](https://github.com/augult/Sage/releases/latest) and run it. The standalone
 `Sage_<version>_x64.exe` needs the Microsoft Edge WebView2 Runtime. The downloads are not
@@ -32,7 +36,26 @@ cargo test                                            # the tests
 
 ## Use
 
-Add an API key, in the desktop app's Settings or on the command line:
+In a terminal, `sage` opens an interactive session in the current folder:
+
+```sh
+cd path/to/project
+sage                         # type a task, or / for commands; sage -c continues the last session
+```
+
+![Sage in a terminal](docs/screenshots/cli-commands.png)
+
+Inside it, `/connect openrouter` (or any other provider) stores an API key, `/model` and `/effort`
+switch what runs, `/permissions ask` makes Sage ask before every edit and command, `/sessions` and
+`/resume` go back to earlier work, `@file` attaches a file and `!cmd` runs a command yourself.
+`/help` lists the rest.
+
+> **Sage edits files and runs shell commands without asking**, unless you set `/permissions ask`
+> (or start it with `--ask`). It always stops before commands that would wipe a home or root
+> directory, but that is a tripwire, not a sandbox: work in a git repository you can reset, or in a
+> container.
+
+The same from scripts, and the API key in the desktop app's Settings or on the command line:
 
 ```sh
 sage key deepseek            # reads the key from stdin; or export DEEPSEEK_API_KEY
