@@ -248,11 +248,9 @@ fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
     c
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn shell_command(cmd: &str, _state: StateMode<'_>) -> Command {
-    let mut c = Command::new("cmd");
-    c.arg("/D").arg("/S").arg("/C").arg(cmd);
-    c
+    crate::util::windows_shell_command(cmd, &["/D"]).into()
 }
 
 async fn pump<R: AsyncRead + Unpin>(mut reader: R, chunks: mpsc::Sender<Vec<u8>>) {
@@ -579,6 +577,33 @@ mod tests {
         // What the model is shown still follows the command to its end.
         assert_eq!(b.total, 5_000);
         assert!(b.snapshot().0.ends_with(line.as_bytes()));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_shell_preserves_quoted_paths_arguments_and_operators() {
+        let batch = spill("show argument.cmd");
+        let dir = batch.parent().unwrap();
+        std::fs::write(&batch, "@echo off\r\necho %1\r\nexit /b 17\r\n").unwrap();
+        let output = shell_command(r#""show argument.cmd" "two & three""#, StateMode::None)
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert_eq!(output.status.code(), Some(17), "{output:?}");
+        assert_eq!(output.stdout.trim_ascii(), br#""two & three""#);
+
+        std::fs::write(dir.join("input file.txt"), "original\r\n").unwrap();
+        let output = shell_command(
+            r#"type "input file.txt" > "output file.txt" && type "output file.txt""#,
+            StateMode::None,
+        )
+        .current_dir(dir)
+        .output()
+        .await
+        .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout.trim_ascii(), b"original");
     }
 
     #[cfg(unix)]

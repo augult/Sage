@@ -1525,11 +1525,10 @@ impl Chat {
         if command.is_empty() {
             return self.fail("usage: !<command>, run in the session's folder");
         }
-        let mut cmd = if cfg!(windows) {
-            let mut c = std::process::Command::new("cmd");
-            c.arg("/C").arg(command);
-            c
-        } else {
+        #[cfg(windows)]
+        let mut cmd = sage_core::util::windows_shell_command(command, &[]);
+        #[cfg(not(windows))]
+        let mut cmd = {
             let mut c = std::process::Command::new("sh");
             c.arg("-c").arg(command);
             c
