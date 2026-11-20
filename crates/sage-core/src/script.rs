@@ -234,8 +234,22 @@ impl Runner<'_> {
             // The closing report of a session that is out of budget is heard even behind a failed
             // step: skipping it would leave no report at all.
             let closing = self.landing && call.tool == Some(Tool::Finish) && call.error.is_none();
-            let out = match &halted {
-                Some(why) if !closing => {
+            // Whatever the mode: nothing runs once the user has stopped the run, and nothing after
+            // an accepted `finish`, which judged the workspace as it was then.
+            let stop = if self.cancel.is_cancelled() {
+                Some("the user stopped the run")
+            } else if res.finished.is_some() {
+                Some("the task was already finished in this reply")
+            } else {
+                None
+            };
+            let skip = match (stop, &halted) {
+                (Some(why), _) => Some(why),
+                (None, Some(why)) if !closing => Some(why.as_str()),
+                _ => None,
+            };
+            let out = match skip {
+                Some(why) => {
                     let text = format!("[skipped] not run, because {why}.");
                     StepOutput {
                         status: StepStatus::Skipped,
@@ -244,9 +258,12 @@ impl Runner<'_> {
                         ..Default::default()
                     }
                 }
-                _ => match &call.error {
-                    Some(err) => StepOutput::error(err),
-                    None => self.execute(call, &mut res, &mut acted).await,
+                None => match (&call.error, call.tool) {
+                    (Some(err), None) => {
+                        StepOutput::error(format!("{err}; the tools are {}", self.tool_names()))
+                    }
+                    (Some(err), Some(_)) => StepOutput::error(err),
+                    (None, _) => self.execute(call, &mut res, &mut acted).await,
                 },
             };
             let ms = started.elapsed().as_millis() as u64;
@@ -321,6 +338,20 @@ impl Runner<'_> {
             }
         }
         res
+    }
+
+    /// The tools this session can run, for a model that called one that does not exist.
+    fn tool_names(&self) -> String {
+        let mut names = vec!["shell", "read", "search", "edit", "write"];
+        if self.sess.features.watches {
+            names.push("watch");
+        }
+        names.push("job");
+        if self.interactive {
+            names.push("ask");
+        }
+        names.push("finish");
+        names.join(", ")
     }
 
     /// Emits watch events; returns true if any watch newly failed.
@@ -547,11 +578,6 @@ impl Runner<'_> {
                 "nobody is present to answer questions in this session. Make the most reasonable choice yourself, carry on, and say in `finish` what you assumed.",
             );
         }
-        if res.finished.is_some() {
-            return StepOutput::error(
-                "the task was already finished in this reply; nothing was asked.",
-            );
-        }
         match tools::ask::parse(args) {
             Ok(question) => {
                 res.asked = Some(question);
@@ -574,6 +600,14 @@ impl Runner<'_> {
             return StepOutput::ok("[done]");
         }
         // The gate judges the workspace as it is now, so bring the watches up to date first.
+        // A background job may have changed files since the last check, with no command after it
+        // to notice.
+        if self.sess.jobs.any_started() {
+            self.sess
+                .evidence
+                .after_command(&self.sess.ws, "a background job", self.sess.deadline)
+                .await;
+        }
         let unverified = str_arg(args, "unverified")
             .map(str::trim)
             .filter(|r| !r.is_empty());
@@ -886,6 +920,111 @@ mod tests {
             (done.verified, done.evidence.as_str()),
             (true, "verified by watch is-two")
         );
+    }
+
+    #[tokio::test]
+    async fn nothing_after_an_accepted_finish_is_run() {
+        let mut s = test_session("script-after-finish", Features::sage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        let (res, _, events) = run(
+            &mut s,
+            &[
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx 1 n.txt", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "done"})),
+                ("write", json!({"path": "late.txt", "content": "x"})),
+            ],
+        )
+        .await;
+        assert_eq!(
+            statuses(&events),
+            vec![StepStatus::Ok, StepStatus::Ok, StepStatus::Skipped]
+        );
+        assert!(res.finished.unwrap().verified);
+        assert!(!s.ws.root.join("late.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn nothing_is_run_once_the_user_has_stopped_the_run() {
+        for features in [Features::sage(), Features::classic()] {
+            let mut s = test_session("script-stopped", features);
+            let sink = MemorySink::default();
+            let mut stats = Stats::default();
+            let cancel = CancellationToken::new();
+            cancel.cancel();
+            let approvals = Approvals::default();
+            Runner {
+                sess: &mut s,
+                sink: &sink,
+                cancel: &cancel,
+                approvals: &approvals,
+                stats: &mut stats,
+                turn: 1,
+                autonomy: Autonomy::Auto,
+                interactive: false,
+                landing: false,
+            }
+            .run(&calls(&[
+                ("write", json!({"path": "a.txt", "content": "x"})),
+                ("edit", json!({"path": "a.txt", "old": "x", "new": "y"})),
+            ]))
+            .await;
+            let events = sink.events.lock().unwrap().clone();
+            assert_eq!(
+                statuses(&events),
+                vec![StepStatus::Skipped, StepStatus::Skipped]
+            );
+            assert!(!s.ws.root.join("a.txt").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_background_command_that_changes_files_makes_the_last_check_stale() {
+        let mut s = test_session("script-background-change", Features::sage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        run(
+            &mut s,
+            &[(
+                "shell",
+                json!({"cmd": "grep -qx 1 n.txt", "expect_exit": "0"}),
+            )],
+        )
+        .await;
+        assert!(s.evidence.fresh());
+        let (res, _, _) = run(
+            &mut s,
+            &[
+                (
+                    "shell",
+                    json!({"cmd": "echo 2 > n.txt", "background": true}),
+                ),
+                ("finish", json!({"summary": "done"})),
+            ],
+        )
+        .await;
+        assert!(
+            res.finished.is_none(),
+            "the check is stale: n.txt changed after it"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_tool_is_answered_with_the_tools_there_are() {
+        let unknown = |features: Features| async move {
+            let mut s = test_session("script-unknown-tool", features);
+            let (res, _, _) = run(&mut s, &[("frobnicate", json!({}))]).await;
+            res.observations[0].1.clone()
+        };
+        let classic = unknown(Features::classic()).await;
+        assert!(
+            !classic.contains("watch") && classic.contains("finish"),
+            "{classic}"
+        );
+        let sage = unknown(Features::sage()).await;
+        assert!(sage.contains("shell") && sage.contains("job"), "{sage}");
+        assert!(!sage.contains("ask"), "nobody is present to answer: {sage}");
     }
 
     fn statuses(events: &[EventKind]) -> Vec<StepStatus> {

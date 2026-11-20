@@ -112,7 +112,12 @@ fn close_truncated(s: &str) -> String {
             _ => {}
         }
     }
-    let mut out = s.trim_end().trim_end_matches(',').to_string();
+    // Inside a string that was cut off, a trailing comma is its content.
+    let mut out = if in_string {
+        s.to_string()
+    } else {
+        s.trim_end().trim_end_matches(',').to_string()
+    };
     if escaped {
         out.pop();
     }
@@ -575,7 +580,7 @@ pub fn parse_calls(raw: &[ToolCall]) -> (Vec<Call>, u32) {
                 repairs += 1;
             }
             let Some(tool) = tool else {
-                return Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: None, args: Value::Null, error: Some(format!("unknown tool `{}`; the tools are shell, read, search, edit, write, watch, job, finish", rc.name)) };
+                return Call { id: rc.id.clone(), raw_name: rc.name.clone(), tool: None, args: Value::Null, error: Some(format!("unknown tool `{}`", rc.name)) };
             };
             let (args, repaired) = match parse_args(&rc.arguments) {
                 Ok(v) => v,
@@ -648,6 +653,11 @@ mod tests {
             assert_eq!(v["cmd"], cmd, "{raw:?}");
         }
         assert!(parse_args("not json at all").is_err());
+        // A comma that a cut-off string ends with is its content, not a trailing comma.
+        assert_eq!(
+            parse_args(r#"{"cmd": "echo a,"#).unwrap().0["cmd"],
+            "echo a,"
+        );
         // A comma inside a string is content, not a trailing comma.
         assert_eq!(
             strip_trailing_commas(r#"{"a": "x,}", "b": 1,}"#),
