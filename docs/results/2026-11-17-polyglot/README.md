@@ -1,4 +1,4 @@
-# Python, Rust and Go benchmark, 16Ã¢â‚¬â€œ17 November 2026
+# Python, Rust and Go benchmark, 16–17 November 2026
 
 36 tasks from the Exercism polyglot set (12 Python, 12 Rust, 12 Go), each run twice per harness:
 72 runs per harness and model. The agent gets the task text and its starting files; the tests are
@@ -36,7 +36,7 @@ test and reference solution line counts match. The archived measurements below r
 
 ## Results
 
-**DeepSeek V4.1 Flash** (Logfare), 16Ã¢â‚¬â€œ17 November, Sage as of commit `31eb400`:
+**DeepSeek V4.1 Flash** (Logfare), 16–17 November, Sage as of commit `31eb400`:
 
 | Harness | Solved | Python | Rust | Go | Total cost | Time per run |
 |---|---|---|---|---|---|---|

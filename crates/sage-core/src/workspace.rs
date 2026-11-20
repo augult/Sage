@@ -531,17 +531,21 @@ struct Racy {
 impl Racy {
     fn see(&mut self, path: &Path, md: &std::fs::Metadata) {
         let now = *self.now.get_or_insert_with(std::time::SystemTime::now);
-        let mut stamp = md.modified().ok();
+        let modified = md.modified().ok();
+        // The time of the last change to the file's status as well: a rewrite whose times were
+        // put back still moves it.
         #[cfg(unix)]
-        {
+        let stamp = {
             use std::os::unix::fs::MetadataExt;
             let ctime = UNIX_EPOCH
                 + Duration::new(
                     md.ctime().max(0) as u64,
                     md.ctime_nsec().clamp(0, 999_999_999) as u32,
                 );
-            stamp = stamp.max(Some(ctime));
-        }
+            modified.max(Some(ctime))
+        };
+        #[cfg(not(unix))]
+        let stamp = modified;
         let Some(stamp) = stamp else { return };
         // A time in the future is as racy as a recent one.
         let recent = now

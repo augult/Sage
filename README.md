@@ -3,8 +3,8 @@
 A coding agent harness for cheap reasoning models: a terminal CLI and a desktop app, written in
 Rust.
 
-[Website](https://sageharness.vercel.app) Â· [Download](https://github.com/augult/Sage/releases/latest) Â·
-[How it works](docs/DESIGN.md) Â· [Benchmarks](docs/BENCHMARKS.md)
+[Website](https://sageharness.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
+[How it works](docs/DESIGN.md) · [Benchmarks](docs/BENCHMARKS.md)
 
 Before each command, the model says what it expects to happen, and Sage checks it mechanically. A
 step that went as expected costs one line; only a surprise is shown in full, with the source lines
@@ -73,8 +73,8 @@ In a project folder, run `sage`, add a key for a provider and say what you want:
 ```text
 $ cd your-project
 $ sage
-â€º /connect openrouter        the key is asked for next, hidden, and kept in ~/.sage
-â€º fix the failing tests
+› /connect openrouter        the key is asked for next, hidden, and kept in ~/.sage
+› fix the failing tests
 ```
 
 | Command | |
@@ -101,7 +101,7 @@ lists the rest.
 sage run -C path/to/project "Fix the failing tests"     # unattended; only a completed task exits 0
 sage run --goal "the tests pass and the README names every flag"
 sage key deepseek          # store a key (read from stdin), or export DEEPSEEK_API_KEY
-sage sessions              # sage show <id> replays one; sage resume <id> "â€¦" continues it
+sage sessions              # sage show <id> replays one; sage resume <id> "…" continues it
 ```
 
 A run that hands control back (`yielded`) exits 2. Use `--json` to inspect its status and the separate

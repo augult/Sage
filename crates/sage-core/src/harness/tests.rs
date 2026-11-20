@@ -1174,7 +1174,7 @@ fn logs_and_metas_that_hold_what_was_retired_still_open() {
         line(2, serde_json::json!({"type": "user", "text": "hi"})),
         line(
             3,
-            serde_json::json!({"type": "lesson", "learned": true, "text": "`pytest -q` fails here â†’ `uv run pytest -q` works"}),
+            serde_json::json!({"type": "lesson", "learned": true, "text": "`pytest -q` fails here → `uv run pytest -q` works"}),
         ),
         line(
             4,
