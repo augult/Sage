@@ -118,15 +118,36 @@ pub enum StateMode<'a> {
 // Both variants also record PIPESTATUS of the last pipeline next to the spill file, so a failure
 // hidden behind `| tail` can be told apart from a success (see `masked_failure`).
 //
-// All of it sits on one line in front of the command, so that the line numbers bash reports for a
-// syntax error are those of the command as the model wrote it. A command that has been handed over
-// as a background job (see `detach`) no longer saves: when it ends, later commands have moved on.
+// All of it comes before the first line of the command, on the same line where bash counts the
+// lines of a `-c` string from 1 and on a line of its own where it counts them from 0 (bash 3.2, the
+// one macOS ships), so that the line numbers bash reports for an error are those of the command
+// as the model wrote it. A command that has been handed over as a background job (see `detach`)
+// no longer saves: when it ends, later commands have moved on.
 #[cfg(unix)]
 const RESTORE: &str = r#"__ps="$SAGE_STATE"; __pp="$SAGE_PIPE"; unset SAGE_STATE SAGE_PIPE; [ -f "$__ps.env" ] && . "$__ps.env" >/dev/null 2>&1; "#;
 #[cfg(unix)]
 const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; [ -e "$__pp.detached" ] || { pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; }; exit $__rc' EXIT; "#;
 #[cfg(unix)]
 const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT; "#;
+// Bash 3.2 does not take the OLDPWD that `spawn` gives it from the environment: `cd -` would fail.
+#[cfg(unix)]
+const HOME_OLDPWD: &str = "OLDPWD=$PWD; ";
+
+/// Whether the `bash` that runs commands numbers the lines of a `-c` string from 0, as bash 3.2
+/// does, rather than from 1. Asked once.
+#[cfg(unix)]
+fn counts_lines_from_zero() -> bool {
+    static FROM_ZERO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FROM_ZERO.get_or_init(|| {
+        std::process::Command::new("bash")
+            .args(["-c", "echo $LINENO"])
+            .env_remove("BASH_ENV")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .is_ok_and(|out| out.stdout.trim_ascii() == b"0")
+    })
+}
 
 /// Marks a still-running command as no longer the session's foreground: its end must not write
 /// its directory and variables over those of the commands that have run since.
@@ -210,18 +231,19 @@ fn pipe_file(spill: &Path) -> std::path::PathBuf {
 #[cfg(unix)]
 fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
     let mut c = Command::new("bash");
-    let script = match state {
+    let prelude = match state {
         StateMode::ReadWrite(p) => {
             c.env("SAGE_STATE", p);
-            format!("{RESTORE}{SAVE}{cmd}")
+            format!("{RESTORE}{HOME_OLDPWD}{SAVE}")
         }
         StateMode::ReadOnly(p) => {
             c.env("SAGE_STATE", p);
-            format!("{RESTORE}{NOTE_PIPE}{cmd}")
+            format!("{RESTORE}{HOME_OLDPWD}{NOTE_PIPE}")
         }
-        StateMode::None => cmd.to_string(),
+        StateMode::None => HOME_OLDPWD.to_string(),
     };
-    c.arg("-c").arg(script);
+    let own_line = if counts_lines_from_zero() { "\n" } else { "" };
+    c.arg("-c").arg(format!("{prelude}{own_line}{cmd}"));
     c.process_group(0);
     c
 }
@@ -298,6 +320,7 @@ pub fn spawn(
     c.env("SAGE_PIPE", pipe_file(spill));
     // `cd -` goes to $OLDPWD, and an inherited one is wherever Sage was launched from: a
     // directory that has nothing to do with the session. Each command starts with it at home.
+    // Bash 4 and later take it from here; bash 3.2 sets its own (`HOME_OLDPWD`).
     c.env("OLDPWD", cwd);
     c.current_dir(cwd)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
@@ -608,14 +631,15 @@ mod tests {
         )
         .await;
         drain(&mut run.readers).await;
+        let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         assert_eq!(
             waited,
             Waited::Exited(Exit {
                 code: Some(0),
                 signal: None
-            })
+            }),
+            "{text}"
         );
-        let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         let here = dir.to_str().unwrap();
         assert_eq!(text.lines().collect::<Vec<_>>(), [here, here], "{text}");
     }

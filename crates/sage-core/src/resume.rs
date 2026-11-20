@@ -221,7 +221,17 @@ pub fn read(dir: &Path) -> Result<Snapshot, String> {
 /// killed is never in the way.
 #[derive(Debug)]
 pub struct SessionLock {
-    _file: File,
+    file: File,
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        // Let go of the lock itself rather than leave that to closing the file: the lock lasts
+        // until the last copy of the file is closed, and a command being started in that moment
+        // holds one (between fork and exec), so a session just closed could still read as open
+        // in another process and be refused to whoever continues it.
+        let _ = self.file.unlock();
+    }
 }
 
 impl SessionLock {
@@ -236,8 +246,9 @@ impl SessionLock {
             .truncate(false)
             .open(&path)
             .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
-        // A lock is let go of when the last copy of its file is closed, and a command being started
-        // at that moment (between fork and exec) holds one for an instant: wait for it.
+        // The lock of a holder that ended without letting go is freed when the last copy of its
+        // file is closed, and a command being started at that moment (between fork and exec)
+        // holds one for an instant: wait for it.
         let mut waited = 0;
         let locked = loop {
             match file.try_lock() {
@@ -253,7 +264,7 @@ impl SessionLock {
                 // The pid is only for the message of whoever is turned away.
                 let _ = file.set_len(0);
                 let _ = write!(file, "{}", std::process::id());
-                Ok(Self { _file: file })
+                Ok(Self { file })
             }
             Err(TryLockError::WouldBlock) => {
                 let mut pid = String::new();
@@ -279,7 +290,15 @@ impl SessionLock {
         let Ok(file) = File::open(dir.join(LOCK)) else {
             return false;
         };
-        matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
+        match file.try_lock_shared() {
+            Ok(()) => {
+                // Not left to the close either, for the same reason as `drop`.
+                let _ = file.unlock();
+                false
+            }
+            Err(TryLockError::WouldBlock) => true,
+            Err(TryLockError::Error(_)) => false,
+        }
     }
 }
 
@@ -333,6 +352,21 @@ mod tests {
         assert!(SessionLock::held(&dir));
         drop(second);
         assert!(!SessionLock::held(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_dropped_lock_is_free_at_once_while_a_copy_of_its_file_is_still_open() {
+        // A command being started holds a copy of every open file for an instant (between fork
+        // and exec): the session is free when its holder lets go, not when that copy is closed.
+        let dir = scratch("lock-copy");
+        let lock = SessionLock::acquire(&dir).unwrap();
+        let copy = lock.file.try_clone().unwrap();
+        drop(lock);
+        assert!(!SessionLock::held(&dir));
+        let again = SessionLock::acquire(&dir).expect("the lock is free while the copy is open");
+        drop(again);
+        drop(copy);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
