@@ -720,6 +720,7 @@ async fn a_message_can_change_the_effort_and_the_autonomy_of_its_session() {
         model: Some("scripted stand-in".into()),
         effort: Some("max".into()),
         autonomy: Some("ask".into()),
+        ..Changes::default()
     })
     .unwrap();
     until_idle(&h, &meta.id).await;
@@ -1173,7 +1174,7 @@ fn logs_and_metas_that_hold_what_was_retired_still_open() {
         line(2, serde_json::json!({"type": "user", "text": "hi"})),
         line(
             3,
-            serde_json::json!({"type": "lesson", "learned": true, "text": "`pytest -q` fails here → `uv run pytest -q` works"}),
+            serde_json::json!({"type": "lesson", "learned": true, "text": "`pytest -q` fails here â†’ `uv run pytest -q` works"}),
         ),
         line(
             4,
