@@ -63,6 +63,19 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Build a cmd.exe invocation for an entire shell command, including any user-supplied quoting.
+#[cfg(windows)]
+pub fn windows_shell_command(script: &str, options: &[&str]) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = std::process::Command::new("cmd.exe");
+    // /S /C strips this one outer pair. raw_arg keeps Rust's argv escaping out of the script.
+    cmd.args(options)
+        .args(["/S", "/C"])
+        .raw_arg(format!("\"{script}\""));
+    cmd
+}
+
 /// `std::fs::canonicalize` without the verbatim prefix Windows answers with: `\\?\C:\work` comes
 /// back as `C:\work`. `cmd.exe` cannot start in the verbatim form, and nobody writes it.
 pub fn canonical(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
