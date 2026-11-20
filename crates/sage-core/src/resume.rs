@@ -286,19 +286,29 @@ impl SessionLock {
     }
 
     /// Whether another holder has the session in `dir` right now.
+    ///
+    /// A holder lets go when it is dropped. One that ended without that (a process killed) is let
+    /// go of only when the last copy of its file is closed, and as in `acquire`, a command being
+    /// started at that moment (between fork and exec) holds a copy for an instant: a lock still
+    /// there a moment later is held.
     pub fn held(dir: &Path) -> bool {
         let Ok(file) = File::open(dir.join(LOCK)) else {
             return false;
         };
-        match file.try_lock_shared() {
-            Ok(()) => {
-                // Not left to the close either, for the same reason as `drop`.
-                let _ = file.unlock();
-                false
+        for _ in 0..5 {
+            match file.try_lock_shared() {
+                Ok(()) => {
+                    // Not left to the close either, for the same reason as `drop`.
+                    let _ = file.unlock();
+                    return false;
+                }
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(TryLockError::Error(_)) => return false,
             }
-            Err(TryLockError::WouldBlock) => true,
-            Err(TryLockError::Error(_)) => false,
         }
+        true
     }
 }
 

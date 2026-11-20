@@ -38,7 +38,10 @@
     at that moment (between fork and exec) holds one, so a session just closed could read as
     `busy` and refuse to be continued. `SessionLock` now unlocks when dropped, and `held` after it
     looks; `resume::tests::a_dropped_lock_is_free_at_once_while_a_copy_of_its_file_is_still_open`
-    holds a copy open across the drop and fails without the fix on Linux too.
+    holds a copy open across the drop and fails without the fix on Linux too. The same test also
+    failed on Linux in the 0.3.2 release run, which shipped with a narrower fix made on `main`
+    meanwhile: `held` asks again for up to 50 ms before it calls a lock held. Both stay: the wait
+    still covers a holder that was killed and so never let go.
   The release's CLI job tests macOS again and its notes say the tests passed on all three
   platforms. CI also runs on `macos-latest`, with Clippy and tests for `sage-core` and `sage-cli`
   only: the desktop app is not released for macOS, and macOS minutes are billed at ten times the
