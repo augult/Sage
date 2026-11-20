@@ -158,8 +158,8 @@ export function modeLabel(mode) {
 }
 
 export const AUTONOMIES = [
-  { value: 'auto', label: 'Auto', title: 'Act without asking' },
-  { value: 'ask', label: 'Ask', title: 'Ask before taking actions' },
+  { value: 'auto', label: 'Act freely', title: 'Edit and run commands without asking (destructive ones still ask)' },
+  { value: 'ask', label: 'Ask first', title: 'Ask before every edit and command' },
 ];
 
 /** A run setting shows only its value; its accessible label and tooltip retain the setting name. */

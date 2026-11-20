@@ -186,7 +186,7 @@ export function mountNewSession(main, app) {
         selection = choice;
         Object.assign(draft, choice);
       }, 'end'), mic.button, startButton],
-      under: [folderSlot, setting('autonomy', 'Autonomy', AUTONOMIES), hint],
+      under: [folderSlot, setting('autonomy', 'Permissions', AUTONOMIES), hint],
     }),
   );
 

@@ -193,7 +193,7 @@ jobs:
           - **CLI downloads** for Linux (x64), macOS (Apple silicon) and Windows (x64).
           - **Runs that are faster, cheaper and more often right:** change detection that holds on large trees, the time budget kept inside a reply, `grep` or `diff` finding nothing no longer counted as a surprise, and a system prompt half as long.
           - The desktop app's mode picker is gone: Sage's own loop is the default, now called `sage`.
-          - **MIT licensed.** Shared as it is: issues and pull requests are welcome but may go unanswered.
+          - **MIT licensed** and shared as it is, without support: fork it to change it.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.

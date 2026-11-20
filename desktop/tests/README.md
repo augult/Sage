@@ -69,9 +69,9 @@ const result = await new Promise(resolve => {
 ```
 
 The sample session is resumable so its composer is exercised. Checks cover
-value-only Autonomy/Effort controls, preserved accessible setting names,
+value-only Permissions/Effort controls, preserved accessible setting names,
 changing and restoring every New-session setting, value-only active-session
-Autonomy/Effort controls; no-session Economy/Code/GitHub hit targets and empty text;
+Permissions/Effort controls; no-session Economy/Code/GitHub hit targets and empty text;
 no `list_dir`/`git_state` requests outside a session; repeated New session,
 Settings and Hello navigation with exactly three tabs and one resizer; title
 alignment to the visible folder chevron path (within 0.1px, not the SVG's
