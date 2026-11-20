@@ -297,7 +297,10 @@ async fn send_message(
         &text,
         &skills.unwrap_or_default(),
         &files.unwrap_or_default(),
-        changes.unwrap_or_default(),
+        Changes {
+            interactive: Some(true),
+            ..changes.unwrap_or_default()
+        },
     )
 }
 

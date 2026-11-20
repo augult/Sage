@@ -390,11 +390,13 @@ impl Runner<'_> {
             ..Default::default()
         };
         if !self.interactive {
-            return danger.map(|why| {
-                denied(format!(
-                    "[denied] refused: this command {why}, and nobody is present to approve it."
-                ))
-            });
+            let reason = danger.map_or_else(
+                || "this step requires approval".to_string(),
+                |why| format!("this command {why}"),
+            );
+            return Some(denied(format!(
+                "[denied] refused: {reason}, and nobody is present to approve it."
+            )));
         }
         let (id, rx) = self.approvals.request();
         self.sink.emit(EventKind::Approval {

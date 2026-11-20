@@ -18,7 +18,7 @@ sage — an expectation-driven agent harness
 
 USAGE
   sage [chat] [options] [task…]  an interactive session in this terminal, with /commands (/help lists them)
-  sage run [options] <task…>     work on a task in a directory, unattended
+  sage run [options] <task…>     work on a task in a directory, unattended (only done exits 0)
   sage skills [show <name>]      list skills, or print one
   sage prompt [options]          print the system prompt `run` would send with the same options
   sage sessions                  list sessions
@@ -436,7 +436,10 @@ fn parse_resume(args: &[String]) -> Result<ResumeArgs, String> {
         id: String::new(),
         message: String::new(),
         skills: Vec::new(),
-        changes: Changes::default(),
+        changes: Changes {
+            interactive: Some(false),
+            ..Changes::default()
+        },
         verbose: false,
         json: false,
         events: false,
@@ -584,7 +587,7 @@ async fn follow(
     }
     let _ = std::io::stdout().flush();
     match status {
-        FinishStatus::Done | FinishStatus::Yielded => ExitCode::SUCCESS,
+        FinishStatus::Done => ExitCode::SUCCESS,
         _ => ExitCode::from(2),
     }
 }

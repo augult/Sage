@@ -3,8 +3,8 @@
 A coding agent harness for cheap reasoning models: a terminal CLI and a desktop app, written in
 Rust.
 
-[Website](https://sageharness.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
-[How it works](docs/DESIGN.md) · [Benchmarks](docs/BENCHMARKS.md)
+[Website](https://sageharness.vercel.app) Â· [Download](https://github.com/augult/Sage/releases/latest) Â·
+[How it works](docs/DESIGN.md) Â· [Benchmarks](docs/BENCHMARKS.md)
 
 Before each command, the model says what it expects to happen, and Sage checks it mechanically. A
 step that went as expected costs one line; only a surprise is shown in full, with the source lines
@@ -37,8 +37,9 @@ requests a run.
 Sage matched OpenCode on DeepSeek and solved more on GLM-5.3, for about 40 to 60% less money and time.
 That is one benchmark, run by me with Sage 0.3.0 on 17 November 2026, and gaps of two or three
 runs are within chance. On your own code the results can differ from other harnesses, in either
-direction, so the best test is your own work. The method, the raw results and every other
-measurement are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+direction, so the best test is your own work. The [benchmark archive](docs/results/2026-11-17-polyglot/README.md)
+includes the per-run data and a way to rerun the 36 exercises. The method and other measurements
+are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
@@ -47,7 +48,7 @@ From the [latest release](https://github.com/augult/Sage/releases/latest), or th
 
 | System | File | What it is |
 |---|---|---|
-| Linux (x64) | `sage-<version>-x86_64-linux.tar.gz` | the CLI |
+| Linux (x64, glibc 2.35+ and OpenSSL 3) | `sage-<version>-x86_64-linux.tar.gz` | the CLI |
 | macOS (Apple silicon) | `sage-<version>-aarch64-macos.tar.gz` | the CLI |
 | Windows (x64) | `sage-<version>-x86_64-windows.zip` | the CLI |
 | Windows (x64) | `Sage_<version>_x64-setup.exe` | the desktop app |
@@ -72,8 +73,8 @@ In a project folder, run `sage`, add a key for a provider and say what you want:
 ```text
 $ cd your-project
 $ sage
-› /connect openrouter        the key is asked for next, hidden, and kept in ~/.sage
-› fix the failing tests
+â€º /connect openrouter        the key is asked for next, hidden, and kept in ~/.sage
+â€º fix the failing tests
 ```
 
 | Command | |
@@ -97,11 +98,14 @@ lists the rest.
 ## Scripts and CI
 
 ```sh
-sage run -C path/to/project "Fix the failing tests"     # unattended; exits 0 when done
+sage run -C path/to/project "Fix the failing tests"     # unattended; only a completed task exits 0
 sage run --goal "the tests pass and the README names every flag"
 sage key deepseek          # store a key (read from stdin), or export DEEPSEEK_API_KEY
-sage sessions              # sage show <id> replays one; sage resume <id> "…" continues it
+sage sessions              # sage show <id> replays one; sage resume <id> "â€¦" continues it
 ```
+
+A run that hands control back (`yielded`) exits 2. Use `--json` to inspect its status and the separate
+`verified` flag when a script requires a checked result.
 
 `--json` prints the result as JSON and `--events` streams every event. `sage --help` lists every
 command and option.

@@ -674,23 +674,38 @@ struct Chat {
     cwd: PathBuf,
     /// The session messages go to; none until the first message opens one.
     session: Option<String>,
-    provider: Option<String>,
-    model: Option<String>,
-    effort: Option<String>,
-    mode: Option<String>,
+    /// Parsed launch options, also used for new sessions opened later in this chat.
+    start: StartRequest,
+    /// Effective permission for the selected session.
     /// `auto` or `ask`.
     autonomy: String,
-    /// The first session's goal, from `--goal`.
-    goal: Option<String>,
     /// What changes about the session with the next message to it.
     pending: Changes,
-    /// Skills to switch on with the next message.
-    skills: Vec<String>,
     verbose: bool,
     /// The choices of the question the last run ended on, for an answer by number.
     choices: Vec<String>,
     /// Ctrl-C pressed at an empty prompt: a second one quits.
     quitting: bool,
+}
+
+/// An explicit request to ask carries across session switches. Otherwise keep the saved mode.
+fn resume_permission<'a>(requested: Option<&str>, events: &'a [Event]) -> &'a str {
+    if requested == Some("ask") {
+        return "ask";
+    }
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.kind {
+            EventKind::SessionStart { autonomy, .. }
+            | EventKind::Settings {
+                autonomy: Some(autonomy),
+                ..
+            } => Some(autonomy.as_str()),
+            _ => None,
+        })
+        .filter(|mode| matches!(*mode, "auto" | "ask"))
+        .unwrap_or("ask")
 }
 
 impl Chat {
@@ -729,9 +744,9 @@ impl Chat {
             return (Some(provider), model);
         }
         let state = self.h.state();
-        let provider = self.provider.clone().or(state.provider.clone());
-        let model = self.model.clone().or_else(|| {
-            if self.provider.is_none() || self.provider == state.provider {
+        let provider = self.start.provider.clone().or(state.provider.clone());
+        let model = self.start.model.clone().or_else(|| {
+            if self.start.provider.is_none() || self.start.provider == state.provider {
                 state.model.clone()
             } else {
                 state
@@ -750,7 +765,7 @@ impl Chat {
             .effort
             .clone()
             .or_else(|| self.meta().map(|m| m.effort))
-            .or(self.effort.clone())
+            .or(self.start.effort.clone())
             .unwrap_or_else(|| self.h.state().effort);
         if effort.starts_with("ratchet") {
             "auto".into()
@@ -845,7 +860,7 @@ impl Chat {
             },
             {
                 // The mode is a developer option: shown only when one was set that is not the default.
-                let mode = match self.mode.as_deref() {
+                let mode = match self.start.mode.as_deref() {
                     Some(mode) if mode != "sage" => format!(" · mode {mode}"),
                     _ => String::new(),
                 };
@@ -1086,8 +1101,19 @@ impl Chat {
                 meta.id, meta.id
             ));
         }
+        let events = match self.h.events(&meta.id) {
+            Ok(events) => events,
+            Err(e) => return self.fail(&e),
+        };
         self.session = Some(meta.id.clone());
-        self.pending = Changes::default();
+        self.autonomy = resume_permission(self.start.autonomy.as_deref(), &events).into();
+        self.pending = Changes {
+            autonomy: (self.autonomy == "ask").then(|| self.autonomy.clone()),
+            interactive: Some(true),
+            max_turns: self.start.max_turns,
+            time_budget_secs: self.start.time_budget_secs,
+            ..Changes::default()
+        };
         self.cwd = PathBuf::from(&meta.cwd);
         self.ok(&format!(
             "continuing “{}” · {} turns · {}",
@@ -1095,11 +1121,9 @@ impl Chat {
             meta.stats.turns,
             tilde(&self.cwd)
         ));
-        let last = self.h.events(&meta.id).ok().and_then(|events| {
-            events.into_iter().rev().find_map(|e| match e.kind {
-                EventKind::Finish { summary, .. } if !summary.trim().is_empty() => Some(summary),
-                _ => None,
-            })
+        let last = events.into_iter().rev().find_map(|e| match e.kind {
+            EventKind::Finish { summary, .. } if !summary.trim().is_empty() => Some(summary),
+            _ => None,
         });
         if let Some(summary) = last {
             eprintln!(
@@ -1189,7 +1213,7 @@ impl Chat {
                         .and_then(|id| state.providers.iter().find(|p| &p.id == id))
                         .is_some_and(|p| p.has_key)
                 };
-                if !keyed(&self.provider) && !keyed(&state.provider) {
+                if !keyed(&self.start.provider) && !keyed(&state.provider) {
                     self.use_provider(&info.id, None);
                     let (_, model) = self.target();
                     self.ok(&format!(
@@ -1207,8 +1231,8 @@ impl Chat {
 
     /// Switches to `provider` (and `model`) here and as the default from now on.
     fn use_provider(&mut self, provider: &str, model: Option<String>) {
-        self.provider = Some(provider.to_string());
-        self.model = model.clone();
+        self.start.provider = Some(provider.to_string());
+        self.start.model = model.clone();
         if self.session.is_some() {
             self.pending.provider = Some(provider.to_string());
             self.pending.model = model.clone();
@@ -1305,7 +1329,7 @@ impl Chat {
             "low" | "high" | "max" => arg,
             _ => return self.fail("effort is auto, low, high or max"),
         };
-        self.effort = Some(value.into());
+        self.start.effort = Some(value.into());
         if self.session.is_some() {
             self.pending.effort = Some(value.into());
         }
@@ -1317,10 +1341,10 @@ impl Chat {
         match arg {
             "" => self.note(&format!(
                 "mode {} · /mode sage or /mode default (for new sessions)",
-                self.mode.as_deref().unwrap_or("sage")
+                self.start.mode.as_deref().unwrap_or("sage")
             )),
             "sage" | "default" => {
-                self.mode = Some(arg.into());
+                self.start.mode = Some(arg.into());
                 self.ok(&format!("mode {arg} for new sessions"));
                 if self.session.is_some() {
                     self.note("this session keeps its mode: /new starts one in the new mode");
@@ -1337,6 +1361,7 @@ impl Chat {
                 self.autonomy
             )),
             "auto" | "ask" => {
+                self.start.autonomy = Some(arg.into());
                 self.autonomy = arg.into();
                 if self.session.is_some() {
                     self.pending.autonomy = Some(arg.into());
@@ -1356,7 +1381,7 @@ impl Chat {
         let on: Vec<String> = self.meta().map(|m| m.skills).unwrap_or_default();
         if arg.is_empty() {
             for s in &all {
-                let mark = if on.contains(&s.name) || self.skills.contains(&s.name) {
+                let mark = if on.contains(&s.name) || self.start.skills.contains(&s.name) {
                     self.accent("●")
                 } else {
                     " ".into()
@@ -1369,10 +1394,10 @@ impl Chat {
         for name in arg.split([',', ' ']).filter(|n| !n.is_empty()) {
             if !all.iter().any(|s| s.name == name) {
                 self.fail(&format!("no skill {name}: /skills lists them"));
-            } else if on.iter().chain(&self.skills).any(|s| s == name) {
+            } else if on.iter().chain(&self.start.skills).any(|s| s == name) {
                 self.note(&format!("{name} is on already"));
             } else {
-                self.skills.push(name.to_string());
+                self.start.skills.push(name.to_string());
                 self.ok(&format!("{name} switches on with your next message"));
             }
         }
@@ -1450,7 +1475,7 @@ impl Chat {
             },
         );
         row("effort", self.effort_label());
-        if let Some(mode) = self.mode.as_deref().filter(|mode| *mode != "sage") {
+        if let Some(mode) = self.start.mode.as_deref().filter(|mode| *mode != "sage") {
             row("mode", mode.to_string());
         }
         row("permissions", self.autonomy.clone());
@@ -1472,8 +1497,8 @@ impl Chat {
             }
             None => row("session", "none yet: your next message starts one".into()),
         }
-        if !self.skills.is_empty() {
-            row("next skills", self.skills.join(", "));
+        if !self.start.skills.is_empty() {
+            row("next skills", self.start.skills.join(", "));
         }
         row("data", tilde(Path::new(&state.data_dir)));
     }
@@ -1530,24 +1555,19 @@ impl Chat {
         }
         self.choices.clear();
         let files = attachments(&text, &self.cwd);
-        let skills = std::mem::take(&mut self.skills);
         let Some(id) = self.session.clone() else {
             let req = StartRequest {
                 cwd: self.cwd.to_string_lossy().into_owned(),
                 task: text,
-                provider: self.provider.clone(),
-                model: self.model.clone(),
-                effort: self.effort.clone(),
-                mode: self.mode.clone(),
                 autonomy: Some(self.autonomy.clone()),
                 interactive: true,
-                skills,
                 files,
-                goal: self.goal.take(),
-                ..Default::default()
+                ..self.start.clone()
             };
             match self.h.start(req) {
                 Ok(meta) => {
+                    self.start.goal = None;
+                    self.start.skills.clear();
                     self.session = Some(meta.id.clone());
                     self.pending = Changes::default();
                     self.follow(&meta.id, 0).await;
@@ -1566,9 +1586,15 @@ impl Chat {
             .ok()
             .and_then(|e| e.last().map(|e| e.seq))
             .unwrap_or(0);
-        let changes = std::mem::take(&mut self.pending);
-        match self.h.send_with(&id, &text, &skills, &files, changes) {
-            Ok(()) => self.follow(&id, before).await,
+        match self
+            .h
+            .send_with(&id, &text, &self.start.skills, &files, self.pending.clone())
+        {
+            Ok(()) => {
+                self.pending = Changes::default();
+                self.start.skills.clear();
+                self.follow(&id, before).await;
+            }
             Err(e) => self.fail(&e),
         }
     }
@@ -1804,7 +1830,7 @@ pub async fn run(h: &Harness, args: &[String]) -> ExitCode {
             _ => rest.push(a.clone()),
         }
     }
-    let opts = match parse_run(&rest, false) {
+    let mut opts = match parse_run(&rest, false) {
         Ok(opts) => opts,
         Err(e) => {
             eprintln!("error: {e}");
@@ -1820,6 +1846,8 @@ pub async fn run(h: &Harness, args: &[String]) -> ExitCode {
     };
     let color = std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let view: Shared = Arc::new(Mutex::new(View::default()));
+    opts.req.autonomy = ask.then(|| "ask".into());
+    let first = std::mem::take(&mut opts.req.task);
     let mut chat = Chat {
         h: h.clone(),
         paint: Paint { on: color },
@@ -1827,26 +1855,26 @@ pub async fn run(h: &Harness, args: &[String]) -> ExitCode {
         view: view.clone(),
         cwd,
         session: None,
-        provider: opts.req.provider.clone(),
-        model: opts.req.model.clone(),
-        effort: opts.req.effort.clone(),
-        mode: opts.req.mode.clone(),
+        start: opts.req,
         autonomy: if ask { "ask".into() } else { "auto".into() },
-        goal: opts.req.goal.clone(),
         pending: Changes::default(),
-        skills: opts.req.skills.clone(),
         verbose: opts.verbose,
         choices: Vec::new(),
         quitting: false,
     };
     let history = PathBuf::from(h.state().data_dir).join("history.txt");
     let mut line_editor = editor(&view, color, history.clone());
-    chat.banner();
     if let Some(id) = &resume {
         chat.resume(id);
+        if chat.session.is_none() {
+            return ExitCode::from(2);
+        }
+        chat.pending.provider.clone_from(&chat.start.provider);
+        chat.pending.model.clone_from(&chat.start.model);
+        chat.pending.effort.clone_from(&chat.start.effort);
     }
-    let first = opts.req.task.trim().to_string();
-    if !first.is_empty() || chat.goal.is_some() {
+    chat.banner();
+    if !first.trim().is_empty() || chat.start.goal.is_some() {
         let first = if first.is_empty() {
             "Work towards the goal.".to_string()
         } else {

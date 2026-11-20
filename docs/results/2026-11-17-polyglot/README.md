@@ -1,13 +1,42 @@
-# Python, Rust and Go benchmark, 16–17 November 2026
+# Python, Rust and Go benchmark, 16Ã¢â‚¬â€œ17 November 2026
 
 36 tasks from the Exercism polyglot set (12 Python, 12 Rust, 12 Go), each run twice per harness:
 72 runs per harness and model. The agent gets the task text and its starting files; the tests are
 held out and run only after it finishes. A run counts as solved only if every hidden test passes.
-The task set was built into a local `sage bench` for these runs and is not among the shipped tasks.
+The original benchmark used a local build of `sage bench`. The public results include the task IDs
+and grading output. The original wrapper and exact prompt text are unavailable.
+
+## Rerun the 36 exercises
+
+From a Sage source checkout on Linux, with Git, Python 3, Go and the pinned Rust toolchain on PATH:
+
+```sh
+python3 docs/results/2026-11-17-polyglot/prepare.py /tmp/sage-polyblind
+cd /tmp/sage-polyblind
+cargo build --locked --release -p sage-cli
+target/release/sage bench --check --tasks polyblind
+```
+
+The script prepares a separate checkout. It selects the exercise IDs from `runs.csv` and fetches
+their starters, tests, and reference implementations from [Aider's pinned Exercism snapshot](https://github.com/Aider-AI/polyglot-benchmark/tree/7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f).
+The offline check grades both the untouched starter and the reference solution for each exercise.
+The held-out files and solutions are embedded only in this benchmark build.
+
+For a new model run, use the benchmark executable from an isolated agent account as described below.
+For example, with a configured Logfare key:
+
+```sh
+target/release/sage bench --tasks polyblind --variants sage -n 2 -p logfare -m glm-5.3 \
+  -e ratchet --max-turns 60 --time-budget 1200 --out glm-rerun.json
+```
+
+This is a reconstruction for new measurements. It uses the upstream exercise instructions and a
+new common prompt. For the 30 exercises that have line counts in the archived audits, the held-out
+test and reference solution line counts match. The archived measurements below refer to the original runs.
 
 ## Results
 
-**DeepSeek V4.1 Flash** (Logfare), 16–17 November, Sage as of commit `31eb400`:
+**DeepSeek V4.1 Flash** (Logfare), 16Ã¢â‚¬â€œ17 November, Sage as of commit `31eb400`:
 
 | Harness | Solved | Python | Rust | Go | Total cost | Time per run |
 |---|---|---|---|---|---|---|

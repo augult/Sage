@@ -25,6 +25,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(test)]
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -134,6 +135,12 @@ pub struct Changes {
     pub effort: Option<String>,
     #[serde(default)]
     pub autonomy: Option<String>,
+    #[serde(default)]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub time_budget_secs: Option<u64>,
+    #[serde(default)]
+    pub interactive: Option<bool>,
 }
 
 /// The files a message may carry: each one a file that is there, and each once.
@@ -973,14 +980,8 @@ impl Harness {
         cfg.effort = effort;
         cfg.autonomy = autonomy;
         cfg.interactive = req.interactive;
-        if let Some(n) = req.max_turns {
-            cfg.max_turns = n.max(1);
-        }
+        cfg.set_run_limits(req.max_turns, req.time_budget_secs);
         cfg.max_requests = req.max_requests;
-        cfg.time_budget = req
-            .time_budget_secs
-            .filter(|s| *s > 0)
-            .map(Duration::from_secs);
 
         let now = now_ms();
         let meta = SessionMeta {
@@ -1133,7 +1134,12 @@ impl Harness {
                 "a /goal command carries no skills or files: send them with a message".into(),
             );
         }
-        let mut retune = Retune::default();
+        let mut retune = Retune {
+            interactive: changes.interactive,
+            max_turns: changes.max_turns,
+            time_budget_secs: changes.time_budget_secs,
+            ..Retune::default()
+        };
         if changes
             .provider
             .as_ref()

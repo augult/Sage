@@ -97,7 +97,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: x86_64-linux
             test: true
           - os: macos-latest
@@ -143,6 +143,20 @@ jobs:
             SAGE_HOME="$RUNNER_TEMP/sage-home" target/release/sage bench --scripted --variants sage --tasks easy -n 1 | tee bench.txt
             grep -E '^ALL +sage +7/7 ' bench.txt
           fi
+
+      - name: Exercise chat and unattended CLI entry points
+        if: runner.os != 'Windows'
+        run: python3 crates/sage-cli/tests/cli_smoke.py target/release/sage
+
+      - name: Check the 36 reconstructed benchmark fixtures offline
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 docs/results/2026-11-17-polyglot/prepare.py "$RUNNER_TEMP/polyblind"
+          cd "$RUNNER_TEMP/polyblind"
+          # The fixture build embeds held-out tests, so it uses a separate target directory.
+          cargo run --locked -p sage-cli -- bench --check --tasks polyblind
 
       - name: Package
         shell: bash
@@ -197,11 +211,11 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          - **Works on macOS as it should.** On macOS's bash 3.2, `cd -` in the agent's commands failed and shell syntax errors were reported a line off. Both are fixed, and the whole test suite now runs on macOS.
-          - **No stale "busy" sessions.** A session that had just closed could look busy for a moment and refuse to be continued. It is now free at once.
-          - **Clearer settings in the desktop app.** Permissions are named as such, "Act freely" or "Ask first", so "Auto" means only the effort. Auto is the recommended effort: it starts low and rises by itself when the task needs it.
-          - **A leaner CLI.** The scripted demo and the developer options are gone from the commands and the help.
-          - **New here?** Run `sage` in a project folder, `/connect` a provider, and say what you want; `/` lists the commands. MIT licensed and shared as it is, without support: fork it to change it.
+          - Resumed chats honor `--ask` and show the saved permission when no override is given. An unattended session refuses steps that require approval.
+          - Interactive chat honors turn and time budgets, including when continuing a session with new limits.
+          - For scripts, only a completed task exits 0. A handoff (`yielded`) exits 2. The JSON result includes its status and verification flag.
+          - The Linux x64 CLI is built on Ubuntu 22.04 and supports glibc 2.35 or newer with OpenSSL 3.
+          - The benchmark archive includes a runnable reconstruction of the 36 published exercises with pinned upstream fixtures.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.

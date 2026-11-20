@@ -97,6 +97,15 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    pub(crate) fn set_run_limits(&mut self, max_turns: Option<u32>, time_budget_secs: Option<u64>) {
+        if let Some(turns) = max_turns {
+            self.max_turns = turns.max(1);
+        }
+        if let Some(seconds) = time_budget_secs {
+            self.time_budget = (seconds > 0).then(|| Duration::from_secs(seconds));
+        }
+    }
+
     pub fn new(model: &str) -> Self {
         Self {
             features: Features::sage(),
@@ -174,6 +183,9 @@ pub struct Retune {
     pub provider: Option<(Provider, String, String)>,
     pub effort: Option<EffortPolicy>,
     pub autonomy: Option<Autonomy>,
+    pub interactive: Option<bool>,
+    pub max_turns: Option<u32>,
+    pub time_budget_secs: Option<u64>,
     /// A goal to work towards from this message on, in place of the one there was. Clearing it is
     /// `goal_command`.
     pub goal: Option<String>,
@@ -312,6 +324,11 @@ impl Agent {
     /// is sent all of it and has none of it cached, so its first request is a first request
     /// again, not a miss. An effort that changes starts over from where its policy starts.
     pub fn retune(&mut self, change: Retune) {
+        if let Some(interactive) = change.interactive {
+            self.cfg.interactive = interactive;
+        }
+        self.cfg
+            .set_run_limits(change.max_turns, change.time_budget_secs);
         let (mut provider, mut model, mut effort, mut autonomy) = (None, None, None, None);
         if let Some((next, id, name)) = change.provider {
             self.provider = Arc::new(next);
