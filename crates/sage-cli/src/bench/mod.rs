@@ -128,9 +128,7 @@ impl Variant {
                 .strip_prefix("no-")
                 .ok_or_else(unknown)?
                 .replace('-', "_");
-            Features::sage()
-                .without(&mechanism)
-                .ok_or_else(unknown)?;
+            Features::sage().without(&mechanism).ok_or_else(unknown)?;
             Ok(mechanism)
         };
         let mut parts = name.split('+');
@@ -1276,12 +1274,11 @@ pub fn render(r: &Report) -> String {
             } else {
                 "default"
             };
-            let against =
-                if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "sage") {
-                    "sage"
-                } else {
-                    plain
-                };
+            let against = if variant.starts_with("ext:") && r.variants.iter().any(|v| v == "sage") {
+                "sage"
+            } else {
+                plain
+            };
             let (Some(c), Some(base)) = (cells(ALL, variant), cells(ALL, against)) else {
                 continue;
             };
@@ -1717,9 +1714,9 @@ mod tests {
             ]
         );
         assert!(parse(&args("--variants prosage")).is_err());
-        let Ok(Command::Run(opt)) = parse(&args(
-            "--variants sage,sage+no-survey,no-survey+no-attach",
-        )) else {
+        let Ok(Command::Run(opt)) =
+            parse(&args("--variants sage,sage+no-survey,no-survey+no-attach"))
+        else {
             panic!("should parse")
         };
         assert_eq!(
@@ -2231,8 +2228,7 @@ u.urlopen(r).read()' "$1"; }"#;
         // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
         // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
         let audit_clean = tasks::find("audit-clean").unwrap();
-        for (label, mode, expect_solved) in
-            [("default", "default", false), ("sage", "sage", true)]
+        for (label, mode, expect_solved) in [("default", "default", false), ("sage", "sage", true)]
         {
             let h = Harness::at(base.join(format!("s2-{label}")));
             let ws = base.join(format!("ws-s2-{label}"));
@@ -2305,8 +2301,7 @@ u.urlopen(r).read()' "$1"; }"#;
             .find(|(p, _)| *p == "test_pager.py")
             .unwrap()
             .1;
-        for (label, mode, expect_solved) in
-            [("default", "default", false), ("sage", "sage", true)]
+        for (label, mode, expect_solved) in [("default", "default", false), ("sage", "sage", true)]
         {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));

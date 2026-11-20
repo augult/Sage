@@ -1824,10 +1824,7 @@ async fn an_effort_the_user_fixed_is_kept_in_every_mode() {
             vec![("read", json!({"path": "n.txt"}))],
         ))
     };
-    for (name, features) in [
-        ("sage", Features::sage()),
-        ("default", Features::classic()),
-    ] {
+    for (name, features) in [("sage", Features::sage()), ("default", Features::classic())] {
         let mut cfg = AgentConfig::new("mock");
         cfg.features = features;
         cfg.effort = EffortPolicy::Fixed(Effort::Max);

@@ -608,10 +608,7 @@ async fn a_session_runs_in_one_of_three_modes() {
     .unwrap();
     assert_eq!(
         back,
-        (
-            Features::sage().without("watches").unwrap(),
-            Mode::Sage
-        )
+        (Features::sage().without("watches").unwrap(), Mode::Sage)
     );
 
     // Sage has every mechanism; the conventional loop has none.

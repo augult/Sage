@@ -649,10 +649,7 @@ mod tests {
         }
         assert!(
             !Features::sage().without("attach").unwrap().attach
-                && !Features::sage()
-                    .without("short-paths")
-                    .unwrap()
-                    .short_paths
+                && !Features::sage().without("short-paths").unwrap().short_paths
         );
         assert_eq!(Features::sage().without("telepathy"), None);
         assert!(Features::sage().with("telepathy").is_none());

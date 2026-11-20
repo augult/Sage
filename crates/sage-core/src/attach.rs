@@ -340,10 +340,7 @@ mod tests {
 
     #[test]
     fn a_task_names_files_in_backticks_or_plainly_and_a_command_is_not_a_file() {
-        let s = test_session(
-            "attach-names",
-            Features::sage().without("survey").unwrap(),
-        );
+        let s = test_session("attach-names", Features::sage().without("survey").unwrap());
         for name in [
             "pager.py",
             "src/util.py",
@@ -380,10 +377,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn nothing_outside_the_workspace_is_named() {
-        let s = test_session(
-            "attach-escape",
-            Features::sage().without("survey").unwrap(),
-        );
+        let s = test_session("attach-escape", Features::sage().without("survey").unwrap());
         put(&s, "inside.txt", "in\n");
         put(&s, "sub/deep.txt", "deep\n");
         let outside = s.ws.root.parent().unwrap().join("outside.txt");
@@ -408,10 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_attached_file_is_read_output_and_counts_as_read() {
-        let mut s = test_session(
-            "attach-read",
-            Features::sage().without("survey").unwrap(),
-        );
+        let mut s = test_session("attach-read", Features::sage().without("survey").unwrap());
         put(&s, "a.txt", "alpha\nbeta\n");
         put(&s, "b.txt", "gamma\n");
         let got = attach(&mut s, "Swap the lines of `a.txt`; b.txt stays.")
@@ -452,10 +443,7 @@ mod tests {
 
     #[test]
     fn only_small_text_files_are_attached_and_a_long_one_is_mentioned_with_its_length() {
-        let mut s = test_session(
-            "attach-size",
-            Features::sage().without("survey").unwrap(),
-        );
+        let mut s = test_session("attach-size", Features::sage().without("survey").unwrap());
         put(&s, "long.txt", &numbered(MAX_FILE_LINES + 1));
         put(
             &s,
@@ -510,10 +498,7 @@ mod tests {
 
     #[test]
     fn the_total_is_bounded_in_lines_and_in_files_and_credentials_stay_out() {
-        let mut s = test_session(
-            "attach-total",
-            Features::sage().without("survey").unwrap(),
-        );
+        let mut s = test_session("attach-total", Features::sage().without("survey").unwrap());
         for name in ["a.txt", "b.txt", "c.txt"] {
             put(&s, name, &numbered(180));
         }
@@ -532,10 +517,7 @@ mod tests {
             400
         );
 
-        let mut s = test_session(
-            "attach-count",
-            Features::sage().without("survey").unwrap(),
-        );
+        let mut s = test_session("attach-count", Features::sage().without("survey").unwrap());
         for i in 1..=6 {
             put(&s, &format!("f{i}.txt"), "x\n");
         }

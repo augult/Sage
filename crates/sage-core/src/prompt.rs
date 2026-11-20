@@ -458,11 +458,7 @@ mod tests {
     fn a_template_is_filled_in_where_it_has_placeholders() {
         let auto = Features::sage();
         let manual = Features::sage().without("auto_watch").unwrap();
-        for features in [
-            auto,
-            manual,
-            Features::sage().without("preflight").unwrap(),
-        ] {
+        for features in [auto, manual, Features::sage().without("preflight").unwrap()] {
             assert_eq!(
                 render(default_template(), &features),
                 system_prompt(&features)
