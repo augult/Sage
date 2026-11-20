@@ -87,11 +87,6 @@ const COMMANDS: &[Command] = &[
         about: "how hard the model thinks",
     },
     Command {
-        name: "mode",
-        args: "[sage|default]",
-        about: "Sage's loop, or the conventional one (new sessions)",
-    },
-    Command {
         name: "permissions",
         args: "[auto|ask]",
         about: "act freely, or ask before every change",
@@ -849,10 +844,14 @@ impl Chat {
                 )
             },
             {
+                // The mode is a developer option: shown only when one was set that is not the default.
+                let mode = match self.mode.as_deref() {
+                    Some(mode) if mode != "sage" => format!(" · mode {mode}"),
+                    _ => String::new(),
+                };
                 let text = format!(
-                    "{} · mode {} · permissions {}",
+                    "{}{mode} · permissions {}",
                     self.effort_label(),
-                    self.mode.as_deref().unwrap_or("sage"),
                     self.autonomy
                 );
                 (
@@ -986,6 +985,7 @@ impl Chat {
             "provider" | "providers" => self.provider(arg),
             "model" | "models" => self.model(arg),
             "effort" => self.effort(arg),
+            // Not in the menu or /help: a developer option (docs/DESIGN.md, "Developer commands").
             "mode" => self.mode(arg),
             "permissions" | "autonomy" => self.permissions(arg),
             "skills" | "skill" => self.skills(arg),
@@ -1450,7 +1450,9 @@ impl Chat {
             },
         );
         row("effort", self.effort_label());
-        row("mode", self.mode.clone().unwrap_or_else(|| "sage".into()));
+        if let Some(mode) = self.mode.as_deref().filter(|mode| *mode != "sage") {
+            row("mode", mode.to_string());
+        }
         row("permissions", self.autonomy.clone());
         match self.meta() {
             Some(meta) => {
@@ -1926,6 +1928,11 @@ mod tests {
     fn a_slash_lists_the_commands_and_an_argument_lists_its_values() {
         assert_eq!(complete("/").len(), COMMANDS.len());
         assert_eq!(complete("/pro"), ["/provider"]);
+        assert_eq!(
+            complete("/mode"),
+            ["/model"],
+            "/mode is for developers, not offered"
+        );
         assert_eq!(complete("/provider o"), ["openrouter"]);
         assert_eq!(complete("/model deepseek-v"), ["deepseek-v4-pro"]);
         assert_eq!(complete("/effort m"), ["max"]);
