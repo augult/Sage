@@ -233,6 +233,40 @@ fn answer_of_one(cmd: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether one command (lowercased) is a recursive `rm` of the root or the home directory itself,
+/// however its flags are split and its target spelled: `rm -r -f /`, `rm -rf ~/*`, `rm -rf "$HOME"`.
+fn wipes_root_or_home(part: &str) -> bool {
+    let mut words = part
+        .split_whitespace()
+        .skip_while(|w| w.contains('=') || matches!(*w, "sudo" | "command" | "env"));
+    if words.next().map(|w| w.rsplit('/').next().unwrap_or(w)) != Some("rm") {
+        return false;
+    }
+    let (mut recursive, mut targets) = (false, Vec::new());
+    let mut options = true;
+    for word in words {
+        if options && word == "--" {
+            options = false;
+        } else if options && word.starts_with("--") {
+            recursive |= word == "--recursive";
+        } else if options && word.starts_with('-') && word.len() > 1 {
+            recursive |= word.contains('r');
+        } else {
+            targets.push(word.trim_matches(|c| c == '"' || c == '\''));
+        }
+    }
+    recursive
+        && targets.iter().any(|t| {
+            let home = ["~", "$home", "${home}"]
+                .iter()
+                .find_map(|h| t.strip_prefix(h));
+            let rest = home.unwrap_or(t);
+            let rest = rest.strip_suffix('*').unwrap_or(rest);
+            let rest = rest.trim_end_matches('/');
+            rest.is_empty() && (home.is_some() || t.starts_with('/'))
+        })
+}
+
 /// Commands whose damage cannot be undone from inside the workspace. A tripwire, not a sandbox.
 pub fn danger(cmd: &str) -> Option<&'static str> {
     let c = cmd.to_ascii_lowercase();
@@ -246,16 +280,7 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
                 || prefix.ends_with("root")
         })
     };
-    let rm_root = [
-        "rm -rf /",
-        "rm -fr /",
-        "rm -rf ~",
-        "rm -fr ~",
-        "rm -rf $home",
-        "rm -rf /*",
-        "rm -rf --no-preserve-root",
-    ];
-    if rm_root.iter().any(|p| whole(p)) {
+    if commands(&c).iter().any(|part| wipes_root_or_home(part)) {
         return Some("recursive delete of the filesystem root or home directory");
     }
     if c.contains("mkfs")
@@ -554,6 +579,8 @@ async fn start_background(
     cwd: &Path,
     cancel: &CancellationToken,
 ) -> StepOutput {
+    // The workspace as it was before the job, so that what the job changes is seen as a change.
+    sess.evidence.before_command(&sess.ws, sess.deadline).await;
     let (spill, spill_path) = sess.next_spill();
     let state_path = sess.shell_state();
     let mut running = match spawn(
@@ -575,6 +602,9 @@ async fn start_background(
     .await;
     if matches!(early, Waited::Exited(_)) {
         drain(&mut running.readers).await;
+        sess.evidence
+            .after_command(&sess.ws, cmd, sess.deadline)
+            .await;
     }
     let (raw, _) = running.buf.lock().unwrap().snapshot();
     let total = running.buf.lock().unwrap().total;
@@ -951,5 +981,28 @@ mod tests {
         assert!(
             danger("chmod -R 777 /workspace/out").is_none() && danger("chmod -R 777 /").is_some()
         );
+        // The home directory however it is spelled, and flags however they are split.
+        for cmd in [
+            "rm -rf ~/",
+            "rm -rf ~/*",
+            "rm -rf $HOME",
+            "rm -rf $HOME/",
+            "rm -rf \"$HOME\"",
+            "rm -rf ${HOME}/*",
+            "rm -r -f /",
+            "rm -fr /*",
+            "rm --recursive --force ~",
+            "rm -Rf ~",
+        ] {
+            assert!(danger(cmd).is_some(), "{cmd}");
+        }
+        for cmd in [
+            "rm -rf ~/.cache/pip",
+            "rm -rf $HOME/build",
+            "rm -r ./out /tmp/x",
+            "rm -f ~",
+        ] {
+            assert!(danger(cmd).is_none(), "{cmd}");
+        }
     }
 }

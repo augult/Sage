@@ -1240,11 +1240,13 @@ impl Agent {
             }
             self.emit_stats(run_started, elapsed_before);
             self.save_point(true).await;
-            if self
+            // Out of time, a reply that finished or asked still ends the run with what it said;
+            // only one that did neither is cut off as out of budget.
+            let out_of_time = self
                 .sess
                 .deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
-            {
+                .is_some_and(|deadline| Instant::now() >= deadline);
+            if out_of_time && result.asked.is_none() && result.finished.is_none() {
                 break self.out_of_budget("time budget");
             }
 
@@ -1269,8 +1271,9 @@ impl Agent {
                     verified: done.verified,
                     evidence: done.evidence,
                 };
+                // With the time gone nothing can follow: the checks are made for the record only.
                 match self
-                    .before_ending(outcome, landing, &mut end_checks, cancel)
+                    .before_ending(outcome, landing || out_of_time, &mut end_checks, cancel)
                     .await
                 {
                     Ending::End(outcome) => break outcome,

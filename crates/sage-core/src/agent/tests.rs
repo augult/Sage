@@ -2234,3 +2234,27 @@ async fn oversized_history_drops_sealed_exchanges_and_retains_the_task() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_finish_accepted_in_the_reply_that_used_up_the_time_is_the_outcome() {
+    // The last reply the budget allows: a command that runs into the deadline, then the report.
+    let reply = MockTurn::calls(
+        "",
+        vec![
+            ("shell", json!({"cmd": "sleep 5", "expect_exit": "0"})),
+            ("finish", json!({"summary": "half of it is done"})),
+        ],
+    );
+    let mut cfg = AgentConfig::new("mock");
+    cfg.features = Features::sage().without("bootstrap").unwrap();
+    cfg.time_budget = Some(Duration::from_secs(1));
+    cfg.max_turns = 1;
+    let mut r = rig("agent-deadline-finish", cfg, vec![fixed(reply)]);
+    let out = r
+        .agent
+        .run("Do it.".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(out.status, FinishStatus::Done, "{}", out.summary);
+    assert_eq!(out.summary, "half of it is done");
+    assert!(!out.verified);
+}
