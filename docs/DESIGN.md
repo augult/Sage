@@ -107,20 +107,28 @@ their model lists are what each vendor documented on 11 November 2026 (Moonshot'
 
 ## Releases
 
-The **Release desktop** GitHub Actions workflow (`release.yml`) typechecks, lints,
-tests, and builds the Windows installer and standalone executable. Dispatch it on
-a development branch for a packaging preflight: the downloads and checksums are
-saved as the `windows-release` artifact, without creating a tag or release.
-Dispatching on `main` also publishes the versioned GitHub release after all checks
-pass. Existing release tags are never overwritten.
+The **Release desktop** GitHub Actions workflow (`release.yml`) builds everything a release ships:
+the Windows desktop app (installer and standalone executable, after the workspace's typecheck,
+Clippy and tests) and the CLI for Linux x64, macOS on Apple silicon and Windows x64 (each after the
+core and CLI tests and a `sage demo` played end to end). Dispatched on a development branch it is a
+preflight: the files are kept as workflow artifacts and nothing is published. Dispatched on `main`
+it publishes the versioned GitHub release, with notes and SHA-256 checksums, once every job has
+passed. Existing release tags are never overwritten.
 
-## Status (17 November 2026)
+A new release: raise `version` in `Cargo.toml` and in `desktop/src-tauri/tauri.conf.json`, rewrite
+the notes in the workflow's publish job, push to `main`, and dispatch the workflow there. The
+website's download button (augult/Harness) asks GitHub for the latest release, so it needs no change
+unless the files are renamed.
+
+## Status (20 November 2026)
 
 What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMARKS.md`.
 
-- **Engine and CLI**: implemented; `cargo test --workspace` runs 267 tests (unit tests per module
+- **Engine and CLI**: implemented; `cargo test --workspace` runs 291 tests (unit tests per module
   plus end-to-end agent runs against a scripted model). CI runs them, Clippy with warnings as
-  errors, formatting and the front end's lint on every pull request and push to `main`.
+  errors, formatting and the front end's lint on every pull request and push to `main`, on Linux
+  and Windows, and the engine's and CLI's on macOS. `sage` in a terminal is an interactive session
+  with `/` commands (`crates/sage-cli/src/chat.rs`); `sage run` is the unattended one.
 - **Benchmark**: `sage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
@@ -128,6 +136,9 @@ What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMA
   44/72 each, Sage at about 60% of OpenCode's cost and time.
 - **Live models**: DeepSeek V4.1 Flash (and GLM-5.3, before the latest changes) run end to end
   through Logfare. Every other preset follows its vendor's documented contract and is untested.
+- **Releases**: the CLI for Linux, macOS and Windows and the desktop app for Windows, on GitHub
+  Releases. The repository is public under the MIT licence and shared as it is: issues and pull
+  requests are open to collaborators only.
 - **Desktop app**: Windows builds are published on GitHub Releases. It also builds on Linux and macOS. Its UI is
   covered by a browser fixture with mock IPC (`desktop/tests/`).
 - **Walkthrough**: `sage demo` plays a scripted session through the real harness.

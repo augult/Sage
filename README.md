@@ -1,107 +1,146 @@
 # Sage
 
-An AI coding agent harness for cheap reasoning models, with a CLI and a desktop app. Written in
-Rust; the desktop app uses Tauri.
+A coding agent harness for cheap reasoning models: a terminal CLI and a desktop app, written in
+Rust.
 
-Before a command runs, the model says what it expects to happen. Sage checks that prediction
-mechanically, so routine steps cost one line of output and the model's attention goes only where
-reality surprised it. Several tool calls can go in one reply and run like a script that stops at
-the first surprise, tests re-run on their own after every edit, and `finish` is accepted only once
-a check has passed since the last change.
+[Website](https://harness-lyart.vercel.app) · [Download](https://github.com/augult/Sage/releases/latest) ·
+[How it works](docs/DESIGN.md) · [Benchmarks](docs/BENCHMARKS.md)
 
-On a 36-task Python, Rust and Go benchmark with hidden tests (DeepSeek V4.1 Flash, 17 November
-2026), Sage solved as many tasks as OpenCode, 44 of 72 each, at about 60% of its cost and time.
-Details: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+![Sage fixing a script in the terminal: one prediction fails, the fix is checked by a watched test](docs/screenshots/cli-run.png)
+
+Before each command, the model says what it expects to happen, and Sage checks it mechanically. A
+step that went as expected costs one line; only a surprise is shown in full, with the source lines
+it points at. The model's attention goes where reality differed, and nowhere else.
+
+- **A reply is a script.** The tool calls in one reply run in order and stop at the first surprise,
+  so the model can edit, check and finish in one round of thinking.
+- **Tests watch themselves.** The first test command the model runs is re-run after every edit, and
+  the model hears about it only when the result changes.
+- **Done means checked.** `finish` is accepted only once a check has passed since the last change.
+- **The cache keeps hitting.** History is append-only, so the provider's prompt cache stays warm,
+  and old output is trimmed only when that costs less than keeping it.
+
+## Results
+
+36 tasks from the Exercism polyglot set, 12 each in Python, Rust and Go, every task run twice per
+harness and judged by tests the agent never saw. Same model, same limits: 20 minutes and 60
+requests a run.
+
+| Model | Harness | Solved | Cost | Time per run |
+|---|---|---|---|---|
+| DeepSeek V4.1 Flash | **Sage** | 44/72 | **$2.73** | **3.8 min** |
+| | OpenCode 1.19.5 | 44/72 | $4.51 | 6.2 min |
+| GLM-5.3 | **Sage** | **31/72** | **$8.86** | **4.6 min** |
+| | OpenCode 1.19.5 | 19/72 | $21.65 | 11.5 min |
+
+One benchmark, run by me with Sage 0.3.0 on 17 November 2026; gaps of two or three runs are within
+chance. The method, the raw results and every other measurement are in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
-**CLI (Linux x64, macOS on Apple silicon, Windows x64):** download the archive for your system from
-the [latest release](https://github.com/augult/Sage/releases/latest), unpack it and put `sage` on
-your `PATH`. The binaries are not signed: on macOS, run `xattr -d com.apple.quarantine sage` once.
+From the [latest release](https://github.com/augult/Sage/releases/latest), or the
+[website](https://harness-lyart.vercel.app), which picks the file for your system:
 
-**Windows desktop app:** download `Sage_<version>_x64-setup.exe` from the
-[latest release](https://github.com/augult/Sage/releases/latest) and run it. The standalone
-`Sage_<version>_x64.exe` needs the Microsoft Edge WebView2 Runtime. The downloads are not
-code-signed, so Windows may warn about an unknown publisher.
+| System | File | What it is |
+|---|---|---|
+| Linux (x64) | `sage-<version>-x86_64-linux.tar.gz` | the CLI |
+| macOS (Apple silicon) | `sage-<version>-aarch64-macos.tar.gz` | the CLI |
+| Windows (x64) | `sage-<version>-x86_64-windows.zip` | the CLI |
+| Windows (x64) | `Sage_<version>_x64-setup.exe` | the desktop app |
 
-**From source** (CLI on any platform, desktop app on Linux, macOS or Windows): install Rust (the
-version is pinned in `rust-toolchain.toml`; on Debian or Ubuntu, `scripts/setup-dev.sh` installs it
-together with the libraries Tauri needs), then:
+Unpack the CLI and put `sage` on your `PATH`. Nothing is code-signed: on macOS, run
+`xattr -d com.apple.quarantine sage` once; Windows may warn about an unknown publisher. The
+standalone `Sage_<version>_x64.exe` runs the desktop app without installing it and needs the
+Microsoft Edge WebView2 Runtime.
 
-```sh
-cargo build --release                                 # the CLI: target/release/sage
-cargo run -p sage-desktop --target-dir target/desktop # the desktop app
-cargo test                                            # the tests
-```
-
-## Use
-
-In a terminal, `sage` opens an interactive session in the current folder:
+**From source**, on any platform: install Rust (`rust-toolchain.toml` pins the version; on Debian or
+Ubuntu, `scripts/setup-dev.sh` also installs what the desktop app needs), then
 
 ```sh
-cd path/to/project
-sage                         # type a task, or / for commands; sage -c continues the last session
+cargo build --release                                  # the CLI: target/release/sage
+cargo run -p sage-desktop --target-dir target/desktop  # the desktop app
 ```
 
-![Sage in a terminal](docs/screenshots/cli-commands.png)
+## Start
 
-Inside it, `/connect openrouter` (or any other provider) stores an API key, `/model` and `/effort`
-switch what runs, `/permissions ask` makes Sage ask before every edit and command, `/sessions` and
-`/resume` go back to earlier work, `@file` attaches a file and `!cmd` runs a command yourself.
-`/help` lists the rest.
+In a project folder, run `sage`, add a key for a provider and say what you want:
 
-> **Sage edits files and runs shell commands without asking**, unless you set `/permissions ask`
-> (or start it with `--ask`). It always stops before commands that would wipe a home or root
-> directory, but that is a tripwire, not a sandbox: work in a git repository you can reset, or in a
-> container.
+```text
+$ cd your-project
+$ sage
+› /connect openrouter        the key is asked for next, hidden, and kept in ~/.sage
+› fix the failing tests
+```
 
-The same from scripts, and the API key in the desktop app's Settings or on the command line:
+No key yet? `/demo` plays a scripted run. Type `/` for the commands:
+
+![The / menu in the terminal](docs/screenshots/cli-commands.png)
+
+| Command | |
+|---|---|
+| `/connect <provider>` | Store an API key. `/connect <url> <model>` adds any OpenAI-compatible endpoint, such as Ollama or LM Studio. |
+| `/model`, `/provider`, `/effort` | Switch what runs, and how hard it thinks: `auto` starts low and rises when surprises pile up. |
+| `/permissions ask` | Ask before every edit and command. |
+| `/goal <condition>` | Keep working until a separate check agrees the condition holds. |
+| `/sessions`, `/resume <id>` | Go back to earlier work. Sessions survive restarts; `sage -c` continues the last one in a folder. |
+| `/skills <name>` | Switch on a skill: `ui`, `security`, `cleanup`, `debug`, `tests` or `performance`. A project's `.sage/skills` and `AGENTS.md` add their own. |
+| `/init`, `/diff`, `/cost`, `/status` | Write an `AGENTS.md`; see what changed, what it cost and what is set. |
+
+`@file` attaches a file, `!command` runs one yourself, Tab completes, Ctrl-C stops a run. `/help`
+lists the rest.
+
+> [!WARNING]
+> Sage edits files and runs shell commands without asking, unless you set `/permissions ask` (or
+> start it with `--ask`). It stops before commands that would wipe a home or root directory, but
+> that is a tripwire, not a sandbox: use it in a git repository you can reset, or in a container.
+
+## Scripts and CI
 
 ```sh
-sage key deepseek            # reads the key from stdin; or export DEEPSEEK_API_KEY
-sage demo                    # a scripted walkthrough, no key needed
-sage run -C path/to/project "Fix the failing tests"
-sage run --goal "the tests pass and the README names every flag" -C path/to/project
-sage sessions                # list stored sessions; sage show <id> replays one
-sage resume <id> "and now the other one"
+sage run -C path/to/project "Fix the failing tests"     # unattended; exits 0 when done
+sage run --goal "the tests pass and the README names every flag"
+sage key deepseek          # store a key (read from stdin), or export DEEPSEEK_API_KEY
+sage sessions              # sage show <id> replays one; sage resume <id> "…" continues it
 ```
 
-`sage --help` lists every command and option.
+`--json` prints the result as JSON and `--events` streams every event. `sage --help` lists every
+command and option.
 
-- **Modes.** Sage (the default) is everything above. `--mode default` is the conventional loop
-  other harnesses run, one tool call after another. Any single mechanism can be switched off with
-  `--without <name>` or on with `--with <name>`.
-- **Effort.** `-e ratchet` (Auto in the app, the default) starts at low and rises when surprises
-  pile up; `low`, `high` and `max` stay where they are set.
-- **Goals.** `--goal`, or `/goal <condition>` in a message, keeps the session working until a
-  separate check agrees the condition holds.
-- **Sessions survive restarts.** A session stored under `~/.sage` (or `SAGE_HOME`) can be continued
-  after the app or the CLI was closed.
-- **Skills.** `ui`, `security`, `cleanup`, `debug`, `tests` and `performance` come built in; a
-  project's `.sage/skills` and `AGENTS.md` add to them.
-- **Providers.** OpenAI, Anthropic, Google, DeepSeek, OpenRouter, Moonshot, xAI, Groq, Together,
-  Logfare, and any OpenAI-compatible endpoint of your own. Only Logfare (DeepSeek V4.1 Flash and
-  GLM-5.3) has been tested live.
-- **Benchmarks.** `sage bench` runs Sage, or other harnesses such as OpenCode, on the same tasks and
-  judges every run with hidden checks.
+## Providers
 
-## License and support
+OpenAI, Anthropic, Google, DeepSeek, OpenRouter, Moonshot, xAI, Groq, Together and Logfare are
+built in, and any OpenAI-compatible endpoint can be added. Only DeepSeek V4.1 Flash and GLM-5.3,
+through Logfare, have been tested end to end; the others follow their vendors' documentation.
 
-[MIT](LICENSE): use it, change it, fork it, sell it, including commercially.
+## Desktop app
 
-Sage is shared as it is. Issues and pull requests are welcome, but I may not answer them, and
-updates may not come. If you need a change, fork it.
+The same engine in a window: sessions in a sidebar, every step and its output open to inspection,
+the diff and Git, skills and settings. Windows builds are released; it builds on Linux and macOS
+from source.
 
-## More
+![The desktop app, starting a new session](docs/screenshots/desktop.jpg)
 
-- [`docs/DESIGN.md`](docs/DESIGN.md): how each mechanism works, sessions, goals, providers, releases.
-- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): every measured number, with raw results.
-- [`docs/HANDOFF.md`](docs/HANDOFF.md): what has been done and what is open.
+## Status
 
-```
-crates/sage-core     the engine (no UI dependencies)
-crates/sage-cli      the `sage` binary; bench/ holds the benchmark tasks
-desktop/src-tauri    the Tauri shell
-desktop/ui           the front end (static, no bundler)
-docs                 design, benchmarks, handoff, UI brief, screenshots
-```
+Sage is shared as it is. It works for me and may for you, but there is no support: issues and pull
+requests are open to collaborators only, and updates may or may not come. If you want something
+changed, fork it; that is what the license is for.
+
+## License
+
+[MIT](LICENSE): use it, change it, fork it, sell it.
+
+## Inside
+
+| Path | |
+|---|---|
+| `crates/sage-core` | The engine, with no UI dependencies. |
+| `crates/sage-cli` | The `sage` binary; `bench/` holds the benchmark tasks. |
+| `desktop/` | The Tauri shell and the front end (static, no bundler). |
+| `docs/DESIGN.md` | How each mechanism works; modes, goals, sessions, providers, releases. |
+| `docs/BENCHMARKS.md` | Every number, with the raw results. |
+| `docs/HANDOFF.md` | The development log: what was done and what is open. |
+
+`cargo test --workspace` runs the tests. `sage bench` runs Sage and other harnesses (OpenCode,
+mini-swe-agent and more) on the same tasks and judges every run with hidden checks.
