@@ -10,13 +10,15 @@ use sage_core::util::{fmt_bytes, fmt_duration};
 use std::io::{IsTerminal, Read, Write};
 use std::process::ExitCode;
 
+// Not in the help, for development only: `sage bench` (`sage bench --help`), and for run, chat and
+// prompt `--mode sage|default`, `--with <mechanism>` and `--without <mechanism>` (docs/DESIGN.md,
+// "Developer commands"). They work as ever; they are left out of what users are shown.
 const HELP: &str = "\
 sage — an expectation-driven agent harness
 
 USAGE
   sage [chat] [options] [task…]  an interactive session in this terminal, with /commands (/help lists them)
   sage run [options] <task…>     work on a task in a directory, unattended
-  sage bench [options]           compare harness variants on built-in tasks (sage bench --help)
   sage skills [show <name>]      list skills, or print one
   sage prompt [options]          print the system prompt `run` would send with the same options
   sage sessions                  list sessions
@@ -29,12 +31,8 @@ OPTIONS for run
   -C, --cwd <dir>          workspace (default: current directory)
   -p, --provider <id>      logfare | deepseek | openrouter | … (`sage providers` lists them all)
   -m, --model <name>       model id as the provider spells it
-  -e, --effort <level>     low | high | max | ratchet (default; starts low, rises on repeated surprises).
-                           The same in every mode: a level you set is the level the run thinks at
-      --mode <name>        sage (default): few requests, at a little cost to the result
-                           default: the conventional loop of other harnesses, nothing of Sage's
-      --without <name>     switch one mechanism off, e.g. auto-watch (repeatable; for ablation runs)
-      --with <name>        switch one mechanism on, e.g. watches in the default mode (repeatable)
+  -e, --effort <level>     ratchet (the default, and recommended: starts low and rises by itself when
+                           the task needs it), low, high or max
       --goal <condition>   keep working until an independent check agrees the condition holds; with
                            no task, the goal is the task. A task starting with /goal does the same
       --skill <name>       switch a skill on (repeatable, or comma-separated)

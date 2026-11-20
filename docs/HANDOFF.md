@@ -39,6 +39,10 @@
   has the binary solve the seven `easy` benchmark tasks offline (`sage bench --scripted`) on Linux
   and macOS, whose bash and python3 the tasks need, and only start it on Windows. The README
   shows no screenshots any more.
+- **Developer commands hidden.** `sage bench`, `--mode`, `--with`, `--without` and the chat's
+  `/mode` work as before but are left out of `sage --help`, the `/` menu, `/help` and the README;
+  the banner and `/status` name the mode only when one other than `sage` was set. They are listed
+  in `docs/DESIGN.md`, "Developer commands".
 - **Website** (augult/Harness): the download button asks GitHub for the latest release and links
   the file for the visitor's system (Windows the desktop installer, macOS and Linux the CLI); the
   copy of the 0.3.0 installer the site served is gone.

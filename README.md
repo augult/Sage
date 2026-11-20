@@ -139,5 +139,4 @@ changed, fork it; that is what the license is for.
 | `docs/BENCHMARKS.md` | Every number, with the raw results. |
 | `docs/HANDOFF.md` | The development log: what was done and what is open. |
 
-`cargo test --workspace` runs the tests. `sage bench` runs Sage and other harnesses (OpenCode,
-mini-swe-agent and more) on the same tasks and judges every run with hidden checks.
+`cargo test --workspace` runs the tests.

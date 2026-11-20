@@ -26,7 +26,8 @@ or off, over a set of tasks. Every claim above can be measured rather than belie
 
 ## Modes
 
-A session runs in one of two modes (`--mode` on the CLI; the desktop app always uses Sage). The mode is fixed when
+A session runs in one of two modes (`--mode` on the CLI, a developer option that `sage --help`
+does not show; the desktop app always uses Sage). The mode is fixed when
 the session starts: its system prompt and its tools are sent with the first request.
 
 | Mode | What it is for | What it does |
@@ -104,6 +105,19 @@ Settings, or one written by hand as `custom` in `~/.sage/config.json`. All of th
 OpenAI-compatible chat-completions endpoints. Only Logfare has been exercised live: the others
 are written from the vendors' documentation (`provider/openai.rs` has what each one takes), and
 their model lists are what each vendor documented on 11 November 2026 (Moonshot's, a day later).
+
+## Developer commands
+
+Some of the CLI is for working on Sage, not for using it: it works as ever but is left out of
+`sage --help`, the `/` menu and `/help`, so users are not shown it.
+
+| Command | What it is for |
+|---|---|
+| `sage bench` | Runs the benchmark tasks under harness variants and other harnesses (`sage bench --help`; `docs/BENCHMARKS.md`). `sage bench --scripted` is also the release's smoke test. |
+| `--mode sage\|default` | For `run`, `chat` and `prompt`: Sage's loop or the conventional one (Modes, above). |
+| `--with <mechanism>`, `--without <mechanism>` | For `run`, `chat` and `prompt`: one mechanism on or off, for ablation runs. |
+| `/mode sage\|default` | In the interactive CLI: the mode of the sessions started after it. |
+| `SAGE_UI_*` | The desktop app's test hooks (`desktop/ui/js/hooks.js`), `SAGE_UI_AUTODEMO` among them. |
 
 ## Releases
 
