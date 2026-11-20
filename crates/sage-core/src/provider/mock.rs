@@ -1,4 +1,4 @@
-//! A scripted stand-in for a model. Used by tests and by the in-app demo so the harness mechanics can
+//! A scripted stand-in for a model. Used by tests, offline benchmark runs and the screenshot hook so the harness mechanics can
 //! be exercised without a key. Its token counts are fabricated from text lengths and are labelled as
 //! simulated everywhere they surface.
 

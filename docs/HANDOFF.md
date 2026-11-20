@@ -15,8 +15,8 @@
   (`enter_for`); `/connect ` with no argument runs as typed rather than picking the first provider.
 - Tested by hand through a real terminal emulator (xterm.js on a pty) with the demo and with a
   stand-in OpenAI-compatible endpoint: approvals, a second message to a session, Ctrl-C mid-command,
-  continuing after a restart, answering a question by number. Screenshots:
-  `docs/screenshots/cli-commands.png`, `cli-run.png`.
+  continuing after a restart, answering a question by number. (The screenshots taken then were
+  removed with the demo, which they showed.)
 - **MIT licence**; the README says the project is shared as it is. The README also says plainly that
   Sage edits and runs commands without asking unless `/permissions ask`.
 - **Release 0.3.2** adds CLI archives for Linux x64, macOS arm64 and Windows x64 to the Windows
@@ -27,12 +27,18 @@
   Actions minutes cost nothing on a public repository, macOS ones included. The README was
   rewritten for people arriving from outside: what Sage does, the polyglot results on both models,
   downloads per system, the `/` commands, scripting, providers and the desktop app.
-  `docs/screenshots/desktop.jpg` is the New session view, taken from the browser fixture with its
-  sample session, folder and model renamed; the older screenshots still show the name Presage.
+  The older screenshots in `docs/screenshots/` still show the name Presage; none is in the README.
 - **Permissions, not "Auto" twice.** The desktop app showed "Auto" for the effort and "Auto" for
   the autonomy side by side. The autonomy picker is now called Permissions, as in the CLI's
   `/permissions`, with the choices "Act freely" and "Ask first" (`AUTONOMIES` in
   `views/controls.js`; the inspector says the same). The IPC field is still `autonomy`.
+- **No demo for users.** `sage demo`, the chat's `/demo` and the desktop app's Help > Play the
+  walkthrough are gone: the scripted walkthrough is a test fixture, not something people use.
+  `Harness::demo` stays for the engine's streaming and persistence test and the
+  `SAGE_UI_AUTODEMO` screenshot hook. The release's CLI smoke test, which played the demo, now
+  has the binary solve the seven `easy` benchmark tasks offline (`sage bench --scripted`) on Linux
+  and macOS, whose bash and python3 the tasks need, and only start it on Windows. The README
+  shows no screenshots any more.
 - **Website** (augult/Harness): the download button asks GitHub for the latest release and links
   the file for the visitor's system (Windows the desktop installer, macOS and Linux the CLI); the
   copy of the 0.3.0 installer the site served is gone.

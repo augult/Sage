@@ -874,7 +874,8 @@ impl Harness {
         Ok(Provider::OpenAi(client))
     }
 
-    /// Starts the scripted walkthrough in a throwaway workspace. No key, no network.
+    /// Starts the scripted walkthrough in a throwaway workspace. No key, no network. For tests and
+    /// the desktop app's `SAGE_UI_AUTODEMO` screenshot hook: no command offers it to users.
     pub fn demo(&self) -> Result<SessionMeta, String> {
         let root = self.inner.data_dir.join("demo").join(session_id());
         demo::create_workspace(&root)

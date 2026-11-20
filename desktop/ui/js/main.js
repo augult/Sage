@@ -116,6 +116,7 @@ const app = {
     app.show({ name: 'session', id: meta.id });
   },
 
+  /** The scripted walkthrough, for the SAGE_UI_AUTODEMO test hook only: users are not offered it. */
   async playDemo() {
     await app.opened(await api.startDemo());
   },

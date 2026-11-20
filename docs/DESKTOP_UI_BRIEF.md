@@ -16,7 +16,7 @@ brief remains the specification. Everything the UI needs is on `sage_core::harne
   snake_case), `Stats`, `FinishStatus`, `CacheVerdict`. `delta` events are transient streaming text;
   a `retry` event voids what was streamed for that turn.
 - `crates/sage-cli/src/main.rs`: the terminal renderer, a reference for presenting each event.
-- `sage demo` writes a complete session to `$SAGE_HOME/sessions/<id>/events.jsonl`.
+- `sage run` writes a complete session to `$SAGE_HOME/sessions/<id>/events.jsonl`.
 
 `Harness::start` and `demo` call `tokio::spawn`: invoke them from async Tauri commands. `Harness` is
 `Clone`; keep one in managed state.
@@ -168,8 +168,8 @@ Plain glass over a painting: dense, quiet, and without a hue of its own.
   Paste, Select all, on the text field the focus is in (a press on the bar leaves the focus where
   it was); Copy also takes what is selected in the conversation. View: Back, Forward, Sidebar,
   Inspector, the inspector's three views (a session's only), and the appearance. Window:
-  Minimize, Maximize or Restore, and the six newest sessions, to go to. Help: Play the
-  walkthrough (`start_demo`), Commands and keys (a dialog of the `/` commands and the keys), About
+  Minimize, Maximize or Restore, and the six newest sessions, to go to. Help: Commands
+  and keys (a dialog of the `/` commands and the keys), About
   Sage (version and data folder). The app listens for Ctrl/Cmd+N, +O, +comma, +B (sidebar),
   +Shift+B (inspector), and for Alt+Left and Alt+Right (Cmd+[ and Cmd+] on a Mac); a dialog keeps
   the keys to itself. An open menu takes the arrow keys, Enter and Escape from the document.
@@ -285,8 +285,8 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
      pressed again, puts what it hears where the caret is, and says over the bar why it
      stopped where the webview has no recogniser or refuses the microphone. With no key
      configured, the view leads with "Add an API key" under its line, and Start is not the
-     primary button. The walkthrough (`start_demo`) has no button: it is played by `sage demo`
-     and by the `SAGE_UI_AUTODEMO` hook.
+     primary button. The walkthrough (`start_demo`) is offered nowhere: only the
+     `SAGE_UI_AUTODEMO` hook plays it, for tests and screenshots.
    - *Session*: no header: what the session is (title, status, folder, model, effort, mode,
      autonomy, skills) is the first block of the inspector's Economy tab. The timeline is a
      conversation, and by default it shows only what was said: the user's message (a grey block on

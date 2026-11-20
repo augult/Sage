@@ -137,11 +137,6 @@ const COMMANDS: &[Command] = &[
         about: "show reasoning and every observation",
     },
     Command {
-        name: "demo",
-        args: "",
-        about: "a scripted run, no key needed",
-    },
-    Command {
         name: "exit",
         args: "",
         about: "quit (also Ctrl-D)",
@@ -894,10 +889,10 @@ impl Chat {
         eprintln!("{}", edge(&format!("╰{}╯", "─".repeat(inner + 2))));
         if provider.is_none() {
             eprintln!(
-                "  {} {} adds a key · {} plays a scripted run",
+                "  {} {} adds a key, for example {}",
                 self.paint.yellow("!"),
                 self.accent("/connect <provider>"),
-                self.accent("/demo"),
+                self.accent("/connect openrouter"),
             );
         }
         eprintln!(
@@ -1008,7 +1003,6 @@ impl Chat {
                     "verbose off"
                 });
             }
-            "demo" => self.demo().await,
             other => {
                 let close: Vec<String> = COMMANDS
                     .iter()
@@ -1523,16 +1517,6 @@ impl Chat {
         }
     }
 
-    async fn demo(&mut self) {
-        match self.h.demo() {
-            Ok(meta) => {
-                self.follow(&meta.id, 0, true).await;
-                self.note("that was a scripted stand-in, not a model: /connect a provider to work on your own code");
-            }
-            Err(e) => self.fail(&e),
-        }
-    }
-
     /// Sends a message to the session, or opens one with it.
     async fn message(&mut self, typed: &str) {
         let mut text = typed.to_string();
@@ -1564,11 +1548,11 @@ impl Chat {
                 Ok(meta) => {
                     self.session = Some(meta.id.clone());
                     self.pending = Changes::default();
-                    self.follow(&meta.id, 0, false).await;
+                    self.follow(&meta.id, 0).await;
                 }
                 Err(e) if e.contains("no provider has an API key") => {
                     self.fail("no provider has a key yet");
-                    self.note("/connect <provider> adds one (/connect openrouter, say) · /demo plays a scripted run");
+                    self.note("/connect <provider> adds one, for example /connect openrouter");
                 }
                 Err(e) => self.fail(&e),
             }
@@ -1582,13 +1566,13 @@ impl Chat {
             .unwrap_or(0);
         let changes = std::mem::take(&mut self.pending);
         match self.h.send_with(&id, &text, &skills, &files, changes) {
-            Ok(()) => self.follow(&id, before, false).await,
+            Ok(()) => self.follow(&id, before).await,
             Err(e) => self.fail(&e),
         }
     }
 
     /// Shows the session's run until it ends. Ctrl-C stops it; approvals are asked for here.
-    async fn follow(&mut self, id: &str, after: u64, demo: bool) {
+    async fn follow(&mut self, id: &str, after: u64) {
         let (backlog, mut rx) = match self.h.subscribe(id) {
             Ok(feed) => feed,
             Err(e) => return self.fail(&e),
@@ -1743,7 +1727,7 @@ impl Chat {
             }
         }
         spinner.clear();
-        let cost = if demo || stats.cost <= 0.0 && !stats.priced {
+        let cost = if stats.cost <= 0.0 && !stats.priced {
             String::new()
         } else {
             format!(" · ${:.4} so far", stats.cost)
