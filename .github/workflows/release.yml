@@ -92,9 +92,8 @@ jobs:
           retention-days: 14
 
   # The `sage` command line, one archive per platform, with the README and the licence.
-  # Linux and Windows run the test suite; macOS is built and smoke-tested with the demo, since three
-  # core tests fail there (bash 3.2's `cd -` and syntax-error line numbers, a session lock released
-  # late after a stop: docs/HANDOFF.md).
+  # Linux and Windows run the test suite; macOS is built and smoke-tested with the demo, since two
+  # core tests fail there (bash 3.2's `cd -` and its syntax-error line numbers: docs/HANDOFF.md).
   cli:
     strategy:
       fail-fast: false

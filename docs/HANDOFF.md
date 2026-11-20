@@ -22,12 +22,15 @@
 - **Release 0.3.2** adds CLI archives for Linux x64, macOS arm64 and Windows x64 to the Windows
   desktop installers (`release.yml`, job `cli`); the release notes are written in the publish job.
 - CI on `main` was red on rustfmt only (the mode rename); formatted.
-- **Open, macOS:** the first macOS run of the tests (the release's CLI job) failed three core tests,
-  none touched by this session: `tools::jobs::tests::cd_minus_stays_in_the_session_directory` (exit
-  1: bash 3.2 and `OLDPWD`), `tools::shell::tests::a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it`
-  (bash 3.2 reports the syntax error on line 2, not 3) and
-  `harness::persistence_tests::stopping_a_queued_run_cancels_it_before_the_first_request` (the
-  session lock still held right after the stop). Until they are fixed on a Mac, the release tests
+- **A session lock seen as held a moment too long:** `SessionLock::held` checked once, so a command
+  being started elsewhere in the process (between fork and exec, holding a copy of the lock file)
+  made a session look busy right after it was closed. `acquire` already waited for that instant;
+  `held` now does too (up to 50 ms). It failed
+  `stopping_a_queued_run_cancels_it_before_the_first_request` on Linux and macOS, now and then.
+- **Open, macOS:** the first macOS run of the tests (the release's CLI job) failed two more core
+  tests, both bash 3.2's doing: `tools::jobs::tests::cd_minus_stays_in_the_session_directory`
+  (`cd -` exits 1) and `tools::shell::tests::a_command_handed_over_as_a_job_does_not_take_the_shell_state_back_with_it`
+  (the syntax error is reported on line 2, not 3). Until they are fixed on a Mac, the release tests
   on Linux and Windows and only smoke-tests the macOS binary with `sage demo`.
 
 ## Fifteenth session: performance and correctness audit (18 November 2026)

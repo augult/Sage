@@ -275,11 +275,20 @@ impl SessionLock {
     }
 
     /// Whether another holder has the session in `dir` right now.
+    ///
+    /// As in `acquire`, a command being started at the moment the holder let go (between fork and
+    /// exec) holds a copy of the file for an instant: a lock still there a moment later is held.
     pub fn held(dir: &Path) -> bool {
         let Ok(file) = File::open(dir.join(LOCK)) else {
             return false;
         };
-        matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
+        for _ in 0..5 {
+            if !matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock)) {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        true
     }
 }
 
