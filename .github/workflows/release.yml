@@ -211,11 +211,12 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          - Resumed chats honor `--ask` and show the saved permission when no override is given. An unattended session refuses steps that require approval.
-          - Interactive chat honors turn and time budgets, including when continuing a session with new limits.
-          - For scripts, only a completed task exits 0. A handoff (`yielded`) exits 2. The JSON result includes its status and verification flag.
-          - The Linux x64 CLI is built on Ubuntu 22.04 and supports glibc 2.35 or newer with OpenSSL 3.
-          - The benchmark archive includes a runnable reconstruction of the 36 published exercises with pinned upstream fixtures.
+          - Nothing in a reply runs after an accepted `finish`, and nothing runs once you stop a run (in every mode).
+          - A `finish` in the reply that used up the time budget is the result, with its summary, instead of "out of budget".
+          - The tripwire for wiping the home or root directory also catches `rm -rf ~/`, `~/*`, `$HOME`, `"$HOME"`, `${HOME}`, split flags and long options.
+          - Files a background command changes make the last check stale, so `finish` is no longer accepted as verified on an outdated check.
+          - A call to a tool that does not exist is answered with the tools the session actually has.
+          - A cut-off tool argument keeps a trailing comma that is part of its text.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.
