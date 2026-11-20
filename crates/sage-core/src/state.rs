@@ -5,7 +5,7 @@ use crate::changes::Baseline;
 use crate::economy::Prices;
 use crate::tools::jobs::Jobs;
 use crate::watches::{WatchSpec, Watches};
-use crate::workspace::{Fingerprint, Seen, Workspace, fingerprint_off_thread};
+use crate::workspace::{Fingerprint, Seen, Workspace, look_again_off_thread};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -318,20 +318,16 @@ impl Evidence {
         deadline: Option<Instant>,
         cmd: Option<&str>,
     ) -> bool {
-        let now = match deadline {
-            Some(deadline) => {
-                tokio::time::timeout_at(deadline.into(), fingerprint_off_thread(&ws.root))
-                    .await
-                    .ok()
-            }
-            None => Some(fingerprint_off_thread(&ws.root).await),
+        let look = look_again_off_thread(&ws.root, self.fingerprint.take());
+        let looked = match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline.into(), look).await.ok(),
+            None => Some(look.await),
         };
-        let Some(now) = now else {
+        let Some((now, changed)) = looked else {
             self.changed("the workspace scan exceeded the time budget");
             self.partial_view = true;
             return true;
         };
-        let changed = self.fingerprint.is_some_and(|before| before != now);
         self.look(now);
         if changed && let Some(cmd) = cmd {
             self.epoch += 1;

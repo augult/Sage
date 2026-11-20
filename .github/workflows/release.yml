@@ -217,6 +217,7 @@ jobs:
           - Files a background command changes make the last check stale, so `finish` is no longer accepted as verified on an outdated check.
           - A call to a tool that does not exist is answered with the tools the session actually has.
           - A cut-off tool argument keeps a trailing comma that is part of its text.
+          - A command that rewrites a file in place with the same size, within the same tick of the file system's clock, is now seen as a change: files changed in the last two seconds are also compared by content, as git does.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.

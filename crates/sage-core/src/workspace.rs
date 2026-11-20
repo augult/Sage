@@ -427,6 +427,13 @@ const FINGERPRINT_MAX_FILES: u32 = 100_000;
 /// A walk that takes longer than this stops, and is covered by git as past the cap.
 const FINGERPRINT_BUDGET: Duration = Duration::from_secs(2);
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+/// A file whose time of change is this close to a look at the workspace may be changed again
+/// without its times changing: file systems keep time in ticks of a few milliseconds, and some in
+/// whole seconds. Such a file is told apart by its content, as git does with its racy entries.
+const RACY_WINDOW: Duration = Duration::from_secs(2);
+/// The largest such file whose content is kept, and the most content kept in one look.
+const RACY_MAX_FILE: u64 = 1024 * 1024;
+const RACY_MAX_TOTAL: u64 = 16 * 1024 * 1024;
 
 /// Every file of a small workspace, relative to `root` and sorted. `None` when there are more than
 /// `max_files`: a larger tree is for the model to explore.
@@ -489,20 +496,78 @@ fn stat_hash(md: &std::fs::Metadata) -> u64 {
 }
 
 /// What a look at the workspace found.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct Fingerprint {
     pub digest: u64,
     /// Every file that counts was seen. False only for a tree too large to walk that is not a git
     /// repository: there a change a command makes may go unnoticed.
     pub complete: bool,
+    /// Files changed so shortly before the look that a rewrite of the same size could keep their
+    /// times (`RACY_WINDOW`), with a hash of what they held.
+    racy: Vec<(PathBuf, u64)>,
+}
+
+impl Fingerprint {
+    /// Whether nothing has changed between `before` and this look: the same files, sizes and times,
+    /// and in the files that were racy at `before`, the same content.
+    pub fn unchanged_since(&self, before: &Fingerprint) -> bool {
+        self.digest == before.digest
+            && self.complete == before.complete
+            && before
+                .racy
+                .iter()
+                .all(|(path, hash)| content_hash(path) == Some(*hash))
+    }
+}
+
+/// Collects the racy files of one look, within the limits on how much is read.
+#[derive(Default)]
+struct Racy {
+    now: Option<std::time::SystemTime>,
+    read: u64,
+    files: Vec<(PathBuf, u64)>,
+}
+
+impl Racy {
+    fn see(&mut self, path: &Path, md: &std::fs::Metadata) {
+        let now = *self.now.get_or_insert_with(std::time::SystemTime::now);
+        let mut stamp = md.modified().ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let ctime = UNIX_EPOCH
+                + Duration::new(
+                    md.ctime().max(0) as u64,
+                    md.ctime_nsec().clamp(0, 999_999_999) as u32,
+                );
+            stamp = stamp.max(Some(ctime));
+        }
+        let Some(stamp) = stamp else { return };
+        // A time in the future is as racy as a recent one.
+        let recent = now
+            .duration_since(stamp)
+            .map_or(true, |age| age < RACY_WINDOW);
+        if !recent || md.len() > RACY_MAX_FILE || self.read + md.len() > RACY_MAX_TOTAL {
+            return;
+        }
+        if let Some(hash) = content_hash(path) {
+            self.read += md.len();
+            self.files.push((path.to_path_buf(), hash));
+        }
+    }
+}
+
+fn content_hash(path: &Path) -> Option<u64> {
+    std::fs::read(path).ok().map(|bytes| fnv64(&bytes))
 }
 
 /// Order-independent digest of (path, size, mtime) for every file under `root` that is not ignored
 /// (`.gitignore`, `.ignore`, the derived directories): the build output and caches a test run
 /// writes are nobody's change.
 ///
-/// It is deliberately metadata-only: the question is "was anything touched", and it is asked around
-/// every command. The walk goes in path order, so a tree too large for it is always cut at the same
+/// It is metadata-only, but for files changed in the last moments before it (`RACY_WINDOW`), whose
+/// content is kept too: the question is "was anything touched", and it is asked around every
+/// command. The walk goes in path order, so a tree too large for it is always cut at the same
 /// files; in a git repository, what git says has changed then stands in for the whole tree.
 pub fn fingerprint(root: &Path) -> Fingerprint {
     fingerprint_within(root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET)
@@ -514,27 +579,46 @@ pub async fn fingerprint_off_thread(root: &Path) -> Fingerprint {
     let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || fingerprint(&root))
         .await
-        .unwrap_or(Fingerprint {
-            digest: 0,
-            complete: false,
-        })
+        .unwrap_or_default()
+}
+
+/// A new look at the workspace, and whether anything changed since `before`, on a blocking thread:
+/// the comparison reads the files that were racy then. A look that could not be taken counts as
+/// unknown, and so as a change.
+pub async fn look_again_off_thread(
+    root: &Path,
+    before: Option<Fingerprint>,
+) -> (Fingerprint, bool) {
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let now = fingerprint(&root);
+        let changed = before.is_some_and(|before| !now.unchanged_since(&before));
+        (now, changed)
+    })
+    .await
+    .unwrap_or((Fingerprint::default(), true))
 }
 
 fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerprint {
     // The digest does not depend on the order files come in, so the walk takes them as the disk
     // gives them, which is fastest. Only one that is cut short needs them in path order.
-    if let Some(digest) = walk_digest(root, max_files, budget) {
+    let mut racy = Racy::default();
+    if let Some(digest) = walk_digest(root, max_files, budget, &mut racy) {
         return Fingerprint {
             digest,
             complete: true,
+            racy: racy.files,
         };
     }
-    if let Some(digest) = git_changes(root) {
+    let mut racy = Racy::default();
+    if let Some(digest) = git_changes(root, &mut racy) {
         return Fingerprint {
             digest,
             complete: true,
+            racy: racy.files,
         };
     }
+    let mut racy = Racy::default();
     // No git to speak for the rest: the first files in path order, the same ones every time unless
     // the clock cuts this walk too.
     let start = Instant::now();
@@ -544,11 +628,13 @@ fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerpr
             break;
         }
         acc = acc.wrapping_add(file_digest(&path, &md));
+        racy.see(&path, &md);
         count += 1;
     }
     Fingerprint {
         digest: acc ^ u64::from(count),
         complete: false,
+        racy: racy.files,
     }
 }
 
@@ -576,7 +662,7 @@ fn file_digest(path: &Path, md: &std::fs::Metadata) -> u64 {
 
 /// The digest of every file that counts, or `None` when there are more than `max_files` or the walk
 /// takes longer than `budget`.
-fn walk_digest(root: &Path, max_files: u32, budget: Duration) -> Option<u64> {
+fn walk_digest(root: &Path, max_files: u32, budget: Duration, racy: &mut Racy) -> Option<u64> {
     let start = Instant::now();
     let (mut acc, mut count) = (0u64, 0u32);
     for (path, md) in walk(root, false) {
@@ -584,6 +670,7 @@ fn walk_digest(root: &Path, max_files: u32, budget: Duration) -> Option<u64> {
             return None;
         }
         acc = acc.wrapping_add(file_digest(&path, &md));
+        racy.see(&path, &md);
         count += 1;
     }
     Some(acc ^ u64::from(count))
@@ -635,7 +722,7 @@ fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
 /// with the size and time of change of each such file, so that one changed again is told apart.
 /// The status letters are left out: staging a file changes nothing in the workspace. `None` outside
 /// a repository, or when git does not answer in time.
-fn git_changes(root: &Path) -> Option<u64> {
+fn git_changes(root: &Path, racy: &mut Racy) -> Option<u64> {
     let top = git_output(root, &["rev-parse", "--show-toplevel"])?;
     let top = PathBuf::from(String::from_utf8_lossy(&top).trim());
     let status = git_output(
@@ -663,9 +750,15 @@ fn git_changes(root: &Path) -> Option<u64> {
             entries.next();
         }
         let file = top.join(String::from_utf8_lossy(path).as_ref());
-        let stat = std::fs::symlink_metadata(&file)
-            .map(|md| stat_hash(&md))
-            .unwrap_or(0);
+        let stat = match std::fs::symlink_metadata(&file) {
+            Ok(md) => {
+                if md.is_file() {
+                    racy.see(&file, &md);
+                }
+                stat_hash(&md)
+            }
+            Err(_) => 0,
+        };
         acc = acc.wrapping_add(mix(fnv64(path) ^ stat));
     }
     Some(acc)
@@ -675,6 +768,11 @@ fn git_changes(root: &Path) -> Option<u64> {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// Whether the later of two looks at the workspace finds nothing changed since the earlier.
+    fn same(before: &Fingerprint, after: &Fingerprint) -> bool {
+        after.unchanged_since(before)
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("sage-ws-{name}-{}", crate::util::rand_hex(4)));
@@ -893,21 +991,24 @@ mod tests {
         fs::create_dir_all(root.join("node_modules/x")).unwrap();
         let f0 = fingerprint(&root);
         assert!(f0.complete);
-        assert_eq!(f0, fingerprint(&root), "stable when nothing changed");
+        assert!(
+            same(&f0, &fingerprint(&root)),
+            "stable when nothing changed"
+        );
 
         fs::write(root.join("node_modules/x/big.js"), "ignored").unwrap();
-        assert_eq!(f0, fingerprint(&root));
+        assert!(same(&f0, &fingerprint(&root)));
 
         fs::write(root.join("a.txt"), "three").unwrap();
         let f1 = fingerprint(&root);
-        assert_ne!(f0, f1);
+        assert!(!same(&f0, &f1));
 
         fs::write(root.join("b.txt"), "").unwrap();
         let f2 = fingerprint(&root);
-        assert_ne!(f1, f2);
+        assert!(!same(&f1, &f2));
 
         fs::remove_file(root.join("b.txt")).unwrap();
-        assert_eq!(f1, fingerprint(&root));
+        assert!(same(&f1, &fingerprint(&root)));
     }
 
     fn git(root: &Path, args: &[&str]) {
@@ -942,7 +1043,38 @@ mod tests {
         fs::write(&path, "new").unwrap();
         let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.set_modified(mtime).unwrap();
-        assert_ne!(fingerprint(&root), original);
+        assert!(!same(&original, &fingerprint(&root)));
+    }
+
+    #[test]
+    fn a_rewrite_that_keeps_the_size_and_times_of_a_racy_file_is_still_a_change() {
+        let root = tmp("fp-racy");
+        let path = root.join("a.txt");
+        fs::write(&path, "one").unwrap();
+        let before = fingerprint(&root);
+        // A file system that keeps time in coarse ticks gives a rewrite in the same tick the same
+        // times: the metadata cannot tell, so the digest is made to agree here as it would there.
+        fs::write(&path, "two").unwrap();
+        let mut after = fingerprint(&root);
+        after.digest = before.digest;
+        assert!(!after.unchanged_since(&before));
+        // Nothing rewritten: the same content is no change, even after the file stops being racy.
+        fs::write(&path, "one").unwrap();
+        let before = fingerprint(&root);
+        let mut later = fingerprint(&root);
+        later.racy.clear();
+        assert!(later.unchanged_since(&before));
+        // A file changed long before the look is not read; one changed just now is.
+        let md = path.metadata().unwrap();
+        let mut racy = Racy::default();
+        racy.see(&path, &md);
+        assert_eq!(racy.files.len(), 1);
+        let mut racy = Racy {
+            now: Some(std::time::SystemTime::now() + Duration::from_secs(60)),
+            ..Racy::default()
+        };
+        racy.see(&path, &md);
+        assert!(racy.files.is_empty());
     }
 
     #[test]
@@ -956,9 +1088,9 @@ mod tests {
         fs::create_dir_all(root.join("build/classes")).unwrap();
         fs::write(root.join("build/classes/A.class"), "x").unwrap();
         fs::write(root.join("test.log"), "ran").unwrap();
-        assert_eq!(f0, fingerprint(&root));
+        assert!(same(&f0, &fingerprint(&root)));
         fs::write(root.join("a.txt"), "two").unwrap();
-        assert_ne!(f0, fingerprint(&root));
+        assert!(!same(&f0, &fingerprint(&root)));
     }
 
     #[test]
@@ -971,9 +1103,8 @@ mod tests {
         let budget = Duration::from_secs(60);
         let f0 = fingerprint_within(&root, 2, budget);
         assert!(!f0.complete);
-        assert_eq!(
-            f0,
-            fingerprint_within(&root, 2, budget),
+        assert!(
+            same(&f0, &fingerprint_within(&root, 2, budget)),
             "a cut in path order is stable"
         );
 
@@ -982,19 +1113,19 @@ mod tests {
         git(&root, &["commit", "-q", "-m", "start"]);
         let g0 = fingerprint_within(&root, 2, budget);
         assert!(g0.complete);
-        assert_eq!(g0, fingerprint_within(&root, 2, budget));
+        assert!(same(&g0, &fingerprint_within(&root, 2, budget)));
         // The last file in path order, far past the cap: git sees it.
         fs::write(root.join("e.txt"), "changed").unwrap();
         let g1 = fingerprint_within(&root, 2, budget);
-        assert_ne!(g0, g1);
+        assert!(!same(&g0, &g1));
         // Staging it changes nothing in the workspace; writing it again does.
         git(&root, &["add", "e.txt"]);
-        assert_eq!(g1, fingerprint_within(&root, 2, budget));
+        assert!(same(&g1, &fingerprint_within(&root, 2, budget)));
         std::thread::sleep(Duration::from_millis(20));
         fs::write(root.join("e.txt"), "changed again!").unwrap();
-        assert_ne!(g1, fingerprint_within(&root, 2, budget));
+        assert!(!same(&g1, &fingerprint_within(&root, 2, budget)));
         // A new file anywhere, too.
         fs::write(root.join("f.txt"), "new").unwrap();
-        assert_ne!(g1, fingerprint_within(&root, 2, budget));
+        assert!(!same(&g1, &fingerprint_within(&root, 2, budget)));
     }
 }
