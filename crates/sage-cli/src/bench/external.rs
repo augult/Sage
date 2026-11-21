@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 /// How long a harness gets to wind down once its turns are used up.
 const GRACE: Duration = Duration::from_secs(20);
 /// What an adapter inherits from the environment. Everything else, API keys above all, is withheld.
+/// The proxy settings are the network Sage's own runs have, whatever it is: a benchmark that
+/// filters it gives every harness the same filter.
 const INHERITED: &[&str] = &[
     "PATH",
     "HOME",
@@ -25,6 +27,15 @@ const INHERITED: &[&str] = &[
     "TZ",
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
     "BENCH_EXT_HOME",
 ];
 /// Exit code by which an adapter says that its harness ran into its own step limit.
@@ -58,6 +69,8 @@ pub struct Job<'a> {
     pub max_turns: u32,
     pub time_budget: u64,
     pub keep: bool,
+    /// The reasoning effort Sage's runs start at, for the harness to ask for (`BENCH_EFFORT`).
+    pub effort: Option<&'a str>,
 }
 
 /// The part of an external run that Sage's own runs have no counterpart for.
@@ -166,6 +179,7 @@ pub async fn run(proxy: &Proxy, job: &Job<'_>) -> Ran {
             .env("BENCH_MAX_TURNS", job.max_turns.to_string())
             .env("BENCH_TIME_BUDGET", job.time_budget.to_string())
             .env("BENCH_SCRATCH", &scratch)
+            .env("BENCH_EFFORT", job.effort.unwrap_or(""))
             .stdin(Stdio::null())
             .stderr(out.try_clone()?)
             .stdout(out)
@@ -243,6 +257,7 @@ mod tests {
             max_turns: 3,
             time_budget: 600,
             keep: false,
+            effort: None,
         }
     }
 
@@ -346,7 +361,7 @@ mod tests {
 
         let script = adapter(
             &root,
-            r#"echo "$BENCH_PROMPT|$BENCH_MODEL|$BENCH_MAX_TURNS|$BENCH_TIME_BUDGET|$BENCH_API_KEY|${CARGO_MANIFEST_DIR:-withheld}" > seen.txt
+            r#"echo "$BENCH_PROMPT|$BENCH_MODEL|$BENCH_MAX_TURNS|$BENCH_TIME_BUDGET|$BENCH_API_KEY|$BENCH_EFFORT|${CARGO_MANIFEST_DIR:-withheld}" > seen.txt
 echo "$BENCH_BASE_URL" > "$BENCH_SCRATCH/url"; ls -A "$BENCH_SCRATCH" > scratch.txt; echo "no key configured" >&2; exit 0"#,
         );
         let quick = Job {
@@ -359,6 +374,7 @@ echo "$BENCH_BASE_URL" > "$BENCH_SCRATCH/url"; ls -A "$BENCH_SCRATCH" > scratch.
             max_turns: 7,
             time_budget: 30,
             keep: false,
+            effort: Some("low"),
         };
         let ran = run(&proxy, &quick).await;
         assert_eq!(
@@ -371,7 +387,7 @@ echo "$BENCH_BASE_URL" > "$BENCH_SCRATCH/url"; ls -A "$BENCH_SCRATCH" > scratch.
         );
         assert_eq!(
             std::fs::read_to_string(ws.join("seen.txt")).unwrap().trim(),
-            "fix `it`|glm-5.3|7|30|sk-bench-proxy|withheld"
+            "fix `it`|glm-5.3|7|30|sk-bench-proxy|low|withheld"
         );
         assert_eq!(
             std::fs::read_to_string(ws.join("scratch.txt"))

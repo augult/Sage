@@ -710,6 +710,14 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
     if let (Some(name), Some((dir, proxy))) = (&job.variant.external, &shared.external) {
         let script = external::script(dir, name);
         let home = shared.dir.join("external").join(&label);
+        // The level Sage's runs start at, so that both ask the model for the same thought.
+        let effort = job
+            .variant
+            .effort
+            .as_deref()
+            .or(shared.effort.as_deref())
+            .and_then(sage_core::agent::EffortPolicy::parse)
+            .map(|policy| policy.start().as_str());
         let ext = external::Job {
             id: &label,
             script: &script,
@@ -720,6 +728,7 @@ async fn attempt(shared: &Shared, job: &Job, retry: u32) -> Run {
             max_turns: shared.max_turns,
             time_budget: shared.time_budget,
             keep: shared.keep,
+            effort,
         };
         let ran = external::run(proxy, &ext).await;
         let u = &ran.detail.usage;

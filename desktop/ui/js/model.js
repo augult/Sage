@@ -246,12 +246,18 @@ const HANDLERS = {
     step.explicit = ev.explicit === true;
     step.change = ev.change && typeof ev.change === 'object' && Array.isArray(ev.change.hunks) ? ev.change : null;
     step.results = Array.isArray(ev.results) ? ev.results : null;
-    // No event announces a watch being switched off; its own step is the only trace. Its result
-    // names the watch as the engine found it (a call with no name means `check`).
-    if (step.tool === 'watch' && step.status === 'ok' && step.summary.endsWith(' off')) {
-      const removed = /^\[ok\] watch (.+) removed$/.exec(step.observation.trim());
-      s.watches.delete(removed ? removed[1] : step.summary.slice(0, -' off'.length));
-      s.sideRev++;
+    // No event announces a watch going away; its step is the only trace. Its result names the
+    // watch as the engine found it (a call with no name means `check`), and a new watch says
+    // which one it replaces.
+    if (step.tool === 'watch' && step.status === 'ok') {
+      const gone = [];
+      if (step.summary.endsWith(' off')) {
+        const removed = /^\[ok\] watch (.+) removed$/.exec(step.observation.trim());
+        gone.push(removed ? removed[1] : step.summary.slice(0, -' off'.length));
+      }
+      for (const [, name] of step.observation.matchAll(/^It replaces watch (.+), which ran the same command\.$/gm)) gone.push(name);
+      for (const name of gone) s.watches.delete(name);
+      if (gone.length) s.sideRev++;
     }
     turn.rev++;
   },

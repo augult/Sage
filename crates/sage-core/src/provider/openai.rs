@@ -177,6 +177,43 @@ pub struct OpenAiProvider {
     client: reqwest::Client,
     /// What a vendor attached to a tool call beyond the standard fields, to send back with it.
     extras: Mutex<HashMap<String, Value>>,
+    /// The effort words the endpoint said this model takes, once it has refused one: each effort is
+    /// then sent as the nearest of them.
+    efforts: Mutex<Option<Vec<String>>>,
+}
+
+/// Effort words from least to most thought, as vendors spell them.
+const EFFORT_LADDER: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/// The effort words a refusal lists: "Unexpected reasoning effort high. Supported types are xhigh
+/// (default), medium, and low."
+fn supported_efforts(message: &str) -> Option<Vec<String>> {
+    let lower = message.to_ascii_lowercase();
+    if !lower.contains("reasoning effort") && !lower.contains("reasoning_effort") {
+        return None;
+    }
+    let at = lower.find("supported types are")? + "supported types are".len();
+    let list = lower[at..].split(['.', '"', ';']).next()?;
+    let words: Vec<String> = list
+        .split([',', ' '])
+        .map(|w| w.trim().trim_matches(['(', ')', '\'', '`']))
+        .filter(|w| EFFORT_LADDER.contains(w))
+        .map(String::from)
+        .collect();
+    (!words.is_empty()).then_some(words)
+}
+
+/// `word` as the nearest of `supported` that thinks at all, a tie going to the one below: three
+/// efforts of Sage's stay three where the model takes three.
+fn nearest_effort(word: &str, supported: &[String]) -> Option<String> {
+    let rank = |w: &str| EFFORT_LADDER.iter().position(|l| *l == w);
+    let want = rank(word)?;
+    supported
+        .iter()
+        .filter_map(|w| Some((rank(w)?, w)))
+        .filter(|(r, _)| *r >= 2 || want < 2)
+        .min_by_key(|(r, _)| (r.abs_diff(want), *r > want))
+        .map(|(_, w)| w.clone())
 }
 
 const MAX_BACKOFF_SECS: u64 = 60;
@@ -208,6 +245,7 @@ impl OpenAiProvider {
             api_key: api_key.to_string(),
             client,
             extras: Mutex::default(),
+            efforts: Mutex::default(),
         })
     }
 
@@ -370,6 +408,20 @@ impl OpenAiProvider {
                 }
             }
         }
+        // In the words the endpoint said it takes for this model, where it has said.
+        if let Some(supported) = self.efforts.lock().unwrap().as_ref() {
+            let mapped = |v: &mut Value| {
+                if let Some(word) = v.as_str().and_then(|w| nearest_effort(w, supported)) {
+                    *v = json!(word);
+                }
+            };
+            if let Some(v) = b.get_mut("reasoning_effort") {
+                mapped(v);
+            }
+            if let Some(v) = b.get_mut("reasoning").and_then(|r| r.get_mut("effort")) {
+                mapped(v);
+            }
+        }
         b
     }
 
@@ -398,26 +450,31 @@ impl OpenAiProvider {
         wire: Option<&str>,
         max_attempts: Option<u32>,
     ) -> Result<ChatResponse, ProviderError> {
-        let body = if let Some(wire) = wire {
-            #[derive(serde::Serialize)]
-            struct Body<'a> {
-                model: &'a str,
-                messages: &'a serde_json::value::RawValue,
-                #[serde(flatten)]
-                options: Map<String, Value>,
-            }
-            serde_json::from_str(wire).and_then(|messages| {
-                serde_json::to_vec(&Body {
-                    model: &self.model,
-                    messages,
-                    options: self.body_options(&req),
+        let build = || {
+            if let Some(wire) = wire {
+                #[derive(serde::Serialize)]
+                struct Body<'a> {
+                    model: &'a str,
+                    messages: &'a serde_json::value::RawValue,
+                    #[serde(flatten)]
+                    options: Map<String, Value>,
+                }
+                serde_json::from_str(wire).and_then(|messages| {
+                    serde_json::to_vec(&Body {
+                        model: &self.model,
+                        messages,
+                        options: self.body_options(&req),
+                    })
                 })
-            })
-        } else {
-            serde_json::to_vec(&self.body(&req))
-        }
-        .map_err(|e| ProviderError::Protocol(e.to_string()))?;
+            } else {
+                serde_json::to_vec(&self.body(&req))
+            }
+            .map_err(|e| ProviderError::Protocol(e.to_string()))
+        };
+        let mut body = build()?;
         let fallback_prompt = est_tokens(std::str::from_utf8(&body).unwrap_or(""));
+        // An effort the model does not take is asked for again, once, in words it does.
+        let mut relearned = false;
         let mut attempt = 0u32;
         loop {
             if cancel.is_cancelled() {
@@ -435,6 +492,26 @@ impl OpenAiProvider {
                         r.usage.prompt = fallback_prompt;
                     }
                     return Ok(r);
+                }
+                Err(ProviderError::Http {
+                    status: 400,
+                    message,
+                    ..
+                }) if !relearned
+                    && max_attempts.is_none_or(|limit| attempt < limit)
+                    && let Some(supported) = supported_efforts(&message) =>
+                {
+                    relearned = true;
+                    *self.efforts.lock().unwrap() = Some(supported);
+                    let again = build()?;
+                    if again == body {
+                        return Err(ProviderError::Http {
+                            status: 400,
+                            message,
+                            retry_after_secs: None,
+                        });
+                    }
+                    body = again;
                 }
                 Err(e)
                     if e.retryable()
@@ -1567,5 +1644,114 @@ mod tests {
             "cache_creation_input_tokens": 30, "output_tokens": 40});
         let usage = parse_usage(&anthropic);
         assert_eq!((usage.prompt, usage.cached, usage.output), (100, 60, 40));
+    }
+
+    #[test]
+    fn an_effort_the_model_does_not_take_is_sent_as_the_nearest_it_does() {
+        let refusal = r#"AiError: AiError: {"error":{"message":"Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.","type":"BadRequestError"}}"#;
+        let words = supported_efforts(refusal).unwrap();
+        assert_eq!(words, ["xhigh", "medium", "low"]);
+        let near = |w: &str| nearest_effort(w, &words).unwrap();
+        // Sage's low, high and max stay three levels.
+        assert_eq!(
+            (near("low"), near("high"), near("max")),
+            ("low".into(), "medium".into(), "xhigh".into())
+        );
+        assert_eq!(supported_efforts("model not found"), None);
+        assert_eq!(
+            supported_efforts("Unexpected value. Supported types are json and text."),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_effort_is_asked_for_again_in_the_model_s_words() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 65536];
+                loop {
+                    let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                    if let Some(head) = text.find("\r\n\r\n") {
+                        let length = text[..head]
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= head + 4 + length {
+                            break;
+                        }
+                    }
+                    match socket.read(&mut chunk).await {
+                        Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                        _ => break,
+                    }
+                }
+                let text = String::from_utf8_lossy(&request).into_owned();
+                let body: Value =
+                    serde_json::from_str(&text[text.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+                let effort = body["reasoning_effort"].as_str().unwrap_or("").to_string();
+                log.lock().unwrap().push(effort.clone());
+                let (status, answer) = if matches!(effort.as_str(), "low" | "medium" | "xhigh") {
+                    (
+                        "200 OK",
+                        format!(
+                            r#"{{"choices":[{{"message":{{"role":"assistant","content":"{effort}"}},"finish_reason":"stop"}}],"usage":{{"prompt_tokens":5,"completion_tokens":1}}}}"#
+                        ),
+                    )
+                } else {
+                    (
+                        "400 Bad Request",
+                        format!(
+                            r#"{{"error":{{"message":"AiError: Unexpected reasoning effort {effort}. Supported types are xhigh (default), medium, and low."}}}}"#
+                        ),
+                    )
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+                let _ = socket.write_all(reply.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        let p = OpenAiProvider::new(
+            &format!("http://{address}/v1"),
+            "k",
+            "qwen-3.8-27b",
+            Dialect::Logfare,
+        )
+        .unwrap();
+        let messages = [Message::user("hi")];
+        let tools = json!([]);
+        let ask = |effort| ChatRequest {
+            messages: &messages,
+            tools: &tools,
+            effort,
+            max_tokens: 64,
+            reasoning_cap: 0,
+        };
+        let cancel = CancellationToken::new();
+        assert_eq!(
+            p.chat(ask(Effort::High), &mut |_| {}, &cancel)
+                .await
+                .unwrap()
+                .content,
+            "medium"
+        );
+        // Learned once: the next request is sent right.
+        assert_eq!(
+            p.chat(ask(Effort::Max), &mut |_| {}, &cancel)
+                .await
+                .unwrap()
+                .content,
+            "xhigh"
+        );
+        assert_eq!(*seen.lock().unwrap(), ["high", "medium", "xhigh"]);
     }
 }

@@ -919,6 +919,14 @@ impl Runner<'_> {
         };
         let cwd = self.sess.ws.cwd.clone();
         // Asking for the check the harness already watches means taking it over under this name.
+        let taken_over: Vec<String> = self
+            .sess
+            .watches
+            .items
+            .iter()
+            .filter(|w| w.auto && w.cmd == cmd && w.cwd == cwd && w.name != name)
+            .map(|w| w.name.clone())
+            .collect();
         self.sess
             .watches
             .items
@@ -932,8 +940,13 @@ impl Runner<'_> {
         self.emit_watches(std::slice::from_ref(&report));
         // Registering a check that currently fails is normal (that is often the bug being fixed), so
         // it never halts the script.
+        // Said in so many words: the watch it replaces is gone, for the model and for the UI.
+        let replaced = taken_over
+            .iter()
+            .map(|old| format!("\nIt replaces watch {old}, which ran the same command."))
+            .collect::<String>();
         let observation = format!(
-            "{}\nIt now re-runs by itself after every change; you will hear about it only when its result changes.",
+            "{}\nIt now re-runs by itself after every change; you will hear about it only when its result changes.{replaced}",
             report.detail
         );
         StepOutput {
@@ -2501,5 +2514,34 @@ mod tests {
         });
         assert_eq!(summary.as_deref(), Some("check off"));
         assert!(s.watches.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_watch_that_takes_over_the_harness_s_own_says_which_it_replaces() {
+        let mut s = test_session("script-watch-takeover", Features::sage());
+        std::fs::write(s.ws.root.join("run_tests.sh"), "exit 0\n").unwrap();
+        // The model's own test command becomes the watch `tests`.
+        run(
+            &mut s,
+            &[(
+                "shell",
+                json!({"cmd": "sh run_tests.sh", "expect_exit": "0"}),
+            )],
+        )
+        .await;
+        assert_eq!(s.watches.names(), "tests");
+        let (res, _, _) = run(
+            &mut s,
+            &[("watch", json!({"name": "unit", "cmd": "sh run_tests.sh"}))],
+        )
+        .await;
+        assert!(
+            res.observations[0]
+                .1
+                .ends_with("\nIt replaces watch tests, which ran the same command."),
+            "{}",
+            res.observations[0].1
+        );
+        assert_eq!(s.watches.names(), "unit");
     }
 }
