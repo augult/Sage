@@ -503,8 +503,8 @@ impl Session {
             .collect();
     }
 
-    /// `limit`, or what is left of the run's time budget where that is less: never under a second,
-    /// so that whatever was asked for is still started.
+    /// `limit`, or what is left of the run's time budget where that is less: zero once the budget
+    /// has run out.
     pub fn within_budget(&self, limit: Duration) -> Duration {
         match self.deadline {
             Some(at) => limit.min(at.saturating_duration_since(Instant::now())),

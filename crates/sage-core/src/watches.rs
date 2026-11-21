@@ -203,7 +203,6 @@ async fn run_within(
     cancel: &CancellationToken,
 ) -> (WatchReport, Option<i32>) {
     let w = sess.watches.items[idx].clone();
-    let started_epoch = sess.evidence.epoch;
     // A run cut short by the time budget says nothing about the code: its result stays unknown.
     let allowed = sess.within_budget(limit);
     let budget_cut = allowed < limit;
@@ -285,7 +284,11 @@ async fn run_within(
         },
     };
 
-    sess.watches.items[idx].epoch = started_epoch;
+    // What a check writes while it runs (a log, a coverage file, build output that is not ignored)
+    // is its own output, so its result stands for the workspace as it left it. Had it stood only
+    // for the state before, a check that writes a file on every run could never certify anything.
+    // A watch that ran before it in the same round is stale now, and `run_stale` runs it again.
+    sess.watches.items[idx].epoch = sess.evidence.epoch;
     sess.watches.items[idx].attempted_at =
         (state != WatchState::Unknown).then_some(sess.evidence.epoch);
     (settle(sess, idx, state, &text, &why, Some(&spill)), code)
@@ -387,18 +390,26 @@ pub async fn run_stale(
     sess: &mut Session,
     cancel: &CancellationToken,
 ) -> (Vec<WatchReport>, String) {
-    let stale: Vec<usize> = (0..sess.watches.items.len())
-        .filter(|i| sess.watches.items[*i].attempted_at != Some(sess.evidence.epoch))
-        .collect();
-    if stale.is_empty() {
-        return (Vec::new(), String::new());
-    }
     let mut reports = Vec::new();
-    for idx in stale {
-        if cancel.is_cancelled() {
+    // A watch that changes files while it runs leaves the ones that ran before it stale: they run
+    // once more, against the files as it left them. Two watches that both write on every run would
+    // leave each other stale for ever, so there is one such round and no more.
+    for _ in 0..2 {
+        let stale: Vec<usize> = (0..sess.watches.items.len())
+            .filter(|i| sess.watches.items[*i].attempted_at != Some(sess.evidence.epoch))
+            .collect();
+        if stale.is_empty() {
             break;
         }
-        reports.push(run_one(sess, idx, cancel).await);
+        for idx in stale {
+            if cancel.is_cancelled() {
+                break;
+            }
+            reports.push(run_one(sess, idx, cancel).await);
+        }
+    }
+    if reports.is_empty() {
+        return (Vec::new(), String::new());
     }
     if !cancel.is_cancelled() && sess.watches.all_pass_at(sess.evidence.epoch) {
         let names = sess.watches.names();
@@ -409,7 +420,7 @@ pub async fn run_stale(
         .filter(|r| !r.detail.is_empty())
         .map(|r| r.detail.clone())
         .collect();
-    let quiet: Vec<&str> = reports
+    let mut quiet: Vec<&str> = reports
         .iter()
         .filter(|r| {
             r.detail.is_empty()
@@ -421,6 +432,9 @@ pub async fn run_stale(
         })
         .map(|r| r.name.as_str())
         .collect();
+    // A watch that ran twice in the round is named once.
+    let mut named = std::collections::HashSet::new();
+    quiet.retain(|name| named.insert(*name));
     if !quiet.is_empty() {
         text.push(format!("watches still passing: {}", quiet.join(", ")));
     }
@@ -467,7 +481,8 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed, observed_epoch: u
             &verdict.violations.join("; "),
             None,
         );
-        sess.watches.items[*idx].epoch = observed_epoch;
+        // As for a run of the watch itself (`run_within`): what the command wrote is its output.
+        sess.watches.items[*idx].epoch = epoch;
         sess.watches.items[*idx].attempted_at = Some(epoch);
         if report.change != WatchChange::Same {
             out.reports.push(report);

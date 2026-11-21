@@ -577,15 +577,6 @@ pub fn fingerprint(root: &Path) -> Fingerprint {
     fingerprint_within(root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET)
 }
 
-/// `fingerprint` on a blocking thread: a large tree takes a while, and the runtime has other
-/// sessions to serve meanwhile. One that could not be taken counts as unknown, never as unchanged.
-pub async fn fingerprint_off_thread(root: &Path) -> Fingerprint {
-    let root = root.to_path_buf();
-    tokio::task::spawn_blocking(move || fingerprint(&root))
-        .await
-        .unwrap_or_default()
-}
-
 /// A new look at the workspace, and whether anything changed since `before`, on a blocking thread:
 /// the comparison reads the files that were racy then. A look that could not be taken counts as
 /// unknown, and so as a change.

@@ -121,12 +121,16 @@ pub async fn exec(
     let buf = run.buf.lock().unwrap();
     let (raw, truncated) = buf.snapshot();
     let total_bytes = buf.total;
+    // The command's output is what it printed until the shell exited. A process it left running in
+    // the background (`server &`) may keep the pipes open and go on printing, but that is the
+    // background process talking, not the command: what had come by then is the whole of it.
+    let exited = matches!(end, ExecEnd::Exited(_));
     // After a `cd` has been followed, so that paths come out relative to where the next call runs.
     Ok(Exec {
         end,
         text: sess.shown(clean(&raw)),
         total_bytes,
-        output_complete: drained && !truncated,
+        output_complete: exited && !truncated,
         drained,
         ms,
         spill,
@@ -275,9 +279,7 @@ pub fn danger(cmd: &str) -> Option<&'static str> {
     let whole = |prefix: &str| {
         c.match_indices(prefix).any(|(i, _)| {
             let rest = &c[i + prefix.len()..];
-            rest.is_empty()
-                || rest.starts_with([' ', ';', '&', '|', '*'])
-                || prefix.ends_with("root")
+            rest.is_empty() || rest.starts_with([' ', ';', '&', '|', '*'])
         })
     };
     if commands(&c).iter().any(|part| wipes_root_or_home(part)) {
@@ -1004,5 +1006,30 @@ mod tests {
         ] {
             assert!(danger(cmd).is_none(), "{cmd}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_process_left_running_in_the_background_does_not_hide_what_the_command_printed() {
+        // The `sleep` keeps the output pipes open after the shell has exited: what the command
+        // printed by then is its output, and a prediction about it is judged on it.
+        let mut s = test_session("background-child", Features::sage());
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo READY; sleep 2 &", "expect_has": "READY", "expect_lacks": "Traceback"}),
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        let out = sh(
+            &mut s,
+            json!({"cmd": "echo booting; sleep 2 &", "expect_has": "READY"}),
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Surprise);
+        assert!(
+            out.observation
+                .contains("expected output to contain \"READY\", it does not"),
+            "{}",
+            out.observation
+        );
     }
 }

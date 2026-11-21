@@ -34,6 +34,80 @@ impl Pattern {
     }
 }
 
+/// How much of the cleaned output already tried is tried again with what comes next, so that a
+/// match that begins in it and ends in the new output is found. About fifty lines.
+const OVERLAP: usize = 4 * 1024;
+/// How much of an unfinished last line is tried (a prompt or a progress line with no newline).
+const OPEN_LINE: usize = 16 * 1024;
+
+/// A job's output as `until` follows it.
+#[derive(Default)]
+struct Follow {
+    /// The spill file; without it, the output kept in memory stands in.
+    file: Option<tokio::fs::File>,
+    /// Bytes of the output taken in so far.
+    read: u64,
+    /// Bytes after the last complete line, waiting for the rest of it.
+    open: Vec<u8>,
+    /// The end of the cleaned complete lines already tried.
+    tail: String,
+    /// Some of the output was gone before it could be looked at.
+    lossy: bool,
+}
+
+impl Follow {
+    /// Takes in the output up to `total` and says whether `pattern` matches it. Complete lines are
+    /// cleaned once each: cleaning works line by line, so the pieces join to what cleaning the
+    /// whole would give.
+    async fn feed(
+        &mut self,
+        features: &crate::state::Features,
+        ws: &crate::workspace::Workspace,
+        job: &super::jobs::Job,
+        pattern: &Pattern,
+        total: u64,
+    ) -> bool {
+        use tokio::io::AsyncReadExt;
+        let mut new = Vec::new();
+        if let Some(file) = &mut self.file {
+            let want = total.saturating_sub(self.read);
+            let _ = file.take(want).read_to_end(&mut new).await;
+            // The collector writes the file before it announces a total, so a short read means the
+            // file stopped at its size limit (or failed): what follows is only in memory.
+            if (new.len() as u64) < want {
+                self.file = None;
+            }
+        }
+        self.read += new.len() as u64;
+        if self.file.is_none() {
+            let buf = job.run.buf.lock().unwrap();
+            let more = buf.since(self.read);
+            self.lossy |= (more.len() as u64) < buf.total.saturating_sub(self.read);
+            new.extend(more);
+            self.read = buf.total;
+        }
+        self.open.extend_from_slice(&new);
+        let lines: Vec<u8> = match self.open.iter().rposition(|b| *b == b'\n') {
+            Some(end) => self.open.drain(..=end).collect(),
+            None => Vec::new(),
+        };
+        let mut window = std::mem::take(&mut self.tail);
+        window.push_str(&shown(features, ws, clean(&lines)));
+        let open = &self.open[self.open.len().saturating_sub(OPEN_LINE)..];
+        let matched = if open.is_empty() {
+            pattern.matches(&window)
+        } else {
+            pattern.matches(&format!("{window}{}", shown(features, ws, clean(open))))
+        };
+        let mut keep = window.len().saturating_sub(OVERLAP);
+        while !window.is_char_boundary(keep) {
+            keep += 1;
+        }
+        self.tail = window.split_off(keep);
+        matched
+    }
+}
+
 pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -> StepOutput {
     let known = {
         let ids: Vec<String> = sess.jobs.list.iter().map(|j| j.id.clone()).collect();
@@ -80,11 +154,14 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
     let start_offset = job.read_offset;
     let deadline = Instant::now() + wait;
     let pattern = until.as_deref().map(Pattern::new);
-    // Read the spill incrementally and only recheck when the collector announces new bytes.
-    // Arbitrary regexes may require the whole prefix. Keep that work bounded.
-    const MATCH_BYTES: u64 = 1024 * 1024;
-    let mut capture = Vec::new();
-    let mut spill = None;
+    // The output is followed as it comes, from its start, and only when the collector announces
+    // new bytes: each new piece is read and cleaned once, and the pattern is tried on it together
+    // with the end of what came before (`Follow`), so the work grows with the output, not with
+    // its square.
+    let mut follow = Follow::default();
+    if let Some(path) = &spill_path {
+        follow.file = tokio::fs::File::open(path).await.ok();
+    }
     let mut scanned = None;
     let mut matched = false;
     let mut partial = false;
@@ -95,25 +172,11 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
         if let Some(pattern) = &pattern
             && scanned != Some(total)
         {
-            use tokio::io::AsyncReadExt;
             scanned = Some(total);
-            if spill.is_none()
-                && let Some(path) = &spill_path
-            {
-                spill = tokio::fs::File::open(path).await.ok();
-            }
-            if let Some(file) = &mut spill
-                && capture.len() < MATCH_BYTES as usize
-            {
-                let available = total.min(MATCH_BYTES).saturating_sub(capture.len() as u64);
-                let _ = file.take(available).read_to_end(&mut capture).await;
-                matched = pattern.matches(&shown(&sess.features, &sess.ws, clean(&capture)));
-            }
-            partial = capture.len() as u64 != total;
-            if !matched && partial {
-                let excerpt = job.run.buf.lock().unwrap().snapshot().0;
-                matched = pattern.matches(&shown(&sess.features, &sess.ws, clean(&excerpt)));
-            }
+            matched = follow
+                .feed(&sess.features, &sess.ws, job, pattern, total)
+                .await;
+            partial = follow.lossy;
         }
         if matched || (exited && !output_open) || Instant::now() >= deadline {
             break;
@@ -263,5 +326,36 @@ mod tests {
         let unknown = run(&mut s, &json!({"id": "bg:9"}), &cancel).await;
         assert_eq!(unknown.status, StepStatus::Error);
         assert!(unknown.observation.contains("known jobs: bg:1"));
+    }
+
+    #[tokio::test]
+    async fn until_finds_text_across_pieces_on_an_open_line_and_long_after_the_start() {
+        let mut s = test_session("job-follow", Features::sage());
+        let cancel = CancellationToken::new();
+        // A long run of output first, then the line waited for, written in two pieces.
+        let cmd = "for i in $(seq 1 3000); do echo \"line $i of the warm-up\"; done; printf 'server re'; sleep 0.3; printf 'ady on :3000\\n'; sleep 30";
+        shell::run(&mut s, &json!({"cmd": cmd, "background": true}), &cancel).await;
+        let out = run(
+            &mut s,
+            &json!({"id": "bg:1", "until": "ready on :3000", "wait": 20}),
+            &cancel,
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        // A prompt with no newline after it is found too, and a regex as well.
+        shell::run(
+            &mut s,
+            &json!({"cmd": "printf 'Password: '; sleep 30", "background": true}),
+            &cancel,
+        )
+        .await;
+        let out = run(
+            &mut s,
+            &json!({"id": "bg:2", "until": "/Pass\\w+:/", "wait": 20}),
+            &cancel,
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Ok, "{}", out.observation);
+        s.jobs.kill_all();
     }
 }
