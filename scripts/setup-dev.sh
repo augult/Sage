@@ -4,7 +4,7 @@
 # MSVC build tools and WebView2.
 #
 # --system-only installs just the system libraries, for environments that provision Rust from
-# rust-toolchain.toml themselves (.hoplite/setup.sh uses it).
+# rust-toolchain.toml themselves.
 set -euo pipefail
 
 # The version pinned in rust-toolchain.toml.
