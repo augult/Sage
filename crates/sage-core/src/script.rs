@@ -68,7 +68,7 @@ pub struct ScriptResult {
     pub finished: Option<Finished>,
     /// The model asked the user something: the run ends and waits for the answer.
     pub asked: Option<tools::ask::Question>,
-    /// Identity of each step that failed, for stall detection.
+    /// Identity of each step that failed, with the state of the files it met, for stall detection.
     pub failed_steps: Vec<u64>,
     pub edited: Vec<String>,
 }
@@ -98,7 +98,9 @@ fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
 
 /// Commands whose exit status cannot be a failure, and so prove nothing: what decides the exit
 /// status of the line cannot fail. `cd dir && pytest` is a check; `cd dir; echo ok`,
-/// `pytest; echo done` (the status is `echo`'s), `pytest || true` and `echo $(pytest)` are not.
+/// `pytest; echo done` (the status is `echo`'s), `pytest || true`, `echo $(pytest)`,
+/// `pytest &` (sent to the background, the line exits 0) and `if pytest; then echo ok; fi` (the
+/// status of `echo`, or 0) are not.
 fn proves_nothing(cmd: &str) -> bool {
     !can_fail(cmd)
 }
@@ -106,8 +108,10 @@ fn proves_nothing(cmd: &str) -> bool {
 /// How two parts of a command line are joined.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Join {
-    /// `;`, a newline or `&`: the status is the later part's.
+    /// `;` or a newline: the status is the later part's.
     List,
+    /// `&`: the part before it runs in the background, and its own status is 0.
+    Background,
     And,
     Or,
     Pipe,
@@ -145,7 +149,7 @@ fn top_level(cmd: &str) -> Vec<(String, Option<Join>)> {
             // `2>&1`, `>&2` and `&>file` are redirections, not a job sent to the background.
             '&' if depth == 0 && i > 0 && matches!(chars[i - 1], '>' | '<') => None,
             '&' if depth == 0 && next == Some('>') => None,
-            '&' if depth == 0 => Some(Join::List),
+            '&' if depth == 0 => Some(Join::Background),
             '|' if depth == 0 => Some(Join::Pipe),
             _ => None,
         };
@@ -185,40 +189,194 @@ fn top_level(cmd: &str) -> Vec<(String, Option<Join>)> {
     parts
 }
 
-/// Whether the exit status of `cmd` can be a failure.
-fn can_fail(cmd: &str) -> bool {
-    // The lists of the line: what `;`, newlines and `&` separate, each an and-or chain of pipelines.
-    let mut lists: Vec<Vec<(String, Option<Join>)>> = vec![Vec::new()];
-    for (part, join) in top_level(cmd) {
-        let ends = join == Some(Join::List);
-        lists
-            .last_mut()
-            .expect("there is always a list")
-            .push((part, join.filter(|j| *j != Join::List)));
-        if ends {
-            lists.push(Vec::new());
+/// One part of a command line as `can_fail` weighs it: a simple command, or a whole compound
+/// command (`if … fi`, a loop, `case … esac`) with the verdict its bodies give it.
+struct Part {
+    text: String,
+    join: Option<Join>,
+    /// Set for a compound command.
+    fails: Option<bool>,
+}
+
+fn first_word(text: &str) -> &str {
+    text.split_whitespace().next().unwrap_or("")
+}
+
+/// The word that closes a compound command `word` opens.
+fn closer(word: &str) -> Option<&'static str> {
+    match word {
+        "if" => Some("fi"),
+        "while" | "until" | "for" | "select" => Some("done"),
+        "case" => Some("esac"),
+        _ => None,
+    }
+}
+
+/// A part without the keyword it starts with (`then`, `do`, `else`, `elif`), and that keyword.
+fn after_keyword(text: &str) -> (Option<&str>, &str) {
+    let trimmed = text.trim_start();
+    let word = first_word(trimmed);
+    match word {
+        "then" | "do" | "else" | "elif" => (Some(word), &trimmed[word.len()..]),
+        _ => (None, text),
+    }
+}
+
+/// The index of the part that closes the compound command opened at `start`.
+fn matching(items: &[(String, Option<Join>)], start: usize) -> Option<usize> {
+    let mut open: Vec<&str> = Vec::new();
+    for (at, (text, _)) in items.iter().enumerate().skip(start) {
+        if let Some(close) = closer(first_word(after_keyword(text).1)) {
+            open.push(close);
+        } else if open.last() == Some(&first_word(text)) {
+            open.pop();
+            if open.is_empty() {
+                return Some(at);
+            }
         }
     }
-    lists.retain(|list| list.iter().any(|(part, _)| !part.trim().is_empty()));
+    None
+}
+
+/// Parts joined back into a command line.
+fn render(items: &[(String, Option<Join>)]) -> String {
+    let mut out = String::new();
+    for (text, join) in items {
+        out.push_str(text);
+        out.push_str(match join {
+            Some(Join::List) => "\n",
+            Some(Join::Background) => "&",
+            Some(Join::And) => "&&",
+            Some(Join::Or) => "||",
+            Some(Join::Pipe) => "|",
+            None => "",
+        });
+    }
+    out
+}
+
+/// Whether a compound command, from its opening part to its closing one, can exit with a failure.
+/// Its status is that of the body that ran last, or 0 where none ran: what decides which body
+/// runs (an `if`'s condition, a loop's test) does not count.
+fn compound_can_fail(open: &str, items: &[(String, Option<Join>)]) -> bool {
+    let inner = &items[..items.len() - 1];
+    if open == "case" {
+        return inner.iter().enumerate().any(|(at, (text, _))| {
+            let mut text = text.as_str();
+            if at == 0 {
+                // `case WORD in`: what follows `in` is the first pattern, if anything.
+                match text.find(" in ") {
+                    Some(i) => text = &text[i + 4..],
+                    None if text.trim_end().ends_with(" in") => return false,
+                    None => return true,
+                }
+            }
+            can_fail(text.split_once(')').map_or(text, |(_, command)| command))
+        });
+    }
+    let mut bodies: Vec<Vec<(String, Option<Join>)>> = Vec::new();
+    let mut collecting = false;
+    let mut depth = 0usize;
+    // The first part is the opening word and its condition.
+    for (text, join) in &inner[1..] {
+        let (keyword, rest) = after_keyword(text);
+        // This compound's own keywords; those of one nested in a body stay in the body.
+        let kept = match (depth, keyword) {
+            (0, Some("then" | "else" | "do")) => {
+                collecting = true;
+                bodies.push(Vec::new());
+                rest
+            }
+            (0, Some("elif")) => {
+                collecting = false;
+                rest
+            }
+            _ => text.as_str(),
+        };
+        if collecting && let Some(body) = bodies.last_mut() {
+            body.push((kept.to_string(), *join));
+        }
+        if closer(first_word(rest)).is_some() {
+            depth += 1;
+        } else if depth > 0 && matches!(first_word(text), "fi" | "done" | "esac") {
+            depth -= 1;
+        }
+    }
+    bodies.iter().any(|body| can_fail(&render(body)))
+}
+
+/// The parts of a line with each compound command replaced by one part that says whether it can
+/// fail.
+fn collapse(items: Vec<(String, Option<Join>)>) -> Vec<Part> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < items.len() {
+        let open = first_word(&items[at].0);
+        if closer(open).is_some()
+            && let Some(end) = matching(&items, at)
+        {
+            out.push(Part {
+                text: String::new(),
+                join: items[end].1,
+                fails: Some(compound_can_fail(open, &items[at..=end])),
+            });
+            at = end + 1;
+            continue;
+        }
+        out.push(Part {
+            text: items[at].0.clone(),
+            join: items[at].1,
+            fails: None,
+        });
+        at += 1;
+    }
+    out
+}
+
+/// Whether the exit status of `cmd` can be a failure.
+fn can_fail(cmd: &str) -> bool {
+    // The lists of the line: what `;`, newlines and `&` separate, each an and-or chain of pipelines,
+    // with whether it was sent to the background.
+    let mut lists: Vec<(Vec<Part>, bool)> = vec![(Vec::new(), false)];
+    for mut part in collapse(top_level(cmd)) {
+        let join = part.join;
+        let ends = matches!(join, Some(Join::List | Join::Background));
+        if ends {
+            part.join = None;
+        }
+        let list = lists.last_mut().expect("there is always a list");
+        list.0.push(part);
+        if ends {
+            list.1 = join == Some(Join::Background);
+            lists.push((Vec::new(), false));
+        }
+    }
+    lists.retain(|(list, _)| {
+        list.iter()
+            .any(|part| part.fails.is_some() || !part.text.trim().is_empty())
+    });
+    // A list in the background exits 0 at once, whatever becomes of it.
+    let fails = |(list, background): &(Vec<Part>, bool)| !background && list_can_fail(list);
     // Under `set -e` any list that fails ends the line with its status.
-    if lists.iter().any(|list| sets_errexit(list)) {
-        return lists.iter().any(|list| list_can_fail(list));
+    if lists.iter().any(|(list, _)| sets_errexit(list)) {
+        return lists.iter().any(fails);
     }
     // Otherwise the status is the last list's. A bare `exit` passes on the status before it.
     while let Some(last) = lists.pop() {
-        if let [(part, _)] = last.as_slice()
-            && part.split_whitespace().collect::<Vec<_>>() == ["exit"]
+        if let [part] = last.0.as_slice()
+            && part.fails.is_none()
+            && part.text.split_whitespace().collect::<Vec<_>>() == ["exit"]
         {
             continue;
         }
-        return list_can_fail(&last);
+        return fails(&last);
     }
     false
 }
 
-fn sets_errexit(list: &[(String, Option<Join>)]) -> bool {
-    list.iter().any(|(part, _)| {
-        let words: Vec<&str> = part.split_whitespace().collect();
+fn sets_errexit(list: &[Part]) -> bool {
+    list.iter().any(|part| {
+        let words: Vec<&str> = part.text.split_whitespace().collect();
         let Some((&"set", flags)) = words.split_first() else {
             return false;
         };
@@ -230,22 +388,22 @@ fn sets_errexit(list: &[(String, Option<Join>)]) -> bool {
 }
 
 /// An and-or chain: `a && b` fails if either can, `a || b` only if both can.
-fn list_can_fail(list: &[(String, Option<Join>)]) -> bool {
-    let mut pipelines: Vec<(Vec<&str>, Option<Join>)> = vec![(Vec::new(), None)];
-    for (part, join) in list {
-        pipelines
-            .last_mut()
-            .expect("never empty")
-            .0
-            .push(part.as_str());
-        if matches!(join, Some(Join::And | Join::Or)) {
-            pipelines.push((Vec::new(), *join));
+fn list_can_fail(list: &[Part]) -> bool {
+    let mut pipelines: Vec<(Vec<&Part>, Option<Join>)> = vec![(Vec::new(), None)];
+    for part in list {
+        pipelines.last_mut().expect("never empty").0.push(part);
+        if matches!(part.join, Some(Join::And | Join::Or)) {
+            pipelines.push((Vec::new(), part.join));
         }
     }
     let mut chain = pipelines.into_iter();
     let (first, _) = chain.next().expect("never empty");
     // A failure in any stage of a pipeline is reported (see `jobs::masked_failure`).
-    let fails = |stages: &[&str]| stages.iter().any(|stage| stage_can_fail(stage));
+    let fails = |stages: &[&Part]| {
+        stages
+            .iter()
+            .any(|part| part.fails.unwrap_or_else(|| stage_can_fail(&part.text)))
+    };
     let mut can = fails(&first);
     for (stages, join) in chain {
         can = match join {
@@ -372,7 +530,9 @@ fn summarize(call: &Call) -> String {
         Some(Tool::Write) => s("path"),
         Some(Tool::Watch) => {
             if bool_arg(a, "off") {
-                format!("{} off", s("name"))
+                // As `watch` reads it: a watch with no name is `check`.
+                let name = s("name");
+                format!("{} off", if name.is_empty() { "check" } else { &name })
             } else {
                 format!("{}: {}", s("name"), one_line(&s("cmd"), 120))
             }
@@ -424,6 +584,8 @@ impl Runner<'_> {
             });
 
             let started = Instant::now();
+            // The state of the files the step met: the same step against changed files is another.
+            let epoch_before = self.sess.evidence.epoch;
             // The closing report of a session that is out of budget is heard even behind a failed
             // step: skipping it would leave no report at all.
             let closing = self.landing && call.tool == Some(Tool::Finish) && call.error.is_none();
@@ -478,8 +640,9 @@ impl Runner<'_> {
                         }
                     }
                     if matches!(status, StepStatus::Surprise | StepStatus::Error) {
-                        res.failed_steps
-                            .push(fnv64(format!("{tool_name}\u{0}{}", call.args).as_bytes()));
+                        res.failed_steps.push(fnv64(
+                            format!("{tool_name}\u{0}{epoch_before}\u{0}{}", call.args).as_bytes(),
+                        ));
                     }
                 }
             }
@@ -854,6 +1017,7 @@ impl Runner<'_> {
             // Nothing can follow this reply, so a refusal would only cost the report.
             // It is accepted, with what is actually known about the work.
             let ev = &self.sess.evidence;
+            let partial = ev.partial_pass();
             let (verified, evidence) = match (&failing, unverified) {
                 (Some((names, _, fails, _)), _) => (
                     false,
@@ -867,6 +1031,7 @@ impl Runner<'_> {
                     ),
                 ),
                 (None, _) if ev.fresh() => (true, ev.verified_by()),
+                (None, _) if partial.is_some() => (false, partial.unwrap_or_default()),
                 (None, Some(reason)) => (false, format!("unverified: {reason}")),
                 (None, None) => (
                     false,
@@ -939,6 +1104,18 @@ impl Runner<'_> {
                 evidence: ev.verified_by(),
             });
             return StepOutput::ok("[done] accepted");
+        }
+        // The check passed, but the harness cannot see every change a command makes here: no
+        // further check would change that, so asking for one would only cost replies.
+        if let Some(evidence) = ev.partial_pass() {
+            res.finished = Some(Finished {
+                summary,
+                verified: false,
+                evidence,
+            });
+            return StepOutput::ok(
+                "[done] accepted without verification: the workspace is too large to see every change a command makes",
+            );
         }
         if let Some(reason) = unverified {
             res.finished = Some(Finished {
@@ -2165,5 +2342,164 @@ mod tests {
             let (_, _, events) = run(&mut s, &[("shell", json!({"cmd": cmd}))]).await;
             assert_eq!(statuses(&events), vec![StepStatus::Ok], "{cmd}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_line_that_always_exits_0_is_no_check_however_it_is_built() {
+        // Sent to the background the line exits 0 at once; an `if` that takes no branch exits 0.
+        for cmd in ["false &", "if false; then echo passed; fi"] {
+            let mut s = test_session("script-always-0", Features::sage());
+            std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+            let (res, _, _) = run(
+                &mut s,
+                &[
+                    ("edit", json!({"path": "n.txt", "old": "1", "new": "2"})),
+                    ("shell", json!({"cmd": cmd, "expect_exit": "0"})),
+                    ("finish", json!({"summary": "done"})),
+                ],
+            )
+            .await;
+            assert!(res.finished.is_none(), "{cmd}");
+            assert!(
+                res.observations[2].1.starts_with("[gate] finish refused"),
+                "{cmd}: {}",
+                res.observations[2].1
+            );
+        }
+        for nothing in [
+            "pytest &",
+            "cd sub && pytest &",
+            "if pytest; then echo ok; fi",
+            "if ! pytest; then echo failed; else echo passed; fi",
+            "if [ -f a ]; then\n  echo yes\nelif pytest; then\n  echo no\nfi",
+            "while pytest; do :; done",
+            "for f in *.py; do echo \"$f\"; done",
+            "case \"$x\" in\n  a) echo a;;\n  *) echo other;;\nesac",
+            "if a; then if b; then echo x; fi; fi",
+            "if pytest; then echo ok; fi; true",
+        ] {
+            assert!(proves_nothing(nothing), "{nothing}");
+        }
+        for check in [
+            "if [ -f setup.py ]; then pytest; fi",
+            "if a; then echo; else pytest -q; fi",
+            "for f in *.py; do python3 -m py_compile \"$f\" || exit 1; done",
+            "while read -r f; do test -f \"$f\"; done < list.txt",
+            "case \"$x\" in a) pytest;; *) echo skip;; esac",
+            "if a; then if b; then pytest; fi; fi",
+            "pytest & wait $!",
+            "make & make test",
+            "if true; then echo; fi && pytest",
+            "cd sub && if true; then pytest; fi",
+            "set -e; if true; then pytest; fi; echo done",
+        ] {
+            assert!(!proves_nothing(check), "{check}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_check_in_a_workspace_too_large_to_see_ends_the_task_unverified_at_once() {
+        let mut s = test_session("script-partial-view", Features::sage());
+        // Too many files to walk, and no git to speak for them.
+        crate::workspace::TEST_MAX_FILES
+            .lock()
+            .unwrap()
+            .push((s.ws.root.clone(), 3));
+        for i in 0..5 {
+            std::fs::write(s.ws.root.join(format!("f{i}")), "").unwrap();
+        }
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        let check = |n: u32| {
+            (
+                "shell",
+                json!({"cmd": format!("grep -qx {n} n.txt"), "expect_exit": "0"}),
+            )
+        };
+        let finish = ("finish", json!({"summary": "done"}));
+        let (res, _, events) = run(
+            &mut s,
+            &[
+                ("edit", json!({"path": "n.txt", "old": "1", "new": "2"})),
+                check(2),
+                finish.clone(),
+            ],
+        )
+        .await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok; 3]);
+        let done = res.finished.expect("no further check could do better");
+        assert_eq!(
+            (done.verified, done.evidence.as_str()),
+            (
+                false,
+                "unverified: `grep -qx 2 n.txt` passed (the workspace is too large to see every change a command makes)"
+            )
+        );
+        // With nothing checked since the change, the gate still asks for a check.
+        let (res, _, _) = run(
+            &mut s,
+            &[
+                ("edit", json!({"path": "n.txt", "old": "2", "new": "3"})),
+                finish.clone(),
+            ],
+        )
+        .await;
+        assert!(
+            res.finished.is_none() && res.observations[1].1.starts_with("[gate] finish refused")
+        );
+        // On the last reply, what is known is said the same way.
+        let (res, _, _) = run_as(&mut s, &[check(3), finish], true).await;
+        let done = res.finished.unwrap();
+        assert!(
+            !done.verified
+                && done
+                    .evidence
+                    .starts_with("unverified: `grep -qx 3 n.txt` passed ("),
+            "{}",
+            done.evidence
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_named_as_other_harnesses_name_them_do_what_those_do() {
+        let mut s = test_session("script-foreign-tools", Features::sage());
+        std::fs::create_dir_all(s.ws.root.join("src")).unwrap();
+        std::fs::write(s.ws.root.join("src/app.py"), "print(1)\n").unwrap();
+        // Finding files by name is a glob, not a search of their contents.
+        for (name, args) in [
+            ("Glob", json!({"pattern": "**/*.py"})),
+            ("file_search", json!({"query": "app.py"})),
+            ("find_files", json!({"pattern": "*.py", "path": "src"})),
+        ] {
+            let (res, _, _) = run(&mut s, &[(name, args)]).await;
+            assert_eq!(res.observations[0].1, "src/app.py\n[1 files]", "{name}");
+        }
+        // A command as an argument list, the way a shell is started with a script.
+        let (res, _, events) = run(
+            &mut s,
+            &[(
+                "shell",
+                json!({"command": ["bash", "-lc", "cat src/app.py"]}),
+            )],
+        )
+        .await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok]);
+        assert!(
+            res.observations[0].1.contains("print(1)"),
+            "{}",
+            res.observations[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_watch_switched_off_without_a_name_is_shown_by_the_name_it_had() {
+        let mut s = test_session("script-watch-off", Features::sage());
+        run(&mut s, &[("watch", json!({"cmd": "true"}))]).await;
+        let (_, _, events) = run(&mut s, &[("watch", json!({"off": true}))]).await;
+        let summary = events.iter().find_map(|e| match e {
+            EventKind::StepStart { summary, .. } => Some(summary.clone()),
+            _ => None,
+        });
+        assert_eq!(summary.as_deref(), Some("check off"));
+        assert!(s.watches.items.is_empty());
     }
 }

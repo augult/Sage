@@ -2304,3 +2304,170 @@ async fn an_empty_reply_is_booked_once_and_answered_with_a_note_not_retried() {
         EventKind::Note { kind, .. } if kind == "empty"
     )));
 }
+
+fn note_texts(r: &Rig) -> Vec<String> {
+    events(r)
+        .into_iter()
+        .filter_map(|e| match e {
+            EventKind::Note { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn edits_sent_together_count_as_one_reply_of_work() {
+    let mut r = rig("agent-edits-together", AgentConfig::new("mock"), vec![]);
+    std::fs::write(r.agent.sess.ws.root.join("m.txt"), "a\nb\nc\nd\ne\nf\n").unwrap();
+    let edits: Vec<(&str, serde_json::Value)> = ["a", "b", "c", "d", "e", "f"]
+        .iter()
+        .map(|l| {
+            (
+                "edit",
+                json!({"path": "m.txt", "old": format!("{l}\n"), "new": format!("{l}{l}\n")}),
+            )
+        })
+        .collect();
+    r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(vec![
+        fixed(MockTurn::calls("all six", edits)),
+        fixed(MockTurn::calls(
+            "done",
+            vec![("finish", json!({"summary": "ok", "unverified": "none"}))],
+        )),
+    ])));
+    r.agent
+        .run(
+            "Double every letter in m.txt.".into(),
+            &CancellationToken::new(),
+        )
+        .await;
+    let notes = note_texts(&r);
+    assert!(!notes.iter().any(|n| n.contains("Step back")), "{notes:?}");
+    assert_eq!(r.agent.edits.get("m.txt"), Some(&1));
+}
+
+#[tokio::test]
+async fn the_same_check_after_a_change_is_not_a_repeat() {
+    let mut r = rig("agent-check-again", AgentConfig::new("mock"), vec![]);
+    let check = (
+        "shell",
+        json!({"cmd": "grep -qx 3 n.txt", "expect_exit": "0"}),
+    );
+    r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(vec![
+        fixed(MockTurn::calls(
+            "try 1",
+            vec![
+                ("edit", json!({"path": "n.txt", "old": "alpha", "new": "1"})),
+                check.clone(),
+            ],
+        )),
+        fixed(MockTurn::calls(
+            "try 2",
+            vec![
+                ("edit", json!({"path": "n.txt", "old": "beta", "new": "2"})),
+                check.clone(),
+            ],
+        )),
+        // Sent again with nothing changed: that is a repeat.
+        fixed(MockTurn::calls("try 3", vec![check.clone()])),
+        fixed(MockTurn::calls(
+            "done",
+            vec![("finish", json!({"summary": "ok", "unverified": "none"}))],
+        )),
+    ])));
+    r.agent
+        .run("Make n.txt hold 3.".into(), &CancellationToken::new())
+        .await;
+    let repeats: Vec<usize> = requests(&r)
+        .iter()
+        .enumerate()
+        .filter(|(_, sent)| {
+            sent.iter()
+                .any(|m| m.content.contains("The same step has now failed twice"))
+        })
+        .map(|(at, _)| at)
+        .collect();
+    // Said once, after the third try, and so in the fourth request and not before.
+    assert_eq!(repeats.first(), Some(&3), "{:?}", note_texts(&r));
+}
+
+/// A local endpoint whose first answer streams `first` and breaks off (no finish reason, no
+/// `[DONE]`); every later one is a `finish` call that reports its usage.
+async fn breaks_off_once(first: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut served = 0;
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 65536];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            let body = if served == 0 {
+                format!("data: {first}\n\n")
+            } else {
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"f\",\"function\":{\"name\":\"finish\",\"arguments\":\"{\\\"summary\\\":\\\"ok\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":10}}\n\ndata: [DONE]\n\n".to_string()
+            };
+            served += 1;
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
+            );
+            let _ = socket.write_all(answer.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    format!("http://{address}/v1")
+}
+
+#[tokio::test]
+async fn an_attempt_that_streamed_only_a_tool_call_and_broke_off_is_paid_for() {
+    let mut booked = Vec::new();
+    for first in [
+        r#"{"choices":[{"delta":{"reasoning_content":"We need to look"},"finish_reason":null}]}"#,
+        r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"shell","arguments":"{\"cmd\":\"ls\"}"}}]},"finish_reason":null}]}"#,
+    ] {
+        let url = breaks_off_once(first).await;
+        let provider = crate::provider::openai::OpenAiProvider::new(
+            &url,
+            "k",
+            "deepseek-flash",
+            crate::provider::openai::Dialect::OpenAi,
+        )
+        .unwrap();
+        let mut sess = test_session("agent-unreported", Features::sage());
+        sess.prices = prices_for("deepseek-flash");
+        let mut agent = Agent::new(
+            Provider::OpenAi(provider),
+            sess,
+            AgentConfig::new("deepseek-flash"),
+            Arc::new(MemorySink::default()),
+            Arc::new(Approvals::default()),
+        );
+        agent.run("Say ok.".into(), &CancellationToken::new()).await;
+        assert_eq!((agent.stats.requests, agent.stats.retries), (2, 1));
+        booked.push((agent.stats.prompt_tokens, agent.stats.output_tokens > 10));
+    }
+    // Both lost attempts are booked by estimate on top of the reported 1000 tokens.
+    assert!(
+        booked
+            .iter()
+            .all(|(prompt, output)| *prompt > 1000 && *output),
+        "{booked:?}"
+    );
+}

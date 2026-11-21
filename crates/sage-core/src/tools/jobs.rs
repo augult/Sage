@@ -109,6 +109,8 @@ pub enum StateMode<'a> {
     ReadWrite(&'a Path),
     /// Restore only: watches and checks must not move the session's cwd.
     ReadOnly(&'a Path),
+    /// No session state at all: the tests of the plumbing itself.
+    #[cfg(test)]
     None,
 }
 
@@ -240,6 +242,7 @@ fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
             c.env("SAGE_STATE", p);
             format!("{RESTORE}{HOME_OLDPWD}{NOTE_PIPE}")
         }
+        #[cfg(test)]
         StateMode::None => HOME_OLDPWD.to_string(),
     };
     let own_line = if counts_lines_from_zero() { "\n" } else { "" };

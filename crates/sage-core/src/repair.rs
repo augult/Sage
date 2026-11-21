@@ -504,15 +504,69 @@ pub fn normalize_args(tool: Tool, args: Value) -> Result<Value, String> {
             map.entry("timeout").or_insert(json!(ms.div_ceil(1000)));
         }
         if let Some(Value::Array(parts)) = map.get("cmd") {
-            let joined = parts
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(" && ");
-            map.insert("cmd".into(), json!(joined));
+            let parts: Vec<&str> = parts.iter().filter_map(Value::as_str).collect();
+            map.insert("cmd".into(), json!(command_line(&parts)));
         }
     }
     Ok(Value::Object(map))
+}
+
+/// A command given as a list. A shell started with a script (`["bash", "-lc", "make test"]`) is
+/// that script; a program and its arguments (`["git", "commit", "-m", "fix it"]`) is one command,
+/// quoted as the shell would need it; a list of whole command lines (`["npm ci", "npm test"]`) is
+/// each of them in turn.
+fn command_line(parts: &[&str]) -> String {
+    let Some(first) = parts.first() else {
+        return String::new();
+    };
+    let program = first.rsplit('/').next().unwrap_or(first);
+    if matches!(program, "bash" | "sh" | "zsh" | "dash" | "ksh")
+        && let Some(at) = parts.iter().position(|part| {
+            part.len() > 1 && part.starts_with('-') && !part.starts_with("--") && part.contains('c')
+        })
+        && let Some(script) = parts.get(at + 1)
+    {
+        return script.to_string();
+    }
+    if first.contains(char::is_whitespace) {
+        return parts.join(" && ");
+    }
+    parts
+        .iter()
+        .map(|part| {
+            let plain = !part.is_empty()
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-./=:,+@%^".contains(c));
+            if plain {
+                part.to_string()
+            } else {
+                format!("'{}'", part.replace('\'', r"'\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Tool names other harnesses give to finding files by name, which `search` does with `glob`.
+fn finds_files(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase().replace('-', "_");
+    let name = name.rsplit(['.', ':']).next().unwrap_or(&name);
+    matches!(
+        name,
+        "glob" | "glob_search" | "file_search" | "find_files" | "find_file"
+    )
+}
+
+/// What a file name pattern given to a file-finding tool comes to as a glob: a glob as it is, a
+/// bare name or a part of one as any file whose name holds it.
+fn as_glob(pattern: &str) -> String {
+    let pattern = pattern.trim();
+    if pattern.contains(['*', '?', '[', '{']) {
+        pattern.to_string()
+    } else {
+        format!("*{pattern}*")
+    }
 }
 
 /// Tool calls written into the reply text instead of the structured field.
@@ -607,7 +661,17 @@ pub fn parse_calls(raw: &[ToolCall]) -> (Vec<Call>, u32) {
             }
             let before = args.clone();
             match normalize_args(tool, args) {
-                Ok(args) => {
+                Ok(mut args) => {
+                    // `Glob {"pattern": "**/*.py"}`: a pattern for file names, not for contents.
+                    if tool == Tool::Search
+                        && finds_files(&rc.name)
+                        && let Some(map) = args.as_object_mut()
+                        && !map.contains_key("glob")
+                        && let Some(pattern) = map.remove("pattern")
+                    {
+                        let glob = pattern.as_str().map(as_glob).unwrap_or_default();
+                        map.insert("glob".into(), json!(glob));
+                    }
                     if args != before {
                         repairs += 1;
                     }
@@ -907,5 +971,55 @@ mod tests {
                 .is_empty()
         );
         assert!(calls_in_text("All done, the tests pass.").is_empty());
+    }
+
+    #[test]
+    fn a_command_given_as_a_list_is_read_as_the_shell_would_run_it() {
+        let cmd =
+            |v: Value| normalize_args(Tool::Shell, json!({"command": v})).unwrap()["cmd"].clone();
+        assert_eq!(
+            cmd(json!(["bash", "-lc", "cat a.txt | wc -l"])),
+            "cat a.txt | wc -l"
+        );
+        assert_eq!(cmd(json!(["/bin/sh", "-c", "make test"])), "make test");
+        assert_eq!(
+            cmd(json!(["git", "commit", "-m", "fix it's bug"])),
+            r"git commit -m 'fix it'\''s bug'"
+        );
+        assert_eq!(cmd(json!(["npm ci", "npm test"])), "npm ci && npm test");
+        assert_eq!(cmd(json!(["ls", "-la", "src/"])), "ls -la src/");
+    }
+
+    #[test]
+    fn a_tool_that_finds_files_by_name_is_a_glob() {
+        let call = |name: &str, args: Value| {
+            let raw = [ToolCall {
+                id: "c".into(),
+                name: name.into(),
+                arguments: args.to_string(),
+            }];
+            parse_calls(&raw).0.remove(0)
+        };
+        let glob = call("Glob", json!({"pattern": "**/*.rs", "path": "src"}));
+        assert_eq!(
+            (glob.tool, glob.args),
+            (
+                Some(Tool::Search),
+                json!({"glob": "**/*.rs", "path": "src"})
+            )
+        );
+        assert_eq!(
+            call("file_search", json!({"query": "app.py"})).args,
+            json!({"glob": "*app.py*"})
+        );
+        // A search of contents stays one, whatever it is called.
+        assert_eq!(
+            call("grep", json!({"pattern": "fn main"})).args,
+            json!({"pattern": "fn main"})
+        );
+        assert_eq!(
+            call("glob", json!({"pattern": "x", "glob": "*.rs"})).args,
+            json!({"pattern": "x", "glob": "*.rs"})
+        );
     }
 }

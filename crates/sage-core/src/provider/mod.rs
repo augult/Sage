@@ -169,6 +169,8 @@ pub enum Delta {
     Attempt,
     Reasoning(String),
     Content(String),
+    /// Bytes of a tool call (its name and arguments) streamed: not shown, but paid for.
+    CallBytes(usize),
     /// The attempt failed and will be retried; anything streamed so far is void.
     Retry {
         attempt: u32,

@@ -51,7 +51,8 @@ impl Tool {
             "read" | "read_file" | "cat" | "view" | "open" | "view_file" | "read_files" | "ls"
             | "list" | "list_dir" | "list_files" => Tool::Read,
             "search" | "grep" | "rg" | "find" | "glob" | "search_files" | "grep_search"
-            | "ripgrep" | "codebase_search" | "file_search" => Tool::Search,
+            | "ripgrep" | "codebase_search" | "file_search" | "find_files" | "find_file"
+            | "glob_search" => Tool::Search,
             "edit"
             | "edit_file"
             | "str_replace"

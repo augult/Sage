@@ -276,6 +276,7 @@ pub async fn run_off_thread(
         .unwrap_or_else(|e| StepOutput::error(format!("the search failed: {e}")))
 }
 
+#[cfg(test)]
 pub fn run(sess: &Session, args: &Value) -> StepOutput {
     search(
         &Scope::of(sess),

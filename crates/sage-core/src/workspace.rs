@@ -578,7 +578,27 @@ fn content_hash(path: &Path) -> Option<u64> {
 /// command. The walk goes in path order, so a tree too large for it is always cut at the same
 /// files; in a git repository, what git says has changed then stands in for the whole tree.
 pub fn fingerprint(root: &Path) -> Fingerprint {
-    fingerprint_within(root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET)
+    fingerprint_within(root, max_files(root), FINGERPRINT_BUDGET)
+}
+
+/// Lower limits on the files a fingerprint walks, by workspace: a test can see a tree that is too
+/// large to walk without making one.
+#[cfg(test)]
+pub(crate) static TEST_MAX_FILES: std::sync::Mutex<Vec<(PathBuf, u32)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn max_files(root: &Path) -> u32 {
+    #[cfg(test)]
+    if let Some((_, max)) = TEST_MAX_FILES
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(at, _)| at == root)
+    {
+        return *max;
+    }
+    let _ = root;
+    FINGERPRINT_MAX_FILES
 }
 
 /// A new look at the workspace, and whether anything changed since `before`, on a blocking thread:
@@ -591,7 +611,7 @@ pub async fn look_again_off_thread(
 ) -> (Fingerprint, bool) {
     let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let now = fingerprint_with(&root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET, git_first);
+        let now = fingerprint_with(&root, max_files(&root), FINGERPRINT_BUDGET, git_first);
         let changed = before.is_some_and(|before| !now.unchanged_since(&before));
         (now, changed)
     })

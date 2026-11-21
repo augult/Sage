@@ -275,25 +275,43 @@ pub struct EvidenceState {
     pub partial_view: bool,
 }
 
-/// Said after "verified by …" where the workspace is too large to see every change a command makes.
+/// Said where the workspace is too large to see every change a command makes.
 const PARTIAL_VIEW: &str = " (the workspace is too large to see every change a command makes)";
 
 impl Evidence {
+    /// A check passed against the workspace as the harness last saw it, or nothing has changed.
+    /// Where the harness cannot see all of the workspace, that is not yet `fresh`.
+    pub fn checked(&self) -> bool {
+        self.epoch == 0
+            || self
+                .verified
+                .as_ref()
+                .is_some_and(|(e, _)| *e == self.epoch)
+    }
+
     pub fn fresh(&self) -> bool {
-        !self.partial_view
-            && (self.epoch == 0
-                || self
-                    .verified
-                    .as_ref()
-                    .is_some_and(|(e, _)| *e == self.epoch))
+        !self.partial_view && self.checked()
     }
 
     /// What stands behind a `fresh` state, in words.
     pub fn verified_by(&self) -> String {
         match &self.verified {
-            Some((_, by)) if self.epoch > 0 => format!("verified by {by}{}", self.caveat()),
+            Some((_, by)) if self.epoch > 0 => format!("verified by {by}"),
             _ => "no changes were made".to_string(),
         }
+    }
+
+    /// Where the workspace is too large to see whole and the last check still stands: what is
+    /// known, as the evidence of a `finish` that is taken unverified. Asking for another check
+    /// would get no further, since no check can vouch for changes the harness cannot see.
+    pub fn partial_pass(&self) -> Option<String> {
+        if !self.partial_view || !self.checked() {
+            return None;
+        }
+        Some(match &self.verified {
+            Some((_, by)) if self.epoch > 0 => format!("unverified: {by} passed{PARTIAL_VIEW}"),
+            _ => format!("unverified: no change was seen{PARTIAL_VIEW}"),
+        })
     }
 
     /// What a claim of verification has to add: nothing, unless the last look at the workspace

@@ -802,6 +802,9 @@ impl Accum {
                     call.name.push_str(name);
                 }
                 call.arguments.push_str(&args);
+                if !name.is_empty() || !args.is_empty() {
+                    on_delta(Delta::CallBytes(name.len() + args.len()));
+                }
                 if let Some(extra) = tc.get("extra_content").filter(|extra| !extra.is_null()) {
                     call.extra = Some(extra.clone());
                 }
@@ -907,7 +910,7 @@ mod tests {
         let mut sink = |d: Delta| match d {
             Delta::Reasoning(t) => seen.push(format!("r:{t}")),
             Delta::Content(t) => seen.push(format!("c:{t}")),
-            Delta::Attempt | Delta::Retry { .. } => {}
+            Delta::Attempt | Delta::CallBytes(_) | Delta::Retry { .. } => {}
         };
         for l in lines {
             if acc.feed_line(l.as_bytes(), &mut sink)? {

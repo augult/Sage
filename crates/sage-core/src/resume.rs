@@ -58,7 +58,7 @@ pub struct Snapshot {
     pub stubs: Vec<Option<String>>,
     pub turn: u32,
     pub stats: Stats,
-    /// How often each file has been edited: the note about the sixth edit counts the session's.
+    /// In how many replies each file has been changed: the note about the sixth counts the session's.
     #[serde(default)]
     pub edits: BTreeMap<String, u32>,
     pub chain_hints: u8,

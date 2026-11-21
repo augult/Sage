@@ -226,7 +226,7 @@ const WRAP_UP_NOTE: &str = "Your next reply is the last one this run allows. Act
 #[derive(Default)]
 struct Streamed {
     attempts: std::sync::atomic::AtomicU32,
-    /// Bytes of reasoning and of text the attempt in progress has streamed.
+    /// Bytes of reasoning and of text (tool calls included) the attempt in progress has streamed.
     reasoning: AtomicU64,
     content: AtomicU64,
     /// The same of attempts that streamed something and then failed, and how many there were.
@@ -457,7 +457,7 @@ impl Agent {
                 format!("workspace verification is incomplete{}", ev.caveat())
             }
             _ if ev.epoch == 0 => "no changes were made".to_string(),
-            Some((epoch, by)) if *epoch == ev.epoch => format!("verified by {by}{}", ev.caveat()),
+            Some((epoch, by)) if *epoch == ev.epoch => format!("verified by {by}"),
             _ => format!("not checked since {}", ev.last_change),
         }
     }
@@ -576,11 +576,16 @@ impl Agent {
                 notes.push("The same step has now failed twice in exactly the same way. Do not send it again unchanged: re-read its output and change the approach.".to_string());
             }
         }
-        for path in &r.edited {
+        // Replies that changed a file, not edits: several edits of one file in one reply are one
+        // piece of work, the way the model is asked to send them.
+        let mut edited: Vec<&String> = r.edited.iter().collect();
+        edited.sort();
+        edited.dedup();
+        for path in edited {
             let n = self.edits.entry(path.clone()).or_insert(0);
             *n += 1;
             if *n == 6 {
-                notes.push(format!("{path} has now been edited 6 times. Step back and state what is actually wrong before changing it again."));
+                notes.push(format!("{path} has now been changed in 6 replies. Step back and state what is actually wrong before changing it again."));
             }
         }
         if self.surprise_streak == 3 {
@@ -904,6 +909,7 @@ impl Agent {
                         text,
                     })
                 }
+                Delta::CallBytes(bytes) => tally.seen(false, bytes),
                 Delta::Retry {
                     attempt,
                     wait_ms,
@@ -1132,7 +1138,7 @@ impl Agent {
                 // on the last reply of the budget: there the prose is all the report there will be.
                 if !self.cfg.interactive && nudges_left > 0 && !landing {
                     nudges_left -= 1;
-                    let msg = match features.gate && !self.sess.evidence.fresh() {
+                    let msg = match features.gate && !self.sess.evidence.checked() {
                         true => format!("You replied without calling finish, and nothing has been checked since {}. Run a check and call finish, or call finish with `unverified` and the reason.", self.sess.evidence.last_change),
                         false => "You replied without a tool call, and nobody is here to read it or to answer. If the task is not done, carry on with tool calls. If that was your answer, call finish with it as the summary.".to_string(),
                     };
@@ -1444,6 +1450,7 @@ impl Agent {
             }
             Delta::Reasoning(text) => streamed.seen(true, text.len()),
             Delta::Content(text) => streamed.seen(false, text.len()),
+            Delta::CallBytes(bytes) => streamed.seen(false, bytes),
             Delta::Retry { .. } => streamed.retried(),
         };
         let prompt =

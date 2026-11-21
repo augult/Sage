@@ -6,10 +6,11 @@ use crate::anchors::push_anchored;
 use crate::util::fnv64;
 use crate::workspace::{Seen, Workspace};
 use regex::Regex;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Loc {
     pub path: PathBuf,
     pub line: usize,
@@ -39,6 +40,9 @@ const MAX_SOURCE_BYTES: u64 = 1_500_000;
 /// Workspace source locations mentioned in `text`, in order of first appearance.
 pub fn find_locations(text: &str, ws: &Workspace) -> Vec<Loc> {
     let mut hits: Vec<(usize, Loc)> = Vec::new();
+    let mut found: HashSet<Loc> = HashSet::new();
+    // A long report names the same files over and over: each spelling is looked at once.
+    let mut files: HashMap<String, Option<PathBuf>> = HashMap::new();
     let mut push = |pos: usize, raw: &str, line: &str| {
         let Ok(line) = line.parse::<usize>() else {
             return;
@@ -46,17 +50,25 @@ pub fn find_locations(text: &str, ws: &Workspace) -> Vec<Loc> {
         if line == 0 {
             return;
         }
-        let abs = ws.resolve(raw);
-        let lossy = abs.to_string_lossy().replace('\\', "/");
-        if VENDORED.iter().any(|v| lossy.contains(v)) || !ws.contains(&abs) {
+        let file = files.entry(raw.to_string()).or_insert_with(|| {
+            let abs = ws.resolve(raw);
+            let lossy = abs.to_string_lossy().replace('\\', "/");
+            if VENDORED.iter().any(|v| lossy.contains(v)) || !ws.contains(&abs) {
+                return None;
+            }
+            match std::fs::metadata(&abs) {
+                Ok(md) if md.is_file() && md.len() <= MAX_SOURCE_BYTES => Some(abs),
+                _ => None,
+            }
+        });
+        let Some(path) = file else {
             return;
-        }
-        match std::fs::metadata(&abs) {
-            Ok(md) if md.is_file() && md.len() <= MAX_SOURCE_BYTES => {}
-            _ => return,
-        }
-        let loc = Loc { path: abs, line };
-        if !hits.iter().any(|(_, l)| *l == loc) {
+        };
+        let loc = Loc {
+            path: path.clone(),
+            line,
+        };
+        if found.insert(loc.clone()) {
             hits.push((pos, loc));
         }
     };
@@ -259,5 +271,29 @@ mod tests {
             .collect();
         let lines: Vec<usize> = select(locs, 3).into_iter().map(|l| l.line).collect();
         assert_eq!(lines, vec![1, 5, 6]);
+    }
+
+    #[test]
+    fn a_long_report_is_read_once_per_location_and_in_order() {
+        let ws = ws_with(&[("src/a.py", &numbered(50)), ("src/b.py", &numbered(50))]);
+        let mut out = String::new();
+        for round in 0..200 {
+            for line in 1..=20 {
+                out.push_str(&format!(
+                    "src/a.py:{line}:1: E{round} x\nsrc/b.py:{line}:1: E x\n"
+                ));
+            }
+        }
+        out.push_str("missing.py:3:1: E x\n");
+        let locs = find_locations(&out, &ws);
+        assert_eq!(locs.len(), 40);
+        assert_eq!(
+            (
+                ws.display(&locs[0].path),
+                locs[0].line,
+                ws.display(&locs[1].path)
+            ),
+            ("src/a.py".to_string(), 1, "src/b.py".to_string())
+        );
     }
 }
