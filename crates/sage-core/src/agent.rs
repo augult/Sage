@@ -170,7 +170,7 @@ pub struct Agent {
     journal: Option<resume::Journal>,
     /// Said in front of the next message: the session was brought back after a restart.
     restored: Option<String>,
-    /// Protected files and required deliverables read mechanically off the session's task.
+    /// Files the session's task says not to change, read off it mechanically ("Guard files").
     contract: Contract,
     /// How often `contract` has held this message's `finish`.
     contract_holds: u8,
@@ -755,8 +755,8 @@ impl Agent {
                 self.contract = Contract::default();
             }
             self.contract_holds = 0;
-        } else if features.contract {
-            self.contract = Contract::capture(&self.sess.ws, &task, features.protect);
+        } else if features.protect {
+            self.contract = Contract::capture(&self.sess.ws, &task);
             self.contract_holds = 0;
         }
         let mut composed = if first {
@@ -1347,20 +1347,13 @@ impl Agent {
         Ending::End(outcome)
     }
 
-    /// Mechanical check on protected files and explicitly requested deliverable files. Runs even
-    /// when `epoch == message_epoch`, so a task that asks for `findings.json` cannot end as
-    /// verified with no file written.
+    /// "Guard files": the files the task says not to change are checked before the run ends. The
+    /// contract is empty unless the session captured one (`Features::protect`) or carries one
+    /// over a restart.
     fn contract_check(&mut self, outcome: &mut Outcome, landing: bool) -> Option<String> {
         let ev = &self.sess.evidence;
-        let worked = ev.epoch > ev.message_epoch;
-        let check_due = worked
-            || outcome.status == FinishStatus::Done
-            || (!self.cfg.interactive && self.contract.has_required());
-        if !self.cfg.features.contract
-            || self.contract.is_empty()
-            || !check_due
-            || self.cfg.autonomy != Autonomy::Auto
-        {
+        let check_due = ev.epoch > ev.message_epoch || outcome.status == FinishStatus::Done;
+        if self.contract.is_empty() || !check_due || self.cfg.autonomy != Autonomy::Auto {
             return None;
         }
         let violations = self.contract.violations(&self.sess.ws.root);
@@ -1386,7 +1379,7 @@ impl Agent {
                 turn: self.turn,
                 from: self.effort.as_str().into(),
                 to: next.as_str().into(),
-                reason: "a task constraint or deliverable was not met".into(),
+                reason: "a file the task said not to change was changed".into(),
             });
             self.effort = next;
         }

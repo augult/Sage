@@ -44,10 +44,9 @@ pub struct Features {
     pub short_paths: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
-    /// Files the task asks to write are checked mechanically before `finish` stands.
-    pub contract: bool,
-    /// Files the task says not to edit are checked too (`Do not edit …`). Off by default: it reads
-    /// the task's words by pattern, and can hold correct work; the "Guard files" setting turns it on.
+    /// Files the task says not to edit (`Do not edit …`) are checked before `finish` stands. Off by
+    /// default: it reads the task's words by pattern, and can hold correct work. The "Guard files"
+    /// setting turns it on.
     pub protect: bool,
 }
 
@@ -109,7 +108,6 @@ impl Features {
             attach: true,
             short_paths: true,
             survey: true,
-            contract: true,
             protect: false,
         }
     }
@@ -130,7 +128,6 @@ impl Features {
             attach: false,
             short_paths: false,
             survey: false,
-            contract: false,
             protect: false,
         }
     }
@@ -151,7 +148,6 @@ impl Features {
         "attach",
         "short_paths",
         "survey",
-        "contract",
         "protect",
     ];
 
@@ -174,6 +170,8 @@ impl Features {
         "panel",
         "referee",
         "routing",
+        // Taken out on its own: the check that the files a task asks to write exist.
+        "contract",
     ];
 
     fn set(mut self, name: &str, on: bool) -> Option<Self> {
@@ -192,7 +190,6 @@ impl Features {
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
-            "contract" => &mut self.contract,
             "protect" => &mut self.protect,
             _ => return None,
         };

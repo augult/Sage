@@ -1,12 +1,10 @@
-//! Mechanical checks on what the task says to produce and what it says to leave alone.
+//! "Guard files": a mechanical check that the files a task says not to change are unchanged.
 //!
-//! A worker whose own tests pass can still fail the task in two plain ways: it finished without
-//! writing the file the task asked for (`findings.json`, a new module or script), perhaps having
-//! put it in a subfolder or summarized the answer in prose instead, or it changed a file the task
-//! forbade touching (a test file, a fixture, a shared module). Both are settled from the task's
-//! words and the workspace on disk, with no model request. The second is read off the task's words
-//! by pattern and can hold work that is right, and no model of the stored benchmark runs broke such
-//! a rule: it is checked only where asked for (`Features::protect`, the "Guard files" setting).
+//! A worker whose own tests pass can still fail the task by changing a file the task forbade
+//! touching (a test file, a fixture, a shared module). The files are read off the task's words and
+//! compared with the workspace on disk, with no model request. The words are read by pattern, which
+//! can hold work that is right, and no model of the stored benchmark runs broke such a rule: it is
+//! checked only where asked for (`Features::protect`, the "Guard files" setting).
 
 use crate::util::fnv64;
 use crate::workspace::{Workspace, derived};
@@ -16,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 const MAX_SNAPSHOT_BYTES: u64 = 8 * 1024 * 1024;
-/// Files a walk keeps at most: the protected files of one rule, or the copies of a missing
-/// deliverable. Only the files a walk looks for count, so a large project is not cut short.
+/// Files a walk keeps at most: the protected files of one rule. Only the files a walk looks for
+/// count, so a large project is not cut short.
 const MAX_WALK_FILES: usize = 5_000;
 /// Entries a walk looks at, at most.
 const MAX_WALK_VISITS: usize = 200_000;
@@ -34,12 +32,10 @@ struct Protected {
     hash: u64,
 }
 
-/// What the task fixes mechanically about the workspace: files that must stay as they began, and
-/// files that must exist when the run ends.
+/// The files the task says must stay as they began.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Contract {
     protected: Vec<Protected>,
-    required: Vec<String>,
 }
 
 static PROHIBITION: LazyLock<Regex> = LazyLock::new(|| {
@@ -55,14 +51,6 @@ static NO_EDIT_CODE: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)\b(?:do\s+not|don't|never)\s+(?:edit|change|modify|touch|alter)\s+any\s+code\b",
     )
     .expect("valid regex")
-});
-
-static WRITE_CREATE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(?:write|create)\s+`([^`\s]+)`").expect("valid regex"));
-
-static ADD_IN_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\badd\s+(?:a\s+|an\s+|the\s+)?[a-z0-9 _-]{0,36}?\bin\s+`([^`\s]+)`")
-        .expect("valid regex")
 });
 
 /// Splits `task` into sentence-sized clauses without cutting inside filenames (`app.conf`, `a.py`).
@@ -245,39 +233,10 @@ fn is_code_rel(rel: &str) -> bool {
         .is_some_and(|ext| CODE_EXTS.iter().any(|c| ext.eq_ignore_ascii_case(c)))
 }
 
-fn valid_deliverable(ws: &Workspace, raw: &str) -> Option<String> {
-    let cleaned = bare_token(raw.trim()).trim_start_matches("./");
-    if cleaned.is_empty()
-        || cleaned.starts_with('/')
-        || cleaned.starts_with('-')
-        || cleaned.ends_with('/')
-        || cleaned.contains("..")
-        || cleaned.contains(|c: char| {
-            c.is_whitespace() || matches!(c, '*' | '?' | '[' | ']' | ':' | '\\')
-        })
-    {
-        return None;
-    }
-    let path = Path::new(cleaned);
-    path.extension()
-        .and_then(|e| e.to_str())
-        .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))?;
-    let abs = ws.resolve(cleaned);
-    if !abs.starts_with(&ws.root) || abs.is_dir() {
-        return None;
-    }
-    let rel = abs
-        .strip_prefix(&ws.root)
-        .ok()?
-        .to_string_lossy()
-        .replace('\\', "/");
-    (!rel.is_empty() && !derived(&rel)).then_some(rel)
-}
-
 impl Contract {
-    /// Reads `task` against `ws` before the session has changed anything, recording explicitly
-    /// requested deliverable paths and, with `protect`, the files it says not to change.
-    pub fn capture(ws: &Workspace, task: &str, protect: bool) -> Self {
+    /// Reads `task` against `ws` before the session has changed anything, recording the files it
+    /// says not to change.
+    pub fn capture(ws: &Workspace, task: &str) -> Self {
         let root = &ws.root;
         let mut seen_protected = HashSet::new();
         let mut protected = Vec::new();
@@ -300,16 +259,8 @@ impl Contract {
         };
         // Files and folders the task names as exceptions to a prohibition: never protected.
         let mut exceptions: Vec<PathBuf> = Vec::new();
-        let mut required = Vec::new();
         for clause in clauses(task) {
-            let Some(m) = PROHIBITION.find(clause) else {
-                Self::collect_required(ws, clause, &mut required);
-                continue;
-            };
-            // A clause may say "Write `x.py`; do not edit `y.py`", or "Improve `a.html` without
-            // changing `app.js`": anything ahead of the prohibition still counts for deliverables.
-            Self::collect_required(ws, &clause[..m.start()], &mut required);
-            if protect {
+            if let Some(m) = PROHIBITION.find(clause) {
                 // What the prohibition covers ends where an exception or a new instruction begins:
                 // "do not edit any file except `a.py`", "don't touch the tests, just fix `a.py`".
                 let after = tokens(&clause[m.end()..]);
@@ -346,35 +297,14 @@ impl Contract {
             let path = root.join(&p.rel);
             !exceptions.iter().any(|e| path.starts_with(e))
         });
-        required.retain(|rel| !protected.iter().any(|p| p.rel == *rel));
-        Self {
-            protected,
-            required,
-        }
-    }
-
-    fn collect_required(ws: &Workspace, text: &str, required: &mut Vec<String>) {
-        for re in [&*WRITE_CREATE, &*ADD_IN_FILE] {
-            for cap in re.captures_iter(text) {
-                if let Some(rel) = valid_deliverable(ws, &cap[1])
-                    && !required.contains(&rel)
-                {
-                    required.push(rel);
-                }
-            }
-        }
+        Self { protected }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.protected.is_empty() && self.required.is_empty()
+        self.protected.is_empty()
     }
 
-    pub fn has_required(&self) -> bool {
-        !self.required.is_empty()
-    }
-
-    /// Problems with the workspace as it stands now: protected files touched, or required files
-    /// missing, misplaced, empty or malformed. Empty when everything holds.
+    /// The protected files that were changed or deleted. Empty when everything holds.
     pub fn violations(&self, root: &Path) -> Vec<String> {
         let mut out = Vec::new();
         for p in &self.protected {
@@ -393,47 +323,6 @@ impl Contract {
                 Ok(_) => {}
             }
         }
-        let mut walked: Option<Vec<PathBuf>> = None;
-        for rel in &self.required {
-            let path = root.join(rel);
-            let Ok(bytes) = std::fs::read(&path) else {
-                let name = Path::new(rel).file_name();
-                // Every file of a deliverable's name, wherever it is: one walk for all of them.
-                let files = walked.get_or_insert_with(|| {
-                    let names: Vec<&std::ffi::OsStr> = self
-                        .required
-                        .iter()
-                        .filter_map(|r| Path::new(r).file_name())
-                        .collect();
-                    walk_files(root, root, &|path| {
-                        Path::new(path)
-                            .file_name()
-                            .is_some_and(|n| names.contains(&n))
-                    })
-                });
-                let misplaced = name.and_then(|wanted| {
-                    files
-                        .iter()
-                        .filter(|p| p.file_name() == Some(wanted))
-                        .filter_map(|p| p.strip_prefix(root).ok())
-                        .map(|r| r.to_string_lossy().replace('\\', "/"))
-                        .find(|r| r != rel)
-                });
-                match misplaced {
-                    Some(other) => out.push(format!("the task asks for `{rel}`, which does not exist (`{other}` exists instead — write it at `{rel}`)")),
-                    None => out.push(format!("the task asks for `{rel}`, which has not been created")),
-                }
-                continue;
-            };
-            let text = String::from_utf8_lossy(&bytes);
-            if rel.to_ascii_lowercase().ends_with(".json") {
-                if let Err(e) = serde_json::from_str::<serde_json::Value>(&text) {
-                    out.push(format!("`{rel}` is not valid JSON ({e})"));
-                }
-            } else if is_code_rel(rel) && text.trim().is_empty() {
-                out.push(format!("`{rel}` is empty"));
-            }
-        }
         out
     }
 
@@ -441,7 +330,7 @@ impl Contract {
     pub fn hold_message(violations: &[String]) -> String {
         let items: Vec<String> = violations.iter().map(|v| format!("- {v}")).collect();
         format!(
-            "[contract] The work is not ready to finish:\n{}\n\nRestore any file the task told you to leave alone (`git checkout -- <path>` where tracked), put every requested file in place, verify the work, and call `finish` again.",
+            "[contract] The work is not ready to finish:\n{}\n\nRestore any file the task told you to leave alone (`git checkout -- <path>` where tracked), verify the work, and call `finish` again.",
             items.join("\n")
         )
     }
@@ -478,7 +367,7 @@ mod tests {
             ],
         );
         let prompt = "`conf/parser.py` is incomplete. Complete it to follow `SPEC.md`. Do not edit the files in `tests/`, `SPEC.md` or `examples/app.conf`.";
-        let c = Contract::capture(&ws, prompt, true);
+        let c = Contract::capture(&ws, prompt);
         assert!(c.violations(&ws.root).is_empty());
 
         // Changing conf/parser.py is expected; touching SPEC.md or anything under tests/ is caught.
@@ -498,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_and_regression_prompts_require_deliverables_and_protect_existing_files() {
+    fn audit_and_regression_prompts_protect_existing_code_and_tests() {
         let ws = temp_ws(
             "audit",
             &[
@@ -507,29 +396,10 @@ mod tests {
             ],
         );
         let prompt = "Audit `notesvc/` for security vulnerabilities. Write `findings.json` in this folder: a JSON list. Do not change any code.";
-        let c = Contract::capture(&ws, prompt, true);
-
-        // Missing findings.json is caught even with zero edits to existing files.
-        let v = c.violations(&ws.root);
-        assert_eq!(
-            v,
-            ["the task asks for `findings.json`, which has not been created"]
-        );
-
-        // Writing it inside notesvc/ instead of the root names the misplaced copy.
-        std::fs::write(ws.root.join("notesvc/findings.json"), "[]\n").unwrap();
-        let v = c.violations(&ws.root);
-        assert_eq!(
-            v,
-            [
-                "the task asks for `findings.json`, which does not exist (`notesvc/findings.json` exists instead — write it at `findings.json`)"
-            ]
-        );
-
-        // Invalid JSON is caught; valid JSON passes; editing code is caught.
+        let c = Contract::capture(&ws, prompt);
+        // A file the task asks for is the model's to write: only what it must not change counts.
+        assert!(c.violations(&ws.root).is_empty());
         std::fs::write(ws.root.join("findings.json"), "{bad").unwrap();
-        assert!(c.violations(&ws.root)[0].contains("not valid JSON"));
-        std::fs::write(ws.root.join("findings.json"), "[]\n").unwrap();
         assert!(c.violations(&ws.root).is_empty());
         std::fs::write(ws.root.join("notesvc/app.py"), "def run(): return 1\n").unwrap();
         assert_eq!(
@@ -546,16 +416,11 @@ mod tests {
         let c2 = Contract::capture(
             &ws2,
             "Fix the bug. Add a regression test in `test_regression.py` that fails now and passes after. Do not edit the existing tests.",
-            true,
-        );
-        assert_eq!(
-            c2.violations(&ws2.root),
-            ["the task asks for `test_regression.py`, which has not been created"]
         );
         std::fs::write(ws2.root.join("test_regression.py"), "def test_it(): pass\n").unwrap();
         assert!(
             c2.violations(&ws2.root).is_empty(),
-            "new test file is required, existing test_catalog.py is protected"
+            "a new test file is no existing test"
         );
         std::fs::write(ws2.root.join("test_catalog.py"), "assert 2\n").unwrap();
         assert_eq!(
@@ -563,29 +428,6 @@ mod tests {
             ["`test_catalog.py` was modified, though the task says not to change it"]
         );
         let _ = std::fs::remove_dir_all(&ws2.root);
-    }
-
-    #[test]
-    fn without_protect_only_the_files_to_write_are_checked() {
-        let ws = temp_ws(
-            "unprotected",
-            &[("calc.py", "x = 1\n"), ("tests/test_calc.py", "assert 1\n")],
-        );
-        let task = "Fix `calc.py`. Write `findings.json`. Do not edit the tests or `calc.py`.";
-        let c = Contract::capture(&ws, task, false);
-        std::fs::write(ws.root.join("tests/test_calc.py"), "assert True\n").unwrap();
-        std::fs::write(ws.root.join("calc.py"), "x = 2\n").unwrap();
-        assert_eq!(
-            c.violations(&ws.root),
-            ["the task asks for `findings.json`, which has not been created"]
-        );
-        std::fs::write(ws.root.join("findings.json"), "[]\n").unwrap();
-        assert!(c.violations(&ws.root).is_empty());
-        // With it, the same task protects both.
-        let c = Contract::capture(&ws, task, true);
-        std::fs::write(ws.root.join("calc.py"), "x = 3\n").unwrap();
-        assert_eq!(c.violations(&ws.root).len(), 1);
-        let _ = std::fs::remove_dir_all(&ws.root);
     }
 
     #[test]
@@ -631,7 +473,7 @@ mod tests {
             ),
         ] {
             let ws = temp_ws("exception", &files);
-            let c = Contract::capture(&ws, task, true);
+            let c = Contract::capture(&ws, task);
             std::fs::write(ws.root.join(work), "changed\n").unwrap();
             assert!(
                 c.violations(&ws.root).is_empty(),
@@ -653,19 +495,14 @@ mod tests {
     }
 
     #[test]
-    fn every_test_of_a_large_project_is_protected_and_a_misplaced_file_is_found_anywhere() {
+    fn every_test_of_a_large_project_is_protected() {
         let mut files: Vec<(String, &str)> = (0..5_000)
             .map(|i| (format!("pkg/m{i:04}.py"), "x\n"))
             .collect();
         files.extend((0..50).map(|i| (format!("pkg/test_m{i}.py"), "assert 1\n")));
-        files.push(("zz/deep/findings.json".into(), "[]\n"));
         let refs: Vec<(&str, &str)> = files.iter().map(|(p, b)| (p.as_str(), *b)).collect();
         let ws = temp_ws("large", &refs);
-        let c = Contract::capture(
-            &ws,
-            "Fix `pkg/m0001.py`. Write `findings.json`. Do not edit the tests.",
-            true,
-        );
+        let c = Contract::capture(&ws, "Fix `pkg/m0001.py`. Do not edit the tests.");
         for i in 0..50 {
             std::fs::write(ws.root.join(format!("pkg/test_m{i}.py")), "assert True\n").unwrap();
         }
@@ -673,11 +510,6 @@ mod tests {
         assert_eq!(
             v.iter().filter(|m| m.contains("was modified")).count(),
             50,
-            "{v:?}"
-        );
-        assert!(
-            v.iter()
-                .any(|m| m.contains("`zz/deep/findings.json` exists instead")),
             "{v:?}"
         );
         let _ = std::fs::remove_dir_all(&ws.root);

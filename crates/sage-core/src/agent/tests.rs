@@ -1899,100 +1899,55 @@ async fn an_effort_the_user_fixed_is_kept_in_every_mode() {
     );
 }
 #[tokio::test]
-async fn contract_holds_finish_in_sage_and_can_be_ablated() {
-    // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: Sage holds `finish` until written.
-    let premature = finish();
-    let write_findings = fixed(MockTurn::calls(
-        "",
-        vec![
-            ("write", json!({"path": "findings.json", "content": "[]\n"})),
-            (
-                "shell",
-                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
-            ),
-            ("finish", json!({"summary": "no vulnerabilities"})),
-        ],
-    ));
-    let mut r = rig(
-        "agent-contract-missing",
-        AgentConfig::new("mock"),
-        vec![premature, write_findings],
-    );
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder. Do not change `n.txt`.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
-    assert_eq!(
-        (
-            out.status,
-            out.verified,
-            r.agent.stats.turns,
-            r.agent.effort()
-        ),
-        (FinishStatus::Done, true, 2, Effort::High)
-    );
-    assert!(
-        requests(&r)[1]
-            .last()
-            .unwrap()
-            .content
-            .contains("the task asks for `findings.json`, which has not been created")
-    );
-
-    // With `protect`, touching a protected file holds `finish` until the file is restored.
-    let touch_forbidden = upper("beta", "BETA");
-    let restore_and_write = fixed(MockTurn::calls(
+async fn guard_files_holds_finish_until_a_protected_file_is_restored_and_is_off_by_default() {
+    let task = "Audit `n.txt` and report. Do not edit `n.txt`.";
+    let touch_forbidden = || upper("beta", "BETA");
+    let restore = fixed(MockTurn::calls(
         "",
         vec![
             (
                 "edit",
                 json!({"path": "n.txt", "old": "BETA", "new": "beta"}),
             ),
-            ("write", json!({"path": "findings.json", "content": "[]\n"})),
             (
                 "shell",
-                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
+                json!({"cmd": "grep -qx beta n.txt", "expect_exit": "0"}),
             ),
-            ("finish", json!({"summary": "restored and wrote findings"})),
+            ("finish", json!({"summary": "restored"})),
         ],
     ));
+    // With `protect`, touching a protected file holds `finish` until the file is restored.
     let mut cfg = AgentConfig::new("mock");
     cfg.features.protect = true;
     let mut r = rig(
         "agent-contract-protected",
         cfg,
-        vec![touch_forbidden, restore_and_write],
+        vec![touch_forbidden(), restore],
     );
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder. Do not edit `n.txt`.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
+    let out = r.agent.run(task.into(), &CancellationToken::new()).await;
     assert_eq!(
         (out.status, out.verified, r.agent.stats.turns),
         (FinishStatus::Done, true, 2)
+    );
+    assert!(
+        requests(&r)[1]
+            .last()
+            .unwrap()
+            .content
+            .contains("`n.txt` was modified, though the task says not to change it")
     );
     assert_eq!(
         std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(),
         "alpha\nbeta\ngamma\n"
     );
 
-    // Ablating `contract` turns it off cleanly.
-    let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::sage().without("contract").unwrap();
-    let mut r = rig("agent-contract-off", cfg, vec![finish()]);
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
+    // As Sage comes, the model is trusted with the task's words.
+    let mut r = rig(
+        "agent-contract-off",
+        AgentConfig::new("mock"),
+        vec![touch_forbidden()],
+    );
+    let out = r.agent.run(task.into(), &CancellationToken::new()).await;
     assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
 }
 
@@ -2172,13 +2127,10 @@ async fn old_observations_are_trimmed_only_where_enough_replies_are_left_to_pay_
 }
 
 #[tokio::test]
-async fn a_missing_deliverable_on_the_last_reply_is_incomplete() {
+async fn a_file_the_task_asks_for_is_left_to_the_model() {
     let mut r = rig(
         "agent-missing-final-deliverable",
-        AgentConfig {
-            max_turns: 1,
-            ..AgentConfig::new("mock")
-        },
+        AgentConfig::new("mock"),
         vec![finish()],
     );
     let out = r
@@ -2188,11 +2140,7 @@ async fn a_missing_deliverable_on_the_last_reply_is_incomplete() {
             &CancellationToken::new(),
         )
         .await;
-    assert_eq!(
-        (out.status, out.verified),
-        (FinishStatus::Incomplete, false)
-    );
-    assert!(out.evidence.contains("findings.json"));
+    assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
 }
 
 #[tokio::test]
