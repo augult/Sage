@@ -205,7 +205,7 @@ enum Ending {
 }
 
 /// Sent once when a task with a written specification first calls `finish`.
-const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Go through the specification the task names (README, spec, contract, docstring, plan or note) rule by rule: every command-line form and wrong use, every error and exit status, every edge case, and every file or entry the task says to change. For each rule no test checks, run a quick check of your own (shell with expect_exit / expect_has), or read the spot that implements it if it cannot be run. Fix what does not hold, then call `finish` again, naming in the summary the rules you checked.";
+const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Do one review, in your next reply only. Go through the specification the task names (README, spec, contract, docstring, plan or note) and pick the rules no test checks: command-line forms and wrong use, errors and exit statuses, edge cases, and every file or entry the task says to change. Send a check for each as calls in that one reply (shell with expect_exit / expect_has; several rules may share one command), with `finish` as its last call. The calls run in order and stop at the first that fails: then fix that and call `finish` again. Do not spread the review over several replies.";
 
 /// Whether a task holds the work to more than its tests: it says they check only part of it, or
 /// it points at a written specification (a README, spec, contract, docstring, plan or note).
