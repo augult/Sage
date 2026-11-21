@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 /// How a vendor spells "think this hard" and "here is what I thought before".
@@ -180,7 +180,16 @@ pub struct OpenAiProvider {
     /// The effort words the endpoint said this model takes, once it has refused one: each effort is
     /// then sent as the nearest of them.
     efforts: Mutex<Option<Vec<String>>>,
+    /// How long the endpoint lets one answer stream, once two answers have been cut at the same
+    /// length: a later cut there is not asked for again.
+    stream_limit: Mutex<Option<Duration>>,
+    /// The shortest stream a cut at the same length twice is taken as a limit for. Shorter cuts
+    /// are ordinary network trouble.
+    pub min_stream_limit: Duration,
 }
+
+/// How close two cuts have to be to count as the same length.
+const SAME_CUT: Duration = Duration::from_secs(5);
 
 /// Effort words from least to most thought, as vendors spell them.
 const EFFORT_LADDER: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -246,6 +255,8 @@ impl OpenAiProvider {
             client,
             extras: Mutex::default(),
             efforts: Mutex::default(),
+            stream_limit: Mutex::default(),
+            min_stream_limit: Duration::from_secs(60),
         })
     }
 
@@ -475,6 +486,7 @@ impl OpenAiProvider {
         let fallback_prompt = est_tokens(std::str::from_utf8(&body).unwrap_or(""));
         // An effort the model does not take is asked for again, once, in words it does.
         let mut relearned = false;
+        let mut last_cut: Option<Duration> = None;
         let mut attempt = 0u32;
         loop {
             if cancel.is_cancelled() {
@@ -482,10 +494,27 @@ impl OpenAiProvider {
             }
             attempt += 1;
             on_delta(Delta::Attempt);
-            match self
+            let began = Instant::now();
+            let answer = self
                 .attempt(&body, req.reasoning_cap, on_delta, cancel)
-                .await
+                .await;
+            // An answer the endpoint ends at the same length as the one before, or at the length it
+            // is known to end answers at, is cut by a limit: the same request would be cut again.
+            if let Err(ProviderError::Network(why)) = &answer
+                && why.contains("broke off")
             {
+                let took = began.elapsed();
+                let near = |at: Duration| took.abs_diff(at) <= SAME_CUT;
+                let mut limit = self.stream_limit.lock().unwrap();
+                if took >= self.min_stream_limit
+                    && (limit.is_some_and(near) || last_cut.is_some_and(near))
+                {
+                    *limit = Some(took);
+                    return Err(ProviderError::StreamCut(took.as_secs()));
+                }
+                last_cut = Some(took);
+            }
+            match answer {
                 Ok(mut r) => {
                     r.retries = attempt - 1;
                     if !r.usage_reported {

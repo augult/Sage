@@ -2471,3 +2471,76 @@ async fn an_attempt_that_streamed_only_a_tool_call_and_broke_off_is_paid_for() {
         "{booked:?}"
     );
 }
+
+/// A local endpoint that cuts the first `cuts` answers off after the same time, as a gateway
+/// with a length limit on a stream does; later ones are a `finish` call.
+async fn cuts_long_answers(cuts: usize) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut served = 0;
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 65536];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Writing it all\"},\"finish_reason\":null}]}\n\n")
+                .await;
+            if served < cuts {
+                tokio::time::sleep(Duration::from_millis(1200)).await;
+            } else {
+                let _ = socket.write_all(b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"f\",\"function\":{\"name\":\"finish\",\"arguments\":\"{\\\"summary\\\":\\\"ok\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10}}\n\ndata: [DONE]\n\n").await;
+            }
+            served += 1;
+            let _ = socket.shutdown().await;
+        }
+    });
+    format!("http://{address}/v1")
+}
+
+#[tokio::test]
+async fn an_answer_cut_twice_at_the_same_length_is_not_asked_for_a_third_time() {
+    let url = cuts_long_answers(2).await;
+    let mut provider = crate::provider::openai::OpenAiProvider::new(
+        &url,
+        "k",
+        "m",
+        crate::provider::openai::Dialect::Logfare,
+    )
+    .unwrap();
+    provider.min_stream_limit = Duration::from_secs(1);
+    let sink = Arc::new(MemorySink::default());
+    let mut agent = Agent::new(
+        Provider::OpenAi(provider),
+        test_session("agent-stream-cut", Features::sage()),
+        AgentConfig::new("m"),
+        sink.clone(),
+        Arc::new(Approvals::default()),
+    );
+    let out = agent.run("Say ok.".into(), &CancellationToken::new()).await;
+    assert_eq!(out.status, FinishStatus::Done);
+    // Two cut attempts, then the reply asked for again with the model told why.
+    assert_eq!(agent.stats.requests, 3);
+    let told = agent.ctx.messages.iter().any(|m| {
+        m.content
+            .contains("ends any reply that streams longer than about 1 seconds")
+    });
+    assert!(told);
+}

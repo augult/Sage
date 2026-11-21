@@ -193,6 +193,9 @@ pub enum ProviderError {
     Overthinking(usize),
     /// The model got stuck repeating itself; the stream was cut to stop paying for it.
     Degenerate,
+    /// The provider ended the answer after this many seconds twice in a row: it cuts any answer
+    /// that streams that long, and asking for the same one again would only be cut again.
+    StreamCut(u64),
 }
 
 impl ProviderError {
@@ -204,6 +207,7 @@ impl ProviderError {
             ProviderError::Network(_) | ProviderError::Protocol(_) => true,
             ProviderError::Cancelled
             | ProviderError::Degenerate
+            | ProviderError::StreamCut(_)
             | ProviderError::Overthinking(_) => false,
         }
     }
@@ -219,6 +223,10 @@ impl fmt::Display for ProviderError {
             ProviderError::Network(m) => write!(f, "network error: {m}"),
             ProviderError::Protocol(m) => write!(f, "unexpected provider response: {m}"),
             ProviderError::Degenerate => write!(f, "model output degenerated into repetition"),
+            ProviderError::StreamCut(secs) => write!(
+                f,
+                "the provider cut the answer off after {secs}s, again: it ends any answer that streams that long"
+            ),
             ProviderError::Overthinking(chars) => write!(
                 f,
                 "the model reasoned for {chars} characters without acting"

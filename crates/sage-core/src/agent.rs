@@ -787,6 +787,8 @@ impl Agent {
 
         let (mut turns_used, mut empties, mut nudges_left, mut loop_retries, mut overthinking_left) =
             (0u32, 0u32, 1u32, 1u32, 3u32);
+        // Replies the provider cut at its length limit that the model is told about and asked again.
+        let mut stream_cuts_left = 3u32;
         // Replies of this run that were nothing but reasoning.
         let mut only_reasoned = 0u32;
         let mut slowest = Duration::ZERO;
@@ -946,6 +948,16 @@ impl Agent {
                 }
                 Err(ProviderError::Cancelled) => {
                     self.book_unreported(&streamed, true, estimate);
+                    continue;
+                }
+                Err(ProviderError::StreamCut(secs)) if stream_cuts_left > 0 => {
+                    self.book_unreported(&streamed, true, estimate);
+                    stream_cuts_left -= 1;
+                    let msg = format!(
+                        "The provider ends any reply that streams longer than about {secs} seconds, and your last one was cut there twice: none of it arrived, so nothing in it ran. Keep each reply well under that: think briefly, make one change or write one file per call, and write a long file in parts (create it, then add to it with edit)."
+                    );
+                    self.note("stream", &msg);
+                    self.ctx.push(Message::user(format!("[harness] {msg}")));
                     continue;
                 }
                 Err(ProviderError::Degenerate) if loop_retries > 0 => {
