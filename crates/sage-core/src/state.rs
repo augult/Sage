@@ -48,6 +48,9 @@ pub struct Features {
     /// default: it reads the task's words by pattern, and can hold correct work. The "Guard files"
     /// setting turns it on.
     pub protect: bool,
+    /// A task held to a written specification has its first `finish` held once, for a review of
+    /// the rules its tests do not check. Needs `gate`.
+    pub spec_review: bool,
 }
 
 /// What a session is run for.
@@ -109,6 +112,7 @@ impl Features {
             short_paths: true,
             survey: true,
             protect: false,
+            spec_review: true,
         }
     }
 
@@ -129,6 +133,7 @@ impl Features {
             short_paths: false,
             survey: false,
             protect: false,
+            spec_review: false,
         }
     }
 
@@ -149,6 +154,7 @@ impl Features {
         "short_paths",
         "survey",
         "protect",
+        "spec_review",
     ];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
@@ -191,6 +197,7 @@ impl Features {
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
             "protect" => &mut self.protect,
+            "spec_review" => &mut self.spec_review,
             _ => return None,
         };
         *slot = on;

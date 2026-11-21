@@ -177,6 +177,8 @@ pub struct Agent {
     /// The next message continues a run of the first task that a restart cut off: `contract`
     /// still applies to it.
     carry_contract: bool,
+    /// The current message points at a written specification beyond its tests (`spec_review`).
+    spec_task: bool,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -202,11 +204,47 @@ enum Ending {
     Carry(String),
 }
 
+/// Sent once when a task with a written specification first calls `finish`.
+const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Go through the specification the task names (README, spec, contract, docstring, plan or note) rule by rule: every command-line form and wrong use, every error and exit status, every edge case, and every file or entry the task says to change. For each rule no test checks, run a quick check of your own (shell with expect_exit / expect_has), or read the spot that implements it if it cannot be run. Fix what does not hold, then call `finish` again, naming in the summary the rules you checked.";
+
+/// Whether a task holds the work to more than its tests: it says they check only part of it, or
+/// it points at a written specification (a README, spec, contract, docstring, plan or note).
+fn points_past_its_tests(task: &str) -> bool {
+    let t = task.to_lowercase();
+    const PARTIAL: &[&str] = &[
+        "cover only",
+        "covers only",
+        "checks only",
+        "check only",
+        "only the library",
+        "library only",
+        "small part",
+        "only some",
+        "only a few",
+        "not only",
+        "does not cover",
+        "do not cover",
+    ];
+    const SPEC: &[&str] = &[
+        "readme",
+        "spec",
+        "contract",
+        "docstring",
+        "plan",
+        "the note",
+        "guarantee",
+        "requirement",
+    ];
+    PARTIAL.iter().any(|p| t.contains(p)) || SPEC.iter().any(|p| t.contains(p))
+}
+
 /// What the checks before a run ends have used up in this run.
 #[derive(Default)]
 struct EndChecks {
     /// Goal checks made for this user message.
     goal: u32,
+    /// The spec review has held a `finish` of this user message.
+    spec: bool,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -289,6 +327,7 @@ impl Agent {
             contract: Contract::default(),
             contract_holds: 0,
             carry_contract: false,
+            spec_task: false,
             sess,
             ctx,
             cfg,
@@ -754,6 +793,7 @@ impl Agent {
         let first = std::mem::take(&mut self.first_message);
         // The mechanical contract reads the task the session began with: a later message is not held
         // to it, unless it carries on with that task after a restart cut its run off.
+        self.spec_task = points_past_its_tests(&task);
         let carried = std::mem::take(&mut self.carry_contract);
         if !first {
             if !carried {
@@ -1365,6 +1405,9 @@ impl Agent {
         if let Some(message) = self.contract_check(&mut outcome, landing) {
             return Ending::Carry(message);
         }
+        if let Some(message) = self.spec_review(&outcome, landing, checks) {
+            return Ending::Carry(message);
+        }
         if let Some(message) = self.goal_check(&mut outcome, landing, checks, cancel).await {
             return Ending::Carry(message);
         }
@@ -1409,6 +1452,36 @@ impl Agent {
         }
         self.note("contract", &format!("finish held: {detail}"));
         Some(Contract::hold_message(&violations))
+    }
+
+    /// The spec review: a task that says its tests check only part of what it asks, or that holds the
+    /// work to a written specification, has its first `finish` held once. A passing test is all the
+    /// gate needs, and a model tends to stop there; what the tests leave out is where it was wrong
+    /// (an exit status the README gives, one entry of a manifest a migration note covers).
+    fn spec_review(
+        &mut self,
+        outcome: &Outcome,
+        landing: bool,
+        checks: &mut EndChecks,
+    ) -> Option<String> {
+        let ev = &self.sess.evidence;
+        if !self.spec_task
+            || checks.spec
+            || landing
+            || outcome.status != FinishStatus::Done
+            || ev.epoch <= ev.message_epoch
+            || self.cfg.autonomy != Autonomy::Auto
+            || !self.cfg.features.spec_review
+            || !self.cfg.features.gate
+        {
+            return None;
+        }
+        checks.spec = true;
+        self.note(
+            "spec",
+            "finish held once for a review against the specification",
+        );
+        Some(SPEC_REVIEW.to_string())
     }
 
     /// Sends the model back to work with `message`, as the harness speaking.

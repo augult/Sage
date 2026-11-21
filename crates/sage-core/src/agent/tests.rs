@@ -2642,3 +2642,18 @@ async fn a_cut_answer_keeps_the_calls_that_arrived_whole() {
         .any(|m| m.content.contains("was cut off by the provider"));
     assert!(told);
 }
+
+#[test]
+fn a_task_held_to_a_written_spec_or_partial_tests_is_recognised() {
+    assert!(points_past_its_tests(
+        "Write `rollup.sh` as `README.md` specifies it."
+    ));
+    assert!(points_past_its_tests("The tests cover the library only."));
+    assert!(points_past_its_tests(
+        "`python3 -m unittest` checks only a few of them."
+    ));
+    assert!(!points_past_its_tests(
+        "Fix the failing test in tests/test_x.py."
+    ));
+    assert!(!points_past_its_tests("Rename foo to bar."));
+}
