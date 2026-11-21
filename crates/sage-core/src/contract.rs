@@ -1,10 +1,12 @@
 //! Mechanical checks on what the task says to produce and what it says to leave alone.
 //!
-//! A worker whose own tests pass can still fail the task in two plain ways: it changed a file the
-//! task forbade touching (a test file, a fixture, a shared module), or it finished without writing
-//! the file the task asked for (`findings.json`, a new module or script), perhaps having put it in
-//! a subfolder or summarized the answer in prose instead. Both are settled from the task's words
-//! and the workspace on disk, with no model request.
+//! A worker whose own tests pass can still fail the task in two plain ways: it finished without
+//! writing the file the task asked for (`findings.json`, a new module or script), perhaps having
+//! put it in a subfolder or summarized the answer in prose instead, or it changed a file the task
+//! forbade touching (a test file, a fixture, a shared module). Both are settled from the task's
+//! words and the workspace on disk, with no model request. The second is read off the task's words
+//! by pattern and can hold work that is right, and no model of the stored benchmark runs broke such
+//! a rule: it is checked only where asked for (`Features::protect`, the "Guard files" setting).
 
 use crate::util::fnv64;
 use crate::workspace::{Workspace, derived};
@@ -273,9 +275,9 @@ fn valid_deliverable(ws: &Workspace, raw: &str) -> Option<String> {
 }
 
 impl Contract {
-    /// Reads `task` against `ws` before the session has changed anything, recording protected files
-    /// and explicitly requested deliverable paths.
-    pub fn capture(ws: &Workspace, task: &str) -> Self {
+    /// Reads `task` against `ws` before the session has changed anything, recording explicitly
+    /// requested deliverable paths and, with `protect`, the files it says not to change.
+    pub fn capture(ws: &Workspace, task: &str, protect: bool) -> Self {
         let root = &ws.root;
         let mut seen_protected = HashSet::new();
         let mut protected = Vec::new();
@@ -300,7 +302,14 @@ impl Contract {
         let mut exceptions: Vec<PathBuf> = Vec::new();
         let mut required = Vec::new();
         for clause in clauses(task) {
-            if let Some(m) = PROHIBITION.find(clause) {
+            let Some(m) = PROHIBITION.find(clause) else {
+                Self::collect_required(ws, clause, &mut required);
+                continue;
+            };
+            // A clause may say "Write `x.py`; do not edit `y.py`", or "Improve `a.html` without
+            // changing `app.js`": anything ahead of the prohibition still counts for deliverables.
+            Self::collect_required(ws, &clause[..m.start()], &mut required);
+            if protect {
                 // What the prohibition covers ends where an exception or a new instruction begins:
                 // "do not edit any file except `a.py`", "don't touch the tests, just fix `a.py`".
                 let after = tokens(&clause[m.end()..]);
@@ -331,12 +340,6 @@ impl Contract {
                         add_protected(&file);
                     }
                 }
-                // A clause may say "Write `x.py`; do not edit `y.py`", or "Improve `a.html` without
-                // changing `app.js`": anything ahead of the prohibition still counts for deliverables.
-                let head = &clause[..m.start()];
-                Self::collect_required(ws, head, &mut required);
-            } else {
-                Self::collect_required(ws, clause, &mut required);
             }
         }
         protected.retain(|p| {
@@ -475,7 +478,7 @@ mod tests {
             ],
         );
         let prompt = "`conf/parser.py` is incomplete. Complete it to follow `SPEC.md`. Do not edit the files in `tests/`, `SPEC.md` or `examples/app.conf`.";
-        let c = Contract::capture(&ws, prompt);
+        let c = Contract::capture(&ws, prompt, true);
         assert!(c.violations(&ws.root).is_empty());
 
         // Changing conf/parser.py is expected; touching SPEC.md or anything under tests/ is caught.
@@ -504,7 +507,7 @@ mod tests {
             ],
         );
         let prompt = "Audit `notesvc/` for security vulnerabilities. Write `findings.json` in this folder: a JSON list. Do not change any code.";
-        let c = Contract::capture(&ws, prompt);
+        let c = Contract::capture(&ws, prompt, true);
 
         // Missing findings.json is caught even with zero edits to existing files.
         let v = c.violations(&ws.root);
@@ -543,6 +546,7 @@ mod tests {
         let c2 = Contract::capture(
             &ws2,
             "Fix the bug. Add a regression test in `test_regression.py` that fails now and passes after. Do not edit the existing tests.",
+            true,
         );
         assert_eq!(
             c2.violations(&ws2.root),
@@ -559,6 +563,29 @@ mod tests {
             ["`test_catalog.py` was modified, though the task says not to change it"]
         );
         let _ = std::fs::remove_dir_all(&ws2.root);
+    }
+
+    #[test]
+    fn without_protect_only_the_files_to_write_are_checked() {
+        let ws = temp_ws(
+            "unprotected",
+            &[("calc.py", "x = 1\n"), ("tests/test_calc.py", "assert 1\n")],
+        );
+        let task = "Fix `calc.py`. Write `findings.json`. Do not edit the tests or `calc.py`.";
+        let c = Contract::capture(&ws, task, false);
+        std::fs::write(ws.root.join("tests/test_calc.py"), "assert True\n").unwrap();
+        std::fs::write(ws.root.join("calc.py"), "x = 2\n").unwrap();
+        assert_eq!(
+            c.violations(&ws.root),
+            ["the task asks for `findings.json`, which has not been created"]
+        );
+        std::fs::write(ws.root.join("findings.json"), "[]\n").unwrap();
+        assert!(c.violations(&ws.root).is_empty());
+        // With it, the same task protects both.
+        let c = Contract::capture(&ws, task, true);
+        std::fs::write(ws.root.join("calc.py"), "x = 3\n").unwrap();
+        assert_eq!(c.violations(&ws.root).len(), 1);
+        let _ = std::fs::remove_dir_all(&ws.root);
     }
 
     #[test]
@@ -604,7 +631,7 @@ mod tests {
             ),
         ] {
             let ws = temp_ws("exception", &files);
-            let c = Contract::capture(&ws, task);
+            let c = Contract::capture(&ws, task, true);
             std::fs::write(ws.root.join(work), "changed\n").unwrap();
             assert!(
                 c.violations(&ws.root).is_empty(),
@@ -637,6 +664,7 @@ mod tests {
         let c = Contract::capture(
             &ws,
             "Fix `pkg/m0001.py`. Write `findings.json`. Do not edit the tests.",
+            true,
         );
         for i in 0..50 {
             std::fs::write(ws.root.join(format!("pkg/test_m{i}.py")), "assert True\n").unwrap();

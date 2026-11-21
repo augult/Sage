@@ -15,6 +15,8 @@ export const api = {
   setDefaults: ({ provider, model, effort }) => invoke('set_defaults', { provider, model, effort }),
   /** Keep retrying a rate-limited or unreachable provider, in running sessions too. */
   setAutoRetry: (on) => invoke('set_auto_retry', { on }),
+  /** Hold `finish` while a file the task says not to edit has changed, in sessions to come. */
+  setProtectFiles: (on) => invoke('set_protect_files', { on }),
   listSessions: () => invoke('list_sessions'),
   startSession: (req) => invoke('start_session', { req }),
   startDemo: () => invoke('start_demo'),

@@ -2087,7 +2087,7 @@ u.urlopen(r).read()' "$1"; }"#;
             let root = base.join(task.id);
             materialize(&root, task.files).unwrap();
             let ws = Workspace::new(&root).unwrap();
-            let contract = Contract::capture(&ws, task.prompt);
+            let contract = Contract::capture(&ws, task.prompt, true);
 
             // 1. For tasks that ask for a brand-new deliverable file, missing it before solution is caught.
             for &(sol_path, _) in task.solution {
@@ -2291,8 +2291,9 @@ u.urlopen(r).read()' "$1"; }"#;
         }
 
         // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
-        // Default accepts `finish` and fails when `test_pager.py` is restored; Sage's
-        // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
+        // Default accepts `finish` and fails when `test_pager.py` is restored, and so does Sage as it
+        // comes. With `protect` (the "Guard files" setting) the contract catches the forbidden edit at
+        // zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
         let pager_orig_test = pager
@@ -2301,8 +2302,11 @@ u.urlopen(r).read()' "$1"; }"#;
             .find(|(p, _)| *p == "test_pager.py")
             .unwrap()
             .1;
-        for (label, mode, expect_solved) in [("default", "default", false), ("sage", "sage", true)]
-        {
+        for (label, mode, with, expect_solved) in [
+            ("default", "default", None, false),
+            ("sage", "sage", None, false),
+            ("sage-protect", "sage", Some("protect"), true),
+        ] {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
             materialize(&ws, pager.files).unwrap();
@@ -2356,6 +2360,7 @@ u.urlopen(r).read()' "$1"; }"#;
                         cwd: ws.to_string_lossy().into_owned(),
                         task: pager.prompt.into(),
                         mode: Some(mode.into()),
+                        with: with.into_iter().map(String::from).collect(),
                         max_turns: Some(10),
                         ..Default::default()
                     },

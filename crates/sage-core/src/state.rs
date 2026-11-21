@@ -44,8 +44,11 @@ pub struct Features {
     pub short_paths: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
-    /// Protected files and named deliverable files in the task are checked mechanically.
+    /// Files the task asks to write are checked mechanically before `finish` stands.
     pub contract: bool,
+    /// Files the task says not to edit are checked too (`Do not edit …`). Off by default: it reads
+    /// the task's words by pattern, and can hold correct work; the "Guard files" setting turns it on.
+    pub protect: bool,
 }
 
 /// What a session is run for.
@@ -107,6 +110,7 @@ impl Features {
             short_paths: true,
             survey: true,
             contract: true,
+            protect: false,
         }
     }
 
@@ -127,6 +131,7 @@ impl Features {
             short_paths: false,
             survey: false,
             contract: false,
+            protect: false,
         }
     }
 
@@ -147,6 +152,7 @@ impl Features {
         "short_paths",
         "survey",
         "contract",
+        "protect",
     ];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
@@ -187,6 +193,7 @@ impl Features {
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
             "contract" => &mut self.contract,
+            "protect" => &mut self.protect,
             _ => return None,
         };
         *slot = on;
@@ -668,6 +675,13 @@ mod tests {
     #[test]
     fn every_mechanism_can_be_switched_off_by_name() {
         for name in Features::NAMES {
+            // Off in Sage until it is asked for: switched on and off again by name.
+            if *name == "protect" {
+                let on = Features::sage().with(name).unwrap();
+                assert_ne!(on, Features::sage());
+                assert_eq!(on.without(name), Some(Features::sage()));
+                continue;
+            }
             let without = Features::sage()
                 .without(name)
                 .unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));

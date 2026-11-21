@@ -1942,7 +1942,7 @@ async fn contract_holds_finish_in_sage_and_can_be_ablated() {
             .contains("the task asks for `findings.json`, which has not been created")
     );
 
-    // Touching a protected file holds `finish` until the file is restored.
+    // With `protect`, touching a protected file holds `finish` until the file is restored.
     let touch_forbidden = upper("beta", "BETA");
     let restore_and_write = fixed(MockTurn::calls(
         "",
@@ -1959,9 +1959,11 @@ async fn contract_holds_finish_in_sage_and_can_be_ablated() {
             ("finish", json!({"summary": "restored and wrote findings"})),
         ],
     ));
+    let mut cfg = AgentConfig::new("mock");
+    cfg.features.protect = true;
     let mut r = rig(
         "agent-contract-protected",
-        AgentConfig::new("mock"),
+        cfg,
         vec![touch_forbidden, restore_and_write],
     );
     let out = r

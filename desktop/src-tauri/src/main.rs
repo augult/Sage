@@ -253,6 +253,12 @@ async fn set_auto_retry(harness: State<'_, Harness>, on: bool) -> Reply<()> {
     harness.set_auto_retry(on)
 }
 
+/// Switches "Guard files" for the sessions to come.
+#[tauri::command]
+async fn set_protect_files(harness: State<'_, Harness>, on: bool) -> Reply<()> {
+    harness.set_protect_files(on)
+}
+
 #[tauri::command]
 async fn list_sessions(harness: State<'_, Harness>) -> Reply<Vec<SessionMeta>> {
     Ok(harness.list())
@@ -642,6 +648,7 @@ fn main() {
             remove_provider,
             set_defaults,
             set_auto_retry,
+            set_protect_files,
             list_sessions,
             start_session,
             start_demo,

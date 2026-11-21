@@ -756,7 +756,7 @@ impl Agent {
             }
             self.contract_holds = 0;
         } else if features.contract {
-            self.contract = Contract::capture(&self.sess.ws, &task);
+            self.contract = Contract::capture(&self.sess.ws, &task, features.protect);
             self.contract_holds = 0;
         }
         let mut composed = if first {

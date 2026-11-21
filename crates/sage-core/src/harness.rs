@@ -196,6 +196,8 @@ pub struct AppState {
     pub effort: String,
     /// Whether a provider that is rate limited or unreachable is retried until it answers.
     pub auto_retry: bool,
+    /// Whether new sessions hold `finish` while a file the task says not to edit has changed.
+    pub protect_files: bool,
     pub data_dir: String,
     pub home: String,
 }
@@ -553,9 +555,10 @@ impl Harness {
 
     /// A harness with this one's keys and defaults that keeps its sessions elsewhere,
     /// so that benchmark runs do not mix with the user's own. It never retries without end: a
-    /// benchmark has to finish.
+    /// benchmark has to finish. "Guard files" is left off: what a run measures is its variant's.
     pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
-        let config = self.config();
+        let mut config = self.config();
+        config.protect_files = false;
         Self {
             inner: Arc::new(Inner {
                 data_dir,
@@ -651,6 +654,7 @@ impl Harness {
             model,
             effort: cfg.effort.clone().unwrap_or_else(|| "ratchet".into()),
             auto_retry: self.inner.auto_retry.load(Ordering::Relaxed),
+            protect_files: cfg.protect_files,
             data_dir: self.inner.data_dir.to_string_lossy().into_owned(),
             home: home_dir().to_string_lossy().into_owned(),
         }
@@ -733,6 +737,15 @@ impl Harness {
     pub fn set_auto_retry(&self, on: bool) -> Result<(), String> {
         self.update_config(|cfg| {
             cfg.auto_retry = on;
+            Ok(())
+        })
+    }
+
+    /// Switches "Guard files" for the sessions started from now on: with it, `finish` is held while
+    /// a file the task says not to edit has changed. Mainly for weaker models.
+    pub fn set_protect_files(&self, on: bool) -> Result<(), String> {
+        self.update_config(|cfg| {
+            cfg.protect_files = on;
             Ok(())
         })
     }
@@ -933,7 +946,8 @@ impl Harness {
     ) -> Result<SessionMeta, String> {
         let ws = Workspace::new(Path::new(req.cwd.trim()))
             .map_err(|e| format!("cannot use {:?} as a workspace: {e}", req.cwd))?;
-        let (features, mode) = features_of(&req)?;
+        let (mut features, mode) = features_of(&req)?;
+        features.protect |= self.config().protect_files;
         // Read once, here: the system prompt is the cached prefix of every request of the session.
         let (system, picked) =
             self.compose_prompt(&req, &ws.root, &features, mode == Mode::Plain)?;

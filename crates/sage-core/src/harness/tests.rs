@@ -292,6 +292,16 @@ async fn scripted_sessions_can_switch_mechanisms_off_and_be_closed() {
     );
     h.set_auto_retry(false).unwrap();
     assert!(!h.state().auto_retry && !Harness::at(h.inner.data_dir.clone()).state().auto_retry);
+
+    // So is "Guard files", off until switched on, and also not handed on.
+    assert!(!h.state().protect_files);
+    h.set_protect_files(true).unwrap();
+    assert!(Harness::at(h.inner.data_dir.clone()).state().protect_files);
+    assert!(
+        !h.with_data_dir(h.inner.data_dir.join("bench"))
+            .state()
+            .protect_files
+    );
 }
 
 #[tokio::test]
@@ -2168,6 +2178,9 @@ async fn a_run_cut_off_by_a_restart_is_continued_under_its_task_and_its_cut_step
             ),
         ],
     );
+    // "Guard files" is on in Settings: the session is held to `Do not edit`.
+    h.set_protect_files(true).unwrap();
+    assert!(h.state().protect_files);
     let req = StartRequest {
         cwd,
         task: "Make alpha upper case in n.txt. Do not edit `keep.txt`.".into(),
