@@ -90,10 +90,7 @@ Gaps of two or three runs are within chance. Costs are what the counted runs cos
 
 - `runs.csv`: one row per counted run (model, harness, account, task, language, solved, cost,
   seconds, round).
-- `raw/<model>/<round>/<account>/`: the benchmark's own output for each round, `results.json` with
-  per-run statistics (tokens, requests, cost) and the console log. Rounds after the first rerun
-  what was missing; `runs.csv` says which round each counted run is from.
-- `scripts/`: the isolation and orchestration as run (`setup.sh`, `arm*.sh`, `loop*.sh`,
-  `allowproxy.py`), the tallies and the audits. Paths in them are those of the machine they ran on;
-  the API key was read from a file outside the repository.
+- `raw/` and `scripts/` (the benchmark's own output per round, and the isolation, orchestration,
+  tallies and audit scripts as run) were removed to keep the repository small; commit
+  `96301e7` in git history still has them.
 - `audit/`: per-run audit lines for both models.

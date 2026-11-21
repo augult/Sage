@@ -10,7 +10,7 @@ solution (`--tasks all` for all 24; without it, the seven of the `easy` set).
 All runs below: Logfare gateway, effort `ratchet`, 5 runs per task and variant (35 per variant).
 Figures are medians per run unless stated. "No cache" is the list-price cost had the provider
 cached nothing, which takes the luck of the cache out of a comparison. Raw results and the CLI's own
-tables are in `docs/results/`.
+tables were in `docs/results/`. Raw outputs were removed from the repository on 22 November 2026 to keep it small; commit `96301e7` in git history still has them.
 
 ```sh
 cargo build

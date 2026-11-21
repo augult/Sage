@@ -1,5 +1,7 @@
 # Handoff: Sage
 
+> Note (22 November 2026): most of `docs/results/` was removed to keep the repository small. Paths into it below can be found in commit `96301e7`.
+
 ## Sixteenth session: an interactive CLI, the licence and 0.3.2 (20 November 2026)
 
 - **`sage` in a terminal is a conversation** (`crates/sage-cli/src/chat.rs`): bare `sage`, `sage chat`
