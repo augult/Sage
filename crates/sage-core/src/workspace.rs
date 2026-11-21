@@ -496,7 +496,7 @@ fn stat_hash(md: &std::fs::Metadata) -> u64 {
 }
 
 /// What a look at the workspace found.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Fingerprint {
     pub digest: u64,
     /// Every file that counts was seen. False only for a tree too large to walk that is not a git
@@ -505,6 +505,10 @@ pub struct Fingerprint {
     /// Files changed so shortly before the look that a rewrite of the same size could keep their
     /// times (`RACY_WINDOW`), with a hash of what they held.
     racy: Vec<(PathBuf, u64)>,
+    /// The tree was too large to walk, and git spoke for it. The next look asks git first rather
+    /// than walk as far as it can only to give up again.
+    #[serde(default)]
+    pub(crate) via_git: bool,
 }
 
 impl Fingerprint {
@@ -583,10 +587,11 @@ pub fn fingerprint(root: &Path) -> Fingerprint {
 pub async fn look_again_off_thread(
     root: &Path,
     before: Option<Fingerprint>,
+    git_first: bool,
 ) -> (Fingerprint, bool) {
     let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let now = fingerprint(&root);
+        let now = fingerprint_with(&root, FINGERPRINT_MAX_FILES, FINGERPRINT_BUDGET, git_first);
         let changed = before.is_some_and(|before| !now.unchanged_since(&before));
         (now, changed)
     })
@@ -595,6 +600,24 @@ pub async fn look_again_off_thread(
 }
 
 fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerprint {
+    fingerprint_with(root, max_files, budget, false)
+}
+
+/// `fingerprint_within`, asking git first where an earlier look found the tree too large to walk
+/// (`git_first`): the same answer, without the walk that would give up again.
+fn fingerprint_with(root: &Path, max_files: u32, budget: Duration, git_first: bool) -> Fingerprint {
+    let from_git = |racy: Racy, digest| Fingerprint {
+        digest,
+        complete: true,
+        racy: racy.files,
+        via_git: true,
+    };
+    if git_first {
+        let mut racy = Racy::default();
+        if let Some(digest) = git_changes(root, &mut racy) {
+            return from_git(racy, digest);
+        }
+    }
     // The digest does not depend on the order files come in, so the walk takes them as the disk
     // gives them, which is fastest. Only one that is cut short needs them in path order.
     let mut racy = Racy::default();
@@ -603,15 +626,12 @@ fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerpr
             digest,
             complete: true,
             racy: racy.files,
+            via_git: false,
         };
     }
     let mut racy = Racy::default();
     if let Some(digest) = git_changes(root, &mut racy) {
-        return Fingerprint {
-            digest,
-            complete: true,
-            racy: racy.files,
-        };
+        return from_git(racy, digest);
     }
     let mut racy = Racy::default();
     // No git to speak for the rest: the first files in path order, the same ones every time unless
@@ -630,6 +650,7 @@ fn fingerprint_within(root: &Path, max_files: u32, budget: Duration) -> Fingerpr
         digest: acc ^ u64::from(count),
         complete: false,
         racy: racy.files,
+        via_git: false,
     }
 }
 
@@ -1122,5 +1143,31 @@ mod tests {
         // A new file anywhere, too.
         fs::write(root.join("f.txt"), "new").unwrap();
         assert!(!same(&g1, &fingerprint_within(&root, 2, budget)));
+    }
+
+    #[test]
+    fn a_tree_git_spoke_for_is_asked_of_git_first_with_the_same_answer() {
+        let root = tmp("fp-git-first");
+        for name in ["a", "b", "c", "d", "e"] {
+            fs::write(root.join(format!("{name}.txt")), name).unwrap();
+        }
+        git(&root, &["init", "-q"]);
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "start"]);
+        let budget = Duration::from_secs(60);
+        let walked = fingerprint_with(&root, 2, budget, false);
+        assert!(walked.via_git && walked.complete);
+        // Git first: the same digest, so the two can be compared, and a change is still seen.
+        let asked = fingerprint_with(&root, 2, budget, true);
+        assert!(asked.via_git && same(&walked, &asked));
+        fs::write(root.join("e.txt"), "changed").unwrap();
+        assert!(!same(&asked, &fingerprint_with(&root, 2, budget, true)));
+        // A small tree is walked, and not handed to git.
+        assert!(!fingerprint_with(&root, 100, budget, false).via_git);
+        // Outside a repository, git cannot answer: the look falls back to the walk.
+        let plain = tmp("fp-git-first-plain");
+        fs::write(plain.join("a.txt"), "a").unwrap();
+        let f = fingerprint_with(&plain, 100, budget, true);
+        assert!(f.complete && !f.via_git);
     }
 }

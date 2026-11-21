@@ -211,13 +211,18 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          - Nothing in a reply runs after an accepted `finish`, and nothing runs once you stop a run (in every mode).
-          - A `finish` in the reply that used up the time budget is the result, with its summary, instead of "out of budget".
-          - The tripwire for wiping the home or root directory also catches `rm -rf ~/`, `~/*`, `$HOME`, `"$HOME"`, `${HOME}`, split flags and long options.
-          - Files a background command changes make the last check stale, so `finish` is no longer accepted as verified on an outdated check.
-          - A call to a tool that does not exist is answered with the tools the session actually has.
-          - A cut-off tool argument keeps a trailing comma that is part of its text.
-          - A command that rewrites a file in place with the same size, within the same tick of the file system's clock, is now seen as a change: files changed in the last two seconds are also compared by content, as git does.
+          - New setting **Guard files** (off by default): `finish` is held while a file the task said not to edit has changed. Mainly for weaker models; not recommended with DeepSeek V4.1. Turn it on in Settings, or with `"protect_files": true` in `config.json`.
+          - Taken out: the check that a file the task asks to write exists. It misread some wordings (`Do not create` made the file required).
+          - With Guard files on, the file a task says to fix is no longer protected by mistake (`except`, `other than`, `outside`, `just fix …`), and every test of a large project is protected.
+          - After a restart, work that was never checked is no longer reported as verified, and a step the restart cut off counts as a change.
+          - `watch` is held to what `shell` is: the API-key file check, the destructive-command tripwire, and approval when permissions are set to ask.
+          - An empty reply from the model is booked and answered with a note, instead of retried as an error up to eight times without its cost being counted.
+          - A check whose command writes a file (a log, a coverage report) no longer traps `finish`, and `pytest; echo done`, `pytest || true` or `echo $(pytest)` no longer count as a passing check.
+          - A command that starts a server in the background and checks its output is no longer always a surprise.
+          - The file with your API keys can no longer be reached through `search`, `./` in a path, or a pattern in a command.
+          - `job` with `until` uses far less CPU on long output, and a needle like `/usr/lib/` is matched as text.
+          - In a repository too large to walk, the look at the workspace around each command asks git first: about 2.5 times faster.
+          - The chat no longer crashes on a line such as `/→` or `/日本語`.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.

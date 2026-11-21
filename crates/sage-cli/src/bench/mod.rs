@@ -2075,34 +2075,19 @@ u.urlopen(r).read()' "$1"; }"#;
     }
 
     #[test]
-    fn contract_has_zero_false_positives_and_catches_forbidden_and_missing_files_across_all_24_tasks()
-     {
+    fn guard_files_has_zero_false_positives_and_catches_forbidden_edits_across_all_24_tasks() {
         use sage_core::contract::Contract;
         use sage_core::workspace::Workspace;
 
         let base = std::env::temp_dir().join(format!("sage-bench-contracts-{}", rand_hex(4)));
         let mut checked_restores = 0usize;
-        let mut checked_deliverables = 0usize;
         for task in tasks::all() {
             let root = base.join(task.id);
             materialize(&root, task.files).unwrap();
             let ws = Workspace::new(&root).unwrap();
             let contract = Contract::capture(&ws, task.prompt);
 
-            // 1. For tasks that ask for a brand-new deliverable file, missing it before solution is caught.
-            for &(sol_path, _) in task.solution {
-                if !task.files.iter().any(|(f, _)| *f == sol_path) {
-                    checked_deliverables += 1;
-                    let v = contract.violations(&ws.root);
-                    assert!(
-                        v.iter().any(|msg| msg.contains(sol_path)),
-                        "task {}: missing deliverable {sol_path} was not caught by contract (got {v:?})",
-                        task.id
-                    );
-                }
-            }
-
-            // 2. Applying the reference solution produces zero contract violations on all 24 tasks.
+            // 1. Applying the reference solution produces zero contract violations on all 24 tasks.
             materialize(&root, task.solution).unwrap();
             let v = contract.violations(&ws.root);
             assert!(
@@ -2111,7 +2096,7 @@ u.urlopen(r).read()' "$1"; }"#;
                 task.id
             );
 
-            // 3. Touching any protected `task.restore` file is caught on every task.
+            // 2. Touching any protected `task.restore` file is caught on every task.
             for &protected in task.restore {
                 checked_restores += 1;
                 let file = ws.root.join(protected);
@@ -2128,7 +2113,7 @@ u.urlopen(r).read()' "$1"; }"#;
                 std::fs::write(&file, orig).unwrap();
             }
         }
-        assert_eq!((checked_restores, checked_deliverables), (46, 6));
+        assert_eq!(checked_restores, 46);
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -2151,148 +2136,10 @@ u.urlopen(r).read()' "$1"; }"#;
             }
         };
 
-        // Scenario 1 (`audit`): a mode-blind model summarizes findings in `finish` with `epoch == 0`,
-        // and writes `findings.json` only if held by the harness. Sage enforces `contract` at zero
-        // token cost.
-        let audit = tasks::find("audit").unwrap();
-        let audit_sol = audit.solution[0].1;
-        for (label, mode, without, expect_solved) in [
-            ("default", "default", vec![], false),
-            (
-                "sage-no-contract",
-                "sage",
-                vec!["contract".to_string()],
-                false,
-            ),
-            ("sage", "sage", vec![], true),
-        ] {
-            let h = Harness::at(base.join(format!("s1-{label}")));
-            let ws = base.join(format!("ws-s1-{label}"));
-            materialize(&ws, audit.files).unwrap();
-            let turns: Vec<TurnFn> = vec![
-                Box::new(|_| {
-                    MockTurn::calls(
-                        "",
-                        vec![(
-                            "finish",
-                            json!({"summary": "Audited notesvc; found 6 vulnerabilities."}),
-                        )],
-                    )
-                }),
-                Box::new(move |msgs: &[Message]| {
-                    let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
-                    assert!(last.contains("findings.json"), "{last}");
-                    MockTurn::calls(
-                        "",
-                        vec![
-                            (
-                                "write",
-                                json!({"path": "findings.json", "content": audit_sol, "overwrite": true}),
-                            ),
-                            (
-                                "shell",
-                                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
-                            ),
-                            (
-                                "finish",
-                                json!({"summary": "Wrote findings.json at workspace root."}),
-                            ),
-                        ],
-                    )
-                }),
-            ];
-            let provider = MockProvider::new(turns);
-            let meta = h
-                .start_scripted(
-                    StartRequest {
-                        cwd: ws.to_string_lossy().into_owned(),
-                        task: audit.prompt.into(),
-                        mode: Some(mode.into()),
-                        without,
-                        max_turns: Some(10),
-                        ..Default::default()
-                    },
-                    provider,
-                )
-                .unwrap();
-            let end = wait_for_end(&h, &meta.id).await.unwrap();
-            eval_ws(audit, &ws);
-            let (solved, tail) = verify(audit, &ws).await;
-            assert_eq!(
-                solved, expect_solved,
-                "s1 audit ({label}): end={:?}, tail={tail}",
-                end.status
-            );
-        }
-
-        // Scenario 2 (`audit-clean`): mode-blind model writes `shelf/findings.json` (wrong directory)
-        // and only moves it to `./findings.json` when the contract guard points out the misplaced copy.
-        let audit_clean = tasks::find("audit-clean").unwrap();
-        for (label, mode, expect_solved) in [("default", "default", false), ("sage", "sage", true)]
-        {
-            let h = Harness::at(base.join(format!("s2-{label}")));
-            let ws = base.join(format!("ws-s2-{label}"));
-            materialize(&ws, audit_clean.files).unwrap();
-            let turns: Vec<TurnFn> = vec![
-                Box::new(|_| {
-                    MockTurn::calls(
-                        "",
-                        vec![
-                            (
-                                "write",
-                                json!({"path": "shelf/findings.json", "content": "[]\n", "overwrite": true}),
-                            ),
-                            (
-                                "shell",
-                                json!({"cmd": "test -f shelf/findings.json", "expect_exit": "0"}),
-                            ),
-                            ("finish", json!({"summary": "No vulnerabilities found."})),
-                        ],
-                    )
-                }),
-                Box::new(|msgs: &[Message]| {
-                    let last = msgs.last().map(|m| m.content.as_str()).unwrap_or("");
-                    assert!(last.contains("shelf/findings.json"), "{last}");
-                    MockTurn::calls(
-                        "",
-                        vec![
-                            (
-                                "shell",
-                                json!({"cmd": "mv shelf/findings.json findings.json && test -f findings.json", "expect_exit": "0"}),
-                            ),
-                            (
-                                "finish",
-                                json!({"summary": "Moved findings.json to workspace root."}),
-                            ),
-                        ],
-                    )
-                }),
-            ];
-            let provider = MockProvider::new(turns);
-            let meta = h
-                .start_scripted(
-                    StartRequest {
-                        cwd: ws.to_string_lossy().into_owned(),
-                        task: audit_clean.prompt.into(),
-                        mode: Some(mode.into()),
-                        max_turns: Some(10),
-                        ..Default::default()
-                    },
-                    provider,
-                )
-                .unwrap();
-            let _ = wait_for_end(&h, &meta.id).await.unwrap();
-            eval_ws(audit_clean, &ws);
-            let (solved, tail) = verify(audit_clean, &ws).await;
-            assert_eq!(
-                solved, expect_solved,
-                "s2 audit-clean ({label}): tail={tail}"
-            );
-        }
-
         // Scenario 4 (`pager` — worker makes visible tests pass by editing forbidden `test_pager.py`):
-        // Default accepts `finish` and fails when `test_pager.py` is restored; Sage's
-        // contract guard catches the forbidden edit at zero token cost and sends the worker back to fix `pager.py`.
+        // Default accepts `finish` and fails when `test_pager.py` is restored, and so does Sage as it
+        // comes. With `protect` (the "Guard files" setting) the contract catches the forbidden edit at
+        // zero token cost and sends the worker back to fix `pager.py`.
         let pager = tasks::find("pager").unwrap();
         let pager_sol = pager.solution[0].1;
         let pager_orig_test = pager
@@ -2301,8 +2148,11 @@ u.urlopen(r).read()' "$1"; }"#;
             .find(|(p, _)| *p == "test_pager.py")
             .unwrap()
             .1;
-        for (label, mode, expect_solved) in [("default", "default", false), ("sage", "sage", true)]
-        {
+        for (label, mode, with, expect_solved) in [
+            ("default", "default", None, false),
+            ("sage", "sage", None, false),
+            ("sage-protect", "sage", Some("protect"), true),
+        ] {
             let h = Harness::at(base.join(format!("s4-{label}")));
             let ws = base.join(format!("ws-s4-{label}"));
             materialize(&ws, pager.files).unwrap();
@@ -2356,6 +2206,7 @@ u.urlopen(r).read()' "$1"; }"#;
                         cwd: ws.to_string_lossy().into_owned(),
                         task: pager.prompt.into(),
                         mode: Some(mode.into()),
+                        with: with.into_iter().map(String::from).collect(),
                         max_turns: Some(10),
                         ..Default::default()
                     },

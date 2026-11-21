@@ -846,7 +846,12 @@ impl Accum {
                 call
             })
             .collect();
-        if self.content.is_empty() && self.reasoning.is_empty() && calls.is_empty() {
+        // A reply that ended (it named a finish reason, or the provider reported what it cost)
+        // with nothing in it is still the model's answer: it is paid for, and asking for the same
+        // request again tends to get the same nothing. The agent books it and sends the model a
+        // note instead. Only a body that told nothing at all is a fault worth retrying.
+        let ended = !self.finish.is_empty() || self.usage.is_some();
+        if self.content.is_empty() && self.reasoning.is_empty() && calls.is_empty() && !ended {
             return Err(ProviderError::Protocol("empty response".into()));
         }
         let usage_reported = self.usage.is_some();
@@ -968,6 +973,25 @@ mod tests {
             }
         });
         format!("http://{address}/v1")
+    }
+
+    #[test]
+    fn a_reply_that_ended_with_nothing_in_it_is_an_answer_and_a_body_that_said_nothing_is_not() {
+        let (r, _) = feed(&[
+            r#"data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+            r#"data: {"choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":1}}"#,
+            "data: [DONE]",
+        ])
+        .unwrap();
+        assert!(r.content.is_empty() && r.calls.is_empty() && r.usage_reported);
+        assert_eq!((r.usage.prompt, r.finish.as_str()), (20000, "stop"));
+        // A finish reason alone ends it too; nothing at all is a fault.
+        assert!(feed(&[r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#]).is_ok());
+        assert!(matches!(
+            feed(&["data: [DONE]"]),
+            Err(ProviderError::Protocol(m)) if m == "empty response"
+        ));
     }
 
     #[tokio::test]

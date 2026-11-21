@@ -6,6 +6,7 @@
 //! counters, policies, and standing checks. A rewrite of old messages starts a new journal.
 //! Older checkpoints embed the conversation directly. The goal is in `meta.json`.
 
+use crate::contract::Contract;
 use crate::events::Stats;
 use crate::provider::Message;
 use crate::state::SessionState;
@@ -63,6 +64,10 @@ pub struct Snapshot {
     pub chain_hints: u8,
     pub solo_hints: u8,
     pub session: SessionState,
+    /// What the task the session began with fixes about the workspace, while it still applies:
+    /// a run of that task that a restart cut off is held to it when it is continued.
+    #[serde(default)]
+    pub contract: Contract,
 }
 
 #[derive(Serialize, Deserialize)]

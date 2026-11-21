@@ -1019,11 +1019,7 @@ impl Chat {
                 });
             }
             other => {
-                let close: Vec<String> = COMMANDS
-                    .iter()
-                    .filter(|c| c.name.starts_with(&other[..other.len().min(2)]))
-                    .map(|c| format!("/{}", c.name))
-                    .collect();
+                let close = close_commands(other);
                 if close.is_empty() {
                     self.fail(&format!("no command /{other}: /help lists them"));
                 } else {
@@ -1776,6 +1772,17 @@ impl Chat {
     }
 }
 
+/// The commands that begin as `typed` does, by its first two characters: what an unknown command
+/// may have meant.
+fn close_commands(typed: &str) -> Vec<String> {
+    let start: String = typed.chars().take(2).collect();
+    COMMANDS
+        .iter()
+        .filter(|c| c.name.starts_with(&start))
+        .map(|c| format!("/{}", c.name))
+        .collect()
+}
+
 /// `/connect <provider> <key>`: a key typed on the line, which the history must not keep.
 fn names_a_key(line: &str) -> bool {
     let mut words = line.split_whitespace();
@@ -2015,6 +2022,15 @@ mod tests {
             "fix the tests\n/status\n"
         );
         std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn an_unknown_command_is_matched_by_characters_not_bytes() {
+        assert!(close_commands("st").contains(&"/status".to_string()));
+        assert!(close_commands("→").is_empty());
+        assert!(close_commands("日本語で説明して").is_empty());
+        assert!(close_commands("é").is_empty());
+        assert_eq!(close_commands("").len(), COMMANDS.len());
     }
 
     #[test]

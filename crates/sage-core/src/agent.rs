@@ -170,10 +170,13 @@ pub struct Agent {
     journal: Option<resume::Journal>,
     /// Said in front of the next message: the session was brought back after a restart.
     restored: Option<String>,
-    /// Protected files and required deliverables read mechanically off the session's task.
+    /// Files the session's task says not to change, read off it mechanically ("Guard files").
     contract: Contract,
     /// How often `contract` has held this message's `finish`.
     contract_holds: u8,
+    /// The next message continues a run of the first task that a restart cut off: `contract`
+    /// still applies to it.
+    carry_contract: bool,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -285,6 +288,7 @@ impl Agent {
             provider: Arc::new(provider),
             contract: Contract::default(),
             contract_holds: 0,
+            carry_contract: false,
             sess,
             ctx,
             cfg,
@@ -743,11 +747,15 @@ impl Agent {
         self.restore_fixed_effort();
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
         let first = std::mem::take(&mut self.first_message);
-        // The mechanical contract reads the task the session began with: a later message is not held to it.
+        // The mechanical contract reads the task the session began with: a later message is not held
+        // to it, unless it carries on with that task after a restart cut its run off.
+        let carried = std::mem::take(&mut self.carry_contract);
         if !first {
-            self.contract = Contract::default();
+            if !carried {
+                self.contract = Contract::default();
+            }
             self.contract_holds = 0;
-        } else if features.contract {
+        } else if features.protect {
             self.contract = Contract::capture(&self.sess.ws, &task);
             self.contract_holds = 0;
         }
@@ -1339,20 +1347,13 @@ impl Agent {
         Ending::End(outcome)
     }
 
-    /// Mechanical check on protected files and explicitly requested deliverable files. Runs even
-    /// when `epoch == message_epoch`, so a task that asks for `findings.json` cannot end as
-    /// verified with no file written.
+    /// "Guard files": the files the task says not to change are checked before the run ends. The
+    /// contract is empty unless the session captured one (`Features::protect`) or carries one
+    /// over a restart.
     fn contract_check(&mut self, outcome: &mut Outcome, landing: bool) -> Option<String> {
         let ev = &self.sess.evidence;
-        let worked = ev.epoch > ev.message_epoch;
-        let check_due = worked
-            || outcome.status == FinishStatus::Done
-            || (!self.cfg.interactive && self.contract.has_required());
-        if !self.cfg.features.contract
-            || self.contract.is_empty()
-            || !check_due
-            || self.cfg.autonomy != Autonomy::Auto
-        {
+        let check_due = ev.epoch > ev.message_epoch || outcome.status == FinishStatus::Done;
+        if self.contract.is_empty() || !check_due || self.cfg.autonomy != Autonomy::Auto {
             return None;
         }
         let violations = self.contract.violations(&self.sess.ws.root);
@@ -1378,7 +1379,7 @@ impl Agent {
                 turn: self.turn,
                 from: self.effort.as_str().into(),
                 to: next.as_str().into(),
-                reason: "a task constraint or deliverable was not met".into(),
+                reason: "a file the task said not to change was changed".into(),
             });
             self.effort = next;
         }
@@ -1560,8 +1561,8 @@ impl Agent {
     /// What continuing this session needs that the workspace, `meta.json` and the log do not hold.
     /// `in_run`: a run is in progress, so that a snapshot that is the last one tells the run was cut off.
     /// Left out on purpose: the read-dedup state and the anchors' histories (files are shown
-    /// again), the evidence, the turn's streak counters, what is queued for the next message
-    /// (`announce`, `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
+    /// again), the turn's streak counters, what is queued for the next message (`announce`,
+    /// `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
     pub fn checkpoint(&self, in_run: bool, setup: &Setup) -> Snapshot {
         let mut snapshot = self.checkpoint_state(in_run, setup);
         snapshot.messages = self.ctx.messages.clone();
@@ -1600,6 +1601,7 @@ impl Agent {
             chain_hints: self.chain_hints,
             solo_hints: self.solo_hints,
             session: self.sess.checkpoint(),
+            contract: self.contract.clone(),
         }
     }
 
@@ -1665,6 +1667,13 @@ impl Agent {
         let mut agent = Self::new(provider, sess, cfg, sink, approvals);
         agent.ctx = Context::restored(snap.messages, snap.stubs);
         let answered = agent.ctx.answer_dangling(INTERRUPTED);
+        // A step the restart cut off may have changed files after the last check.
+        if answered > 0 {
+            agent.sess.evidence.changed("a step that a restart cut off");
+        }
+        // The run of the first task was cut off: continuing it is still that task.
+        agent.carry_contract = snap.in_run;
+        agent.contract = snap.contract;
         agent.turn = snap.turn;
         agent.effort = Effort::parse(&snap.effort).unwrap_or(agent.effort);
         agent.stats = snap.stats;

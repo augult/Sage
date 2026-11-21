@@ -198,6 +198,10 @@ pub struct Config {
     /// Keep retrying a provider that is rate limited or unreachable instead of ending the run.
     #[serde(default)]
     pub auto_retry: bool,
+    /// "Guard files": `finish` is held while a file the task says not to edit has changed
+    /// (`Features::protect`). For new sessions.
+    #[serde(default)]
+    pub protect_files: bool,
     #[serde(default)]
     pub custom: Option<CustomProvider>,
     /// The user's own endpoints, in the order they were added.

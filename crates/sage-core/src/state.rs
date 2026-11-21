@@ -44,8 +44,10 @@ pub struct Features {
     pub short_paths: bool,
     /// A small workspace is listed in full, and as much of it as fits is in the first message, already read. Needs `attach`.
     pub survey: bool,
-    /// Protected files and named deliverable files in the task are checked mechanically.
-    pub contract: bool,
+    /// Files the task says not to edit (`Do not edit …`) are checked before `finish` stands. Off by
+    /// default: it reads the task's words by pattern, and can hold correct work. The "Guard files"
+    /// setting turns it on.
+    pub protect: bool,
 }
 
 /// What a session is run for.
@@ -106,7 +108,7 @@ impl Features {
             attach: true,
             short_paths: true,
             survey: true,
-            contract: true,
+            protect: false,
         }
     }
 
@@ -126,7 +128,7 @@ impl Features {
             attach: false,
             short_paths: false,
             survey: false,
-            contract: false,
+            protect: false,
         }
     }
 
@@ -146,7 +148,7 @@ impl Features {
         "attach",
         "short_paths",
         "survey",
-        "contract",
+        "protect",
     ];
 
     /// Switches one mechanism off by name (`auto_watch` or `auto-watch`), for ablation runs.
@@ -168,6 +170,8 @@ impl Features {
         "panel",
         "referee",
         "routing",
+        // Taken out on its own: the check that the files a task asks to write exist.
+        "contract",
     ];
 
     fn set(mut self, name: &str, on: bool) -> Option<Self> {
@@ -186,7 +190,7 @@ impl Features {
             "attach" => &mut self.attach,
             "short_paths" => &mut self.short_paths,
             "survey" => &mut self.survey,
-            "contract" => &mut self.contract,
+            "protect" => &mut self.protect,
             _ => return None,
         };
         *slot = on;
@@ -253,6 +257,22 @@ pub struct Evidence {
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
+    /// The last look found the tree too large to walk and asked git: the next one asks git first.
+    git_first: bool,
+}
+
+/// What a stored session keeps of its `Evidence`: whether the work was checked after its last
+/// change survives a restart, and the last look at the workspace with it, so that a change made
+/// while the program was not running is seen as one.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EvidenceState {
+    pub epoch: u64,
+    pub verified: Option<(u64, String)>,
+    pub last_change: String,
+    #[serde(default)]
+    pub fingerprint: Option<Fingerprint>,
+    #[serde(default)]
+    pub partial_view: bool,
 }
 
 /// Said after "verified by …" where the workspace is too large to see every change a command makes.
@@ -284,7 +304,28 @@ impl Evidence {
 
     fn look(&mut self, now: Fingerprint) {
         self.partial_view = !now.complete;
+        self.git_first = now.via_git;
         self.fingerprint = Some(now);
+    }
+
+    fn checkpoint(&self) -> EvidenceState {
+        EvidenceState {
+            epoch: self.epoch,
+            verified: self.verified.clone(),
+            last_change: self.last_change.clone(),
+            fingerprint: self.fingerprint.clone(),
+            partial_view: self.partial_view,
+        }
+    }
+
+    fn restore(&mut self, state: EvidenceState) {
+        self.epoch = state.epoch;
+        self.verified = state.verified;
+        self.last_change = state.last_change;
+        self.git_first = state.fingerprint.as_ref().is_some_and(|f| f.via_git);
+        self.fingerprint = state.fingerprint;
+        self.partial_view = state.partial_view;
+        self.message_epoch = state.epoch;
     }
 
     /// A tool changed files itself.
@@ -318,7 +359,7 @@ impl Evidence {
         deadline: Option<Instant>,
         cmd: Option<&str>,
     ) -> bool {
-        let look = look_again_off_thread(&ws.root, self.fingerprint.take());
+        let look = look_again_off_thread(&ws.root, self.fingerprint.take(), self.git_first);
         let looked = match deadline {
             Some(deadline) => tokio::time::timeout_at(deadline.into(), look).await.ok(),
             None => Some(look.await),
@@ -356,6 +397,10 @@ pub struct SessionState {
     pub baseline: Option<Baseline>,
     pub watches: Vec<WatchSpec>,
     pub dialects: Vec<(String, bool)>,
+    /// Whether the work was checked after its last change. Missing from a snapshot stored before
+    /// it was kept.
+    #[serde(default)]
+    pub evidence: Option<EvidenceState>,
 }
 
 /// The highest `N` of the `out/N.log` files a session directory holds.
@@ -480,6 +525,7 @@ impl Session {
             baseline: self.baseline.clone(),
             watches: self.watches.specs(),
             dialects,
+            evidence: Some(self.evidence.checkpoint()),
         }
     }
 
@@ -501,6 +547,14 @@ impl Session {
             .into_iter()
             .map(|(path, already)| (PathBuf::from(path), already))
             .collect();
+        match state.evidence {
+            Some(evidence) => self.evidence.restore(evidence),
+            // Stored before the checks were kept: whatever the tools did may never have been checked.
+            None if state.step > 0 => self
+                .evidence
+                .changed("the work before a restart, whose checks were not kept"),
+            None => {}
+        }
     }
 
     /// `limit`, or what is left of the run's time budget where that is less: zero once the budget
@@ -618,6 +672,13 @@ mod tests {
     #[test]
     fn every_mechanism_can_be_switched_off_by_name() {
         for name in Features::NAMES {
+            // Off in Sage until it is asked for: switched on and off again by name.
+            if *name == "protect" {
+                let on = Features::sage().with(name).unwrap();
+                assert_ne!(on, Features::sage());
+                assert_eq!(on.without(name), Some(Features::sage()));
+                continue;
+            }
             let without = Features::sage()
                 .without(name)
                 .unwrap_or_else(|| panic!("{name} is listed but cannot be switched off"));

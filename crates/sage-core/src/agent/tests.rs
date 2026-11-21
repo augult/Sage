@@ -1899,98 +1899,55 @@ async fn an_effort_the_user_fixed_is_kept_in_every_mode() {
     );
 }
 #[tokio::test]
-async fn contract_holds_finish_in_sage_and_can_be_ablated() {
-    // Zero edits (`epoch == 0`) on an audit that asks for `findings.json`: Sage holds `finish` until written.
-    let premature = finish();
-    let write_findings = fixed(MockTurn::calls(
-        "",
-        vec![
-            ("write", json!({"path": "findings.json", "content": "[]\n"})),
-            (
-                "shell",
-                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
-            ),
-            ("finish", json!({"summary": "no vulnerabilities"})),
-        ],
-    ));
-    let mut r = rig(
-        "agent-contract-missing",
-        AgentConfig::new("mock"),
-        vec![premature, write_findings],
-    );
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder. Do not change `n.txt`.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
-    assert_eq!(
-        (
-            out.status,
-            out.verified,
-            r.agent.stats.turns,
-            r.agent.effort()
-        ),
-        (FinishStatus::Done, true, 2, Effort::High)
-    );
-    assert!(
-        requests(&r)[1]
-            .last()
-            .unwrap()
-            .content
-            .contains("the task asks for `findings.json`, which has not been created")
-    );
-
-    // Touching a protected file holds `finish` until the file is restored.
-    let touch_forbidden = upper("beta", "BETA");
-    let restore_and_write = fixed(MockTurn::calls(
+async fn guard_files_holds_finish_until_a_protected_file_is_restored_and_is_off_by_default() {
+    let task = "Audit `n.txt` and report. Do not edit `n.txt`.";
+    let touch_forbidden = || upper("beta", "BETA");
+    let restore = fixed(MockTurn::calls(
         "",
         vec![
             (
                 "edit",
                 json!({"path": "n.txt", "old": "BETA", "new": "beta"}),
             ),
-            ("write", json!({"path": "findings.json", "content": "[]\n"})),
             (
                 "shell",
-                json!({"cmd": "test -f findings.json", "expect_exit": "0"}),
+                json!({"cmd": "grep -qx beta n.txt", "expect_exit": "0"}),
             ),
-            ("finish", json!({"summary": "restored and wrote findings"})),
+            ("finish", json!({"summary": "restored"})),
         ],
     ));
+    // With `protect`, touching a protected file holds `finish` until the file is restored.
+    let mut cfg = AgentConfig::new("mock");
+    cfg.features.protect = true;
     let mut r = rig(
         "agent-contract-protected",
-        AgentConfig::new("mock"),
-        vec![touch_forbidden, restore_and_write],
+        cfg,
+        vec![touch_forbidden(), restore],
     );
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder. Do not edit `n.txt`.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
+    let out = r.agent.run(task.into(), &CancellationToken::new()).await;
     assert_eq!(
         (out.status, out.verified, r.agent.stats.turns),
         (FinishStatus::Done, true, 2)
+    );
+    assert!(
+        requests(&r)[1]
+            .last()
+            .unwrap()
+            .content
+            .contains("`n.txt` was modified, though the task says not to change it")
     );
     assert_eq!(
         std::fs::read_to_string(r.agent.sess.ws.root.join("n.txt")).unwrap(),
         "alpha\nbeta\ngamma\n"
     );
 
-    // Ablating `contract` turns it off cleanly.
-    let mut cfg = AgentConfig::new("mock");
-    cfg.features = Features::sage().without("contract").unwrap();
-    let mut r = rig("agent-contract-off", cfg, vec![finish()]);
-    let out = r
-        .agent
-        .run(
-            "Audit `n.txt`. Write `findings.json` in this folder.".into(),
-            &CancellationToken::new(),
-        )
-        .await;
+    // As Sage comes, the model is trusted with the task's words.
+    let mut r = rig(
+        "agent-contract-off",
+        AgentConfig::new("mock"),
+        vec![touch_forbidden()],
+    );
+    let out = r.agent.run(task.into(), &CancellationToken::new()).await;
     assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
 }
 
@@ -2170,13 +2127,10 @@ async fn old_observations_are_trimmed_only_where_enough_replies_are_left_to_pay_
 }
 
 #[tokio::test]
-async fn a_missing_deliverable_on_the_last_reply_is_incomplete() {
+async fn a_file_the_task_asks_for_is_left_to_the_model() {
     let mut r = rig(
         "agent-missing-final-deliverable",
-        AgentConfig {
-            max_turns: 1,
-            ..AgentConfig::new("mock")
-        },
+        AgentConfig::new("mock"),
         vec![finish()],
     );
     let out = r
@@ -2186,11 +2140,7 @@ async fn a_missing_deliverable_on_the_last_reply_is_incomplete() {
             &CancellationToken::new(),
         )
         .await;
-    assert_eq!(
-        (out.status, out.verified),
-        (FinishStatus::Incomplete, false)
-    );
-    assert!(out.evidence.contains("findings.json"));
+    assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 1));
 }
 
 #[tokio::test]
@@ -2257,4 +2207,100 @@ async fn a_finish_accepted_in_the_reply_that_used_up_the_time_is_the_outcome() {
     assert_eq!(out.status, FinishStatus::Done, "{}", out.summary);
     assert_eq!(out.summary, "half of it is done");
     assert!(!out.verified);
+}
+
+/// A local OpenAI-style endpoint that streams `bodies` in turn, one per request, and counts them.
+async fn streaming_endpoint(bodies: Vec<String>) -> (String, Arc<std::sync::atomic::AtomicU32>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let served = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let count = served.clone();
+    tokio::spawn(async move {
+        let mut bodies = bodies.into_iter();
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            count.fetch_add(1, Ordering::SeqCst);
+            let body = bodies.next().unwrap_or_default();
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(answer.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    (format!("http://{address}/v1"), served)
+}
+
+#[tokio::test]
+async fn an_empty_reply_is_booked_once_and_answered_with_a_note_not_retried() {
+    use crate::provider::openai::{Dialect, OpenAiProvider};
+    let empty = [
+        r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":1}}"#,
+    ];
+    let finish = [
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"f1","type":"function","function":{"name":"finish","arguments":"{\"summary\":\"hi\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":20100,"completion_tokens":9}}"#,
+    ];
+    let sse = |chunks: &[&str]| {
+        let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+        body.push_str("data: [DONE]\n\n");
+        body
+    };
+    let (url, served) = streaming_endpoint(vec![sse(&empty), sse(&finish)]).await;
+    let mut provider = OpenAiProvider::new(&url, "k", "m", Dialect::DeepSeek).unwrap();
+    provider.max_retries = 2;
+    let sess = test_session("agent-empty-reply", Features::sage());
+    let sink = Arc::new(MemorySink::default());
+    let mut agent = Agent::new(
+        Provider::OpenAi(provider),
+        sess,
+        AgentConfig::new("m"),
+        sink.clone(),
+        Arc::new(Approvals::default()),
+    );
+    let out = agent.run("Say hi.".into(), &CancellationToken::new()).await;
+    assert_eq!(
+        (out.status, out.summary.as_str()),
+        (FinishStatus::Done, "hi")
+    );
+    assert_eq!(
+        served.load(Ordering::SeqCst),
+        2,
+        "no retry of the empty reply"
+    );
+    assert_eq!(
+        (
+            agent.stats.requests,
+            agent.stats.retries,
+            agent.stats.prompt_tokens
+        ),
+        (2, 0, 40_100),
+        "both replies are booked"
+    );
+    assert!(sink.events.lock().unwrap().iter().any(|e| matches!(
+        e,
+        EventKind::Note { kind, .. } if kind == "empty"
+    )));
 }

@@ -185,8 +185,9 @@ function appearanceSection() {
 
 /**
  * Which key sends a task or a follow-up (the other one breaks the line; kept by the window, like
- * the appearance), and whether a request the provider turned away is made again without end
- * (kept by the engine, and reaching the sessions that are running as well as the ones to come).
+ * the appearance), whether a request the provider turned away is made again without end (kept by
+ * the engine, and reaching the sessions that are running as well as the ones to come), and whether
+ * new sessions are held to the files a task says not to edit ("Guard files", kept by the engine).
  */
 function messagesSection(app) {
   const keys = radioChips({
@@ -221,7 +222,38 @@ function messagesSection(app) {
       }
     },
   });
-  return h('section.panel', { id: 'settings-messages' }, h('h2.section-title', 'Messages'), field('Send with', keys), field('Auto-retry', autoRetry, error));
+  const guardError = h('div.form-error', { role: 'alert', hidden: true });
+  const guarded = () => (app.state.protect_files ? 'on' : 'off');
+  const guard = radioChips({
+    name: 'guard-files',
+    label: 'Guard files',
+    segmented: true,
+    options: [
+      { value: 'on', label: 'On', title: 'Block finishing while a file the task said not to touch is changed' },
+      { value: 'off', label: 'Off', title: 'Trust the model to follow the task' },
+    ],
+    value: guarded(),
+    onChange: async (value) => {
+      guardError.hidden = true;
+      try {
+        await api.setProtectFiles(value === 'on');
+        await app.reloadState();
+      } catch (problem) {
+        guardError.textContent = String(problem);
+        guardError.hidden = false;
+        guard.querySelector(`input[value="${guarded()}"]`).checked = true;
+      }
+    },
+  });
+  const guardHint = hint('Stops the AI from finishing if it changed a file your task said not to touch. Mainly for weaker models; not recommended with DeepSeek V4.1. Applies to new sessions.');
+  return h(
+    'section.panel',
+    { id: 'settings-messages' },
+    h('h2.section-title', 'Messages'),
+    field('Send with', keys),
+    field('Auto-retry', autoRetry, error),
+    field('Guard files', guard, h('div', guardHint, guardError)),
+  );
 }
 
 /**

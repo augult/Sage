@@ -5,7 +5,7 @@
   const initialView = params.get('view') === 'session' ? 'session' : 'new';
   const session = { id: 'fixture-hello', title: 'Hello', cwd: '/home/user/Novel', provider: 'fixture', model: 'fixture-model', mode: 'sage', effort: 'medium', autonomy: 'auto', simulated: false, created: 1730000000000, updated: 1730000000000, status: 'resumable', outcome: null, verified: false, stats: {}, skills: [] };
   const events = [{ type: 'session_start', seq: 1, ts: session.created, title: session.title, cwd: session.cwd, provider: session.provider, model: session.model, mode: session.mode }, { type: 'user', seq: 2, ts: session.created + 1, text: 'Hello', files: [] }];
-  const state = { version: 'browser-fixture', home: '/home/user', data_dir: '/home/user/.sage', provider: 'fixture', model: 'fixture-model', effort: 'medium', auto_retry: false, providers: [{ id: 'fixture', name: 'Fixture provider', serves: 'Synthetic browser fixture', base_url: 'https://example.invalid', key_env: '', has_key: true, models: ['fixture-model'], note: 'Not a real connection', custom: false }] };
+  const state = { version: 'browser-fixture', home: '/home/user', data_dir: '/home/user/.sage', provider: 'fixture', model: 'fixture-model', effort: 'medium', auto_retry: false, protect_files: false, providers: [{ id: 'fixture', name: 'Fixture provider', serves: 'Synthetic browser fixture', base_url: 'https://example.invalid', key_env: '', has_key: true, models: ['fixture-model'], note: 'Not a real connection', custom: false }] };
   const rich = params.has('rich');
   const skills = rich ? [{ name: 'ui-review', title: 'Review interface accessibility and responsive layouts', description: 'Check spacing, contrast, keyboard access, and narrow windows.', body: '# UI review\n\nCheck the interface in light and dark appearances.\n', path: '/home/user/.sage/skills/ui-review/SKILL.md' }] : [];
   if (rich) {
@@ -28,6 +28,7 @@
     app_state: () => state,
     set_defaults: (change) => { for (const [key, value] of Object.entries(change)) if (value !== undefined) state[key] = value; return null; },
     set_auto_retry: ({ on }) => { state.auto_retry = on; return null; },
+    set_protect_files: ({ on }) => { state.protect_files = on; return null; },
     list_sessions: () => [session],
     session_events: () => events,
     subscribe: () => events,
