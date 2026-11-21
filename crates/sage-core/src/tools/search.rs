@@ -194,6 +194,11 @@ fn scan(
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
+        // The harness's own configuration holds API keys: a search of the folder it is in does
+        // not show its lines.
+        if scope.holds_keys(entry.path()) {
+            continue;
+        }
         let room = cap - scan.shown;
         let mut sink = FileSink {
             lines: Vec::new(),
@@ -231,6 +236,8 @@ struct Scope {
     ws: Workspace,
     cap: usize,
     anchors: bool,
+    /// The file that holds the API keys, as it really is, where it exists: never searched.
+    keys: Option<PathBuf>,
 }
 
 impl Scope {
@@ -239,7 +246,16 @@ impl Scope {
             ws: sess.ws.clone(),
             cap: sess.limits.search_matches,
             anchors: sess.features.anchors,
+            keys: crate::util::canonical(crate::config::data_dir().join("config.json")).ok(),
         }
+    }
+
+    /// Whether `path` is the file with the keys. Only a file of that name is looked at closely.
+    fn holds_keys(&self, path: &Path) -> bool {
+        self.keys.as_deref().is_some_and(|keys| {
+            path.file_name() == keys.file_name()
+                && crate::util::canonical(path).is_ok_and(|real| real == keys)
+        })
     }
 }
 
@@ -608,5 +624,26 @@ mod tests {
         assert!(out.observation.contains("… 20 more matches in this file"));
         assert!(out.observation.ends_with("[60 of 100+ matches shown, in 3 files — narrow with path, glob or a tighter pattern]"), "{}", out.observation);
         assert_eq!(out.observation.matches("|needle").count(), 60);
+    }
+
+    #[test]
+    fn the_file_with_the_keys_is_never_searched() {
+        let s = fixture(Features::sage());
+        let home = s.ws.root.join("data");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.json"), "{\"key\": \"sk-secret\"}\n").unwrap();
+        std::fs::write(home.join("notes.txt"), "sk-not-a-secret\n").unwrap();
+        let mut scope = Scope::of(&s);
+        scope.keys = crate::util::canonical(home.join("config.json")).ok();
+        let budget = SearchBudget {
+            deadline: Instant::now() + TIME_BUDGET,
+            cancel: CancellationToken::new(),
+        };
+        let out = search(&scope, &json!({"pattern": "sk-", "path": "data"}), &budget);
+        assert!(
+            out.observation.contains("sk-not-a-secret") && !out.observation.contains("sk-secret\""),
+            "{}",
+            out.observation
+        );
     }
 }

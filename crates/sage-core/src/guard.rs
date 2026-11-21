@@ -215,25 +215,49 @@ impl Expect {
     }
 }
 
-/// `/pattern/` is a regex; anything else is a case-insensitive substring.
-fn output_contains(output: &str, needle: &str) -> bool {
-    if needle.len() > 2
-        && needle.starts_with('/')
-        && let Some(end) = needle.rfind('/').filter(|e| *e > 0)
-    {
-        let (pat, flags) = (&needle[1..end], &needle[end + 1..]);
-        let regex = RegexBuilder::new(pat)
-            .case_insensitive(flags.contains('i'))
-            .multi_line(true)
-            .dot_matches_new_line(flags.contains('s'))
-            .build();
-        if flags.chars().all(|c| matches!(c, 'i' | 'm' | 's'))
-            && let Ok(re) = regex
-        {
-            return re.is_match(output);
+/// The regex a needle written `/pattern/` (with optional `i`, `m`, `s` flags) stands for. A path
+/// such as `/usr/lib/` or `/api/v1/` is not one: a slash inside a regex between slashes would be
+/// escaped, so one that is not makes the needle plain text.
+fn needle_regex(needle: &str) -> Option<regex::Regex> {
+    if needle.len() <= 2 || !needle.starts_with('/') {
+        return None;
+    }
+    let end = needle.rfind('/').filter(|e| *e > 0)?;
+    let (pat, flags) = (&needle[1..end], &needle[end + 1..]);
+    if !flags.chars().all(|c| matches!(c, 'i' | 'm' | 's')) {
+        return None;
+    }
+    let mut escaped = false;
+    for c in pat.chars() {
+        match c {
+            '/' if !escaped => return None,
+            '\\' => escaped = !escaped,
+            _ => escaped = false,
         }
     }
-    output.to_lowercase().contains(&needle.to_lowercase())
+    RegexBuilder::new(pat)
+        .case_insensitive(flags.contains('i'))
+        .multi_line(true)
+        .dot_matches_new_line(flags.contains('s'))
+        .build()
+        .ok()
+}
+
+/// `/pattern/` is a regex; anything else is a case-insensitive substring.
+fn output_contains(output: &str, needle: &str) -> bool {
+    match needle_regex(needle) {
+        Some(re) => re.is_match(output),
+        None => output.to_lowercase().contains(&needle.to_lowercase()),
+    }
+}
+
+/// A needle as a violation names it: a regex is said to be one, so that `/src/` failing on a line
+/// that holds `src` but no `/src/` is not a mystery.
+fn shown_needle(needle: &str) -> String {
+    match needle_regex(needle) {
+        Some(_) => format!("{needle:?} (read as a regex)"),
+        None => format!("{needle:?}"),
+    }
 }
 
 /// Checks a receipt without treating an excerpt as complete evidence.
@@ -243,14 +267,39 @@ pub fn check_capture(
     text: &str,
     complete: bool,
 ) -> Verdict {
-    if !complete && expect.is_some_and(Expect::has_output_predicates) {
-        let mut verdict = check(expect, exit, text);
-        verdict.held = false;
-        verdict.violations =
-            vec!["output was incomplete, so its prediction could not be verified".into()];
-        return verdict;
+    let Some(e) = expect.filter(|e| !complete && e.has_output_predicates()) else {
+        return check(expect, exit, text);
+    };
+    // Only part of the output is at hand. The exit code is known, and text the part holds is
+    // there; text it does not hold may be in what is missing, and so may text it must not hold.
+    let mut verdict = check(
+        Some(&Expect {
+            exit: Some(e.exit_expected()),
+            ..Expect::default()
+        }),
+        exit,
+        text,
+    );
+    verdict.violations.extend(
+        e.lacks
+            .iter()
+            .filter(|l| output_contains(text, l))
+            .map(|l| {
+                format!(
+                    "expected output not to contain {}, but it does",
+                    shown_needle(l)
+                )
+            }),
+    );
+    let unknown = e.lacks.iter().any(|l| !output_contains(text, l))
+        || e.has.iter().any(|h| !output_contains(text, h));
+    if unknown && verdict.violations.is_empty() {
+        verdict
+            .violations
+            .push("output was incomplete, so its prediction could not be verified".into());
     }
-    check(expect, exit, text)
+    verdict.held = verdict.violations.is_empty();
+    verdict
 }
 
 impl Expect {
@@ -279,12 +328,18 @@ pub fn check(expect: Option<&Expect>, exit: Option<i32>, output: &str) -> Verdic
     }
     for h in &e.has {
         if !output_contains(output, h) {
-            violations.push(format!("expected output to contain {h:?}, it does not"));
+            violations.push(format!(
+                "expected output to contain {}, it does not",
+                shown_needle(h)
+            ));
         }
     }
     for l in &e.lacks {
         if output_contains(output, l) {
-            violations.push(format!("expected output not to contain {l:?}, but it does"));
+            violations.push(format!(
+                "expected output not to contain {}, but it does",
+                shown_needle(l)
+            ));
         }
     }
     Verdict {
@@ -454,5 +509,61 @@ mod tests {
         let e = Expect::from_value(&json!({"exit": 0, "has": "ok"})).unwrap();
         assert_eq!(e.describe(), "exit 0 · has \"ok\"");
         assert_eq!(Expect::default().describe(), "exit 0");
+    }
+
+    #[test]
+    fn part_of_the_output_proves_what_it_shows_and_nothing_it_does_not() {
+        let e = |has: &[&str], lacks: &[&str]| Expect {
+            exit: None,
+            has: has.iter().map(|s| s.to_string()).collect(),
+            lacks: lacks.iter().map(|s| s.to_string()).collect(),
+        };
+        let part = "server ready\n";
+        // What the part holds is there, whatever is missing.
+        assert!(check_capture(Some(&e(&["ready"], &[])), Some(0), part, false).held);
+        // What it does not hold, and what must be absent, may be in the rest.
+        for unknown in [e(&["done"], &[]), e(&["ready"], &["Traceback"])] {
+            let v = check_capture(Some(&unknown), Some(0), part, false);
+            assert!(!v.held);
+            assert_eq!(
+                v.violations,
+                ["output was incomplete, so its prediction could not be verified"]
+            );
+        }
+        // Text that must be absent and is in the part is a violation, as is a wrong exit code.
+        let v = check_capture(Some(&e(&[], &["ready"])), Some(0), part, false);
+        assert_eq!(
+            v.violations,
+            ["expected output not to contain \"ready\", but it does"]
+        );
+        let exit_zero = Expect {
+            exit: Some(ExitExpect::Code(0)),
+            ..e(&["ready"], &[])
+        };
+        let v = check_capture(Some(&exit_zero), Some(2), part, false);
+        assert_eq!(v.violations, ["expected exit 0, got exit 2"]);
+    }
+
+    #[test]
+    fn a_path_between_slashes_is_text_and_a_word_between_slashes_is_a_regex() {
+        // A slash inside means a path: `/src/main/` is looked for as it is.
+        assert!(!output_contains("build/src_gen/main.o", "/src/main/"));
+        assert!(output_contains("at /app/src/main/x.rs", "/src/main/"));
+        assert!(needle_regex("/usr/lib/").is_none() && needle_regex(r"/src\/main/").is_some());
+        // One word between slashes is a regex, as the tool's schema says, and a violation says so.
+        assert!(output_contains("3 passed", "/pass(ed)?/"));
+        let v = check(
+            Some(&Expect {
+                exit: None,
+                has: vec![],
+                lacks: vec!["/src/".into()],
+            }),
+            Some(0),
+            "build/src_gen/main.o",
+        );
+        assert_eq!(
+            v.violations,
+            ["expected output not to contain \"/src/\" (read as a regex), but it does"]
+        );
     }
 }

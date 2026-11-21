@@ -220,6 +220,15 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| home_dir().join(".sage"))
 }
 
+/// Whether `path` is, however it is spelled and through any link, the file that holds the API keys.
+pub fn holds_keys(path: &Path) -> bool {
+    let own = data_dir().join("config.json");
+    match (crate::util::canonical(path), crate::util::canonical(&own)) {
+        (Ok(path), Ok(own)) => path == own,
+        _ => crate::workspace::normalize(path) == crate::workspace::normalize(&own),
+    }
+}
+
 impl Config {
     pub fn load(path: &Path) -> Self {
         std::fs::read_to_string(path)

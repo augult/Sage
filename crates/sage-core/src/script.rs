@@ -96,32 +96,188 @@ fn halts(tool: Option<Tool>, status: StepStatus) -> bool {
     }
 }
 
-/// Commands that succeed no matter what and so prove nothing. One part that can fail makes the
-/// line a check: `cd dir && pytest` is one, `cd dir; echo ok` is not.
+/// Commands whose exit status cannot be a failure, and so prove nothing: what decides the exit
+/// status of the line cannot fail. `cd dir && pytest` is a check; `cd dir; echo ok`,
+/// `pytest; echo done` (the status is `echo`'s), `pytest || true` and `echo $(pytest)` are not.
 fn proves_nothing(cmd: &str) -> bool {
-    let mut parts = vec![String::new()];
+    !can_fail(cmd)
+}
+
+/// How two parts of a command line are joined.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Join {
+    /// `;`, a newline or `&`: the status is the later part's.
+    List,
+    And,
+    Or,
+    Pipe,
+}
+
+/// The parts of `cmd` at its top level, each with what joins it to the next: separators inside
+/// quotes, `$(…)`, backticks and `(…)` / `{…}` groups belong to their part.
+fn top_level(cmd: &str) -> Vec<(String, Option<Join>)> {
+    let chars: Vec<char> = cmd.chars().collect();
+    let mut parts = Vec::new();
+    let mut part = String::new();
     let mut quote: Option<char> = None;
-    for c in cmd.chars() {
-        match quote {
-            Some(q) if c == q => quote = None,
-            Some(_) => {}
-            None if c == '\'' || c == '"' => quote = Some(c),
-            None if matches!(c, ';' | '&' | '|' | '\n' | '(' | ')' | '{' | '}') => {
-                parts.push(String::new())
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if let Some(q) = quote {
+            part.push(c);
+            if c == '\\' && q != '\'' {
+                if let Some(n) = next {
+                    part.push(n);
+                    i += 1;
+                }
+            } else if c == q {
+                quote = None;
             }
-            None => parts.last_mut().unwrap().push(c),
+            i += 1;
+            continue;
+        }
+        let join = match c {
+            ';' | '\n' if depth == 0 => Some(Join::List),
+            '&' if depth == 0 && next == Some('&') => Some(Join::And),
+            '|' if depth == 0 && next == Some('|') => Some(Join::Or),
+            // `2>&1`, `>&2` and `&>file` are redirections, not a job sent to the background.
+            '&' if depth == 0 && i > 0 && matches!(chars[i - 1], '>' | '<') => None,
+            '&' if depth == 0 && next == Some('>') => None,
+            '&' if depth == 0 => Some(Join::List),
+            '|' if depth == 0 => Some(Join::Pipe),
+            _ => None,
+        };
+        if let Some(join) = join {
+            parts.push((std::mem::take(&mut part), Some(join)));
+            if matches!(join, Join::And | Join::Or) || (join == Join::Pipe && next == Some('&')) {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '\\' => {
+                part.push(c);
+                if let Some(n) = next {
+                    part.push(n);
+                    i += 1;
+                }
+            }
+            '\'' | '"' | '`' => {
+                quote = Some(c);
+                part.push(c);
+            }
+            '(' | '{' => {
+                depth += 1;
+                part.push(c);
+            }
+            ')' | '}' => {
+                depth = depth.saturating_sub(1);
+                part.push(c);
+            }
+            _ => part.push(c),
+        }
+        i += 1;
+    }
+    parts.push((part, None));
+    parts
+}
+
+/// Whether the exit status of `cmd` can be a failure.
+fn can_fail(cmd: &str) -> bool {
+    // The lists of the line: what `;`, newlines and `&` separate, each an and-or chain of pipelines.
+    let mut lists: Vec<Vec<(String, Option<Join>)>> = vec![Vec::new()];
+    for (part, join) in top_level(cmd) {
+        let ends = join == Some(Join::List);
+        lists
+            .last_mut()
+            .expect("there is always a list")
+            .push((part, join.filter(|j| *j != Join::List)));
+        if ends {
+            lists.push(Vec::new());
         }
     }
-    parts.iter().all(|part| {
-        let first = part
-            .split_whitespace()
-            .find(|w| !w.contains('='))
-            .unwrap_or("");
-        matches!(
-            first,
-            "echo" | "true" | ":" | "printf" | "cd" | "pwd" | "sleep" | "export" | "exit" | ""
-        )
+    lists.retain(|list| list.iter().any(|(part, _)| !part.trim().is_empty()));
+    // Under `set -e` any list that fails ends the line with its status.
+    if lists.iter().any(|list| sets_errexit(list)) {
+        return lists.iter().any(|list| list_can_fail(list));
+    }
+    // Otherwise the status is the last list's. A bare `exit` passes on the status before it.
+    while let Some(last) = lists.pop() {
+        if let [(part, _)] = last.as_slice()
+            && part.split_whitespace().collect::<Vec<_>>() == ["exit"]
+        {
+            continue;
+        }
+        return list_can_fail(&last);
+    }
+    false
+}
+
+fn sets_errexit(list: &[(String, Option<Join>)]) -> bool {
+    list.iter().any(|(part, _)| {
+        let words: Vec<&str> = part.split_whitespace().collect();
+        let Some((&"set", flags)) = words.split_first() else {
+            return false;
+        };
+        let short = flags
+            .iter()
+            .any(|w| w.starts_with('-') && !w.starts_with("--") && w.contains('e'));
+        short || flags.windows(2).any(|w| w == ["-o", "errexit"])
     })
+}
+
+/// An and-or chain: `a && b` fails if either can, `a || b` only if both can.
+fn list_can_fail(list: &[(String, Option<Join>)]) -> bool {
+    let mut pipelines: Vec<(Vec<&str>, Option<Join>)> = vec![(Vec::new(), None)];
+    for (part, join) in list {
+        pipelines
+            .last_mut()
+            .expect("never empty")
+            .0
+            .push(part.as_str());
+        if matches!(join, Some(Join::And | Join::Or)) {
+            pipelines.push((Vec::new(), *join));
+        }
+    }
+    let mut chain = pipelines.into_iter();
+    let (first, _) = chain.next().expect("never empty");
+    // A failure in any stage of a pipeline is reported (see `jobs::masked_failure`).
+    let fails = |stages: &[&str]| stages.iter().any(|stage| stage_can_fail(stage));
+    let mut can = fails(&first);
+    for (stages, join) in chain {
+        can = match join {
+            Some(Join::Or) => can && fails(&stages),
+            _ => can || fails(&stages),
+        };
+    }
+    can
+}
+
+fn stage_can_fail(stage: &str) -> bool {
+    let stage = stage.trim();
+    if let Some(inner) = stage
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .or_else(|| stage.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
+    {
+        return can_fail(inner);
+    }
+    let mut words = stage.split_whitespace().skip_while(|w| {
+        w.split_once('=').is_some_and(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    });
+    match words.next() {
+        None => false,
+        Some("exit") => !matches!(words.next(), None | Some("0")),
+        Some(word) => !matches!(
+            word,
+            "echo" | "true" | ":" | "printf" | "cd" | "pwd" | "sleep" | "export" | "set" | "unset"
+        ),
+    }
 }
 
 /// Whether a command or a path names the file the harness keeps API keys in: `config.json` in its
@@ -131,6 +287,43 @@ fn names_key_file(text: &str) -> bool {
     text.contains(".sage/config.json")
         || text.contains(".sage\\config.json")
         || text.contains(own.to_string_lossy().as_ref())
+}
+
+/// Whether a command names the file with the keys, or reaches it through the data folder: the
+/// folder itself (`grep -r key ~/.sage`, `cd ~/.sage && cat config.json`), a pattern in it
+/// (`cat ~/.sage/conf*`) or anything there whose name starts like the file's. A subfolder such as
+/// `~/.sage/sessions` is not refused. A command can always reach a file some other way: this
+/// catches the usual spellings, it is no sandbox.
+fn shell_reaches_keys(cmd: &str) -> bool {
+    if names_key_file(cmd) {
+        return true;
+    }
+    let dir = crate::config::data_dir();
+    let mut spellings = vec![dir.to_string_lossy().into_owned()];
+    if dir == crate::util::home_dir().join(".sage") {
+        spellings.extend(["~/.sage", "$HOME/.sage", "${HOME}/.sage"].map(String::from));
+    }
+    spellings.iter().any(|spelling| {
+        cmd.match_indices(spelling.as_str()).any(|(at, _)| {
+            let rest: String = cmd[at + spelling.len()..]
+                .chars()
+                .take_while(|c| {
+                    !c.is_whitespace() && !matches!(c, ';' | '|' | '&' | ')' | '\'' | '"')
+                })
+                .collect();
+            if rest.is_empty() {
+                return true;
+            }
+            // `~/.sage-old` is another folder.
+            let Some(inside) = rest.strip_prefix(['/', '\\']) else {
+                return false;
+            };
+            let inside = inside.trim_start_matches(['/', '\\']);
+            inside.is_empty()
+                || inside.contains(['*', '?', '[', '{'])
+                || inside.to_ascii_lowercase().starts_with("conf")
+        })
+    })
 }
 
 fn summarize(call: &Call) -> String {
@@ -377,12 +570,18 @@ impl Runner<'_> {
     /// Asks for approval where the step needs it. Returns what the model is told if it was refused.
     async fn refusal(&mut self, call: &Call, tool: Tool) -> Option<StepOutput> {
         // Whatever the autonomy: what a tool prints goes to the provider with the next request.
-        let named = match tool {
-            Tool::Shell => str_arg(&call.args, "cmd"),
-            Tool::Read | Tool::Search => str_arg(&call.args, "path"),
-            _ => None,
+        // A path is judged by the file it reaches (`./`, `..` and links included); a command by
+        // what it says, which is a tripwire for the usual spellings and no more. `search` of a
+        // folder that holds the file skips the file itself (`tools::search`).
+        let keys = match tool {
+            Tool::Shell => str_arg(&call.args, "cmd").is_some_and(shell_reaches_keys),
+            Tool::Read | Tool::Search | Tool::Edit | Tool::Write => str_arg(&call.args, "path")
+                .is_some_and(|path| {
+                    names_key_file(path) || crate::config::holds_keys(&self.sess.ws.resolve(path))
+                }),
+            _ => false,
         };
-        if named.is_some_and(names_key_file) {
+        if keys {
             let text = "[denied] refused: that is the harness's own configuration, which holds API keys. Nothing in it bears on the task.".to_string();
             return Some(StepOutput {
                 status: StepStatus::Denied,
@@ -611,7 +810,10 @@ impl Runner<'_> {
         let unverified = str_arg(args, "unverified")
             .map(str::trim)
             .filter(|r| !r.is_empty());
-        let mut failing: Option<(String, bool, String)> = None;
+        // Watches that do not pass against the workspace as it is: their names, whether `unverified`
+        // gets past them, whether any of them fails (rather than having passed against an earlier
+        // state), and what their last runs said.
+        let mut failing: Option<(String, bool, bool, String)> = None;
         if self.sess.features.watches && !self.sess.watches.items.is_empty() {
             let (reports, text) = watches::run_stale(self.sess, self.cancel).await;
             self.emit_watches(&reports);
@@ -628,8 +830,14 @@ impl Runner<'_> {
                     .map(|w| w.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                // A check the model never asked for must not be able to trap it.
-                failing = Some((names, not_passing.iter().all(|w| w.auto), text));
+                let fails = not_passing.iter().any(|w| w.state == WatchState::Fail);
+                // A check the model never asked for must not be able to trap it, and nor may one
+                // that is not failing but could not be brought up to date (two watches that write
+                // files on every run leave each other behind).
+                let waivable = not_passing
+                    .iter()
+                    .all(|w| w.auto || w.state != WatchState::Fail);
+                failing = Some((names, waivable, fails, text));
             }
         }
         if self.landing {
@@ -637,9 +845,16 @@ impl Runner<'_> {
             // It is accepted, with what is actually known about the work.
             let ev = &self.sess.evidence;
             let (verified, evidence) = match (&failing, unverified) {
-                (Some((names, _, _)), _) => (
+                (Some((names, _, fails, _)), _) => (
                     false,
-                    format!("unverified: watch {names} was failing when the budget ran out"),
+                    format!(
+                        "unverified: watch {names} {} when the budget ran out",
+                        if *fails {
+                            "was failing"
+                        } else {
+                            "had no passing result for the final files"
+                        }
+                    ),
                 ),
                 (None, _) if ev.fresh() => (true, ev.verified_by()),
                 (None, Some(reason)) => (false, format!("unverified: {reason}")),
@@ -662,39 +877,41 @@ impl Runner<'_> {
                 "[done] accepted without verification"
             });
         }
-        if let Some((names, waivable, text)) = failing {
+        if let Some((names, waivable, fails, text)) = failing {
             if let (true, Some(reason)) = (waivable, unverified) {
+                let state = if fails {
+                    "is failing"
+                } else {
+                    "has no passing result for the final files"
+                };
                 res.finished = Some(Finished {
                     summary,
                     verified: false,
-                    evidence: format!("unverified: {reason} (watch {names} is failing)"),
+                    evidence: format!("unverified: {reason} (watch {names} {state})"),
                 });
                 return StepOutput::ok("[done] accepted without verification");
             }
-            let why = if self
-                .sess
-                .watches
-                .items
-                .iter()
-                .any(|w| w.state == WatchState::Fail)
-            {
+            let why = if fails {
                 "is not passing"
             } else {
                 "has no current passing result"
             };
             let head = format!("[SURPRISE] finish refused: watch {names} {why}.");
             let mut detail = if text.is_empty() {
-                if why == "is not passing" {
+                if fails {
                     "Its output has not changed since it was last shown.".to_string()
                 } else {
-                    "A check changed the workspace. Run a read-only check of the final files."
-                        .to_string()
+                    "It passed, but files changed after it ran, so its result is for an earlier state of the files.".to_string()
                 }
             } else {
                 text
             };
-            if waivable {
+            if waivable && fails {
                 detail.push_str("\nFix it. If it cannot pass for a reason outside this task, call finish with `unverified` set to that reason.");
+            } else if waivable {
+                detail.push_str(
+                    "\nCall finish with `unverified` set to the reason it cannot be checked.",
+                );
             }
             return StepOutput {
                 status: StepStatus::Surprise,
@@ -1653,5 +1870,191 @@ mod tests {
                 "nope"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_watch_that_writes_a_file_as_it_runs_still_verifies_and_never_traps_finish() {
+        // The model's own watch writes a log on every run: its result is for the files as it left
+        // them, so `finish` is accepted as verified.
+        let mut s = test_session("script-writing-watch", Features::sage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        run(
+            &mut s,
+            &[(
+                "watch",
+                json!({"name": "check", "cmd": "grep -q 1 n.txt && date +%s%N > last-run.log"}),
+            )],
+        )
+        .await;
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done"}))]).await;
+        let done = res.finished.expect("a passing watch lets finish through");
+        assert!(done.verified, "{}", done.evidence);
+
+        // The test command the task names writes a file too: a fix sent with `finish` is checked
+        // and accepted in the same reply.
+        let mut s = test_session("script-writing-preflight", Features::sage());
+        let root = s.ws.root.clone();
+        std::fs::write(root.join("n.txt"), "1\n").unwrap();
+        std::fs::write(
+            root.join("test.sh"),
+            "echo ran > test-output.log\ngrep -qx 2 n.txt\n",
+        )
+        .unwrap();
+        let cancel = CancellationToken::new();
+        let pre = watches::preflight(&mut s, "Make `bash test.sh` pass.", &cancel)
+            .await
+            .expect("the task names a test command");
+        assert_eq!(pre.state, WatchState::Fail);
+        let (res, _, events) = run(
+            &mut s,
+            &[
+                ("edit", json!({"path": "n.txt", "old": "1", "new": "2"})),
+                ("finish", json!({"summary": "fixed"})),
+            ],
+        )
+        .await;
+        assert_eq!(statuses(&events), vec![StepStatus::Ok, StepStatus::Ok]);
+        let done = res.finished.expect("the fix passes the named test");
+        assert_eq!(
+            (done.verified, done.evidence.as_str()),
+            (true, "verified by watch tests")
+        );
+    }
+
+    #[tokio::test]
+    async fn two_watches_that_write_on_every_run_can_be_finished_past_with_a_reason() {
+        // Each leaves the other behind, so neither result is for the final files. Neither fails:
+        // `unverified` gets past them, and the evidence does not call them failing.
+        let mut s = test_session("script-two-writers", Features::sage());
+        for name in ["a", "b"] {
+            run(
+                &mut s,
+                &[(
+                    "watch",
+                    json!({"name": name, "cmd": format!("date +%s%N > {name}.log")}),
+                )],
+            )
+            .await;
+        }
+        let (res, _, _) = run(&mut s, &[("finish", json!({"summary": "done"}))]).await;
+        assert!(res.finished.is_none());
+        let refused = &res.observations[0].1;
+        assert!(
+            refused.contains("has no current passing result") && refused.contains("`unverified`"),
+            "{refused}"
+        );
+        let (res, _, _) = run(
+            &mut s,
+            &[(
+                "finish",
+                json!({"summary": "done", "unverified": "both checks write logs"}),
+            )],
+        )
+        .await;
+        let done = res
+            .finished
+            .expect("a watch that is not failing cannot trap finish");
+        assert!(!done.verified);
+        assert!(
+            done.evidence
+                .contains("has no passing result for the final files")
+                && !done.evidence.contains("failing"),
+            "{}",
+            done.evidence
+        );
+    }
+
+    #[tokio::test]
+    async fn a_check_whose_status_is_not_its_own_is_no_evidence() {
+        // `grep` fails, but the line exits with `echo`'s 0.
+        let mut s = test_session("script-echo-after", Features::sage());
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        let (res, _, _) = run(
+            &mut s,
+            &[
+                ("edit", json!({"path": "n.txt", "old": "1", "new": "3"})),
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx 2 n.txt; echo checked", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "done"})),
+            ],
+        )
+        .await;
+        assert!(res.finished.is_none(), "the gate wants a real check");
+        assert!(res.observations[2].1.starts_with("[gate] finish refused"));
+
+        for nothing in [
+            "pytest -q; echo done",
+            "pytest -q || true",
+            "echo $(bash -c 'exit 3')",
+            "echo \"$(pytest)\"",
+            "cd sub && echo 'done; grep x'",
+            "export A=1; pwd",
+            "  ",
+        ] {
+            assert!(proves_nothing(nothing), "{nothing}");
+        }
+        for check in [
+            "cd sub && FOO=1 python3 -m unittest",
+            "echo start; grep -q 2 n.txt",
+            "pytest -q 2>&1 | tail -5",
+            "(cd sub && pytest)",
+            "{ make; make test; }",
+            "set -e; pytest; echo done",
+            "set -euo pipefail\npytest\necho done",
+            "python app.py & sleep 1; curl -sf localhost:8000/health",
+            "pytest || pytest --lf",
+            "pytest; exit $?",
+            "pytest; exit",
+            "! grep -q TODO src.py",
+        ] {
+            assert!(!proves_nothing(check), "{check}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_key_file_is_refused_however_it_is_spelled() {
+        let mut s = test_session("script-key-spellings", Features::sage());
+        let dir = crate::config::data_dir();
+        let d = dir.display().to_string();
+        for (tool, args) in [
+            ("read", json!({"path": format!("{d}/./config.json")})),
+            (
+                "read",
+                json!({"path": format!("{d}/sessions/../config.json")}),
+            ),
+            (
+                "edit",
+                json!({"path": format!("{d}/config.json"), "old": "a", "new": "b"}),
+            ),
+            (
+                "write",
+                json!({"path": format!("{d}/config.json"), "content": "{}"}),
+            ),
+            ("shell", json!({"cmd": format!("cat {d}/conf*.json")})),
+            ("shell", json!({"cmd": format!("grep -r key {d}")})),
+            (
+                "shell",
+                json!({"cmd": format!("cd {d} && cat config.json")}),
+            ),
+        ]
+        .into_iter()
+        .chain(
+            (dir == crate::util::home_dir().join(".sage"))
+                .then(|| ("shell", json!({"cmd": "grep -rn sk- ~/.sage/"}))),
+        ) {
+            let (res, _, events) = run(&mut s, &[(tool, args.clone())]).await;
+            assert_eq!(statuses(&events), vec![StepStatus::Denied], "{tool} {args}");
+            assert!(res.observations[0].1.contains("holds API keys"));
+        }
+        // What else is in the data folder, and a folder that only starts like it, are not refused.
+        for cmd in [
+            format!("ls {d}/sessions 2>/dev/null; true"),
+            format!("ls {d}-old 2>/dev/null; true"),
+        ] {
+            let (_, _, events) = run(&mut s, &[("shell", json!({"cmd": cmd}))]).await;
+            assert_eq!(statuses(&events), vec![StepStatus::Ok], "{cmd}");
+        }
     }
 }
