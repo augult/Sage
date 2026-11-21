@@ -174,6 +174,9 @@ pub struct Agent {
     contract: Contract,
     /// How often `contract` has held this message's `finish`.
     contract_holds: u8,
+    /// The next message continues a run of the first task that a restart cut off: `contract`
+    /// still applies to it.
+    carry_contract: bool,
 }
 
 /// What a message may change about the session it is sent to. Left out, a thing stays as it is.
@@ -285,6 +288,7 @@ impl Agent {
             provider: Arc::new(provider),
             contract: Contract::default(),
             contract_holds: 0,
+            carry_contract: false,
             sess,
             ctx,
             cfg,
@@ -743,9 +747,13 @@ impl Agent {
         self.restore_fixed_effort();
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
         let first = std::mem::take(&mut self.first_message);
-        // The mechanical contract reads the task the session began with: a later message is not held to it.
+        // The mechanical contract reads the task the session began with: a later message is not held
+        // to it, unless it carries on with that task after a restart cut its run off.
+        let carried = std::mem::take(&mut self.carry_contract);
         if !first {
-            self.contract = Contract::default();
+            if !carried {
+                self.contract = Contract::default();
+            }
             self.contract_holds = 0;
         } else if features.contract {
             self.contract = Contract::capture(&self.sess.ws, &task);
@@ -1560,8 +1568,8 @@ impl Agent {
     /// What continuing this session needs that the workspace, `meta.json` and the log do not hold.
     /// `in_run`: a run is in progress, so that a snapshot that is the last one tells the run was cut off.
     /// Left out on purpose: the read-dedup state and the anchors' histories (files are shown
-    /// again), the evidence, the turn's streak counters, what is queued for the next message
-    /// (`announce`, `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
+    /// again), the turn's streak counters, what is queued for the next message (`announce`,
+    /// `attached`, `shown`) and the provider's cache record. The goal is in `meta.json`.
     pub fn checkpoint(&self, in_run: bool, setup: &Setup) -> Snapshot {
         let mut snapshot = self.checkpoint_state(in_run, setup);
         snapshot.messages = self.ctx.messages.clone();
@@ -1600,6 +1608,7 @@ impl Agent {
             chain_hints: self.chain_hints,
             solo_hints: self.solo_hints,
             session: self.sess.checkpoint(),
+            contract: self.contract.clone(),
         }
     }
 
@@ -1665,6 +1674,13 @@ impl Agent {
         let mut agent = Self::new(provider, sess, cfg, sink, approvals);
         agent.ctx = Context::restored(snap.messages, snap.stubs);
         let answered = agent.ctx.answer_dangling(INTERRUPTED);
+        // A step the restart cut off may have changed files after the last check.
+        if answered > 0 {
+            agent.sess.evidence.changed("a step that a restart cut off");
+        }
+        // The run of the first task was cut off: continuing it is still that task.
+        agent.carry_contract = snap.in_run;
+        agent.contract = snap.contract;
         agent.turn = snap.turn;
         agent.effort = Effort::parse(&snap.effort).unwrap_or(agent.effort);
         agent.stats = snap.stats;

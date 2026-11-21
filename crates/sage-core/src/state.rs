@@ -253,6 +253,22 @@ pub struct Evidence {
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
+    /// The last look found the tree too large to walk and asked git: the next one asks git first.
+    git_first: bool,
+}
+
+/// What a stored session keeps of its `Evidence`: whether the work was checked after its last
+/// change survives a restart, and the last look at the workspace with it, so that a change made
+/// while the program was not running is seen as one.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EvidenceState {
+    pub epoch: u64,
+    pub verified: Option<(u64, String)>,
+    pub last_change: String,
+    #[serde(default)]
+    pub fingerprint: Option<Fingerprint>,
+    #[serde(default)]
+    pub partial_view: bool,
 }
 
 /// Said after "verified by …" where the workspace is too large to see every change a command makes.
@@ -284,7 +300,28 @@ impl Evidence {
 
     fn look(&mut self, now: Fingerprint) {
         self.partial_view = !now.complete;
+        self.git_first = now.via_git;
         self.fingerprint = Some(now);
+    }
+
+    fn checkpoint(&self) -> EvidenceState {
+        EvidenceState {
+            epoch: self.epoch,
+            verified: self.verified.clone(),
+            last_change: self.last_change.clone(),
+            fingerprint: self.fingerprint.clone(),
+            partial_view: self.partial_view,
+        }
+    }
+
+    fn restore(&mut self, state: EvidenceState) {
+        self.epoch = state.epoch;
+        self.verified = state.verified;
+        self.last_change = state.last_change;
+        self.git_first = state.fingerprint.as_ref().is_some_and(|f| f.via_git);
+        self.fingerprint = state.fingerprint;
+        self.partial_view = state.partial_view;
+        self.message_epoch = state.epoch;
     }
 
     /// A tool changed files itself.
@@ -318,7 +355,7 @@ impl Evidence {
         deadline: Option<Instant>,
         cmd: Option<&str>,
     ) -> bool {
-        let look = look_again_off_thread(&ws.root, self.fingerprint.take());
+        let look = look_again_off_thread(&ws.root, self.fingerprint.take(), self.git_first);
         let looked = match deadline {
             Some(deadline) => tokio::time::timeout_at(deadline.into(), look).await.ok(),
             None => Some(look.await),
@@ -356,6 +393,10 @@ pub struct SessionState {
     pub baseline: Option<Baseline>,
     pub watches: Vec<WatchSpec>,
     pub dialects: Vec<(String, bool)>,
+    /// Whether the work was checked after its last change. Missing from a snapshot stored before
+    /// it was kept.
+    #[serde(default)]
+    pub evidence: Option<EvidenceState>,
 }
 
 /// The highest `N` of the `out/N.log` files a session directory holds.
@@ -480,6 +521,7 @@ impl Session {
             baseline: self.baseline.clone(),
             watches: self.watches.specs(),
             dialects,
+            evidence: Some(self.evidence.checkpoint()),
         }
     }
 
@@ -501,6 +543,14 @@ impl Session {
             .into_iter()
             .map(|(path, already)| (PathBuf::from(path), already))
             .collect();
+        match state.evidence {
+            Some(evidence) => self.evidence.restore(evidence),
+            // Stored before the checks were kept: whatever the tools did may never have been checked.
+            None if state.step > 0 => self
+                .evidence
+                .changed("the work before a restart, whose checks were not kept"),
+            None => {}
+        }
     }
 
     /// `limit`, or what is left of the run's time budget where that is less: zero once the budget

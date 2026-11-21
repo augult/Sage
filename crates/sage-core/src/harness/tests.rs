@@ -2024,3 +2024,227 @@ async fn closing_every_session_leaves_each_one_continuable_and_frees_it() {
         .unwrap();
     assert!(h.is_live(&id));
 }
+
+/// The finish of the last run of session `id`: its status, whether it was verified, its evidence.
+fn last_finish(h: &Harness, id: &str) -> (FinishStatus, bool, String) {
+    h.events(id)
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|e| match &e.kind {
+            EventKind::Finish {
+                status,
+                verified,
+                evidence,
+                ..
+            } => Some((*status, *verified, evidence.clone())),
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// What the `finish` steps of session `id` were answered with, in order.
+fn finish_answers(h: &Harness, id: &str) -> Vec<String> {
+    h.events(id)
+        .unwrap()
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::StepEnd {
+                tool, observation, ..
+            } if tool == "finish" => Some(observation.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_restart_keeps_what_was_checked_and_what_was_not() {
+    use crate::provider::mock::MockTurn;
+    use serde_json::json;
+    let finish = || MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]);
+    let check_and_finish = || {
+        MockTurn::calls(
+            "",
+            vec![
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx ALPHA n.txt", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "done"})),
+            ],
+        )
+    };
+    // As stored now, and as an older Sage stored it, with nothing of the checks in the snapshot.
+    for older in [false, true] {
+        let h = harness("resume-evidence");
+        let cwd = resume_workspace(&h);
+        let edit = MockTurn::calls(
+            "",
+            vec![(
+                "edit",
+                json!({"path": "n.txt", "old": "alpha", "new": "ALPHA"}),
+            )],
+        );
+        let req = StartRequest {
+            cwd,
+            task: "Make alpha upper case in n.txt.".into(),
+            interactive: true,
+            without: vec!["survey".into()],
+            ..Default::default()
+        };
+        let id = h
+            .start_scripted(
+                req,
+                MockProvider::scripted(vec![edit, MockTurn::say("Changed it.")]),
+            )
+            .unwrap()
+            .id;
+        until_idle(&h, &id).await;
+        assert!(!last_finish(&h, &id).1, "the edit was never checked");
+        let dir = session_dir(&h, &id);
+        if older {
+            let mut stored: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join(resume::SNAPSHOT)).unwrap())
+                    .unwrap();
+            stored["session"]
+                .as_object_mut()
+                .unwrap()
+                .remove("evidence");
+            resume::write_atomic(
+                &dir.join(resume::SNAPSHOT),
+                &serde_json::to_vec(&stored).unwrap(),
+            )
+            .unwrap();
+        }
+        let data = h.inner.data_dir.clone();
+        drop(h);
+
+        let back = Harness::at(data);
+        back.resume_stand_ins(true);
+        listed_free(&back).await;
+        back.resume_scripted(
+            &id,
+            MockProvider::scripted(vec![finish(), check_and_finish()]),
+        )
+        .unwrap();
+        back.send_with_skills(&id, "Continue where you left off.", &[])
+            .unwrap();
+        until_idle(&back, &id).await;
+        let answers = finish_answers(&back, &id);
+        assert!(
+            answers[0].starts_with("[gate] finish refused: nothing has been checked since"),
+            "older={older}: {answers:?}"
+        );
+        assert_eq!(
+            last_finish(&back, &id),
+            (
+                FinishStatus::Done,
+                true,
+                "verified by `grep -qx ALPHA n.txt`".to_string()
+            ),
+            "older={older}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_run_cut_off_by_a_restart_is_continued_under_its_task_and_its_cut_steps_are_unchecked() {
+    use crate::provider::Role;
+    use crate::provider::mock::MockTurn;
+    use serde_json::json;
+    let h = harness("resume-cut-contract");
+    let cwd = resume_workspace(&h);
+    std::fs::write(Path::new(&cwd).join("keep.txt"), "original\n").unwrap();
+    let upper_and_check = MockTurn::calls(
+        "",
+        vec![
+            (
+                "edit",
+                json!({"path": "n.txt", "old": "alpha", "new": "ALPHA"}),
+            ),
+            (
+                "shell",
+                json!({"cmd": "grep -qx ALPHA n.txt", "expect_exit": "0"}),
+            ),
+        ],
+    );
+    let req = StartRequest {
+        cwd,
+        task: "Make alpha upper case in n.txt. Do not edit `keep.txt`.".into(),
+        interactive: true,
+        without: vec!["survey".into()],
+        ..Default::default()
+    };
+    let id = h
+        .start_scripted(
+            req,
+            MockProvider::scripted(vec![upper_and_check, MockTurn::say("Checked.")]),
+        )
+        .unwrap()
+        .id;
+    until_idle(&h, &id).await;
+    // As if the program was killed while the calls of the first run ran.
+    let dir = session_dir(&h, &id);
+    let mut snapshot = resume::read(&dir).unwrap();
+    let at = snapshot
+        .messages
+        .iter()
+        .rposition(|m| m.role == Role::Assistant && !m.tool_calls.is_empty())
+        .unwrap();
+    snapshot.messages.truncate(at + 1);
+    snapshot.stubs.truncate(at + 1);
+    snapshot.in_run = true;
+    assert!(!snapshot.contract.is_empty());
+    resume::write_atomic(
+        &dir.join(resume::SNAPSHOT),
+        &serde_json::to_vec(&snapshot).unwrap(),
+    )
+    .unwrap();
+    h.close(&id).await.unwrap();
+    let data = h.inner.data_dir.clone();
+    drop(h);
+
+    let back = Harness::at(data);
+    back.resume_stand_ins(true);
+    listed_free(&back).await;
+    let finish = || MockTurn::calls("", vec![("finish", json!({"summary": "done"}))]);
+    let touch_check_finish = MockTurn::calls(
+        "",
+        vec![
+            (
+                "edit",
+                json!({"path": "keep.txt", "old": "original", "new": "changed"}),
+            ),
+            (
+                "shell",
+                json!({"cmd": "grep -qx ALPHA n.txt", "expect_exit": "0"}),
+            ),
+            ("finish", json!({"summary": "done"})),
+        ],
+    );
+    back.resume_scripted(
+        &id,
+        MockProvider::scripted(vec![
+            finish(),
+            touch_check_finish,
+            finish(),
+            finish(),
+            finish(),
+        ]),
+    )
+    .unwrap();
+    back.send_with_skills(&id, "Continue where you left off.", &[])
+        .unwrap();
+    until_idle(&back, &id).await;
+    let answers = finish_answers(&back, &id);
+    assert!(
+        answers[0].contains("nothing has been checked since a step that a restart cut off"),
+        "{answers:?}"
+    );
+    let (status, verified, evidence) = last_finish(&back, &id);
+    assert_eq!((status, verified), (FinishStatus::Incomplete, false));
+    assert!(
+        evidence.contains("contract unmet: `keep.txt` was modified"),
+        "{evidence}"
+    );
+}

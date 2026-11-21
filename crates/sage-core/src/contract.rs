@@ -14,14 +14,18 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 const MAX_SNAPSHOT_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_WALK_FILES: usize = 500;
+/// Files a walk keeps at most: the protected files of one rule, or the copies of a missing
+/// deliverable. Only the files a walk looks for count, so a large project is not cut short.
+const MAX_WALK_FILES: usize = 5_000;
+/// Entries a walk looks at, at most.
+const MAX_WALK_VISITS: usize = 200_000;
 
 const CODE_EXTS: &[&str] = &[
     "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "rs", "go", "sh", "bash", "rb", "php", "java",
     "c", "cc", "cpp", "h", "hpp",
 ];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct Protected {
     rel: String,
     len: u64,
@@ -30,7 +34,7 @@ struct Protected {
 
 /// What the task fixes mechanically about the workspace: files that must stay as they began, and
 /// files that must exist when the run ends.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Contract {
     protected: Vec<Protected>,
     required: Vec<String>,
@@ -149,7 +153,9 @@ fn snapshot_file(root: &Path, path: &Path) -> Option<Protected> {
     })
 }
 
-fn walk_files(under: &Path) -> Vec<PathBuf> {
+/// The files under `under` that `keep` takes, by their path from `root` with `/` between parts.
+/// The walk goes in path order, so where a limit cuts it, it always cuts at the same files.
+fn walk_files(under: &Path, root: &Path, keep: &dyn Fn(&str) -> bool) -> Vec<PathBuf> {
     let walker = ignore::WalkBuilder::new(under)
         .hidden(false)
         .ignore(false)
@@ -158,6 +164,7 @@ fn walk_files(under: &Path) -> Vec<PathBuf> {
         .git_exclude(false)
         .parents(false)
         .follow_links(false)
+        .sort_by_file_name(|a, b| a.cmp(b))
         .filter_entry(|e| {
             !e.file_name().to_str().is_some_and(|n| {
                 matches!(
@@ -176,8 +183,16 @@ fn walk_files(under: &Path) -> Vec<PathBuf> {
         })
         .build();
     let mut out = Vec::new();
-    for entry in walker.flatten() {
-        if entry.file_type().is_some_and(|t| t.is_file()) {
+    for entry in walker.flatten().take(MAX_WALK_VISITS) {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if keep(&rel) {
             out.push(entry.into_path());
             if out.len() >= MAX_WALK_FILES {
                 break;
@@ -186,6 +201,23 @@ fn walk_files(under: &Path) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+/// Words after a prohibition that end what it covers: what follows them is an exception to it
+/// ("except `a.py`", "other than `a.py`", "outside `src`") or a new instruction ("…, just fix
+/// `a.py`"). `other` counts only as `other than`, `apart` and `aside` only before `from`.
+fn ends_prohibition(word: &str, next: Option<&str>) -> bool {
+    let word = word.to_ascii_lowercase();
+    let next = next.map(str::to_ascii_lowercase);
+    match word.as_str() {
+        "except" | "excepting" | "but" | "besides" | "outside" | "unless" | "instead"
+        | "rather" | "only" | "just" | "beyond" | "fix" | "implement" | "make" | "add"
+        | "write" | "create" | "update" | "refactor" | "solve" | "correct" | "repair"
+        | "complete" => true,
+        "other" => next.as_deref() == Some("than"),
+        "apart" | "aside" => next.as_deref() == Some("from"),
+        _ => false,
+    }
 }
 
 fn is_test_rel(rel: &str) -> bool {
@@ -255,46 +287,48 @@ impl Contract {
             }
         };
 
+        // A word of the task as a file or folder of the workspace, other than the workspace itself.
+        let inside = |tok: &str| {
+            let trimmed = tok.trim_end_matches('/');
+            if trimmed.is_empty() {
+                return None;
+            }
+            let real = crate::util::canonical(ws.resolve(trimmed)).ok()?;
+            (real.starts_with(root) && real != *root).then_some(real)
+        };
+        // Files and folders the task names as exceptions to a prohibition: never protected.
+        let mut exceptions: Vec<PathBuf> = Vec::new();
         let mut required = Vec::new();
         for clause in clauses(task) {
             if let Some(m) = PROHIBITION.find(clause) {
-                let tail = &clause[m.start()..];
-                for tok in tokens(tail) {
-                    let trimmed = tok.trim_end_matches('/');
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let candidate = ws.resolve(trimmed);
-                    let Ok(real) = crate::util::canonical(&candidate) else {
-                        continue;
-                    };
-                    if !real.starts_with(root) || real == *root {
-                        continue;
-                    }
+                // What the prohibition covers ends where an exception or a new instruction begins:
+                // "do not edit any file except `a.py`", "don't touch the tests, just fix `a.py`".
+                let after = tokens(&clause[m.end()..]);
+                let cut = (0..after.len())
+                    .find(|&i| ends_prohibition(after[i], after.get(i + 1).copied()))
+                    .unwrap_or(after.len());
+                let covered = tokens(&clause[m.start()..m.end()])
+                    .into_iter()
+                    .chain(after[..cut].iter().copied());
+                for real in covered.filter_map(inside) {
                     if real.is_file() {
                         add_protected(&real);
                     } else if real.is_dir() {
-                        for file in walk_files(&real) {
+                        for file in walk_files(&real, root, &|_| true) {
                             add_protected(&file);
                         }
                     }
                 }
+                exceptions.extend(after[cut..].iter().copied().filter_map(inside));
+                let tail = &clause[m.start()..];
                 if NO_EDIT_TESTS.is_match(tail) {
-                    for file in walk_files(root) {
-                        if let Ok(rel) = file.strip_prefix(root)
-                            && is_test_rel(&rel.to_string_lossy().replace('\\', "/"))
-                        {
-                            add_protected(&file);
-                        }
+                    for file in walk_files(root, root, &is_test_rel) {
+                        add_protected(&file);
                     }
                 }
                 if NO_EDIT_CODE.is_match(tail) {
-                    for file in walk_files(root) {
-                        if let Ok(rel) = file.strip_prefix(root)
-                            && is_code_rel(&rel.to_string_lossy().replace('\\', "/"))
-                        {
-                            add_protected(&file);
-                        }
+                    for file in walk_files(root, root, &is_code_rel) {
+                        add_protected(&file);
                     }
                 }
                 // A clause may say "Write `x.py`; do not edit `y.py`", or "Improve `a.html` without
@@ -305,7 +339,11 @@ impl Contract {
                 Self::collect_required(ws, clause, &mut required);
             }
         }
-        required.retain(|rel| !seen_protected.contains(rel));
+        protected.retain(|p| {
+            let path = root.join(&p.rel);
+            !exceptions.iter().any(|e| path.starts_with(e))
+        });
+        required.retain(|rel| !protected.iter().any(|p| p.rel == *rel));
         Self {
             protected,
             required,
@@ -357,7 +395,19 @@ impl Contract {
             let path = root.join(rel);
             let Ok(bytes) = std::fs::read(&path) else {
                 let name = Path::new(rel).file_name();
-                let files = walked.get_or_insert_with(|| walk_files(root));
+                // Every file of a deliverable's name, wherever it is: one walk for all of them.
+                let files = walked.get_or_insert_with(|| {
+                    let names: Vec<&std::ffi::OsStr> = self
+                        .required
+                        .iter()
+                        .filter_map(|r| Path::new(r).file_name())
+                        .collect();
+                    walk_files(root, root, &|path| {
+                        Path::new(path)
+                            .file_name()
+                            .is_some_and(|n| names.contains(&n))
+                    })
+                });
                 let misplaced = name.and_then(|wanted| {
                     files
                         .iter()
@@ -509,5 +559,99 @@ mod tests {
             ["`test_catalog.py` was modified, though the task says not to change it"]
         );
         let _ = std::fs::remove_dir_all(&ws2.root);
+    }
+
+    #[test]
+    fn what_the_task_names_as_an_exception_or_the_work_itself_is_not_protected() {
+        let files = [
+            ("calc.py", "x = 1\n"),
+            ("util.py", "u = 1\n"),
+            ("src/calc.py", "y = 1\n"),
+            ("tests/test_calc.py", "assert 1\n"),
+        ];
+        // (task, the file that is the work, a file the task still protects)
+        for (task, work, kept) in [
+            (
+                "Don't touch the tests, just fix `calc.py`.",
+                "calc.py",
+                Some("tests/test_calc.py"),
+            ),
+            (
+                "Don't touch the tests, fix `calc.py` instead.",
+                "calc.py",
+                Some("tests/test_calc.py"),
+            ),
+            (
+                "Fix the crash. Do not edit any file except `calc.py`.",
+                "calc.py",
+                None,
+            ),
+            (
+                "Do not modify anything other than calc.py.",
+                "calc.py",
+                None,
+            ),
+            ("Do not change files outside src.", "src/calc.py", None),
+            (
+                "Do not change any code except `calc.py`.",
+                "calc.py",
+                Some("util.py"),
+            ),
+            (
+                "Do not edit `util.py` or the tests, but fix `calc.py`.",
+                "calc.py",
+                Some("util.py"),
+            ),
+        ] {
+            let ws = temp_ws("exception", &files);
+            let c = Contract::capture(&ws, task);
+            std::fs::write(ws.root.join(work), "changed\n").unwrap();
+            assert!(
+                c.violations(&ws.root).is_empty(),
+                "{task:?}: {:?}",
+                c.violations(&ws.root)
+            );
+            if let Some(kept) = kept {
+                std::fs::write(ws.root.join(kept), "changed\n").unwrap();
+                assert_eq!(
+                    c.violations(&ws.root),
+                    [format!(
+                        "`{kept}` was modified, though the task says not to change it"
+                    )],
+                    "{task:?}"
+                );
+            }
+            let _ = std::fs::remove_dir_all(&ws.root);
+        }
+    }
+
+    #[test]
+    fn every_test_of_a_large_project_is_protected_and_a_misplaced_file_is_found_anywhere() {
+        let mut files: Vec<(String, &str)> = (0..5_000)
+            .map(|i| (format!("pkg/m{i:04}.py"), "x\n"))
+            .collect();
+        files.extend((0..50).map(|i| (format!("pkg/test_m{i}.py"), "assert 1\n")));
+        files.push(("zz/deep/findings.json".into(), "[]\n"));
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, b)| (p.as_str(), *b)).collect();
+        let ws = temp_ws("large", &refs);
+        let c = Contract::capture(
+            &ws,
+            "Fix `pkg/m0001.py`. Write `findings.json`. Do not edit the tests.",
+        );
+        for i in 0..50 {
+            std::fs::write(ws.root.join(format!("pkg/test_m{i}.py")), "assert True\n").unwrap();
+        }
+        let v = c.violations(&ws.root);
+        assert_eq!(
+            v.iter().filter(|m| m.contains("was modified")).count(),
+            50,
+            "{v:?}"
+        );
+        assert!(
+            v.iter()
+                .any(|m| m.contains("`zz/deep/findings.json` exists instead")),
+            "{v:?}"
+        );
+        let _ = std::fs::remove_dir_all(&ws.root);
     }
 }

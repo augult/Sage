@@ -536,7 +536,9 @@ impl Runner<'_> {
     /// The tools this session can run, for a model that called one that does not exist.
     fn tool_names(&self) -> String {
         let mut names = vec!["shell", "read", "search", "edit", "write"];
-        if self.sess.features.watches {
+        // As the tool schemas have it (`prompt::tool_schemas`): with auto-watch, the harness makes
+        // the watches itself and `watch` is not offered.
+        if self.sess.features.watches && !self.sess.features.auto_watch {
             names.push("watch");
         }
         names.push("job");
@@ -573,8 +575,15 @@ impl Runner<'_> {
         // A path is judged by the file it reaches (`./`, `..` and links included); a command by
         // what it says, which is a tripwire for the usual spellings and no more. `search` of a
         // folder that holds the file skips the file itself (`tools::search`).
+        // A watch runs its command now and again after every change: it is held to what a shell
+        // command is held to. One that only takes a watch away runs nothing.
+        let cmd = match tool {
+            Tool::Shell => str_arg(&call.args, "cmd"),
+            Tool::Watch if !bool_arg(&call.args, "off") => str_arg(&call.args, "cmd"),
+            _ => None,
+        };
         let keys = match tool {
-            Tool::Shell => str_arg(&call.args, "cmd").is_some_and(shell_reaches_keys),
+            Tool::Shell | Tool::Watch => cmd.is_some_and(shell_reaches_keys),
             Tool::Read | Tool::Search | Tool::Edit | Tool::Write => str_arg(&call.args, "path")
                 .is_some_and(|path| {
                     names_key_file(path) || crate::config::holds_keys(&self.sess.ws.resolve(path))
@@ -605,12 +614,9 @@ impl Runner<'_> {
                 });
             }
         }
-        let danger = if tool == Tool::Shell {
-            str_arg(&call.args, "cmd").and_then(tools::shell::danger)
-        } else {
-            None
-        };
-        if !tool.is_act() || (self.autonomy == Autonomy::Auto && danger.is_none()) {
+        let danger = cmd.and_then(tools::shell::danger);
+        let runs = tool.is_act() || cmd.is_some();
+        if !runs || (self.autonomy == Autonomy::Auto && danger.is_none()) {
             return None;
         }
         let denied = |text: String| StepOutput {
@@ -635,7 +641,11 @@ impl Runner<'_> {
             tool: tool.name().to_string(),
             summary: summarize(call),
             reason: danger
-                .unwrap_or("this step changes the workspace")
+                .unwrap_or(if tool == Tool::Watch {
+                    "this step runs a command, and again after every change"
+                } else {
+                    "this step changes the workspace"
+                })
                 .to_string(),
         });
         let allow = tokio::select! {
@@ -1242,6 +1252,105 @@ mod tests {
         let sage = unknown(Features::sage()).await;
         assert!(sage.contains("shell") && sage.contains("job"), "{sage}");
         assert!(!sage.contains("ask"), "nobody is present to answer: {sage}");
+        // `watch` is named only where the tool schemas offer it.
+        assert!(!sage.contains("watch"), "{sage}");
+        let manual = unknown(Features::sage().without("auto_watch").unwrap()).await;
+        assert!(manual.contains("watch"), "{manual}");
+    }
+
+    #[tokio::test]
+    async fn a_watch_is_held_to_what_a_shell_command_is_held_to() {
+        // The key file: refused, not shown.
+        let mut s = test_session("script-watch-keys", Features::sage());
+        let key = crate::config::data_dir().join("config.json");
+        let (res, _, events) = run(
+            &mut s,
+            &[(
+                "watch",
+                json!({"name": "k", "cmd": format!("cat {}", key.display())}),
+            )],
+        )
+        .await;
+        assert_eq!(statuses(&events), vec![StepStatus::Denied]);
+        assert!(res.observations[0].1.contains("holds API keys"));
+        assert!(s.watches.items.is_empty(), "a refused watch is not kept");
+
+        // A command the tripwire catches: refused with nobody to approve it, as through `shell`.
+        let (res, _, _) = run(
+            &mut s,
+            &[(
+                "watch",
+                json!({"name": "d", "cmd": "echo mkfs > via_watch.txt"}),
+            )],
+        )
+        .await;
+        assert!(
+            res.observations[0]
+                .1
+                .starts_with("[denied] refused: this command writes directly to a disk device")
+        );
+        assert!(!s.ws.root.join("via_watch.txt").exists());
+
+        // Asked first where every step that runs something is, and not run when declined.
+        let sink = MemorySink::default();
+        let mut stats = Stats::default();
+        let cancel = CancellationToken::new();
+        let approvals = Approvals::default();
+        let list = calls(&[("watch", json!({"name": "w", "cmd": "touch made_by_watch"}))]);
+        let mut runner = Runner {
+            sess: &mut s,
+            sink: &sink,
+            cancel: &cancel,
+            approvals: &approvals,
+            stats: &mut stats,
+            turn: 1,
+            autonomy: Autonomy::Ask,
+            interactive: true,
+            landing: false,
+        };
+        let decline = async {
+            while !approvals.resolve(1, false) {
+                tokio::task::yield_now().await;
+            }
+        };
+        let (res, _) = tokio::join!(runner.run(&list), decline);
+        assert!(
+            res.observations[0]
+                .1
+                .starts_with("[denied] the user declined")
+        );
+        assert!(!s.ws.root.join("made_by_watch").exists());
+        assert!(sink.events.lock().unwrap().iter().any(|e| matches!(
+            e,
+            EventKind::Approval { tool, .. } if tool == "watch"
+        )));
+
+        // Taking a watch away runs nothing and needs no approval.
+        s.watches.set("w", "true", s.ws.cwd.clone(), None);
+        let sink = MemorySink::default();
+        let list = calls(&[("watch", json!({"name": "w", "off": true}))]);
+        let res = Runner {
+            sess: &mut s,
+            sink: &sink,
+            cancel: &cancel,
+            approvals: &approvals,
+            stats: &mut stats,
+            turn: 2,
+            autonomy: Autonomy::Ask,
+            interactive: true,
+            landing: false,
+        }
+        .run(&list)
+        .await;
+        assert!(res.observations[0].1.starts_with("[ok] watch w removed"));
+        assert!(
+            !sink
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, EventKind::Approval { .. }))
+        );
     }
 
     fn statuses(events: &[EventKind]) -> Vec<StepStatus> {

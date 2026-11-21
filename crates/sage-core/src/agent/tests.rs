@@ -2258,3 +2258,99 @@ async fn a_finish_accepted_in_the_reply_that_used_up_the_time_is_the_outcome() {
     assert_eq!(out.summary, "half of it is done");
     assert!(!out.verified);
 }
+
+/// A local OpenAI-style endpoint that streams `bodies` in turn, one per request, and counts them.
+async fn streaming_endpoint(bodies: Vec<String>) -> (String, Arc<std::sync::atomic::AtomicU32>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let served = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let count = served.clone();
+    tokio::spawn(async move {
+        let mut bodies = bodies.into_iter();
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            count.fetch_add(1, Ordering::SeqCst);
+            let body = bodies.next().unwrap_or_default();
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(answer.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    (format!("http://{address}/v1"), served)
+}
+
+#[tokio::test]
+async fn an_empty_reply_is_booked_once_and_answered_with_a_note_not_retried() {
+    use crate::provider::openai::{Dialect, OpenAiProvider};
+    let empty = [
+        r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":1}}"#,
+    ];
+    let finish = [
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"f1","type":"function","function":{"name":"finish","arguments":"{\"summary\":\"hi\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":20100,"completion_tokens":9}}"#,
+    ];
+    let sse = |chunks: &[&str]| {
+        let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+        body.push_str("data: [DONE]\n\n");
+        body
+    };
+    let (url, served) = streaming_endpoint(vec![sse(&empty), sse(&finish)]).await;
+    let mut provider = OpenAiProvider::new(&url, "k", "m", Dialect::DeepSeek).unwrap();
+    provider.max_retries = 2;
+    let sess = test_session("agent-empty-reply", Features::sage());
+    let sink = Arc::new(MemorySink::default());
+    let mut agent = Agent::new(
+        Provider::OpenAi(provider),
+        sess,
+        AgentConfig::new("m"),
+        sink.clone(),
+        Arc::new(Approvals::default()),
+    );
+    let out = agent.run("Say hi.".into(), &CancellationToken::new()).await;
+    assert_eq!(
+        (out.status, out.summary.as_str()),
+        (FinishStatus::Done, "hi")
+    );
+    assert_eq!(
+        served.load(Ordering::SeqCst),
+        2,
+        "no retry of the empty reply"
+    );
+    assert_eq!(
+        (
+            agent.stats.requests,
+            agent.stats.retries,
+            agent.stats.prompt_tokens
+        ),
+        (2, 0, 40_100),
+        "both replies are booked"
+    );
+    assert!(sink.events.lock().unwrap().iter().any(|e| matches!(
+        e,
+        EventKind::Note { kind, .. } if kind == "empty"
+    )));
+}
