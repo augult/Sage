@@ -1045,6 +1045,10 @@ impl Agent {
             // run it. Either the output limit cut it, or the stream ended without a word and left
             // arguments that only parse once closed.
             let cut = resp.finish == "length"
+                || (resp.finish == crate::provider::openai::CUT_FINISH
+                    && raw_calls.last().is_some_and(|c| {
+                        serde_json::from_str::<serde_json::Value>(c.arguments.trim()).is_err()
+                    }))
                 || (resp.finish.is_empty()
                     && raw_calls
                         .last()
@@ -1052,6 +1056,8 @@ impl Agent {
             if cut && let Some(last) = calls.last_mut() {
                 let why = if resp.finish == "length" {
                     "hit the output limit"
+                } else if resp.finish == crate::provider::openai::CUT_FINISH {
+                    "was cut off by the provider (it ends replies that stream too long)"
                 } else {
                     "broke off"
                 };

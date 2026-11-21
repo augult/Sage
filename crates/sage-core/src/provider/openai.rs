@@ -186,7 +186,13 @@ pub struct OpenAiProvider {
     /// The shortest stream a cut at the same length twice is taken as a limit for. Shorter cuts
     /// are ordinary network trouble.
     pub min_stream_limit: Duration,
+    /// What the last answer that broke off had sent in full: the tool calls it got to, kept so a
+    /// cut by a time limit still makes progress instead of costing the whole reply.
+    salvage: Mutex<Option<Box<ChatResponse>>>,
 }
+
+/// The finish reason of an answer the stream broke off in, kept for the tool calls it had sent.
+pub const CUT_FINISH: &str = "cut";
 
 /// How close two cuts have to be to count as the same length.
 const SAME_CUT: Duration = Duration::from_secs(5);
@@ -257,6 +263,7 @@ impl OpenAiProvider {
             efforts: Mutex::default(),
             stream_limit: Mutex::default(),
             min_stream_limit: Duration::from_secs(60),
+            salvage: Mutex::default(),
         })
     }
 
@@ -494,6 +501,7 @@ impl OpenAiProvider {
             }
             attempt += 1;
             on_delta(Delta::Attempt);
+            *self.salvage.lock().unwrap() = None;
             let began = Instant::now();
             let answer = self
                 .attempt(&body, req.reasoning_cap, on_delta, cancel)
@@ -504,6 +512,19 @@ impl OpenAiProvider {
                 && why.contains("broke off")
             {
                 let took = began.elapsed();
+                // A long answer cut after it had sent tool calls keeps them: asking again would
+                // take as long and most likely be cut at the same place. The agent runs the calls
+                // that arrived whole and is told about the one that did not.
+                let kept = self.salvage.lock().unwrap().take();
+                if took >= self.min_stream_limit
+                    && let Some(mut r) = kept
+                {
+                    r.retries = attempt - 1;
+                    if !r.usage_reported {
+                        r.usage.prompt = fallback_prompt;
+                    }
+                    return Ok(*r);
+                }
                 let near = |at: Duration| took.abs_diff(at) <= SAME_CUT;
                 let mut limit = self.stream_limit.lock().unwrap();
                 if took >= self.min_stream_limit
@@ -669,6 +690,12 @@ impl OpenAiProvider {
         // Seen live: a gateway that closes a stream in the middle of the thought, with no error.
         // What came by then is no answer: it is asked for again, like a connection that dropped.
         if !ended && acc.broke_off() {
+            if acc.calls.iter().any(|c| !c.name.is_empty()) {
+                acc.finish = CUT_FINISH.into();
+                if let Ok((response, _)) = acc.finish_with_extras() {
+                    *self.salvage.lock().unwrap() = Some(Box::new(response));
+                }
+            }
             return Err(ProviderError::Network(
                 "the answer broke off before it ended".into(),
             ));

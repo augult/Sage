@@ -2544,3 +2544,101 @@ async fn an_answer_cut_twice_at_the_same_length_is_not_asked_for_a_third_time() 
     });
     assert!(told);
 }
+
+/// Serves `bodies` in turn, closing each after it: the first after a pause, without ending it.
+async fn serves_then_cuts(bodies: Vec<&'static str>) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut served = 0;
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 65536];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(n) if n > 0 => request.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            let body = bodies[served.min(bodies.len() - 1)];
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n")
+                .await;
+            let _ = socket.write_all(body.as_bytes()).await;
+            if served == 0 {
+                tokio::time::sleep(Duration::from_millis(1200)).await;
+            }
+            served += 1;
+            let _ = socket.shutdown().await;
+        }
+    });
+    format!("http://{address}/v1")
+}
+
+#[tokio::test]
+async fn a_cut_answer_keeps_the_calls_that_arrived_whole() {
+    let url = serves_then_cuts(vec![
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"w\",\"function\":{\"name\":\"write\",\"arguments\":\"{\\\"path\\\":\\\"a.txt\\\",\\\"content\\\":\\\"one\\\\n\\\"}\"}}]},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"v\",\"function\":{\"name\":\"write\",\"arguments\":\"{\\\"path\\\":\\\"b.txt\\\",\\\"content\\\":\\\"tw\"}}]},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"f\",\"function\":{\"name\":\"finish\",\"arguments\":\"{\\\"summary\\\":\\\"ok\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10}}\n\ndata: [DONE]\n\n",
+    ])
+    .await;
+    let mut provider = crate::provider::openai::OpenAiProvider::new(
+        &url,
+        "k",
+        "m",
+        crate::provider::openai::Dialect::Logfare,
+    )
+    .unwrap();
+    provider.min_stream_limit = Duration::from_secs(1);
+    let sink = Arc::new(MemorySink::default());
+    let mut agent = Agent::new(
+        Provider::OpenAi(provider),
+        test_session("agent-stream-salvage", Features::sage()),
+        AgentConfig::new("m"),
+        sink.clone(),
+        Arc::new(Approvals::default()),
+    );
+    agent
+        .run("Write the files.".into(), &CancellationToken::new())
+        .await;
+    // The cut reply is not asked for again: its whole call ran, the half one did not. (The other
+    // requests are the finish gate asking for a check.)
+    assert!(
+        sink.events
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|e| !matches!(e, EventKind::Error { .. }))
+    );
+    let first_reply = agent
+        .ctx
+        .messages
+        .iter()
+        .find(|m| m.role == Role::Assistant)
+        .unwrap();
+    assert_eq!(first_reply.tool_calls.len(), 2);
+    let root = agent.sess.ws.root.clone();
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\n"
+    );
+    assert!(!root.join("b.txt").exists());
+    let told = agent
+        .ctx
+        .messages
+        .iter()
+        .any(|m| m.content.contains("was cut off by the provider"));
+    assert!(told);
+}
