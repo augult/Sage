@@ -1,0 +1,7 @@
+THOUGHT = r'''The validation wrongly compares a new frame's first throw with the previous frame's last throw. Validate only when the frame scan ends on an existing unpaired first throw, then check standard games.'''
+CONTENT = ""
+CALLS = [
+    {"name": "edit", "arguments": {"path": "bowling.py", "old": "        if frame < 9 and i == len(self._rolls):\n            if i > 0 and self._rolls[i - 1] != 10 and len(self._rolls) % 2 == 1:\n                if self._rolls[i - 1] + pins > 10:\n                    raise ValueError(\"a frame cannot knock down more than 10 pins\")\n        elif frame == 9:\n", "new": "        if frame < 9 and i < len(self._rolls):\n            if self._rolls[i] != 10 and self._rolls[i] + pins > 10:\n                raise ValueError(\"a frame cannot knock down more than 10 pins\")\n        elif frame == 9:\n"}},
+    {"name": "shell", "arguments": {"cmd": "python3 -c \"from bowling import BowlingGame;\ndef g(rs):\n x=BowlingGame(); [x.roll(r) for r in rs]; return x.score()\nassert g([0]*20)==0; assert g([1,2]*10)==30; assert g([10]*12)==300; assert g([10,5,5,9,0]+[0]*14)==48; assert g([0]*18+[10,1,9])==20; print('checks passed')\"", "expect_exit": "0", "expect_has": "checks passed"}},
+    {"name": "finish", "arguments": {"summary": "Fixed frame-boundary validation and confirmed canonical bowling scores, including perfect game, strike/spare sequence and tenth-frame fill.", "unverified": "The grader tests were unavailable."}}
+]
