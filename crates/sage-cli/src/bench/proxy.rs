@@ -139,6 +139,7 @@ pub struct Meter {
 struct Inner {
     upstream: String,
     key: String,
+    locked_max: bool,
     client: reqwest::Client,
     runs: Mutex<HashMap<String, Arc<Meter>>>,
 }
@@ -158,7 +159,7 @@ impl Drop for Proxy {
 impl Proxy {
     /// Listens on a free local port and forwards to `upstream`, a base URL such as
     /// `https://host/v1`, authenticating with `key`.
-    pub async fn start(upstream: &str, key: &str) -> Result<Proxy, String> {
+    pub async fn start(upstream: &str, key: &str, locked_max: bool) -> Result<Proxy, String> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
             .map_err(|e| format!("could not start the metering proxy: {e}"))?;
@@ -170,6 +171,7 @@ impl Proxy {
         let inner = Arc::new(Inner {
             upstream: upstream.trim_end_matches('/').to_string(),
             key: key.to_string(),
+            locked_max,
             client,
             runs: Mutex::new(HashMap::new()),
         });
@@ -674,7 +676,21 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         ..Call::default()
     };
     let mut injected = false;
-    if model_call && let Ok(mut v) = serde_json::from_slice::<Value>(&body) {
+    let parsed = model_call
+        .then(|| serde_json::from_slice::<Value>(&body).ok())
+        .flatten();
+    if model_call && inner.locked_max && !parsed.as_ref().is_some_and(Value::is_object) {
+        refuse(
+            stream,
+            400,
+            "bench_invalid_request",
+            "locked-max needs a JSON request object",
+            req.keep_alive,
+        )
+        .await?;
+        return Ok(req.keep_alive);
+    }
+    if let Some(mut v) = parsed {
         let length = |key: &str| v.get(key).and_then(Value::as_array).map(Vec::len);
         call.model = v
             .get("model")
@@ -684,9 +700,16 @@ async fn handle(inner: &Inner, stream: &mut TcpStream, req: Request) -> std::io:
         call.stream = v.get("stream").and_then(Value::as_bool).unwrap_or(false);
         call.messages = length("messages").or(length("input")).unwrap_or(0);
         call.tools = length("tools").unwrap_or(0);
-        if rest == "chat/completions" && ask_for_usage(&mut v) {
-            body = serde_json::to_vec(&v).unwrap_or(body);
-            injected = true;
+        injected = rest == "chat/completions" && ask_for_usage(&mut v);
+        if inner.locked_max {
+            v["reasoning"] = json!({"effort": "max"});
+            if rest == "chat/completions" {
+                v["reasoning_effort"] = json!("max");
+                v["include_reasoning"] = json!(true);
+            }
+        }
+        if injected || inner.locked_max {
+            body = serde_json::to_vec(&v)?;
         }
     }
     let over = {
@@ -861,9 +884,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn locked_max_overrides_each_request_without_losing_usage() {
+        let (upstream, seen) = fake_provider().await;
+        let proxy = Proxy::start(&upstream, "real-key", true).await.unwrap();
+        let (base, _) = proxy.open("max", 3);
+        let (status, text) = post(
+            &base,
+            "chat/completions",
+            json!({"model": "gpt-6-luna", "stream": true}),
+        )
+        .await;
+        assert_eq!((status, text.as_str()), (200, STREAM));
+        let (status, _) = post(
+            &base,
+            "chat/completions",
+            json!({"model": "gpt-6-luna", "reasoning_effort": "low", "reasoning": {"enabled": false}}),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let (status, _) = post(&base, "chat/completions", json!([])).await;
+        assert_eq!(status, 400);
+        let m = proxy.close("max").await;
+        assert_eq!((m.turns, m.usage_injected, m.unmetered), (2, 1, 0));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        for (_, _, _, body) in seen.iter() {
+            assert_eq!(body["reasoning"], json!({"effort": "max"}));
+            assert_eq!(body["reasoning_effort"], "max");
+            assert_eq!(body["include_reasoning"], true);
+        }
+    }
+
+    #[tokio::test]
     async fn counts_the_usage_of_plain_and_streamed_answers_and_passes_them_through_unchanged() {
         let (upstream, seen) = fake_provider().await;
-        let proxy = Proxy::start(&upstream, "real-key").await.unwrap();
+        let proxy = Proxy::start(&upstream, "real-key", false).await.unwrap();
         let (base, _meter) = proxy.open("run-a", 10);
 
         let (status, text) = post(
@@ -962,7 +1017,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_requests_beyond_the_turn_limit_and_keeps_runs_apart() {
         let (upstream, seen) = fake_provider().await;
-        let proxy = Proxy::start(&upstream, "real-key").await.unwrap();
+        let proxy = Proxy::start(&upstream, "real-key", false).await.unwrap();
         let (a, meter) = proxy.open("a", 2);
         let (b, _) = proxy.open("b", 2);
         let ask = json!({"model": "glm-5.3", "messages": []});
@@ -1013,7 +1068,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_request_is_passed_on_and_recorded_but_is_no_turn() {
         let (upstream, _) = fake_provider().await;
-        let proxy = Proxy::start(&upstream, "real-key").await.unwrap();
+        let proxy = Proxy::start(&upstream, "real-key", false).await.unwrap();
         let (base, _) = proxy.open("r", 5);
         let (status, text) = post(
             &base,
@@ -1034,7 +1089,9 @@ mod tests {
             "{m:?}"
         );
 
-        let unreachable = Proxy::start("http://127.0.0.1:1/v1", "k").await.unwrap();
+        let unreachable = Proxy::start("http://127.0.0.1:1/v1", "k", false)
+            .await
+            .unwrap();
         let (base, _) = unreachable.open("r", 5);
         assert_eq!(
             post(&base, "chat/completions", json!({"model": "glm-5.3"}))
