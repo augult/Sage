@@ -19,6 +19,17 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
   --variants ecosage,no-preflight,no-auto-watch,classic -n 5 -j 3 --out /tmp/glm-5.3.json
 ```
 
+## GPT-6 Luna: 7 Hard tasks + 23 Polyglot blind tasks, 22 November 2026
+
+120 runs (`gpt-6-luna`, 2 repeats per task and harness) across the 7 built-in `hard` tasks (28 runs) and the 23 Python and Rust Exercism `polyblind` tasks (92 runs), after adding one-turn beyond-watch spec verification, zero-test runner rejection, passive inspection filtering, and masked multi-line script failure detection (`docs/results/2026-11-22-gpt6-luna/`):
+
+| Harness | Solved (all 60) | Hard (14) | Polyglot Rust (22) | Polyglot Python (24) | Median turns | Total turns | Prompt tokens | Cost (OpenAI 2:1 cache) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Sage** | **29 / 60 (48.3%)** | 11 / 14 | **15 / 22 (68.2%)** | 3 / 24 | **2.0** | **176** | **963.9k** | **$0.221** |
+| **OpenCode 1.19.5** | **23 / 60 (38.3%)** | 12 / 14 | **9 / 22 (40.9%)** | 2 / 24 | **5.5** | **375** | **2,839.6k** | **$0.366** |
+
+Sage solved 26% more tasks overall (and 67% more on the typed Rust polyglot exercises where 100% of the test suite is held out) while using **53% fewer turns**, **66% fewer prompt tokens**, and **40% lower cost**.
+
 ## GLM-5.3 on the same tasks, 17 November 2026
 
 The Python, Rust and Go set below, run again on GLM-5.3 through Logfare with Sage 0.3.0, Ecosage
