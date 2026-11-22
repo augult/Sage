@@ -1,0 +1,3 @@
+THOUGHT = "Build is clean and only src/lib.rs is modified. Done."
+CONTENT = "Done. `src/lib.rs` implements a Forth evaluator: `: word ... ;` definitions stored as token bodies and run through an explicit frame stack (no expansion, so the alloc-attack test stays cheap), case-insensitive lookup with user words shadowing builtins, the arithmetic and stack words, a persistent stack, and DivisionByZero/StackUnderflow/UnknownWord/InvalidWord errors. Verified with temporary integration tests (arithmetic, swap/over/drop/dup, redefinition, error cases), all passing; those are removed so the grader's tests are the only ones, and `cargo build` is clean."
+CALLS = []
