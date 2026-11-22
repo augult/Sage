@@ -30,6 +30,17 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
 
 Sage solved 25% more tasks overall (and 78% more on the typed Rust polyglot exercises where 100% of the test suite is held out) while being faster on both median and mean time (**49.9 s vs. 61.4 s mean** on the 23-task polyglot set) and using **55% fewer turns**, **67% fewer prompt tokens**, and **43% lower cost**.
 
+## DeepSeek V4.1 Flash on the same 30 tasks, 22 November 2026
+
+The exact same 30-task, 120-run suite (7 `hard` + 23 Python and Rust `polyblind`, 2 repeats per task and harness) run with `deepseek-v4.1-flash-1017` (`docs/results/2026-11-22-deepseek-v4.1-flash/`):
+
+| Harness | Solved (all 60) | Hard (14) | Polyglot Rust (22) | Polyglot Python (24) | Median turns | Total turns | Median / Mean time | Prompt tokens | Cost (DeepSeek rate) | Cost (OpenAI 2:1 cache) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Sage** | **45 / 60 (75.0%)** | **14 / 14** | **19 / 22 (86.4%)** | **12 / 24 (50.0%)** | **2.0** | **142** | **54.7 s / 74.6 s** | **683.5k** | **$0.207** | **$0.232** |
+| **OpenCode 1.19.5** | **40 / 60 (66.7%)** | **14 / 14** | **18 / 22 (81.8%)** | **8 / 24 (33.3%)** | **6.0** | **378** | **86.0 s / 96.9 s** | **3,269.1k** | **$0.274** | **$0.456** |
+
+Both harnesses solved **14 / 14** on the 7 Hard tasks, while Sage solved **31 / 46 (67.4%) vs. 26 / 46 (56.5%)** on the 23 Polyglot blind tasks (**45 / 60 vs. 40 / 60 overall**, +12.5% more solved), using **62% fewer turns** (142 vs. 378), **79% fewer prompt tokens** (683.5k vs. 3,269.1k), **36% lower median time** (54.7 s vs. 86.0 s; **71.4 s vs. 94.7 s mean** on the polyglot set), and **24.2% lower cost at DeepSeek's 50:1 cache rate** (**49.0% lower cost at OpenAI's 2:1 cache rate**).
+
 ## GLM-5.3 on the same tasks, 17 November 2026
 
 The Python, Rust and Go set below, run again on GLM-5.3 through Logfare with Sage 0.3.0, Ecosage
