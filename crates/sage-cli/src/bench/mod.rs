@@ -2219,15 +2219,16 @@ u.urlopen(r).read()' "$1"; }"#;
             assert_eq!(solved, expect_solved, "s4 pager ({label}): tail={tail}");
         }
 
-        // Scenario 5 (`confdialect`): once the visible tests pass, Sage's tip asks for the spec to be
-        // covered before `finish` but still accepts a direct one; this model takes it and misses §5.
+        // Scenario 5 (`confdialect`): once the visible starter tests pass on `partial_conf`, Sage's tip
+        // asks for an in-memory spec check before `finish` instead of inviting a premature finish, so
+        // the model tests §5 trailing-backslash handling, fixes the bug, and solves the task.
         let conf = tasks::find("confdialect").unwrap();
         let conf_sol = conf.solution[0].1;
         let partial_conf = conf_sol.replace(
             "raise ConfError(\"continuation at the end of the file\", number)",
             "break",
         );
-        for (label, mode, expect_solved) in [("sage", "sage", false)] {
+        for (label, mode, expect_solved) in [("sage", "sage", true)] {
             let h = Harness::at(base.join(format!("s5-{label}")));
             let ws = base.join(format!("ws-s5-{label}"));
             materialize(&ws, conf.files).unwrap();
@@ -2283,7 +2284,7 @@ u.urlopen(r).read()' "$1"; }"#;
                 "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}",
                 end.status, end.stats.turns
             );
-            assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 2));
+            assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 20));
         }
 
         let _ = std::fs::remove_dir_all(&base);

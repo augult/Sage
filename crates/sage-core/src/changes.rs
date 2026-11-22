@@ -10,7 +10,7 @@
 
 use crate::state::Session;
 use crate::text::bound;
-use crate::util::fnv64;
+use crate::util::{fnv64, truncate_chars};
 use crate::workspace::derived;
 use std::collections::HashMap;
 use std::path::Path;
@@ -197,6 +197,19 @@ async fn git_changes(sess: &Session) -> Option<String> {
         }
     }
     Some(out.trim_end().to_string())
+}
+
+/// One-pass spec and diff verification prompt when `finish` is called after only the starter test
+/// watch has run on a spec-driven task.
+pub fn review_text(task: &str, changes: Option<&str>) -> String {
+    let block = match changes {
+        Some(changes) => format!("<changes>\n{changes}\n</changes>\n"),
+        None => String::new(),
+    };
+    format!(
+        "[review] Not accepted yet: only the starter test watch has run, and passing the visible starter tests does not prove every requirement in the task and spec holds.\n<task>\n{}\n</task>\n{block}Complete verification in ONE reply by chaining your check and `finish`:\n1. Audit `<changes>` against `<task>` and the spec or README sentence by sentence: check every rule, error condition and its attributes (such as `.line` on list items and continuations), boundary or EOF case, and caller, config or manifest file.\n2. In your next reply, chain any needed `edit` with ONE self-contained `shell` command (e.g. `python3 -c \"...\"`, `node -e \"...\"`, or `sh -c \"...\"` with `expect_exit: \"0\"`, leaving no scratch files) that tests the rules and edge cases missing from the starter tests, followed immediately by `finish` in the same reply.",
+        truncate_chars(task, 6000)
+    )
 }
 
 #[cfg(all(test, unix))]

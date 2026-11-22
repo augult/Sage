@@ -746,6 +746,7 @@ impl Agent {
         self.sess.task = task.clone();
         self.restore_fixed_effort();
         self.sess.evidence.message_epoch = self.sess.evidence.epoch;
+        self.sess.evidence.reviewed = false;
         let first = std::mem::take(&mut self.first_message);
         // The mechanical contract reads the task the session began with: a later message is not held
         // to it, unless it carries on with that task after a restart cut its run off.
@@ -1200,10 +1201,20 @@ impl Agent {
                 let only_changes = !tools.is_empty()
                     && tools.iter().all(|t| matches!(t, Tool::Edit | Tool::Write));
                 let checked = self.sess.evidence.epoch > 0 && self.sess.evidence.fresh();
+                let needs_spec_check = checked
+                    && !self.sess.evidence.verified_beyond_watch()
+                    && !self.sess.evidence.reviewed
+                    && crate::state::task_has_spec(&self.sess.task, &self.sess.ws.root);
                 let hint = if checked && (only_changes || tools.last() == Some(&Tool::Shell)) {
-                    Some(
-                        "Tip: every check passes, so once every rule in the task and its spec is covered, `finish` is accepted now and could have been in the same reply (it is skipped or refused automatically whenever a check fails).",
-                    )
+                    if needs_spec_check {
+                        Some(
+                            "Tip: the watched tests pass. Before `finish`, verify the rules and edge cases in the task and spec that the starter tests leave out: send one in-memory `shell` check (with `expect_exit: \"0\"`) and `finish` together in your next reply (if the check fails, `finish` is skipped automatically).",
+                        )
+                    } else {
+                        Some(
+                            "Tip: every check passes, so once every rule in the task and its spec is covered, `finish` is accepted now and could have been in the same reply (it is skipped or refused automatically whenever a check fails).",
+                        )
+                    }
                 } else if only_changes && self.sess.watches.items.is_empty() {
                     Some(
                         "Tip: send the check (shell with expect_exit) and `finish` together in your next reply: if the check fails, `finish` is skipped automatically. They can ride along with the edits just the same.",
