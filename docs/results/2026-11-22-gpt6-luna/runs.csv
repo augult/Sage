@@ -6,7 +6,7 @@ gpt-6-luna,hard,confdialect,sage,1,1,done,7,14,73543,60224,7688,3335,0.00679,0.0
 gpt-6-luna,hard,rollup,sage,1,1,done,3,6,19303,11520,2159,1095,0.0025,0.00333,44.2
 gpt-6-luna,hard,jobqueue,sage,1,1,done,2,5,12366,4480,3011,1067,0.003,0.00333,49.8
 gpt-6-luna,hard,ttlcache,sage,1,1,done,1,3,4931,0,1683,599,0.00175,0.00175,24.6
-gpt-6-luna,polyblind,pgb-py-bowling,sage,1,1,done,5,9,23852,17792,11060,9062,0.0076,0.00888,363.0
+gpt-6-luna,polyblind,pgb-py-bowling,sage,1,0,done,4,6,19681,13184,4275,1541,0.00358,0.00453,62.0
 gpt-6-luna,polyblind,pgb-py-connect,sage,1,0,done,1,3,2331,0,800,328,0.00083,0.00083,13.5
 gpt-6-luna,polyblind,pgb-py-food-chain,sage,1,0,done,1,3,2712,0,977,361,0.00099,0.00099,14.6
 gpt-6-luna,polyblind,pgb-py-forth,sage,1,0,done,1,3,2874,0,1245,414,0.00118,0.00118,16.9
@@ -14,16 +14,16 @@ gpt-6-luna,polyblind,pgb-py-go-counting,sage,1,0,done,6,10,30556,24128,3551,1657
 gpt-6-luna,polyblind,pgb-py-paasio,sage,1,0,done,1,6,2492,0,1153,367,0.00107,0.00107,15.1
 gpt-6-luna,polyblind,pgb-py-phone-number,sage,1,0,done,1,3,2915,0,837,317,0.00094,0.00094,13.0
 gpt-6-luna,polyblind,pgb-py-pov,sage,1,0,done,3,5,11311,6592,2280,935,0.0021,0.00257,37.8
-gpt-6-luna,polyblind,pgb-py-rest-api,sage,1,0,done,8,13,47495,38464,12349,8976,0.00888,0.01165,361.3
+gpt-6-luna,polyblind,pgb-py-rest-api,sage,1,0,done,1,3,2686,0,1284,457,0.00117,0.00117,18.4
 gpt-6-luna,polyblind,pgb-py-sgf-parsing,sage,1,0,done,1,3,3597,0,1292,457,0.00131,0.00131,18.4
 gpt-6-luna,polyblind,pgb-py-two-bucket,sage,1,0,done,1,3,2896,0,1030,446,0.00105,0.00105,18.2
 gpt-6-luna,polyblind,pgb-py-zebra-puzzle,sage,1,1,done,4,8,13632,9344,2905,1475,0.00241,0.00309,59.6
 gpt-6-luna,polyblind,pgb-rs-book-store,sage,1,1,done,4,9,15408,10112,2176,1005,0.00213,0.00286,41.7
 gpt-6-luna,polyblind,pgb-rs-bowling,sage,1,1,done,3,8,13702,7616,2858,1592,0.00265,0.0032,65.9
 gpt-6-luna,polyblind,pgb-rs-dot-dsl,sage,1,0,done,2,4,5531,2624,1147,827,0.00113,0.00132,34.3
-gpt-6-luna,polyblind,pgb-rs-fizzy,sage,1,0,done,3,5,8903,5760,1656,932,0.00148,0.0019,345.4
+gpt-6-luna,polyblind,pgb-rs-fizzy,sage,1,0,done,5,9,27215,19136,4169,1874,0.00377,0.00515,76.8
 gpt-6-luna,polyblind,pgb-rs-forth,sage,1,0,done,3,8,12693,6272,6626,3741,0.00496,0.00541,151.0
-gpt-6-luna,polyblind,pgb-rs-ocr-numbers,sage,1,0,budget,1,0,0,0,0,0,0.0,0.0,600.0
+gpt-6-luna,polyblind,pgb-rs-ocr-numbers,sage,1,1,done,3,6,12290,6848,2714,1319,0.00247,0.00296,53.4
 gpt-6-luna,polyblind,pgb-rs-parallel-letter-frequency,sage,1,1,done,2,5,6747,2496,1642,768,0.00163,0.00181,32.3
 gpt-6-luna,polyblind,pgb-rs-two-bucket,sage,1,1,done,3,5,13180,7360,3597,1301,0.00305,0.00358,53.1
 gpt-6-luna,polyblind,pgb-rs-variable-length-quantity,sage,1,1,done,2,6,7126,2496,1747,796,0.00175,0.00193,34.1
@@ -36,7 +36,7 @@ gpt-6-luna,hard,confdialect,sage,2,1,done,2,3,13318,5760,2531,1011,0.00267,0.003
 gpt-6-luna,hard,rollup,sage,2,0,done,8,19,71244,57792,10900,5723,0.00873,0.01289,229.4
 gpt-6-luna,hard,jobqueue,sage,2,0,done,5,8,30253,21248,4756,1975,0.00427,0.0058,85.6
 gpt-6-luna,hard,ttlcache,sage,2,1,done,1,3,4931,0,1816,652,0.00183,0.00183,26.5
-gpt-6-luna,polyblind,pgb-py-bowling,sage,2,0,done,6,7,33364,25664,5011,1628,0.00424,0.00609,578.0
+gpt-6-luna,polyblind,pgb-py-bowling,sage,2,1,done,5,8,28599,20928,5511,2567,0.00452,0.00603,103.1
 gpt-6-luna,polyblind,pgb-py-connect,sage,2,0,done,3,5,9663,5568,2062,849,0.00187,0.00227,34.1
 gpt-6-luna,polyblind,pgb-py-food-chain,sage,2,0,done,2,5,6477,2688,1554,776,0.00151,0.0017,31.3
 gpt-6-luna,polyblind,pgb-py-forth,sage,2,0,done,2,4,6996,2816,2949,996,0.0024,0.00261,40.0
@@ -66,7 +66,7 @@ gpt-6-luna,hard,confdialect,opencode,1,0,done,9,0,92480,76608,6682,3754,0.00662,
 gpt-6-luna,hard,rollup,opencode,1,0,done,10,0,110246,94400,5546,3883,0.00599,0.01278,160.8
 gpt-6-luna,hard,jobqueue,opencode,1,1,done,9,0,83371,69248,6520,3410,0.00624,0.01122,143.5
 gpt-6-luna,hard,ttlcache,opencode,1,1,done,10,0,99026,83840,5771,3187,0.00599,0.01203,132.4
-gpt-6-luna,polyblind,pgb-py-bowling,opencode,1,0,done,7,0,40211,31872,4581,3424,0.0041,0.00639,525.3
+gpt-6-luna,polyblind,pgb-py-bowling,opencode,1,1,done,10,0,77588,66816,4964,3218,0.00479,0.00961,135.8
 gpt-6-luna,polyblind,pgb-py-connect,opencode,1,0,done,4,0,21191,12928,1589,1033,0.00223,0.00316,44.3
 gpt-6-luna,polyblind,pgb-py-food-chain,opencode,1,0,done,4,0,21790,13376,1663,1140,0.0023,0.00326,48.6
 gpt-6-luna,polyblind,pgb-py-forth,opencode,1,0,done,4,0,22351,13504,1489,669,0.00226,0.00323,29.7
