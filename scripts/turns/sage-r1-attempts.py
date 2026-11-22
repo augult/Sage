@@ -1,0 +1,26 @@
+THOUGHT = "The code migration is partially complete; the search identified all remaining old names. I will update CLI failure reporting and all shipped manifest, configuration, script, and README examples while preserving their existing attempt counts."
+CONTENT = ""
+CALLS = [
+    {"name": "edit", "arguments": {"path": "fetchkit/cli.py", "old": "print(f\"FAILED {url} after {tries - 1} retries\")", "new": "print(f\"FAILED {url} after {tries} attempts\")"}},
+    {"name": "edit", "arguments": {"path": "fetchkit/jobs.py", "old": "    {\"jobs\": [{\"url\": \"https://mirror.example/a.tar\", \"priority\": \"high\", \"retries\": 1}]}", "new": "    {\"jobs\": [{\"url\": \"https://mirror.example/a.tar\", \"priority\": \"high\", \"attempts\": 2}]}"}},
+    {"name": "edit", "arguments": {"path": "config/fetchkit.ini.template", "old": "; How often a failed download is retried before fetchkit gives up on it.\nretries = 4", "new": "; Total number of tries before fetchkit gives up on a failed download.\nattempts = 5"}},
+    {"name": "edit", "arguments": {"path": "examples/manifest.json", "old": "\"retries\": 1", "new": "\"attempts\": 2"}},
+    {"name": "edit", "arguments": {"path": "examples/manifest.json", "old": "\"retries\": 0", "new": "\"attempts\": 1"}},
+    {"name": "edit", "arguments": {"path": "scripts/backfill.py", "old": "PATIENT = {\"retries\": 7, \"timeout\": 30.0}", "new": "PATIENT = {\"attempts\": 8, \"timeout\": 30.0}"}},
+    {"name": "edit", "arguments": {"path": "scripts/backfill.py", "old": "probe.fetch(INDEX, retries=0)", "new": "probe.fetch(INDEX, attempts=1)"}},
+    {"name": "edit", "arguments": {"path": "scripts/nightly.sh", "old": "# Nightly refresh of the mirror. The upstream is flaky at night, so every download gets four\n# retries instead of the default two. Extra arguments are passed on to fetchkit.", "new": "# Nightly refresh of the mirror. The upstream is flaky at night, so every download gets five\n# attempts instead of the default three. Extra arguments are passed on to fetchkit."}},
+    {"name": "edit", "arguments": {"path": "scripts/nightly.sh", "old": "--retries 4", "new": "--attempts 5"}},
+    {"name": "edit", "arguments": {"path": "scripts/smoke.sh", "old": "FETCHKIT_RETRIES=0", "new": "FETCHKIT_ATTEMPTS=1"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "client = Client(retries=3, timeout=15)       # up to four tries per download", "new": "client = Client(attempts=4, timeout=15)     # up to four tries per download"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "retries=0", "new": "attempts=1"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "its `retries` attribute\nsays how many retries were made.", "new": "its `attempts` attribute\nsays how many tries were made."}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "--retries", "new": "--attempts", "all": True}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "(1 tries)", "new": "(1 attempts)"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "| `retries` | 2       | how often a failed download is retried               |", "new": "| `attempts` | 3       | total number of tries for a download                  |"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "FETCHKIT_RETRIES", "new": "FETCHKIT_ATTEMPTS"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "`retries`, or a `priority` (`low`: never retried, `high`: retried five times", "new": "`attempts`, or a `priority` (`low`: one try, `high`: six attempts"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "four retries per download", "new": "five attempts per download"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "one try and no retries", "new": "one attempt"}},
+    {"name": "edit", "arguments": {"path": "README.md", "old": "`FETCHKIT_FAIL_FIRST=2` makes every URL fail twice\nbefore it succeeds, and `FETCHKIT_TRACE=tries.log` records every try.", "new": "`FETCHKIT_FAIL_FIRST=2` makes every URL fail twice\nbefore it succeeds, and `FETCHKIT_TRACE=tries.log` records every attempt."}},
+    {"name": "search", "arguments": {"pattern": "retries|RETRIES", "path": ".", "context": 1}},
+]
