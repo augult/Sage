@@ -1,0 +1,3 @@
+THOUGHT = r'''All tests pass and the discount logic is correct for every basket shape. Done.'''
+CONTENT = "Implemented `lowest_price` in `src/lib.rs`.\n\nIt counts copies of each of the five titles, then repeatedly takes one copy of every title still in stock to form candidate sets. The greedy grouping is optimal except when a set of 5 and a set of 3 remain: 5+3 books at 25% and 10% saves less than 4+4 at 20% each, so every (5,3) pair is swapped for two (4,4) sets. Prices are summed in cents using the 0/5/10/20/25 percent tiers.\n\n`cargo test` passes: empty basket, all five single-size tiers, and the 8-book basket that must cost 5120."
+CALLS = []
