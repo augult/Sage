@@ -23,12 +23,12 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
 
 120 runs (`gpt-6-luna`, 2 repeats per task and harness) across the 7 built-in `hard` tasks (28 runs) and the 23 Python and Rust Exercism `polyblind` tasks (92 runs), after adding one-turn beyond-watch spec verification, zero-test runner rejection, passive inspection filtering, and masked multi-line script failure detection (`docs/results/2026-11-22-gpt6-luna/`):
 
-| Harness | Solved (all 60) | Hard (14) | Polyglot Rust (22) | Polyglot Python (24) | Median turns | Total turns | Prompt tokens | Cost (OpenAI 2:1 cache) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Sage** | **29 / 60 (48.3%)** | 11 / 14 | **15 / 22 (68.2%)** | 3 / 24 | **2.0** | **176** | **963.9k** | **$0.221** |
-| **OpenCode 1.19.5** | **23 / 60 (38.3%)** | 12 / 14 | **9 / 22 (40.9%)** | 2 / 24 | **5.5** | **375** | **2,839.6k** | **$0.366** |
+| Harness | Solved (all 60) | Hard (14) | Polyglot Rust (22) | Polyglot Python (24) | Median turns | Total turns | Median / Mean time | Prompt tokens | Cost (OpenAI 2:1 cache) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Sage** | **30 / 60 (50.0%)** | 11 / 14 | **16 / 22 (72.7%)** | 3 / 24 | **2.0** | **171** | **41.2 s / 59.7 s** | **940.7k** | **$0.212** |
+| **OpenCode 1.19.5** | **24 / 60 (40.0%)** | 12 / 14 | **9 / 22 (40.9%)** | 3 / 24 | **6.0** | **378** | **60.8 s / 78.7 s** | **2,876.9k** | **$0.370** |
 
-Sage solved 26% more tasks overall (and 67% more on the typed Rust polyglot exercises where 100% of the test suite is held out) while using **53% fewer turns**, **66% fewer prompt tokens**, and **40% lower cost**.
+Sage solved 25% more tasks overall (and 78% more on the typed Rust polyglot exercises where 100% of the test suite is held out) while being faster on both median and mean time (**49.9 s vs. 61.4 s mean** on the 23-task polyglot set) and using **55% fewer turns**, **67% fewer prompt tokens**, and **43% lower cost**.
 
 ## GLM-5.3 on the same tasks, 17 November 2026
 
