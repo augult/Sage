@@ -708,7 +708,8 @@ impl Runner<'_> {
                     .evidence
                     .passed(format!("`{}`", one_line(&meta.cmd, 100)));
             }
-            if meta.ok
+            if meta.held_explicit
+                && meta.ok
                 && !proves_nothing(&meta.cmd)
                 && !empty_test_run
                 && self.sess.evidence.epoch == epoch_before
@@ -955,7 +956,7 @@ impl Runner<'_> {
         }
         if !self.sess.evidence.reviewed
             && self.sess.evidence.epoch > self.sess.evidence.message_epoch
-            && self.sess.evidence.fresh()
+            && (self.sess.evidence.fresh() || unverified.is_some())
             && !self.sess.evidence.verified_beyond_watch()
             && crate::state::task_has_spec(&self.sess.task, &self.sess.ws.root)
         {
@@ -2280,5 +2281,29 @@ mod tests {
         .await;
         assert!(res2.finished.is_some_and(|f| f.verified));
         assert!(!s2.evidence.reviewed);
+
+        // A multi-line command where an earlier python script fails with SyntaxError before the
+        // watched test command exits 0 halts the script and does not count as beyond-watch verification.
+        let mut s3 = test_session("script-spec-masked-syntax", Features::sage());
+        s3.task = "Implement README.md; the existing test covers only the basics.".into();
+        std::fs::write(s3.ws.root.join("README.md"), "# Spec\n").unwrap();
+        std::fs::write(s3.ws.root.join("n.txt"), "2\n").unwrap();
+        let idx = s3
+            .watches
+            .set("tests", "grep -qx 2 n.txt", s3.ws.cwd.clone(), None);
+        s3.watches.items[idx].auto = true;
+        let (res3, _, _) = run(
+            &mut s3,
+            &[
+                (
+                    "shell",
+                    json!({"cmd": "python3 -c '('\ngrep -qx 2 n.txt", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "should be skipped"})),
+            ],
+        )
+        .await;
+        assert!(res3.surprised);
+        assert!(res3.finished.is_none());
     }
 }
