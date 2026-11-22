@@ -1,0 +1,8 @@
+THOUGHT = r'''All assertions pass, including case-insensitivity, lexical redefinition, underflow, division by zero, malformed definitions and a 400-deep definition chain. The temporary test file has been removed.'''
+
+CONTENT = r'''Implemented the Forth evaluator in `src/lib.rs`: arithmetic (`+ - * /`, with `DivisionByZero`), stack words (`DUP DROP SWAP OVER`, with `StackUnderflow`), and `: name ... ;` definitions. Words are case-insensitive, definitions are compiled to an instruction arena so redefinition is cheap and an earlier definition keeps the meaning it was written with, and invalid names or unknown words report `InvalidWord`/`UnknownWord`.
+
+Verified with a temporary integration test (since removed): arithmetic and stack behaviour, user-defined words, redefinition, case-insensitivity, negative numbers, empty definitions, error cases, and a 400-deep definition chain; `cargo test` passed 1/1.'''
+
+CALLS = [
+    {"name": "finish", "arguments": {"summary": r'''Implemented src/lib.rs: integer arithmetic and stack words with DivisionByZero/StackUnderflow, case-insensitive `: name ... ;` definitions compiled into an instruction arena (cheap redefinition, lexical capture of earlier definitions), and InvalidWord/UnknownWord errors for bad names, missing `;`, and unknown words. Verified with a temporary cargo test covering arithmetic, DUP/SWAP/OVER/DROP, redefinition, case-insensitivity, negative numbers, empty definitions, error paths and a 400-deep definition chain; it passed, and the temporary file was removed.''', "unverified": r'''The grader's own tests (including tests/alloc-attack.rs) were not available in the workspace, so they were not run; behaviour was checked with an equivalent ad-hoc suite.''', "expect_exit": "0"}}]
