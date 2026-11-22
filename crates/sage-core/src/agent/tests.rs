@@ -2673,7 +2673,7 @@ fn spec_turns(review_cmd: &'static str, after: Vec<TurnFn>) -> Vec<TurnFn> {
         )),
         fixed(MockTurn::calls(
             "the review",
-            vec![("watch", json!({"name": "spec", "cmd": review_cmd}))],
+            vec![("shell", json!({"cmd": review_cmd, "expect_exit": "0"}))],
         )),
     ];
     turns.extend(after);
@@ -2698,7 +2698,7 @@ async fn a_spec_review_that_passes_lets_the_held_finish_stand_without_another_re
     assert!(out.verified);
     assert!(out.summary.starts_with("wrote out.txt"), "{}", out.summary);
     assert!(
-        out.summary.contains("watch `spec` passes"),
+        out.summary.contains("the review's checks pass"),
         "{}",
         out.summary
     );

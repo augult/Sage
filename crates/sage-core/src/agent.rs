@@ -205,11 +205,10 @@ enum Ending {
 }
 
 /// Sent once when a task with a written specification first calls `finish`.
-const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Review the work against the specification the task names (README, spec, contract, docstring, plan or note), in your next reply and with ONE call: `watch` named `spec`, whose `cmd` is a shell script that checks every rule no test covers (command-line forms and wrong use, errors and exit statuses, edge cases, and every file or entry the task says to change). Make it print PASS or FAIL with the rule for each check and exit non-zero if any fails. The harness runs it: if it passes, your `finish` stands as it is and no further reply is needed. If it fails, fix the work and call `finish` again; the watch re-runs by itself after every change.";
-/// The same review where there are no watches: the checks go in one reply, with `finish` last.
-const SPEC_REVIEW_PLAIN: &str = "Before this ends: the tests cover only part of what the task asks. Review the work against the specification the task names (README, spec, contract, docstring, plan or note), in your next reply only: one check (shell with expect_exit / expect_has) for every rule no test covers, with `finish` as the last call. The calls stop at the first that fails: then fix that and call `finish` again.";
-/// Replies a spec review may take before the model is told to finish.
-const SPEC_REVIEW_REPLIES: u32 = 4;
+const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Review the work against the specification the task names (README, spec, contract, docstring, plan or note), in your next reply and with ONE call: `shell` with `expect_exit: \"0\"`, whose `cmd` is a script that checks every rule no test covers (command-line forms and wrong use, errors and exit statuses, edge cases, and every file or entry the task says to change). Make it print PASS or FAIL with the rule for each check, and exit non-zero if any fails. If it passes, your `finish` stands as it is and no further reply is needed. If it fails, fix the work and call `finish` again.";
+/// Replies a spec review may take before the model is told to finish: enough to fix what the
+/// review found, not so many that a review runs away.
+const SPEC_REVIEW_REPLIES: u32 = 8;
 
 /// Whether a task holds the work to more than its tests: it says they check only part of it, or
 /// it points at a written specification (a README, spec, contract, docstring, plan or note).
@@ -1506,18 +1505,14 @@ impl Agent {
             "spec",
             "finish held once for a review against the specification",
         );
-        Some(if self.cfg.features.watches {
-            checks.held = Some(outcome.clone());
-            SPEC_REVIEW.to_string()
-        } else {
-            SPEC_REVIEW_PLAIN.to_string()
-        })
+        checks.held = Some(outcome.clone());
+        Some(SPEC_REVIEW.to_string())
     }
 
     /// The held `finish` stands when a reply did nothing but check, every check passed and every
-    /// watch, the review's own among them, passes now: asking the model to say `finish` again
-    /// would cost a reply and change nothing. A reply that changed files has to call `finish`
-    /// itself, since what it says may no longer hold.
+    /// watch passes now: asking the model to say `finish` again would cost a reply and change
+    /// nothing. A reply that changed files has to call `finish` itself, since what it says may no
+    /// longer hold.
     fn review_passed(
         &mut self,
         calls: &[repair::Call],
@@ -1534,13 +1529,12 @@ impl Agent {
                 Some(Tool::Shell | Tool::Watch | Tool::Read | Tool::Search)
             )
         });
-        let watches = &self.sess.watches;
-        let review = watches.items.iter().any(|w| w.name == "spec");
         if !checked
             || !only_looked
             || !quiet
-            || !review
-            || !watches.all_pass_at(self.sess.evidence.epoch)
+            || !self.sess.watches.items.iter().all(|w| {
+                w.state == crate::watches::WatchState::Pass && w.epoch == self.sess.evidence.epoch
+            })
             || !self.sess.evidence.fresh()
         {
             return None;
@@ -1549,7 +1543,7 @@ impl Agent {
         outcome.verified = true;
         outcome.evidence = self.evidence_text();
         outcome.summary = format!(
-            "{}\n\nReviewed against the specification: watch `spec` passes.",
+            "{}\n\nReviewed against the specification: the review's checks pass.",
             outcome.summary
         );
         self.note("spec", "the review's checks pass: the held finish stands");

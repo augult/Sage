@@ -2230,7 +2230,7 @@ u.urlopen(r).read()' "$1"; }"#;
 
         // Scenario 5 (`confdialect`): once the visible tests pass, Sage's tip asks for the spec to be
         // covered before `finish`. This model calls `finish` at once anyway: the spec review holds
-        // it, and the checks that follow find and fix the §5 miss.
+        // it, the review's check finds the §5 miss, and the model fixes it and finishes.
         let conf = tasks::find("confdialect").unwrap();
         let conf_sol = conf.solution[0].1;
         let partial_conf = conf_sol.replace(
@@ -2256,16 +2256,13 @@ u.urlopen(r).read()' "$1"; }"#;
                             // Sage qualifies `finish` with spec coverage, while still accepting a direct finish.
                             assert!(last.contains("once every rule in the task and its spec is covered"), "{last}");
                             MockTurn::calls("", vec![("finish", json!({"summary": "Visible tests pass."}))])
-                        } else if step < 11 {
-                            MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import conf; conf.parse('[s]\\na = 1\\n')\"", "expect_exit": "0"}))])
-                        } else if step == 11 {
-                            // Self-test on §5 trailing backslash fails (a surprise!), resetting `settled_replies`.
+                        } else if step == 2 {
+                            // The review: its check of §5, a trailing backslash, fails.
+                            assert!(last.contains("checks every rule no test covers"), "{last}");
                             MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import sys, conf\ntry:\n conf.parse('k = v \\\\\\n')\n sys.exit(1)\nexcept conf.ConfError:\n pass\"", "expect_exit": "0"}))])
-                        } else if step == 12 {
+                        } else if step == 3 {
                             // Worker fixes the §5 bug (`epoch` advances).
                             MockTurn::calls("", vec![("write", json!({"path": "conf/parser.py", "content": conf_sol, "overwrite": true}))])
-                        } else if step < 19 {
-                            MockTurn::calls("", vec![("shell", json!({"cmd": "python3 -c \"import conf; conf.parse('a = 1\\n')\"", "expect_exit": "0"}))])
                         } else {
                             MockTurn::calls("", vec![("finish", json!({"summary": "All 10 sections verified."}))])
                         }
@@ -2293,8 +2290,7 @@ u.urlopen(r).read()' "$1"; }"#;
                 "s5 confdialect ({label}): end={:?}, turns={}, tail={tail}",
                 end.status, end.stats.turns
             );
-            assert_eq!(end.status, FinishStatus::Done);
-            assert!(end.stats.turns > 2, "{}", end.stats.turns);
+            assert_eq!((end.status, end.stats.turns), (FinishStatus::Done, 5));
         }
 
         let _ = std::fs::remove_dir_all(&base);
