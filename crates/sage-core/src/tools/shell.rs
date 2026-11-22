@@ -419,13 +419,25 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
             }
         }
         ExecEnd::Exited(exit) => {
-            let verdict = guard::check_capture(
+            let mut verdict = guard::check_capture(
                 expect.as_ref(),
                 exit.code,
                 predicate_text.as_deref().unwrap_or(&ex.text),
                 ex.output_complete || predicate_text.is_some(),
             );
-            let ok = exit.code == Some(0);
+            let masked_script_err = exit.code == Some(0)
+                && (cmd.contains('\n') || cmd.contains(';'))
+                && (ex.text.contains("\nSyntaxError:")
+                    || ex.text.contains("Traceback (most recent call last):"))
+                && !cmd.contains("SyntaxError")
+                && !cmd.contains("Traceback");
+            if masked_script_err {
+                verdict.held = false;
+                verdict
+                    .violations
+                    .push("an earlier command in the multi-line script failed with an unhandled Python error before the final command exited 0".into());
+            }
+            let ok = exit.code == Some(0) && !masked_script_err;
             let dur = fmt_duration(ex.ms);
             // Unpredicted, `grep` that finds nothing or `diff` of files that differ has answered,
             // not failed: what follows it in the reply still runs.
