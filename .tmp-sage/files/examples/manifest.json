@@ -1,0 +1,9 @@
+{
+  "jobs": [
+    {"url": "https://mirror.example/index.json", "priority": "high"},
+    {"url": "https://mirror.example/packages/core.tar"},
+    {"url": "https://mirror.example/packages/extras.tar", "priority": "low"},
+    {"url": "https://mirror.example/packages/docs.tar", "priority": "low", "attempts": 2},
+    {"url": "https://mirror.example/keys/release.asc", "priority": "high", "attempts": 1}
+  ]
+}
