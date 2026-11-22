@@ -25,8 +25,8 @@ LOGFARE_API_KEY=... SAGE_HOME=/tmp/sage-live target/debug/sage bench -p logfare 
 
 | Harness | Solved (all 60) | Hard (14) | Polyglot Rust (22) | Polyglot Python (24) | Median turns | Total turns | Median / Mean time | Prompt tokens | Cost (OpenAI 2:1 cache) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Sage** | **30 / 60 (50.0%)** | 11 / 14 | **16 / 22 (72.7%)** | 3 / 24 | **2.0** | **171** | **41.2 s / 59.7 s** | **940.7k** | **$0.212** |
-| **OpenCode 1.19.5** | **24 / 60 (40.0%)** | 12 / 14 | **9 / 22 (40.9%)** | 3 / 24 | **6.0** | **378** | **60.8 s / 78.7 s** | **2,876.9k** | **$0.370** |
+| **Sage** | **30 / 60 (50.0%)** | 11 / 14 | **16 / 22 (72.7%)** | 3 / 24 | **2.0** | **171** | **41.2 s / 59.7 s** | **940.8k** | **$0.212** |
+| **OpenCode 1.19.5** | **24 / 60 (40.0%)** | 12 / 14 | **9 / 22 (40.9%)** | 3 / 24 | **6.0** | **378** | **60.8 s / 78.7 s** | **2,876.9k** | **$0.369** |
 
 Sage solved 25% more tasks overall (and 78% more on the typed Rust polyglot exercises where 100% of the test suite is held out) while being faster on both median and mean time (**49.9 s vs. 61.4 s mean** on the 23-task polyglot set) and using **55% fewer turns**, **67% fewer prompt tokens**, and **43% lower cost**.
 
