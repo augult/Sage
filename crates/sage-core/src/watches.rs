@@ -111,12 +111,12 @@ impl Watches {
             .collect();
     }
 
-    /// True when `cmd` in `cwd` is an automatically adopted watch command.
+    /// True when `cmd` in `cwd` is or embeds an automatically adopted watch command.
     pub fn is_auto_cmd(&self, cmd: &str, cwd: &Path) -> bool {
         let cmd = without_cd(cmd, cwd);
         self.items
             .iter()
-            .any(|w| w.auto && w.cmd == cmd && w.cwd == cwd)
+            .any(|w| w.auto && w.cwd == cwd && (w.cmd == cmd || cmd.contains(w.cmd.as_str())))
     }
 }
 
