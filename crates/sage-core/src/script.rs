@@ -280,6 +280,82 @@ fn stage_can_fail(stage: &str) -> bool {
     }
 }
 
+/// Whether `cmd` only inspects files or git state (`cat`, `ls`, `git status`, `git diff`,
+/// `rg ... || true`) without running a behavioural check of the project's code.
+fn inspection_only(cmd: &str) -> bool {
+    let mut lists: Vec<Vec<(String, Option<Join>)>> = vec![Vec::new()];
+    for (part, join) in top_level(cmd) {
+        let ends = join == Some(Join::List);
+        lists
+            .last_mut()
+            .expect("there is always a list")
+            .push((part, join.filter(|j| *j != Join::List)));
+        if ends {
+            lists.push(Vec::new());
+        }
+    }
+    lists.retain(|list| list.iter().any(|(part, _)| !part.trim().is_empty()));
+    !lists.is_empty() && lists.iter().all(|list| list_is_inspection(list))
+}
+
+fn list_is_inspection(list: &[(String, Option<Join>)]) -> bool {
+    let mut pipelines: Vec<(Vec<&str>, Option<Join>)> = vec![(Vec::new(), None)];
+    for (part, join) in list {
+        pipelines
+            .last_mut()
+            .expect("never empty")
+            .0
+            .push(part.as_str());
+        if matches!(join, Some(Join::And | Join::Or)) {
+            pipelines.push((Vec::new(), *join));
+        }
+    }
+    let mut chain = pipelines.into_iter();
+    let (first, _) = chain.next().expect("never empty");
+    let passive = |stages: &[&str]| stages.iter().all(|stage| stage_is_inspection(stage));
+    let mut insp = passive(&first);
+    for (stages, join) in chain {
+        insp = match join {
+            // `rg ... || true` cannot fail and only inspects files.
+            Some(Join::Or) => insp || passive(&stages),
+            _ => insp && passive(&stages),
+        };
+    }
+    insp
+}
+
+fn stage_is_inspection(stage: &str) -> bool {
+    let stage = stage.trim();
+    if let Some(inner) = stage
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .or_else(|| stage.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
+    {
+        return inspection_only(inner);
+    }
+    if !stage_can_fail(stage) {
+        return true;
+    }
+    let mut words = stage.split_whitespace().skip_while(|w| {
+        w.split_once('=').is_some_and(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    });
+    let Some(word) = words.next() else {
+        return true;
+    };
+    let prog = word.rsplit('/').next().unwrap_or(word);
+    match prog {
+        "cat" | "head" | "tail" | "ls" | "wc" | "stat" | "file" | "nl" | "sort" | "uniq"
+        | "cut" | "tr" | "realpath" | "dirname" | "basename" | "which" | "type" => true,
+        "git" => matches!(
+            words.find(|w| !w.starts_with('-')),
+            Some("status" | "diff" | "log" | "show" | "branch" | "rev-parse")
+        ),
+        _ => false,
+    }
+}
+
 /// Whether a command or a path names the file the harness keeps API keys in: `config.json` in its
 /// data folder, wherever that is, or in the usual `~/.sage`.
 fn names_key_file(text: &str) -> bool {
@@ -711,6 +787,7 @@ impl Runner<'_> {
             if meta.held_explicit
                 && meta.ok
                 && !proves_nothing(&meta.cmd)
+                && !inspection_only(&meta.cmd)
                 && !empty_test_run
                 && self.sess.evidence.epoch == epoch_before
                 && !self.sess.watches.is_auto_cmd(&meta.cmd, &self.sess.ws.cwd)
@@ -2305,5 +2382,37 @@ mod tests {
         .await;
         assert!(res3.surprised);
         assert!(res3.finished.is_none());
+
+        // Passive inspection commands (`cat`, `git status`, `rg ... || true`) do not satisfy
+        // beyond-watch spec verification.
+        let mut s4 = test_session("script-spec-inspection-only", Features::sage());
+        s4.task = "Implement README.md; the existing test covers only the basics.".into();
+        std::fs::write(s4.ws.root.join("README.md"), "# Spec\n").unwrap();
+        std::fs::write(s4.ws.root.join("n.txt"), "1\n").unwrap();
+        let idx = s4
+            .watches
+            .set("tests", "grep -qx 2 n.txt", s4.ws.cwd.clone(), None);
+        s4.watches.items[idx].auto = true;
+        let (res4, _, _) = run(
+            &mut s4,
+            &[
+                (
+                    "write",
+                    json!({"path": "n.txt", "content": "2\n", "overwrite": true}),
+                ),
+                (
+                    "shell",
+                    json!({"cmd": "rg -n 'old' . || true; cat n.txt; git status --short || true", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "only inspected files"})),
+            ],
+        )
+        .await;
+        assert!(res4.finished.is_none());
+        assert!(
+            res4.observations[2]
+                .1
+                .starts_with("[review] Not accepted yet")
+        );
     }
 }
