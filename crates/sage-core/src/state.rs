@@ -257,6 +257,10 @@ pub struct Evidence {
     pub refusals: u8,
     /// The epoch when the last user message arrived: only changes since then are the message's own.
     pub message_epoch: u64,
+    /// Latest epoch verified by a check beyond the automatic starter watch.
+    pub beyond_watch_epoch: Option<u64>,
+    /// Whether `finish` has already asked for a spec/diff verification pass on this message.
+    pub reviewed: bool,
     /// The last look found the tree too large to walk and asked git: the next one asks git first.
     git_first: bool,
 }
@@ -286,6 +290,14 @@ impl Evidence {
                     .verified
                     .as_ref()
                     .is_some_and(|(e, _)| *e == self.epoch))
+    }
+
+    pub fn verified_beyond_watch(&self) -> bool {
+        self.epoch == 0 || self.beyond_watch_epoch == Some(self.epoch)
+    }
+
+    pub fn passed_beyond_watch(&mut self) {
+        self.beyond_watch_epoch = Some(self.epoch);
     }
 
     /// What stands behind a `fresh` state, in words.
@@ -326,6 +338,8 @@ impl Evidence {
         self.fingerprint = state.fingerprint;
         self.partial_view = state.partial_view;
         self.message_epoch = state.epoch;
+        self.beyond_watch_epoch = None;
+        self.reviewed = false;
     }
 
     /// A tool changed files itself.
@@ -382,6 +396,44 @@ impl Evidence {
     pub fn passed(&mut self, check: impl Into<String>) {
         self.verified = Some((self.epoch, check.into()));
     }
+}
+
+/// Whether `path` names a test file whose execution covers new test cases written in the session.
+pub fn is_test_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase().replace('\\', "/");
+    if lower
+        .split('/')
+        .any(|seg| matches!(seg, "test" | "tests" | "__tests__"))
+    {
+        return true;
+    }
+    let file = lower.rsplit('/').next().unwrap_or(&lower);
+    file.starts_with("test_")
+        || file.ends_with("_test.py")
+        || file.ends_with("_test.go")
+        || file.ends_with("_test.rs")
+        || file.contains(".test.")
+        || file.contains(".spec.")
+}
+
+/// Whether the task or workspace has a specification or partial starter tests that require
+/// verification beyond the starter test watch.
+pub fn task_has_spec(task: &str, root: &std::path::Path) -> bool {
+    let lower = task.to_ascii_lowercase();
+    let partial_or_spec = [
+        "covers only",
+        "only checks",
+        "only tests",
+        "does not cover",
+        "not cover every",
+        "spec.md",
+        "readme.md",
+        "migration.md",
+        "grader will supply",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    partial_or_spec || root.join("SPEC.md").is_file()
 }
 
 /// What a stored session keeps of its `Session` (see `Session::checkpoint`).

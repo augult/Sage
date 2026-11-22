@@ -697,11 +697,24 @@ impl Runner<'_> {
             res.edited.push(path);
         }
         if let Some(meta) = &out.shell {
+            let empty_test_run = watches::test_like(&meta.cmd)
+                && meta
+                    .completed
+                    .as_ref()
+                    .is_some_and(|r| watches::ran_no_tests(&r.text));
             // Evidence is a prediction of success that came true, made about something that can fail.
-            if meta.held_explicit && meta.ok && !proves_nothing(&meta.cmd) {
+            if meta.held_explicit && meta.ok && !proves_nothing(&meta.cmd) && !empty_test_run {
                 self.sess
                     .evidence
                     .passed(format!("`{}`", one_line(&meta.cmd, 100)));
+            }
+            if meta.ok
+                && !proves_nothing(&meta.cmd)
+                && !empty_test_run
+                && self.sess.evidence.epoch == epoch_before
+                && !self.sess.watches.is_auto_cmd(&meta.cmd, &self.sess.ws.cwd)
+            {
+                self.sess.evidence.passed_beyond_watch();
             }
             // An explicit run satisfies a standing check only for the state it observed. It still
             // counts as an attempt if it changed the workspace.
@@ -721,6 +734,14 @@ impl Runner<'_> {
                 if self.sess.watches.all_pass_at(self.sess.evidence.epoch) {
                     let names = self.sess.watches.names();
                     self.sess.evidence.passed(format!("watch {names}"));
+                    if self
+                        .sess
+                        .touched
+                        .iter()
+                        .any(|p| crate::state::is_test_path(p))
+                    {
+                        self.sess.evidence.passed_beyond_watch();
+                    }
                 }
             }
         }
@@ -765,6 +786,7 @@ impl Runner<'_> {
         if self.sess.watches.all_pass_at(self.sess.evidence.epoch) {
             let names = self.sess.watches.names();
             self.sess.evidence.passed(format!("watch {names}"));
+            self.sess.evidence.passed_beyond_watch();
         }
         self.emit_watches(std::slice::from_ref(&report));
         // Registering a check that currently fails is normal (that is often the bug being fixed), so
@@ -929,6 +951,21 @@ impl Runner<'_> {
                 stub: head.clone(),
                 observation: format!("{head}\n{detail}"),
                 ..Default::default()
+            };
+        }
+        if !self.sess.evidence.reviewed
+            && self.sess.evidence.epoch > self.sess.evidence.message_epoch
+            && self.sess.evidence.fresh()
+            && !self.sess.evidence.verified_beyond_watch()
+            && crate::state::task_has_spec(&self.sess.task, &self.sess.ws.root)
+        {
+            self.sess.evidence.reviewed = true;
+            let diff = crate::changes::changes(self.sess).await;
+            let text = crate::changes::review_text(&self.sess.task, diff.as_deref());
+            return StepOutput {
+                stub: "[review] one spec verification pass before finish is accepted".into(),
+                observation: text,
+                ..StepOutput::ok("")
             };
         }
         let ev = &mut self.sess.evidence;
@@ -2165,5 +2202,83 @@ mod tests {
             let (_, _, events) = run(&mut s, &[("shell", json!({"cmd": cmd}))]).await;
             assert_eq!(statuses(&events), vec![StepStatus::Ok], "{cmd}");
         }
+    }
+
+    #[tokio::test]
+    async fn spec_tasks_require_one_verification_beyond_the_starter_watch_or_accept_a_chained_check()
+     {
+        let mut s = test_session("script-spec-review", Features::sage());
+        s.task = "Implement README.md; the existing test covers only the basics.".into();
+        std::fs::write(s.ws.root.join("README.md"), "# Spec\nRule 1 and Rule 2.\n").unwrap();
+        std::fs::write(s.ws.root.join("n.txt"), "1\n").unwrap();
+        let idx = s
+            .watches
+            .set("tests", "grep -qx 2 n.txt", s.ws.cwd.clone(), None);
+        s.watches.items[idx].auto = true;
+        s.watches.items[idx].named = true;
+
+        // First finish when only the auto-watch ran triggers one [review] pass.
+        let (res, _, _) = run(
+            &mut s,
+            &[
+                (
+                    "write",
+                    json!({"path": "n.txt", "content": "2\n", "overwrite": true}),
+                ),
+                ("finish", json!({"summary": "updated n.txt"})),
+            ],
+        )
+        .await;
+        assert!(res.finished.is_none());
+        assert!(
+            res.observations[1]
+                .1
+                .starts_with("[review] Not accepted yet"),
+            "{}",
+            res.observations[1].1
+        );
+
+        // Next reply chains an in-memory shell check with finish and completes in one reply.
+        let (res, _, _) = run(
+            &mut s,
+            &[
+                (
+                    "shell",
+                    json!({"cmd": "test \"$(cat n.txt)\" = 2", "expect_exit": "0"}),
+                ),
+                (
+                    "finish",
+                    json!({"summary": "verified spec rule and finished"}),
+                ),
+            ],
+        )
+        .await;
+        assert!(res.finished.is_some_and(|f| f.verified));
+
+        // If the model chains its own check right before finish on the first try, 0 review turns are needed.
+        let mut s2 = test_session("script-spec-chained", Features::sage());
+        std::fs::write(s2.ws.root.join("SPEC.md"), "# Spec\n").unwrap();
+        std::fs::write(s2.ws.root.join("n.txt"), "1\n").unwrap();
+        let idx = s2
+            .watches
+            .set("tests", "grep -qx 2 n.txt", s2.ws.cwd.clone(), None);
+        s2.watches.items[idx].auto = true;
+        let (res2, _, _) = run(
+            &mut s2,
+            &[
+                (
+                    "write",
+                    json!({"path": "n.txt", "content": "2\n", "overwrite": true}),
+                ),
+                (
+                    "shell",
+                    json!({"cmd": "test \"$(cat n.txt)\" = 2", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "done in one reply"})),
+            ],
+        )
+        .await;
+        assert!(res2.finished.is_some_and(|f| f.verified));
+        assert!(!s2.evidence.reviewed);
     }
 }

@@ -110,6 +110,14 @@ impl Watches {
             })
             .collect();
     }
+
+    /// True when `cmd` in `cwd` is an automatically adopted watch command.
+    pub fn is_auto_cmd(&self, cmd: &str, cwd: &Path) -> bool {
+        let cmd = without_cd(cmd, cwd);
+        self.items
+            .iter()
+            .any(|w| w.auto && w.cmd == cmd && w.cwd == cwd)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -414,6 +422,9 @@ pub async fn run_stale(
     if !cancel.is_cancelled() && sess.watches.all_pass_at(sess.evidence.epoch) {
         let names = sess.watches.names();
         sess.evidence.passed(format!("watch {names}"));
+        if sess.touched.iter().any(|p| crate::state::is_test_path(p)) {
+            sess.evidence.passed_beyond_watch();
+        }
     }
     let mut text: Vec<String> = reports
         .iter()
@@ -489,6 +500,21 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed, observed_epoch: u
         }
     }
 
+    // A test runner that matched 0 tests proves nothing and must not become a passing watch.
+    if epoch == observed_epoch
+        && same.is_empty()
+        && sess.features.auto_watch
+        && run.code == Some(0)
+        && test_like(cmd)
+        && ran_no_tests(&run.text)
+    {
+        let shown = one_line(cmd, 80);
+        out.notice = Some(format!(
+            "Note: `{shown}` ran 0 tests; run a command or inline check that exercises your code with real inputs."
+        ));
+        return out;
+    }
+
     // A runner that could not start (126, 127) says nothing about the code. Nor does a throwaway
     // script: one that lives outside the workspace is gone, or failing on purpose, soon after.
     let promote = epoch == observed_epoch
@@ -497,7 +523,8 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed, observed_epoch: u
         && run.ms <= AUTO_MAX_MS
         && !matches!(run.code, None | Some(126 | 127))
         && test_like(cmd)
-        && !throwaway(cmd, &sess.ws.root);
+        && !throwaway(cmd, &sess.ws.root)
+        && !ran_no_tests(&run.text);
     let previous = sess
         .watches
         .items
@@ -535,13 +562,38 @@ pub fn observe(sess: &mut Session, cmd: &str, run: &Completed, observed_epoch: u
             "watch {AUTO_NAME}: PASS · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again."
         ),
         (None, _) => format!(
-            "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. Send `finish` in the same reply as your fix: the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead."
+            "watch {AUTO_NAME}: FAIL · `{shown}` is now watched: it re-runs by itself after every change and you hear about it when the result changes, so do not run it again. Send `finish` in the same reply as your fix (if the task or spec states rules and edge cases the watched tests do not cover, chain one `shell` check with `expect_exit: \"0\"` for those cases right before `finish`): the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead."
         ),
     };
     report.detail = notice.clone();
     out.reports.push(report);
     out.notice = Some(notice);
     out
+}
+
+/// True when a test runner's output shows that zero test cases were executed.
+pub fn ran_no_tests(text: &str) -> bool {
+    if text.contains("Ran 0 tests in")
+        || text.contains("collected 0 items")
+        || text.contains("# tests 0\n")
+        || text.contains("ℹ tests 0\n")
+    {
+        return true;
+    }
+    if (text.contains("[no test files]") || text.contains("testing: warning: no tests to run"))
+        && !text
+            .lines()
+            .any(|l| l.starts_with("ok  \t") || l.starts_with("FAIL\t"))
+    {
+        return true;
+    }
+    text.contains("running 0 tests")
+        && !text.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("running ")
+                && !t.starts_with("running 0 tests")
+                && (t.ends_with(" test") || t.ends_with(" tests"))
+        })
 }
 
 /// True when `new` is `old` with more arguments: the same run restricted to a part.
@@ -591,7 +643,7 @@ pub fn named_in(task: &str) -> Option<&str> {
 }
 
 /// What the model is told after a preflight, below the result.
-pub const PREFLIGHT_NOTE: &str = "The harness ran the test command the task names and watches it from now on: it re-runs by itself after every change and you hear about it when the result changes, so do not run it yourself. Send `finish` in the same reply as your fix: the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead.";
+pub const PREFLIGHT_NOTE: &str = "The harness ran the test command the task names and watches it from now on: it re-runs by itself after every change and you hear about it when the result changes, so do not run it yourself. Send `finish` in the same reply as your fix (if the task or spec states rules and edge cases the watched tests do not cover, chain one `shell` check with `expect_exit: \"0\"` for those cases right before `finish`): the tests are re-run first, and if they still fail `finish` is refused and you get the new failure instead.";
 
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -1270,5 +1322,40 @@ mod tests {
         for cmd in no {
             assert!(!test_like(cmd), "{cmd}");
         }
+    }
+
+    #[test]
+    fn zero_test_runs_are_detected_and_not_promoted_to_watches() {
+        assert!(ran_no_tests("Ran 0 tests in 0.000s\n\nNO TESTS RAN"));
+        assert!(ran_no_tests("?   \texample.com/foo\t[no test files]"));
+        assert!(ran_no_tests(
+            "running 0 tests\n\ntest result: ok. 0 passed; 0 failed"
+        ));
+        assert!(!ran_no_tests(
+            "running 0 tests\nrunning 2 tests\ntest result: ok. 2 passed"
+        ));
+        assert!(!ran_no_tests("Ran 3 tests in 0.001s\n\nOK"));
+
+        let mut s = test_session("watch-zero-tests", Features::sage());
+        let cwd = s.ws.cwd.clone();
+        let obs = observe(
+            &mut s,
+            "python3 -m unittest",
+            &Completed {
+                cwd,
+                code: Some(0),
+                text: "Ran 0 tests in 0.000s\n\nNO TESTS RAN\n".into(),
+                predicate_text: None,
+                output_complete: true,
+                ms: 10,
+            },
+            0,
+        );
+        assert!(s.watches.items.is_empty());
+        assert!(
+            obs.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("ran 0 tests"))
+        );
     }
 }
