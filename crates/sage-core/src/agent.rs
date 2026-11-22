@@ -205,7 +205,11 @@ enum Ending {
 }
 
 /// Sent once when a task with a written specification first calls `finish`.
-const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Do one review, in your next reply only. Go through the specification the task names (README, spec, contract, docstring, plan or note) and pick the rules no test checks: command-line forms and wrong use, errors and exit statuses, edge cases, and every file or entry the task says to change. Send a check for each as calls in that one reply (shell with expect_exit / expect_has; several rules may share one command), with `finish` as its last call. The calls run in order and stop at the first that fails: then fix that and call `finish` again. Do not spread the review over several replies.";
+const SPEC_REVIEW: &str = "Before this ends: the tests cover only part of what the task asks. Review the work against the specification the task names (README, spec, contract, docstring, plan or note), in your next reply and with ONE call: `watch` named `spec`, whose `cmd` is a shell script that checks every rule no test covers (command-line forms and wrong use, errors and exit statuses, edge cases, and every file or entry the task says to change). Make it print PASS or FAIL with the rule for each check and exit non-zero if any fails. The harness runs it: if it passes, your `finish` stands as it is and no further reply is needed. If it fails, fix the work and call `finish` again; the watch re-runs by itself after every change.";
+/// The same review where there are no watches: the checks go in one reply, with `finish` last.
+const SPEC_REVIEW_PLAIN: &str = "Before this ends: the tests cover only part of what the task asks. Review the work against the specification the task names (README, spec, contract, docstring, plan or note), in your next reply only: one check (shell with expect_exit / expect_has) for every rule no test covers, with `finish` as the last call. The calls stop at the first that fails: then fix that and call `finish` again.";
+/// Replies a spec review may take before the model is told to finish.
+const SPEC_REVIEW_REPLIES: u32 = 4;
 
 /// Whether a task holds the work to more than its tests: it says they check only part of it, or
 /// it points at a written specification (a README, spec, contract, docstring, plan or note).
@@ -245,6 +249,10 @@ struct EndChecks {
     goal: u32,
     /// The spec review has held a `finish` of this user message.
     spec: bool,
+    /// The `finish` the spec review holds: it stands as soon as a reply's checks all pass.
+    held: Option<Outcome>,
+    /// Replies since the spec review held the `finish`.
+    review_replies: u32,
 }
 
 const KEEP_RECENT_MESSAGES: usize = 12;
@@ -1241,6 +1249,9 @@ impl Agent {
             .run(&calls)
             .await;
             slowest = slowest.max(turn_started.elapsed());
+            // Nothing changed and nothing went wrong: what a review that passes looks like.
+            let quiet =
+                result.edited.is_empty() && !result.surprised && result.failed_steps.is_empty();
 
             self.surprise_streak = if result.surprised {
                 self.surprise_streak + 1
@@ -1336,7 +1347,21 @@ impl Agent {
                     evidence: self.evidence_text(),
                 };
             }
+            if result.finished.is_none() && end_checks.held.is_some() {
+                end_checks.review_replies += 1;
+                if let Some(outcome) = self.review_passed(&calls, quiet, &mut end_checks) {
+                    break outcome;
+                }
+                if end_checks.review_replies == SPEC_REVIEW_REPLIES && !landing {
+                    let msg = format!(
+                        "The review has taken {SPEC_REVIEW_REPLIES} replies. Finish now: call `finish`, and name in the summary any rule that still fails."
+                    );
+                    self.note("spec", &msg);
+                    self.ctx.push(Message::user(format!("[harness] {msg}")));
+                }
+            }
             if let Some(done) = result.finished {
+                end_checks.held = None;
                 let outcome = Outcome {
                     status: FinishStatus::Done,
                     summary: done.summary,
@@ -1481,7 +1506,54 @@ impl Agent {
             "spec",
             "finish held once for a review against the specification",
         );
-        Some(SPEC_REVIEW.to_string())
+        Some(if self.cfg.features.watches {
+            checks.held = Some(outcome.clone());
+            SPEC_REVIEW.to_string()
+        } else {
+            SPEC_REVIEW_PLAIN.to_string()
+        })
+    }
+
+    /// The held `finish` stands when a reply did nothing but check, every check passed and every
+    /// watch, the review's own among them, passes now: asking the model to say `finish` again
+    /// would cost a reply and change nothing. A reply that changed files has to call `finish`
+    /// itself, since what it says may no longer hold.
+    fn review_passed(
+        &mut self,
+        calls: &[repair::Call],
+        quiet: bool,
+        checks: &mut EndChecks,
+    ) -> Option<Outcome> {
+        use crate::tools::Tool;
+        let checked = calls
+            .iter()
+            .any(|c| matches!(c.tool, Some(Tool::Shell | Tool::Watch)));
+        let only_looked = calls.iter().all(|c| {
+            matches!(
+                c.tool,
+                Some(Tool::Shell | Tool::Watch | Tool::Read | Tool::Search)
+            )
+        });
+        let watches = &self.sess.watches;
+        let review = watches.items.iter().any(|w| w.name == "spec");
+        if !checked
+            || !only_looked
+            || !quiet
+            || !review
+            || !watches.all_pass_at(self.sess.evidence.epoch)
+            || !self.sess.evidence.fresh()
+        {
+            return None;
+        }
+        let mut outcome = checks.held.take()?;
+        outcome.verified = true;
+        outcome.evidence = self.evidence_text();
+        outcome.summary = format!(
+            "{}\n\nReviewed against the specification: watch `spec` passes.",
+            outcome.summary
+        );
+        self.note("spec", "the review's checks pass: the held finish stands");
+        Some(outcome)
     }
 
     /// Sends the model back to work with `message`, as the harness speaking.

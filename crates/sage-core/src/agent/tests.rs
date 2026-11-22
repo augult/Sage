@@ -2657,3 +2657,89 @@ fn a_task_held_to_a_written_spec_or_partial_tests_is_recognised() {
     ));
     assert!(!points_past_its_tests("Rename foo to bar."));
 }
+
+fn spec_turns(review_cmd: &'static str, after: Vec<TurnFn>) -> Vec<TurnFn> {
+    let mut turns: Vec<TurnFn> = vec![
+        fixed(MockTurn::calls(
+            "write, check, finish",
+            vec![
+                ("write", json!({"path": "out.txt", "content": "done\n"})),
+                (
+                    "shell",
+                    json!({"cmd": "grep -qx done out.txt", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "wrote out.txt"})),
+            ],
+        )),
+        fixed(MockTurn::calls(
+            "the review",
+            vec![("watch", json!({"name": "spec", "cmd": review_cmd}))],
+        )),
+    ];
+    turns.extend(after);
+    turns
+}
+
+#[tokio::test]
+async fn a_spec_review_that_passes_lets_the_held_finish_stand_without_another_reply() {
+    let mut r = rig("agent-spec-pass", AgentConfig::new("mock"), vec![]);
+    r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(spec_turns(
+        "grep -qx done out.txt && echo PASS",
+        vec![],
+    ))));
+    let out = r
+        .agent
+        .run(
+            "Write out.txt as README.md specifies.".into(),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(out.status, FinishStatus::Done, "{}", out.summary);
+    assert!(out.verified);
+    assert!(out.summary.starts_with("wrote out.txt"), "{}", out.summary);
+    assert!(
+        out.summary.contains("watch `spec` passes"),
+        "{}",
+        out.summary
+    );
+    // The first reply, and the review: no third reply to say `finish` again.
+    assert_eq!(r.agent.stats.requests, 2);
+}
+
+#[tokio::test]
+async fn a_spec_review_that_fails_sends_the_model_back_and_its_next_finish_ends_the_run() {
+    let mut r = rig("agent-spec-fail", AgentConfig::new("mock"), vec![]);
+    let fix = fixed(MockTurn::calls(
+        "fix and finish",
+        vec![
+            (
+                "write",
+                json!({"path": "out.txt", "content": "done\nusage\n", "overwrite": true}),
+            ),
+            (
+                "shell",
+                json!({"cmd": "grep -qx usage out.txt", "expect_exit": "0"}),
+            ),
+            ("finish", json!({"summary": "added the usage line"})),
+        ],
+    ));
+    r.agent.provider = Arc::new(Provider::Mock(MockProvider::new(spec_turns(
+        "grep -qx usage out.txt || { echo 'FAIL usage line'; exit 1; }",
+        vec![fix],
+    ))));
+    let out = r
+        .agent
+        .run(
+            "Write out.txt as README.md specifies.".into(),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(out.status, FinishStatus::Done, "{}", out.summary);
+    assert_eq!(out.summary, "added the usage line");
+    assert_eq!(r.agent.stats.requests, 3);
+    let root = r.agent.sess.ws.root.clone();
+    assert_eq!(
+        std::fs::read_to_string(root.join("out.txt")).unwrap(),
+        "done\nusage\n"
+    );
+}
