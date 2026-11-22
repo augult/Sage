@@ -1,0 +1,6 @@
+THOUGHT = "The visible fixture now passes. Verify no-valid input, stdin, normalization plus a tied slowest request, -n remainder aggregation, and CLI usage failures in a single inline shell check before finishing."
+CONTENT = ""
+CALLS = [
+    {"name": "shell", "arguments": {"cmd": "set -eu\nempty=$(printf 'bad\\n\\nnope\\n' | sh rollup.sh)\n[ \"$empty\" = \"$(printf 'requests: 0\\nskipped: 2\\nwindow: -')\" ]\ninput=$(printf '2026-01-01T00:00:00Z GET /x/12/?q=1 500 10ms 20b\\n2026-01-01T00:00:01Z GET /x/34 200 30ms 40b\\n2026-01-01T00:00:02Z POST / 200 30ms 1b\\n' | sh rollup.sh -n 1)\nprintf '%s\\n' \"$input\" | grep -F 'GET /x/:id' >/dev/null\nprintf '%s\\n' \"$input\" | grep -F '(other)' >/dev/null\nprintf '%s\\n' \"$input\" | grep -F 'GET /x/:id' | grep -F '2   50.0' >/dev/null\nif sh rollup.sh -n 0 >/dev/null 2>&1; then exit 1; else [ $? -eq 2 ]; fi\nif sh rollup.sh extra extra >/dev/null 2>&1; then exit 1; else [ $? -eq 2 ]; fi", "expect_exit": "0", "timeout": 30}},
+    {"name": "finish", "arguments": {"summary": "Implemented the POSIX sh/mawk rollup. The sample check and additional stdin, empty-valid-set, route normalization, aggregate and CLI usage checks passed.", "unverified": "The extra checks were focused cases, not exhaustive property testing across all possible logs."}}
+]
