@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-py-food-chain", "repeat": 1, "slot": "ds-sage-pgb-py-food-chain-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 28743, "reply_bytes": 5879, "requests": 2, "replies": 2}
