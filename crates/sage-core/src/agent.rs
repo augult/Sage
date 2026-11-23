@@ -35,12 +35,14 @@ use tokio_util::sync::CancellationToken;
 pub enum EffortPolicy {
     Fixed(Effort),
     Ratchet(Effort),
+    LockedMax,
 }
 
 impl EffortPolicy {
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim().to_ascii_lowercase();
         match s.as_str() {
+            "locked-max" => Some(EffortPolicy::LockedMax),
             "ratchet" | "auto" | "adaptive" => Some(EffortPolicy::Ratchet(Effort::Low)),
             _ => match s
                 .strip_prefix("ratchet-")
@@ -55,6 +57,7 @@ impl EffortPolicy {
     pub fn start(&self) -> Effort {
         match self {
             EffortPolicy::Fixed(e) | EffortPolicy::Ratchet(e) => *e,
+            EffortPolicy::LockedMax => Effort::Max,
         }
     }
 
@@ -62,7 +65,15 @@ impl EffortPolicy {
         match self {
             EffortPolicy::Fixed(e) => e.as_str().to_string(),
             EffortPolicy::Ratchet(e) => format!("ratchet-{}", e.as_str()),
+            EffortPolicy::LockedMax => "locked-max".to_string(),
         }
+    }
+
+    fn fallback(self, effort: Effort, only_reasoned: u32) -> Option<Effort> {
+        if self == EffortPolicy::LockedMax {
+            return None;
+        }
+        less_thinking(effort, only_reasoned)
     }
 }
 
@@ -963,7 +974,7 @@ impl Agent {
                     );
                     self.note("overthinking", &msg);
                     only_reasoned += 1;
-                    if let Some(lower) = less_thinking(self.effort, only_reasoned) {
+                    if let Some(lower) = self.cfg.effort.fallback(self.effort, only_reasoned) {
                         self.sink.emit(EventKind::Effort {
                             turn,
                             from: self.effort.as_str().into(),
@@ -1109,8 +1120,11 @@ impl Agent {
                         // Thinking that fills the whole reply will do so again unless it is given less room.
                         let reasoned = resp.usage.reasoning * 10 >= resp.usage.output * 9;
                         only_reasoned += u32::from(reasoned);
-                        if let Some(lower) =
-                            less_thinking(self.effort, only_reasoned).filter(|_| reasoned)
+                        if let Some(lower) = self
+                            .cfg
+                            .effort
+                            .fallback(self.effort, only_reasoned)
+                            .filter(|_| reasoned)
                         {
                             self.sink.emit(EventKind::Effort {
                                 turn,
