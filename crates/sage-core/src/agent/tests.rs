@@ -1203,6 +1203,8 @@ fn effort_policy_parses() {
     );
     assert_eq!(EffortPolicy::parse("fast"), None);
     assert_eq!(EffortPolicy::Ratchet(Effort::Low).label(), "ratchet-low");
+    let locked = EffortPolicy::LockedMax;
+    assert_eq!(EffortPolicy::parse(&locked.label()), Some(locked));
 }
 
 #[test]
@@ -1814,6 +1816,31 @@ async fn a_goal_is_checked_in_the_classic_loop_too() {
         "{}",
         out.evidence
     );
+}
+
+#[tokio::test]
+async fn locked_max_never_lowers_effort_after_an_overthinking_reply() {
+    let mut cfg = AgentConfig::new("mock");
+    cfg.effort = EffortPolicy::LockedMax;
+    let mut r = rig(
+        "agent-locked-max",
+        cfg,
+        vec![
+            fixed(MockTurn::fail(ProviderError::Overthinking(100_000))),
+            fixed(MockTurn::calls(
+                "",
+                vec![("read", json!({"path": "n.txt"}))],
+            )),
+            finish(),
+        ],
+    );
+    let out = r
+        .agent
+        .run("How long is n.txt?".into(), &CancellationToken::new())
+        .await;
+    assert_eq!(out.status, FinishStatus::Done);
+    let asked = shapes(&r).iter().map(|s| s.effort).collect::<Vec<_>>();
+    assert_eq!(asked, [Effort::Max; 3]);
 }
 
 #[tokio::test]
