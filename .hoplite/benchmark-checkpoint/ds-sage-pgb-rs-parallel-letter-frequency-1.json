@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-rs-parallel-letter-frequency", "repeat": 1, "slot": "ds-sage-pgb-rs-parallel-letter-frequency-1", "status": "done", "solved": true, "turns": 5, "wire_max": 5, "request_bytes": 74387, "reply_bytes": 4690, "requests": 5, "replies": 5}
