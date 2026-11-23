@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-rs-book-store", "repeat": 1, "slot": "ds-sage-pgb-rs-book-store-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 31579, "reply_bytes": 8383, "requests": 2, "replies": 2}
