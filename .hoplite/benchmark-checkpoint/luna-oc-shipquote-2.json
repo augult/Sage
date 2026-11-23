@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "shipquote", "repeat": 2, "slot": "luna-oc-shipquote-2", "status": "done", "solved": true, "turns": 12, "wire_max": 12, "request_bytes": 641484, "reply_bytes": 24244, "requests": 12, "replies": 12}

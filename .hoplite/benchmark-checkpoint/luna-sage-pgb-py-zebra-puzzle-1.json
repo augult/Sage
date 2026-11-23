@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "pgb-py-zebra-puzzle", "repeat": 1, "slot": "luna-sage-pgb-py-zebra-puzzle-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 9666, "reply_bytes": 2484, "requests": 1, "replies": 1}
