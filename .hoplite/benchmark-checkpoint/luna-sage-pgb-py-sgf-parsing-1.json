@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "pgb-py-sgf-parsing", "repeat": 1, "slot": "luna-sage-pgb-py-sgf-parsing-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 14613, "reply_bytes": 5487, "requests": 1, "replies": 1}
