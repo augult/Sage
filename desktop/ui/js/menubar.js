@@ -10,7 +10,7 @@
 
 import { api } from './api.js';
 import { appWindow, maximized } from './chrome.js';
-import { brandMark, h, icon } from './dom.js';
+import { h, icon } from './dom.js';
 import { tilde } from './format.js';
 import * as panes from './panes.js';
 import * as themes from './themes.js';
@@ -105,7 +105,6 @@ function showAbout(state) {
     h('div.dialog-head', h('h2', 'About Sage'), closeButton(close)),
     h(
       'div.about-body',
-      brandMark(40),
       h('div.about-name', 'Sage'),
       h('div.muted', `Version ${state.version}`),
       h('p.about-what', 'An expectation-driven agent harness.'),

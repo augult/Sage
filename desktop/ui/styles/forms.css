@@ -44,11 +44,6 @@
   text-align: center;
 }
 
-.new-hero .brand-mark {
-  flex: none;
-  color: var(--soft);
-}
-
 .new-bar {
   flex: none;
   width: 100%;
@@ -1039,7 +1034,6 @@ textarea.editor {
 @media (max-height: 540px) {
   .new-body { gap: 16px; }
   .new-hero { gap: 10px; }
-  .new-hero .brand-mark { width: 32px; height: 32px; }
 }
 
 @media (max-width: 520px) {

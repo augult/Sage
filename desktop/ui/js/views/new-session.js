@@ -7,7 +7,7 @@
 // offered over the bar.
 
 import { api } from '../api.js';
-import { brandMark, h, icon } from '../dom.js';
+import { h, icon } from '../dom.js';
 import { folderNames, plainPath, tilde } from '../format.js';
 import { attachments } from './attach.js';
 import { barButton, chatBar, fitBox, markIdle, onSendKey } from './common.js';
@@ -192,7 +192,7 @@ export function mountNewSession(main, app) {
 
   // The way to a key leads while there is none.
   const lead = keyed.length === 0 && h('button.btn.primary.new-lead', { id: 'add-key', type: 'button', onclick: () => app.show({ name: 'settings', section: 'settings-keys' }) }, icon('key', 14), 'Add an API key');
-  const hero = h('div.new-hero', brandMark(44), h('h1.view-title', 'What should we work on?'));
+  const hero = h('div.new-hero', h('h1.view-title', 'What should we work on?'));
 
   main.append(h('div.new-body', hero, lead, bar));
   drawFolder();

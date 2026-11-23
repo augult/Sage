@@ -113,32 +113,6 @@ export function icon(name, size = 16) {
 
 export const spinner = () => h('span.spinner', { 'aria-hidden': 'true' });
 
-let marks = 0;
-
-/**
- * The app's mark at `size`, as the website and the app icon have it: a disc, and a ring over it
- * that is cut out where it crosses the disc, so what is behind shows through the cut.
- */
-export function brandMark(size) {
-  const el = (name, attributes, ...children) => {
-    const node = document.createElementNS(SVG, name);
-    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-    node.append(...children);
-    return node;
-  };
-  const whole = () => el('rect', { x: 0, y: 0, width: 24, height: 24, fill: '#fff' });
-  // Each mark cuts by masks of its own: two on a page must not share them.
-  const cut = `mark-${++marks}`;
-  return el(
-    'svg',
-    { class: 'brand-mark', viewBox: '2 2 20 20', width: size, height: size, 'aria-hidden': 'true' },
-    el('mask', { id: `${cut}-ring` }, whole(), el('circle', { cx: 14.5, cy: 9.5, r: 6.6, fill: 'none', stroke: '#000', 'stroke-width': 1.8 })),
-    el('mask', { id: `${cut}-disc` }, whole(), el('circle', { cx: 9.5, cy: 14.5, r: 7.5, fill: '#000' })),
-    el('circle', { cx: 9.5, cy: 14.5, r: 7.5, fill: 'currentColor', mask: `url(#${cut}-ring)` }),
-    el('circle', { cx: 14.5, cy: 9.5, r: 6.6, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, mask: `url(#${cut}-disc)` }),
-  );
-}
-
 /** The mark of a run in progress: a dot, and around it a ring that swells and fades (styles/base.css). */
 export function pulse(size = 16) {
   const svg = document.createElementNS(SVG, 'svg');
