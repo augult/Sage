@@ -7,7 +7,5 @@ release/
 .env.*
 .DS_Store
 desktop/src-tauri/gen/
-.hoplite/runtime/
-.hoplite/artifacts/
 __pycache__/
 *.pyc

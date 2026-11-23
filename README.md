@@ -34,12 +34,10 @@ model, same tasks.
 | GPT-6 Luna | **Sage** | **30/60** | **$0.212** | **41 s** |
 | | OpenCode 1.19.5 | 24/60 | $0.369 | 61 s |
 
-Sage solved more with both models, for 24 to 43% less money and about a third less time. On an
-earlier 36-task Python, Rust and Go set, GLM-5.3 solved 31 of 72 with Sage against 19 with OpenCode,
-at 59% less cost. These were run by me on 17 and 22 November 2026; gaps of two or three runs are
-within chance, and on your own code the results can differ, in either direction, so the best test
-is your own work. Per-run data is in [`docs/results/`](docs/results/), and the method and every
-other measurement in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Sage solved more with both models, for 24 to 43% less money and about a third less time. These
+were run by me on 22 November 2026; gaps of two or three runs are within chance, and on your own
+code the results can differ, in either direction, so the best test is your own work. Per-run data
+is in [`docs/results/`](docs/results/), and the method in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
@@ -113,8 +111,8 @@ command and option.
 ## Providers
 
 OpenAI, Anthropic, Google, DeepSeek, OpenRouter, Moonshot, xAI, Groq, Together and Logfare are
-built in, and any OpenAI-compatible endpoint can be added. Only DeepSeek V4.1 Flash and GLM-5.3,
-through Logfare, have been tested end to end; the others follow their vendors' documentation.
+built in, and any OpenAI-compatible endpoint can be added. Only DeepSeek V4.1 Flash, GLM-5.3 and GPT-6
+Luna have been tested end to end; the others follow their vendors' documentation.
 
 ## Desktop app
 
@@ -140,7 +138,7 @@ changed, fork it; that is what the license is for.
 | `crates/sage-cli` | The `sage` binary; `bench/` holds the benchmark tasks. |
 | `desktop/` | The Tauri shell and the front end (static, no bundler). |
 | `docs/DESIGN.md` | How each mechanism works; modes, goals, sessions, providers, releases. |
-| `docs/BENCHMARKS.md` | Every number, with the raw results. |
-| `docs/HANDOFF.md` | The development log: what was done and what is open. |
+| `docs/BENCHMARKS.md` | The benchmark results and how to run them; per-run data in `docs/results/`. |
+| `docs/DESKTOP_UI_BRIEF.md` | The desktop app's specification. |
 
 `cargo test --workspace` runs the tests.

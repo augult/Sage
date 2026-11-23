@@ -1,2 +1,0 @@
-[1/18] deepseek-v4.1-flash-1017 · pgb-rs-ocr-numbers · prosage #1: solved · 27 turns · $0.1059 · 7m48s
-[2/18] deepseek-v4.1-flash-1017 · pgb-rs-xorcism · prosage #1: solved · 34 turns · $0.0827 · 6m34s

@@ -148,12 +148,12 @@ jobs:
         if: runner.os != 'Windows'
         run: python3 crates/sage-cli/tests/cli_smoke.py target/release/sage
 
-      - name: Check the 36 reconstructed benchmark fixtures offline
+      - name: Check the 23 benchmark exercises offline
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          python3 docs/results/2026-11-17-polyglot/prepare.py "$RUNNER_TEMP/polyblind"
+          python3 scripts/polyglot.py "$RUNNER_TEMP/polyblind"
           cd "$RUNNER_TEMP/polyblind"
           # The fixture build embeds held-out tests, so it uses a separate target directory.
           cargo run --locked -p sage-cli -- bench --check --tasks polyblind
@@ -218,7 +218,7 @@ jobs:
           | DeepSeek V4.1 Flash | 45/60 | 40/60 | 24% lower | 36% lower (median) |
           | GPT-6 Luna | 30/60 | 24/60 | 43% lower | 32% lower (median) |
 
-          On the earlier 36-task Python, Rust and Go set, GLM-5.3 solved 31/72 with Sage against 19/72 with OpenCode, at 59% lower cost. Every run, the method and the raw results: [docs/BENCHMARKS.md](https://github.com/augult/Sage/blob/main/docs/BENCHMARKS.md).
+          Every run, the method and the raw results: [docs/BENCHMARKS.md](https://github.com/augult/Sage/blob/main/docs/BENCHMARKS.md).
 
           ## What changed
           - **Passing the visible tests is no longer enough to finish a task with a spec.** When the task or its README states rules the tests in the project leave out, `finish` waits for one check of those rules first, sent in the same reply. Reading a file, `git status` or a search that cannot fail do not count as that check.

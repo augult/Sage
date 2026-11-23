@@ -1,8 +1,8 @@
 # Sage: design and details
 
 The long form of the README: how each mechanism works, the modes, the session goal, continuing a
-session, providers, releases and the state of the project as last written down. Every number is
-in `docs/BENCHMARKS.md`; what is open is in `docs/HANDOFF.md`.
+session, providers, releases and the state of the project. The benchmark results are in
+`docs/BENCHMARKS.md`.
 
 ## How it works
 
@@ -40,8 +40,8 @@ Any mechanism in the table above can be switched off in Sage (`--without <name>`
 `default+<name>`).
 
 Earlier versions had a third mode, Prosage, with blind examiners and referees beside the run. It
-was taken out: on the Python, Rust and Go benchmark of 17 November 2026 (DeepSeek V4.1 Flash) it
-solved fewer tasks than Sage, 41 of 72 against 44, at more than twice the cost. A session stored as Prosage comes back as Sage.
+was taken out because it solved fewer tasks than Sage at more than twice the cost. A session stored
+as Prosage comes back as Sage.
 
 **Effort is not part of the mode.** Every mode runs at the effort it is given. `ratchet` (Auto in
 the app) starts at `low` and rises on surprises; `low`, `high` and `max` are kept as they are set.
@@ -135,22 +135,19 @@ the notes in the workflow's publish job, push to `main`, and dispatch the workfl
 website's download button (augult/Harness) asks GitHub for the latest release, so it needs no change
 unless the files are renamed.
 
-## Status (20 November 2026)
+## Status (23 November 2026, version 0.4.0)
 
-What is open and how to continue: `docs/HANDOFF.md`. Every number: `docs/BENCHMARKS.md`.
-
-- **Engine and CLI**: implemented; `cargo test --workspace` runs 291 tests (unit tests per module
-  plus end-to-end agent runs against a scripted model). CI runs them, Clippy with warnings as
+- **Engine and CLI**: implemented; `cargo test --workspace` runs the unit tests of every module
+  and end-to-end agent runs against a scripted model. CI runs them, Clippy with warnings as
   errors, formatting and the front end's lint on every pull request and push to `main`, on Linux
   and Windows, and the engine's and CLI's on macOS. `sage` in a terminal is an interactive session
   with `/` commands (`crates/sage-cli/src/chat.rs`); `sage run` is the unattended one.
 - **Benchmark**: `sage bench` runs 24 synthetic tasks in three sets (`easy`, `skill`, `hard`)
   under harness variants, and other harnesses (`ext:mini`, `ext:opencode`, …) on the same tasks
   through a metering proxy. Every run is judged with held-out checks, whatever the agent claimed.
-  The latest comparison is the Python, Rust and Go run of 17 November 2026: Sage and OpenCode
-  44/72 each, Sage at about 60% of OpenCode's cost and time.
-- **Live models**: DeepSeek V4.1 Flash (and GLM-5.3, before the latest changes) run end to end
-  through Logfare. Every other preset follows its vendor's documented contract and is untested.
+  The latest comparison, 22 November 2026, is in `docs/BENCHMARKS.md`: Sage solved more than
+  OpenCode with DeepSeek V4.1 Flash and GPT-6 Luna, at lower cost and in less time.
+- **Live models**: DeepSeek V4.1 Flash, GPT-6 Luna and GLM-5.3 have run end to end. Every other preset follows its vendor's documented contract and is untested.
 - **Releases**: the CLI for Linux, macOS and Windows and the desktop app for Windows, on GitHub
   Releases. The repository is public under the MIT licence and shared as it is: issues and pull
   requests are open to collaborators only.

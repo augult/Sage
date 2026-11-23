@@ -1,3 +1,0 @@
-[1/9] deepseek-v4.1-flash-1017 · pgb-py-food-chain · ext:opencode #1: solved · 6 turns · $0.0019 · 22s
-[2/9] deepseek-v4.1-flash-1017 · pgb-py-forth · ext:opencode #1: NOT solved (done) · 17 turns · $0.0242 · 3m11s
-[3/9] deepseek-v4.1-flash-1017 · pgb-py-go-counting · ext:opencode #1: solved · 55 turns · $0.1111 · 12m28s

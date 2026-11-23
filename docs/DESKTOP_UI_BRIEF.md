@@ -1,7 +1,6 @@
 # Desktop UI brief
 
-The shell and front end are built; what has and has not been verified is in `docs/HANDOFF.md`. This
-brief remains the specification. Everything the UI needs is on `sage_core::harness::Harness`.
+The shell and front end are built; this brief is their specification. Everything the UI needs is on `sage_core::harness::Harness`.
 
 ## Read first
 
@@ -86,8 +85,8 @@ sessions a stand-in played as continuable, and a message to one brings it back, 
 Start a scripted session, quit the app (SIGTERM goes through the same door as the window's
 close), start it again with `SAGE_UI_OPEN=<id> SAGE_UI_REVIVE=<file>`, and type into
 `#followup` with a script. Without the hook such a session is read-only (`simulated`).
-Pickers answer to scripts as `#pick-model`, `#pick-effort`, `#pick-mode`, `#pick-autonomy` and
-`#pick-folder`, and their options as `#pick-mode-menu [data-value="default"]`; a model's option
+Pickers answer to scripts as `#pick-model`, `#pick-effort`, `#pick-autonomy` and
+`#pick-folder`, and their options as `#pick-autonomy-menu [data-value="ask"]`; a model's option
 is `#pick-model-menu [data-value="<provider>:<model>"]` and a recent folder's
 `#pick-folder-menu [data-value="<path>"]`. Skills are commands typed into the box, once their
 list has loaded (`wait:800`): `type:#task=>/debug fix it` switches Debug on and leaves the rest
@@ -252,14 +251,13 @@ fill, a dither ink or an ink colour, and these have to be recomputed.
 2. **Main**:
    - *New session*: no title and no picture, and with the middle panel's background on no sheet:
      the view opens on the bare glass
-     (see Glass). In its middle, a little above the centre, are the app's mark, one large line
+     (see Glass). In its middle, a little above the centre, are one large line
      ("What should we work on?") and the chat bar, built by the same function as a session's
      (`chatBar` in `ui/js/views/common.js`); once the first message is sent the bar is at the
      foot of the sheet. In the bar are the task and, along its foot, the + that attaches files
      and the effort (Auto, Low, High, Max: Auto is the engine's `ratchet`, which starts low and
      steps up when predictions fail) at one end, and the model, the microphone and Start at the
-     other. Under the bar are the folder, the mode (Ecosage / Default, each with what
-     it is for as its `title`; README, "Modes") and the autonomy (Auto / Ask). The folder is a
+     other. Under the bar are the folder and the permissions (Act freely / Ask first). The folder is a
      picker like the rest: the folders of up to five recent sessions by name (the full path is
      the `title`), the chosen one checked, and under a rule "Choose folder…" (the system's own
      folder dialog, `pick_folder`); a folder picked there joins the list. Start is Enter in the
@@ -428,39 +426,39 @@ timeout 60 xvfb-run -a -s "-screen 0 1320x860x24" bash -c \
   'target/desktop/debug/sage-desktop & APP=$!; sleep 12; import -window root /tmp/shot.png; kill $APP; wait $APP 2>/dev/null; true'
 ```
 
-Look at every screenshot. The demo session must show only the task, one grey bar, the answer, the
+Look at every view. The demo session must show only the task, one grey bar, the answer, the
 line for the outcome and the card of the file it edited; the bar must end "1 surprise, 1 skipped",
 and its rows, opened, must show the surprise with its prediction and the skipped `finish`.
 The walkthrough: reply 1 reads and runs the check (it becomes watch `tests`), reply 2 edits and
 predicts a pass (a surprise; `finish` is skipped), reply 3 edits and finishes (verified by watch
 `tests`).
 
-`docs/screenshots/` holds the views as that command shows them, with these in place of
-`SAGE_UI_AUTODEMO=1` (a keyed view also takes `LOGFARE_API_KEY=x`; no session is started with it):
+These hooks open each view in the state worth checking, in place of `SAGE_UI_AUTODEMO=1`
+(a keyed view also takes `LOGFARE_API_KEY=x`; no session is started with it):
 
-| File | Hooks |
+| View | Hooks |
 | --- | --- |
-| `new-session.jpg` | `SAGE_UI_VIEW=new`, no key |
-| `new-session-model-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:#pick-model'` |
-| `new-session-skills-menu.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='wait:800;;type:#task=>/skills;;key:#task=>Enter;;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
-| `session.jpg` | `SAGE_UI_AUTODEMO=1` |
-| `session-tools.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
-| `session-diff.jpg` | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
-| `session-sources.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
-| `session-skills.jpg` | `SAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;type:#followup=>/skills;;key:#followup=>Enter;;click:[data-skill="ui"] .skill-use` |
-| `session-github.jpg` | a session whose folder is a git repository with a github.com remote, uncommitted changes and unpushed commits, then `click:#tab-github` |
-| `session-code.jpg` | the same session, then `click:#tab-code;;click:[data-path="src"];;click:[data-path="src/board.js"]` |
-| `session-attach.jpg` | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='attach:#attach=><path>,<path>;;type:#task=>…'` |
-| `session-error.jpg` | `SAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
-| `settings.jpg` | `SAGE_UI_VIEW=settings` |
-| `settings-keys.jpg` | `SAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x SAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |
-| `settings-defaults.jpg` | the same with `ANTHROPIC_API_KEY=x` and `scroll:#settings-defaults;;click:#default-provider` |
-| `settings-unsaved.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;type:#system-prompt=>…;;click:#new-session'` |
-| `settings-skills.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
-| `settings-system-prompt.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
-| `settings-instructions.jpg` | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |
+| New session | `SAGE_UI_VIEW=new`, no key |
+| New session model menu | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='click:#pick-model'` |
+| New session skills menu | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='wait:800;;type:#task=>/skills;;key:#task=>Enter;;click:[data-skill="debug"] .skill-use;;click:[data-skill="tests"] .skill-use'` |
+| Session | `SAGE_UI_AUTODEMO=1` |
+| Session tools | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.work-toggle;;click:[data-step="2.1"] .row-line;;click:[data-step="2.2"] .row-line;;wait:600;;click:[data-step="2.1"] [data-mode="unified"];;scroll:[data-step="2.1"]'` |
+| Session diff | `SAGE_UI_AUTODEMO=1 SAGE_UI_SCRIPT='wait:9000;;click:.changes .row-line;;wait:300;;click:.changes [data-mode="split"];;wait:400;;scroll:.result'` |
+| Session sources | `SAGE_UI_OPEN=<id>` of a stored session whose log has a `web_search` step (the engine has no such tool yet: the step was added to `events.jsonl` by hand), then `click:.work-toggle` and the step's `.row-line` |
+| Session skills | `SAGE_UI_SCRIPTED=<file>` with `"skills": ["debug", "tests"]`, then `wait:7500;;type:#followup=>/skills;;key:#followup=>Enter;;click:[data-skill="ui"] .skill-use` |
+| Session github | a session whose folder is a git repository with a github.com remote, uncommitted changes and unpushed commits, then `click:#tab-github` |
+| Session code | the same session, then `click:#tab-code;;click:[data-path="src"];;click:[data-path="src/board.js"]` |
+| Session attach | `SAGE_UI_VIEW=new SAGE_UI_SCRIPT='attach:#attach=><path>,<path>;;type:#task=>…'` |
+| Session error | `SAGE_UI_OPEN=<id>` of a stored session whose log was cut after its first `turn_start` and given two `retry` events and a `finish` with status `stopped`, then `click:.work-toggle` |
+| Settings | `SAGE_UI_VIEW=settings` |
+| Settings keys | `SAGE_UI_VIEW=settings LOGFARE_API_KEY=x OPENAI_API_KEY=x SAGE_UI_SCRIPT='wait:1200;;scroll:#settings-keys'` |
+| Settings defaults | the same with `ANTHROPIC_API_KEY=x` and `scroll:#settings-defaults;;click:#default-provider` |
+| Settings unsaved | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;type:#global-instructions=>…;;type:#system-prompt=>…;;click:#new-session'` |
+| Settings skills | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1200;;click:[data-skill="tests"];;wait:400;;scroll:#settings-skills'` |
+| Settings system prompt | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-system'` |
+| Settings instructions | `SAGE_UI_VIEW=settings SAGE_UI_SCRIPT='wait:1500;;scroll:#settings-instructions'` |
 
 Any of them takes `SAGE_UI_THEME=ember|orchid|tide|graphite|none` and
-`SAGE_UI_SCHEME=light|dark`; the screenshots go through all four paintings in both appearances.
-The settings shots ran against a `SAGE_HOME` holding a user `skills/tests.md` (Edited), a custom
-skill with a long title, and an `AGENTS.md`.
+`SAGE_UI_SCHEME=light|dark`; check each view in all four paintings and both appearances.
+The settings views are best checked against a `SAGE_HOME` holding a user `skills/tests.md`
+(Edited), a custom skill with a long title, and an `AGENTS.md`.

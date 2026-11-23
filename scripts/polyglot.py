@@ -1,4 +1,9 @@
-"""Prepare an isolated Sage checkout with the published 36-exercise selection."""
+"""Prepare a separate Sage checkout whose `sage bench` has the 23 Exercism exercises of the
+benchmark in docs/BENCHMARKS.md as the task set `polyblind`, their tests held out.
+
+    python3 scripts/polyglot.py <new directory>
+    cd <new directory> && cargo run -p sage-cli -- bench --tasks polyblind ...
+"""
 import argparse
 import csv
 import json
@@ -7,8 +12,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-ARCHIVE = Path(__file__).resolve().parent
-SAGE = ARCHIVE.parents[2]
+SAGE = Path(__file__).resolve().parents[1]
+# The exercises are the ones in the published runs.
+RUNS = SAGE / "docs/results/2026-11-22-deepseek-v4.1-flash/runs.csv"
 UPSTREAM = "https://github.com/Aider-AI/polyglot-benchmark.git"
 REVISION = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 # Language, tool available to the agent, check before grading, held-out grader.
@@ -85,10 +91,10 @@ def main():
     output = args.output.resolve()
     if output.exists() or SAGE in output.parents:
         parser.error("choose a new directory outside the Sage checkout")
-    with (ARCHIVE / "runs.csv").open(newline="", encoding="utf-8") as rows:
-        tasks = sorted({row["task"] for row in csv.DictReader(rows)})
-    if len(tasks) != 36:
-        raise ValueError(f"expected 36 archived exercise IDs, found {len(tasks)}")
+    with RUNS.open(newline="", encoding="utf-8") as rows:
+        tasks = sorted({row["task"] for row in csv.DictReader(rows) if row["task"].startswith("pgb-")})
+    if len(tasks) != 23:
+        raise ValueError(f"expected 23 exercise IDs in {RUNS}, found {len(tasks)}")
 
     git("clone", "--quiet", "--no-checkout", "--no-hardlinks", SAGE, output)
     git("checkout", "--quiet", "--detach", git("rev-parse", "HEAD", cwd=SAGE), cwd=output)
