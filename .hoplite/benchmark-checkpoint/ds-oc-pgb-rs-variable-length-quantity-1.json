@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-rs-variable-length-quantity", "repeat": 1, "slot": "ds-oc-pgb-rs-variable-length-quantity-1", "status": "done", "solved": true, "turns": 8, "wire_max": 8, "request_bytes": 282291, "reply_bytes": 7402, "requests": 8, "replies": 8}
