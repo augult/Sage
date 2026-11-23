@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "connpool", "repeat": 1, "slot": "luna-oc-connpool-1", "status": "done", "solved": true, "turns": 8, "wire_max": 8, "request_bytes": 288636, "reply_bytes": 13741, "requests": 8, "replies": 8}
