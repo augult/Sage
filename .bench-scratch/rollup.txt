@@ -1,0 +1,213 @@
+#!/bin/sh
+# rollup.sh - per-endpoint summary of a gateway access log.
+
+set -f
+LC_ALL=C
+export LC_ALL
+
+usage() {
+	printf 'usage: rollup.sh [-n N] [FILE]\n' >&2
+	exit 2
+}
+
+limit=10
+seen_n=0
+seen_file=0
+file=
+
+while [ $# -gt 0 ]; do
+	[ "$seen_file" -eq 0 ] || usage
+	case $1 in
+	-n)
+		[ "$seen_n" -eq 0 ] || usage
+		seen_n=1
+		[ $# -ge 2 ] || usage
+		shift
+		case $1 in
+		'' | *[!0-9]*) usage ;;
+		esac
+		limit=$1
+		[ "$limit" -gt 0 ] || usage
+		;;
+	-?*)
+		usage
+		;;
+	*)
+		file=$1
+		seen_file=1
+		;;
+	esac
+	shift
+done
+
+if [ "$seen_file" -eq 1 ]; then
+	if [ ! -r "$file" ] || [ -d "$file" ]; then
+		printf 'rollup.sh: cannot read %s\n' "$file" >&2
+		exit 2
+	fi
+	set -- "$file"
+else
+	set --
+fi
+
+tab=$(printf '\t')
+
+awk -v tab="$tab" '
+function normalise(p,   k, i, s, out) {
+	k = split(p, seg, "/")
+	out = ""
+	for (i = 1; i <= k; i++) {
+		s = seg[i]
+		if (s ~ /^[0-9]+$/)
+			s = ":id"
+		out = (i == 1) ? s : out "/" s
+	}
+	return out
+}
+{
+	if ($0 == "")
+		next
+	if ($0 !~ /^[^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+$/) {
+		skipped++
+		next
+	}
+	ts = $1
+	method = $2
+	raw = $3
+	status = $4
+	lat = $5
+	size = $6
+	if (method != "GET" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE") {
+		skipped++
+		next
+	}
+	if (substr(raw, 1, 1) != "/") {
+		skipped++
+		next
+	}
+	if (status !~ /^[0-9][0-9][0-9]$/) {
+		skipped++
+		next
+	}
+	if (lat !~ /^[0-9]+ms$/) {
+		skipped++
+		next
+	}
+	if (size !~ /^[0-9]+b$/) {
+		skipped++
+		next
+	}
+
+	reqs++
+	l = lat
+	sub(/ms$/, "", l)
+	l = l + 0
+	b = size
+	sub(/b$/, "", b)
+	b = b + 0
+
+	if (reqs == 1) {
+		first = ts
+		last = ts
+		slowlat = l
+		slowmethod = method
+		slowpath = raw
+		slowts = ts
+	} else {
+		if (ts < first)
+			first = ts
+		if (ts > last)
+			last = ts
+		if (l > slowlat) {
+			slowlat = l
+			slowmethod = method
+			slowpath = raw
+			slowts = ts
+		}
+	}
+
+	p = raw
+	sub(/\?.*/, "", p)
+	if (length(p) > 1 && substr(p, length(p), 1) == "/")
+		p = substr(p, 1, length(p) - 1)
+
+	printf "1%s%s %s%s%d%s%d%s%d\n", tab, method, normalise(p), tab, l, tab, (status + 0 >= 500), tab, b
+}
+END {
+	printf "0%s%d%s%d%s%s%s%s%s%d%s%s%s%s%s%s\n", tab, reqs, tab, skipped, tab, (reqs ? first : "-"), tab, (reqs ? last : "-"), tab, slowlat, tab, slowmethod, tab, slowpath, tab, slowts
+}
+' ${1+"$@"} |
+	sort -t "$tab" -k1,1n -k2,2 -k3,3n |
+	awk -F '\t' -v tab="$tab" '
+function flush(   p50, p95) {
+	if (!started)
+		return
+	p50 = v[int((50 * c + 99) / 100)]
+	p95 = v[int((95 * c + 99) / 100)]
+	printf "1%s%d%s%s%s%.1f%s%d%s%d%s%d%s%d\n", tab, c, tab, cur, tab, 100.0 * e / c, tab, p50, tab, p95, tab, by, tab, e
+}
+{
+	if ($1 == "0") {
+		meta = $0
+		next
+	}
+	if (!started) {
+		started = 1
+		cur = $2
+		c = 0
+		e = 0
+		by = 0
+	} else if ($2 != cur) {
+		flush()
+		cur = $2
+		c = 0
+		e = 0
+		by = 0
+	}
+	c++
+	e += $4
+	by += $5
+	v[c] = $3 + 0
+}
+END {
+	flush()
+	if (meta != "")
+		print meta
+}
+' |
+	sort -t "$tab" -k1,1n -k2,2nr -k3,3 |
+	awk -F '\t' -v n="$limit" '
+function row(name, cnt, errpct, p50, p95, bytes) {
+	printf "%-32s %7d %6.1f %6s %6s %10d\n", name, cnt, errpct, p50, p95, bytes
+}
+{
+	if ($1 == "0") {
+		reqs = $2 + 0
+		skipped = $3 + 0
+		if (reqs == 0) {
+			printf "requests: 0\nskipped: %d\nwindow: -\n", skipped
+			next
+		}
+		printf "requests: %d\nskipped: %d\nwindow: %s .. %s\n", reqs, skipped, $4, $5
+		printf "slowest: %dms %s %s at %s\n", $6 + 0, $7, $8, $9
+		printf "\n%-32s %7s %6s %6s %6s %10s\n", "endpoint", "count", "err%", "p50", "p95", "bytes"
+		table = 1
+		next
+	}
+	if (!table)
+		next
+	if (shown < n) {
+		shown++
+		row($3, $2, $4, $5, $6, $7)
+	} else {
+		other = 1
+		oc += $2
+		oe += $8
+		ob += $7
+	}
+}
+END {
+	if (other)
+		row("(other)", oc, 100.0 * oe / oc, "-", "-", ob)
+}
+'
