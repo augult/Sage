@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "shipquote", "repeat": 1, "slot": "ds-sage-shipquote-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 49274, "reply_bytes": 9987, "requests": 2, "replies": 2}

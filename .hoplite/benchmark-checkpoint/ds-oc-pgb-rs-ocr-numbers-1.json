@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-rs-ocr-numbers", "repeat": 1, "slot": "ds-oc-pgb-rs-ocr-numbers-1", "status": "done", "solved": true, "turns": 9, "wire_max": 9, "request_bytes": 329380, "reply_bytes": 8256, "requests": 9, "replies": 9}
