@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-py-rest-api", "repeat": 1, "slot": "ds-sage-pgb-py-rest-api-1", "status": "done", "solved": false, "turns": 5, "wire_max": 5, "request_bytes": 132909, "reply_bytes": 28590, "requests": 5, "replies": 5}

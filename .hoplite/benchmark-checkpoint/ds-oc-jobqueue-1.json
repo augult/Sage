@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "jobqueue", "repeat": 1, "slot": "ds-oc-jobqueue-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 227128, "reply_bytes": 14966, "requests": 6, "replies": 6}

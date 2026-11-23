@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "confdialect", "repeat": 1, "slot": "ds-oc-confdialect-1", "status": "done", "solved": false, "turns": 10, "wire_max": 10, "request_bytes": 481551, "reply_bytes": 14287, "requests": 10, "replies": 10}
