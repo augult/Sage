@@ -23,23 +23,23 @@ bills, with fewer requests, fewer tokens and less waiting than a conventional ag
 
 ## Results
 
-36 tasks from the Exercism polyglot set, 12 each in Python, Rust and Go, every task run twice per
-harness and judged by tests the agent never saw. Same model, same limits: 20 minutes and 60
-requests a run.
+30 tasks, judged by tests the agent never saw: the 7 `hard` tasks built into `sage bench` and 23
+Python and Rust exercises from the Exercism polyglot set, every task run twice per harness. Same
+model, same tasks.
 
-| Model | Harness | Solved | Cost | Time per run |
+| Model | Harness | Solved | Cost | Median time per run |
 |---|---|---|---|---|
-| DeepSeek V4.1 Flash | **Sage** | 44/72 | **$2.73** | **3.8 min** |
-| | OpenCode 1.19.5 | 44/72 | $4.51 | 6.2 min |
-| GLM-5.3 | **Sage** | **31/72** | **$8.86** | **4.6 min** |
-| | OpenCode 1.19.5 | 19/72 | $21.65 | 11.5 min |
+| DeepSeek V4.1 Flash | **Sage** | **45/60** | **$0.207** | **55 s** |
+| | OpenCode 1.19.5 | 40/60 | $0.274 | 86 s |
+| GPT-6 Luna | **Sage** | **30/60** | **$0.212** | **41 s** |
+| | OpenCode 1.19.5 | 24/60 | $0.369 | 61 s |
 
-Sage matched OpenCode on DeepSeek and solved more on GLM-5.3, for about 40 to 60% less money and time.
-That is one benchmark, run by me with Sage 0.3.0 on 17 November 2026, and gaps of two or three
-runs are within chance. On your own code the results can differ from other harnesses, in either
-direction, so the best test is your own work. The [benchmark archive](docs/results/2026-11-17-polyglot/README.md)
-includes the per-run data and a way to rerun the 36 exercises. The method and other measurements
-are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Sage solved more with both models, for 24 to 43% less money and about a third less time. On an
+earlier 36-task Python, Rust and Go set, GLM-5.3 solved 31 of 72 with Sage against 19 with OpenCode,
+at 59% less cost. These were run by me on 17 and 22 November 2026; gaps of two or three runs are
+within chance, and on your own code the results can differ, in either direction, so the best test
+is your own work. Per-run data is in [`docs/results/`](docs/results/), and the method and every
+other measurement in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Install
 
