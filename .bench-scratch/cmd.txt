@@ -1,0 +1,9 @@
+printf '2026-01-01T00:00:00Z GET /a 200 5ms 1b\n2026-01-01T00:00:01Z POST /a 500 9ms 2b\n' | sh rollup.sh -; echo "A:$?"
+printf '2026-01-01T00:00:00Z GET / 200 5ms 1b\n\nbad\n' | sh rollup.sh -n 5; echo "B:$?"
+printf '' | sh rollup.sh -n 2; echo "C:$?"
+sh rollup.sh -n 0 access.log </dev/null >/dev/null 2>&1; echo "D:$?"
+sh rollup.sh access.log extra >/dev/null 2>&1; echo "E:$?"
+sh rollup.sh -x >/dev/null 2>&1; echo "F:$?"
+sh rollup.sh -n 99 access.log | tail -n 2; echo "G:$?"
+printf '2026-01-01T00:00:00Z GET /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 200 5ms 1b\n' | sh rollup.sh -n 5 | tail -n 1; echo "H:$?"
+command -v dash; readlink -f /bin/sh
