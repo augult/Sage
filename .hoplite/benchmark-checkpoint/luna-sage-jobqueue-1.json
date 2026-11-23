@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "jobqueue", "repeat": 1, "slot": "luna-sage-jobqueue-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 18138, "reply_bytes": 10092, "requests": 1, "replies": 1}
