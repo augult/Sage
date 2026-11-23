@@ -7,7 +7,7 @@ held-out checks are added and the task's verification is run. Only that counts a
 `sage bench --check` proves that each task fails as shipped and passes with its reference
 solution (`--tasks all` for all 24; without it, the seven of the `easy` set).
 
-All runs below: Logfare gateway, effort `ratchet`, 5 runs per task and variant (35 per variant).
+Unless noted otherwise: Logfare gateway, effort `ratchet`, 5 runs per task and variant (35 per variant).
 Figures are medians per run unless stated. "No cache" is the list-price cost had the provider
 cached nothing, which takes the luck of the cache out of a comparison. Raw results and the CLI's own
 tables are in `docs/results/`.
@@ -40,6 +40,28 @@ The exact same 30-task, 120-run suite (7 `hard` + 23 Python and Rust `polyblind`
 | **OpenCode 1.19.5** | **40 / 60 (66.7%)** | **14 / 14** | **18 / 22 (81.8%)** | **8 / 24 (33.3%)** | **6.0** | **378** | **86.0 s / 96.9 s** | **3,269.1k** | **$0.274** | **$0.456** |
 
 Both harnesses solved **14 / 14** on the 7 Hard tasks, while Sage solved **31 / 46 (67.4%) vs. 26 / 46 (56.5%)** on the 23 Polyglot blind tasks (**45 / 60 vs. 40 / 60 overall**, +12.5% more solved), using **62% fewer turns** (142 vs. 378), **79% fewer prompt tokens** (683.5k vs. 3,269.1k), **36% lower median time** (54.7 s vs. 86.0 s; **71.4 s vs. 94.7 s mean** on the polyglot set), and **24.2% lower cost at DeepSeek's 50:1 cache rate** (**49.0% lower cost at OpenAI's 2:1 cache rate**).
+
+### Rerun the 30-task selection with maximum reasoning
+
+The Luna archive records a low starting effort, and the DeepSeek archive does not record effort.
+Neither establishes a maximum-effort comparison. The command below reconstructs the same task
+selection from the pinned upstream exercises, not the original wrapper or exact prompts.
+
+```sh
+python3 docs/results/2026-11-17-polyglot/prepare.py /tmp/sage-nov22 \
+  --runs docs/results/2026-11-22-gpt6-luna/runs.csv
+cd /tmp/sage-nov22
+cargo build --locked -p sage-cli
+target/debug/sage bench --check --tasks hard,polyblind
+bash scripts/external/install.sh opencode
+target/debug/sage bench -p logfare -m gpt-6-luna,deepseek-v4.1-flash-1017 \
+  --tasks hard,polyblind --variants sage,ext:opencode --effort locked-max -n 2 \
+  --out max-reasoning.json
+```
+
+Use an isolated benchmark environment and a configured `LOGFARE_API_KEY` with access to both
+models. `locked-max` keeps Sage from lowering effort on retries and makes the proxy send `max`
+on each OpenCode request to Logfare. Confirm the gateway honors it before comparing results.
 
 ## GLM-5.3 on the same tasks, 17 November 2026
 
