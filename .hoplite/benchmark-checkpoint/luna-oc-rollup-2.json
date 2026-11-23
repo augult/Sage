@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "rollup", "repeat": 2, "slot": "luna-oc-rollup-2", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 224920, "reply_bytes": 11115, "requests": 6, "replies": 6}
