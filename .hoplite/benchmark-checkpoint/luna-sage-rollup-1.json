@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "rollup", "repeat": 1, "slot": "luna-sage-rollup-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 43144, "reply_bytes": 11256, "requests": 2, "replies": 2}
