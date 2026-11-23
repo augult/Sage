@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-py-two-bucket", "repeat": 1, "slot": "ds-oc-pgb-py-two-bucket-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 184767, "reply_bytes": 4213, "requests": 6, "replies": 6}

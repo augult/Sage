@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "ttlcache", "repeat": 1, "slot": "ds-sage-ttlcache-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 19905, "reply_bytes": 12758, "requests": 1, "replies": 1}
