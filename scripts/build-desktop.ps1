@@ -2,8 +2,6 @@
 # on the Desktop and in the Start menu, so it opens like any other program: no terminal.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\build-desktop.ps1 [-NoShortcuts]
-#
-# Or double-click "Build Sage.cmd" in the repository's root.
 
 param(
     # Build and install the exe only.
