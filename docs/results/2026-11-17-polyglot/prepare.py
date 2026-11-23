@@ -1,4 +1,4 @@
-"""Prepare an isolated Sage checkout with the published 36-exercise selection."""
+"""Prepare an isolated Sage checkout with exercises from an archived benchmark."""
 import argparse
 import csv
 import json
@@ -81,13 +81,16 @@ def exercise(upstream, bench, task):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="new directory for the benchmark checkout")
+    parser.add_argument("--runs", type=Path, help="select Polyblind exercise IDs from a different runs.csv")
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists() or SAGE in output.parents:
         parser.error("choose a new directory outside the Sage checkout")
-    with (ARCHIVE / "runs.csv").open(newline="", encoding="utf-8") as rows:
-        tasks = sorted({row["task"] for row in csv.DictReader(rows)})
-    if len(tasks) != 36:
+    with (args.runs or ARCHIVE / "runs.csv").open(newline="", encoding="utf-8") as rows:
+        tasks = sorted({row["task"] for row in csv.DictReader(rows) if row["task"].startswith("pgb-")})
+    if not tasks:
+        parser.error("the CSV contains no Polyblind exercise IDs")
+    if args.runs is None and len(tasks) != 36:
         raise ValueError(f"expected 36 archived exercise IDs, found {len(tasks)}")
 
     git("clone", "--quiet", "--no-checkout", "--no-hardlinks", SAGE, output)
