@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "confdialect", "repeat": 1, "slot": "luna-sage-confdialect-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 23327, "reply_bytes": 11852, "requests": 1, "replies": 1}

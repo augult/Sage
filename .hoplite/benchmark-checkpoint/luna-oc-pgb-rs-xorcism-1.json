@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "pgb-rs-xorcism", "repeat": 1, "slot": "luna-oc-pgb-rs-xorcism-1", "status": "done", "solved": true, "turns": 17, "wire_max": 17, "request_bytes": 773397, "reply_bytes": 13745, "requests": 17, "replies": 17}

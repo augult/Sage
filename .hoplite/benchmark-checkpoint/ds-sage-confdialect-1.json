@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "confdialect", "repeat": 1, "slot": "ds-sage-confdialect-1", "status": "done", "solved": false, "turns": 2, "wire_max": 2, "request_bytes": 70823, "reply_bytes": 21418, "requests": 2, "replies": 2}

@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-rs-forth", "repeat": 1, "slot": "ds-sage-pgb-rs-forth-1", "status": "done", "solved": false, "turns": 3, "wire_max": 3, "request_bytes": 56143, "reply_bytes": 12643, "requests": 3, "replies": 3}
