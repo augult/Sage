@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "connpool", "repeat": 1, "slot": "luna-sage-connpool-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 51582, "reply_bytes": 16072, "requests": 2, "replies": 2}

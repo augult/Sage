@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "ttlcache", "repeat": 1, "slot": "luna-sage-ttlcache-1", "status": "done", "solved": true, "turns": 1, "wire_max": 1, "request_bytes": 19909, "reply_bytes": 7451, "requests": 1, "replies": 1}

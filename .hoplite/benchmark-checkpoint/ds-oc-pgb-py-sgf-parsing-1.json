@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-py-sgf-parsing", "repeat": 1, "slot": "ds-oc-pgb-py-sgf-parsing-1", "status": "done", "solved": true, "turns": 10, "wire_max": 10, "request_bytes": 408775, "reply_bytes": 9156, "requests": 10, "replies": 10}

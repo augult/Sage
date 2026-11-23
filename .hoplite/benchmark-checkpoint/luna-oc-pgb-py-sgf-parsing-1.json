@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "pgb-py-sgf-parsing", "repeat": 1, "slot": "luna-oc-pgb-py-sgf-parsing-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 182189, "reply_bytes": 6823, "requests": 6, "replies": 6}
