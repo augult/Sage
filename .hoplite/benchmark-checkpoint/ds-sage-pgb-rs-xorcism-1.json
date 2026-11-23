@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-rs-xorcism", "repeat": 1, "slot": "ds-sage-pgb-rs-xorcism-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 210122, "reply_bytes": 30163, "requests": 6, "replies": 6}
