@@ -1,0 +1,1 @@
+git status --short; echo ---; python3 -c "import bowling; g=bowling.BowlingGame(); [g.roll(10) for _ in range(12)]; print('perfect:', g.score())"; echo ---; python3 -c "import bowling; g=bowling.BowlingGame(); [g.roll(4) for _ in range(20)]; print('all fours:', g.score())"; echo ---; wc -l bowling.py
