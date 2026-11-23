@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-py-bowling", "repeat": 1, "slot": "ds-sage-pgb-py-bowling-1", "status": "done", "solved": false, "turns": 6, "wire_max": 6, "request_bytes": 157071, "reply_bytes": 21859, "requests": 6, "replies": 6}

@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "pgb-rs-variable-length-quantity", "repeat": 1, "slot": "luna-sage-pgb-rs-variable-length-quantity-1", "status": "done", "solved": true, "turns": 3, "wire_max": 3, "request_bytes": 50048, "reply_bytes": 5764, "requests": 3, "replies": 3}
