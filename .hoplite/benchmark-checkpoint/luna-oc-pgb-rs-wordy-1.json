@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "pgb-rs-wordy", "repeat": 1, "slot": "luna-oc-pgb-rs-wordy-1", "status": "done", "solved": true, "turns": 13, "wire_max": 13, "request_bytes": 454082, "reply_bytes": 7278, "requests": 13, "replies": 13}
