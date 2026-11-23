@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "rollup", "repeat": 1, "slot": "ds-sage-rollup-1", "status": "done", "solved": true, "turns": 5, "wire_max": 5, "request_bytes": 148120, "reply_bytes": 12780, "requests": 6, "replies": 5}
