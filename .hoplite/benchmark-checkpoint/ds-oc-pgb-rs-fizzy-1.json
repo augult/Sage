@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-rs-fizzy", "repeat": 1, "slot": "ds-oc-pgb-rs-fizzy-1", "status": "done", "solved": false, "turns": 8, "wire_max": 8, "request_bytes": 262535, "reply_bytes": 5530, "requests": 8, "replies": 8}
