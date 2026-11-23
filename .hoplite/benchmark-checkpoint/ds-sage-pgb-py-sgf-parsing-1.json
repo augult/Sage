@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "pgb-py-sgf-parsing", "repeat": 1, "slot": "ds-sage-pgb-py-sgf-parsing-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 42142, "reply_bytes": 10228, "requests": 2, "replies": 2}

@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "pgb-py-connect", "repeat": 1, "slot": "luna-oc-pgb-py-connect-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 148762, "reply_bytes": 4212, "requests": 6, "replies": 6}

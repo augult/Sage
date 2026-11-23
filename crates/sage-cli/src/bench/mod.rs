@@ -6,12 +6,14 @@ mod proxy;
 mod tasks;
 
 use crate::{k, pct};
+use sage_core::agent::EffortPolicy;
 use sage_core::config::Config;
 use sage_core::economy::{peak_multiplier, prices_for};
 use sage_core::events::{Event, EventKind, FinishStatus, Stats};
 use sage_core::harness::{Harness, StartRequest};
 use sage_core::prompt::prefix_tokens;
 use sage_core::provider::mock::{MockProvider, MockTurn};
+use sage_core::provider::openai::Dialect;
 use sage_core::state::{Features, Mode};
 use sage_core::util::{civil_date, fmt_duration, now_ms, one_line, rand_hex};
 use serde::Serialize;
@@ -45,7 +47,8 @@ OPTIONS
       --external-dir <dir> where ext:<name> finds <name>/run.sh (default: scripts/external)
       --tasks <list>       task ids or sets: easy, skill, hard, all (default: easy)
   -n, --repeats <n>        runs per task and variant (default 3)
-  -e, --effort <level>     as for `sage run`
+  -e, --effort <level>     as for `sage run`; locked-max keeps every request at max,
+                           including OpenCode on Logfare
       --max-turns <n>      per run (default 30)
       --time-budget <s>    per run (default 600)
   -j, --jobs <n>           runs in parallel (default 4)
@@ -1009,9 +1012,23 @@ pub async fn execute(h: &Harness, opt: &Options, progress: bool) -> Result<Repor
         }
         let endpoint = Config::load(&Path::new(&state.data_dir).join("config.json"))
             .resolve(Some(provider), None)?;
+        let locked_max =
+            opt.effort.as_deref().and_then(EffortPolicy::parse) == Some(EffortPolicy::LockedMax);
+        if locked_max
+            && (endpoint.dialect != Dialect::Logfare
+                || opt
+                    .variants
+                    .iter()
+                    .filter_map(|v| v.external.as_deref())
+                    .any(|v| v != "opencode"))
+        {
+            return Err(
+                "locked-max for external variants currently requires OpenCode on Logfare".into(),
+            );
+        }
         Some((
             adapters,
-            proxy::Proxy::start(&endpoint.base_url, &endpoint.key).await?,
+            proxy::Proxy::start(&endpoint.base_url, &endpoint.key, locked_max).await?,
         ))
     } else {
         None

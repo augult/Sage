@@ -340,7 +340,7 @@ mod tests {
             std::env::var_os("CARGO_MANIFEST_DIR").is_some(),
             "cargo sets this for tests; the adapter must not see it"
         );
-        let proxy = Proxy::start("http://127.0.0.1:1/v1", "real-key")
+        let proxy = Proxy::start("http://127.0.0.1:1/v1", "real-key", false)
             .await
             .unwrap();
 

@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "sage", "task": "jobqueue", "repeat": 1, "slot": "ds-sage-jobqueue-1", "status": "done", "solved": true, "turns": 2, "wire_max": 2, "request_bytes": 55109, "reply_bytes": 21667, "requests": 2, "replies": 2}
