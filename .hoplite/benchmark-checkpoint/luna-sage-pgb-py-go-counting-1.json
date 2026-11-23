@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "sage", "task": "pgb-py-go-counting", "repeat": 1, "slot": "luna-sage-pgb-py-go-counting-1", "status": "done", "solved": false, "turns": 1, "wire_max": 1, "request_bytes": 11871, "reply_bytes": 3413, "requests": 1, "replies": 1}
