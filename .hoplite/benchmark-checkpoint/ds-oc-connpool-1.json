@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "connpool", "repeat": 1, "slot": "ds-oc-connpool-1", "status": "done", "solved": true, "turns": 8, "wire_max": 8, "request_bytes": 374334, "reply_bytes": 24838, "requests": 9, "replies": 8}

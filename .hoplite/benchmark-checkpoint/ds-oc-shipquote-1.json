@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "shipquote", "repeat": 1, "slot": "ds-oc-shipquote-1", "status": "done", "solved": true, "turns": 5, "wire_max": 5, "request_bytes": 177639, "reply_bytes": 11827, "requests": 5, "replies": 5}
