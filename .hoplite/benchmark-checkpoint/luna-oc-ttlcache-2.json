@@ -1,0 +1,1 @@
+{"model": "gpt-6-luna", "harness": "ext:opencode", "task": "ttlcache", "repeat": 2, "slot": "luna-oc-ttlcache-2", "status": "done", "solved": true, "turns": 8, "wire_max": 8, "request_bytes": 304539, "reply_bytes": 11473, "requests": 8, "replies": 8}

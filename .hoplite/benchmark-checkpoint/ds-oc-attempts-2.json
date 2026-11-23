@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "attempts", "repeat": 2, "slot": "ds-oc-attempts-2", "status": "done", "solved": false, "turns": 12, "wire_max": 12, "request_bytes": 852463, "reply_bytes": 24962, "requests": 12, "replies": 12}

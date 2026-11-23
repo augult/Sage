@@ -1,0 +1,1 @@
+{"model": "deepseek-v4.1-flash-1017", "harness": "ext:opencode", "task": "pgb-py-zebra-puzzle", "repeat": 1, "slot": "ds-oc-pgb-py-zebra-puzzle-1", "status": "done", "solved": true, "turns": 6, "wire_max": 6, "request_bytes": 182697, "reply_bytes": 5840, "requests": 6, "replies": 6}
