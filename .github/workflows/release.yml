@@ -207,23 +207,14 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          A fix release: one security fix, a handful of bug fixes, and a system prompt that gives general advice.
+          A security release: API keys can no longer reach the model, however a command comes by them.
 
           ## Security
-          - **API keys stay out of the conversation.** The commands Sage runs no longer see the provider API keys in your environment (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY` and the rest). Before, a command such as `env` could send a key to the model and into the session's logs. A project whose own tests need one of these variables has to be given it another way.
+          - **Keys are redacted.** Every API key Sage knows of, in its config file or in the environment, is replaced by `[redacted]` in everything that goes to the model and in the session's log, stored conversation and saved outputs. 0.4.1 kept the keys out of the commands' environment, but a command could still read them from Sage's own process (`/proc`, `ps`) or from the config file under another spelling.
+          - **The config file is refused under any spelling of its path**, `..` included.
+          - **Old sessions are cleaned.** Sessions saved before 0.4.1 kept the commands' whole environment, keys included; those lines are removed the first time 0.4.2 starts, and a stored conversation that held a key is redacted when it is continued.
 
-          ## Fixes
-          - **A handled Python error is no longer a failure.** A command that catches an exception and prints its traceback, then exits 0, is no longer reported as failed.
-          - **Loading the code is not checking it.** On a task held to a document (a README, a spec), a check that only imports or builds the code no longer stands for checking the document's rules: `finish` asks for that once first.
-          - **The first message leaves out ignored files.** Build output, logs and other files your `.gitignore` excludes are no longer attached to it, and no longer push real files out.
-          - **No stale budget note.** "Your next reply is the last one" is no longer added after a run has already finished.
-          - **`sage key` hides the key** as you type it.
-          - **GPT-6 Luna is priced**, so its cost is shown, at its list price.
-          - CI now checks changes to the system prompt, the skills and the benchmark tasks, and runs the command-line smoke test.
-
-          ## Changed
-          - **The system prompt is general advice.** The edge cases to check are general ones (empty and boundary inputs, end of input, ordering, splitting and joining, errors and the line they report); a check has to run the code on real inputs; text between tool calls stays short. The HTML and CSS advice stays.
-          - The benchmark pages price GPT-6 Luna at its list price: Sage is 21% cheaper than OpenCode with it (24% with DeepSeek V4.1 Flash), not 43%.
+          A key added while a session is running is redacted from the next session on. A command that prints a key in another form (encoded, or cut in pieces) is not caught: Sage is not a sandbox.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.

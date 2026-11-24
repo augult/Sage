@@ -462,6 +462,32 @@ fn names_key_file(text: &str) -> bool {
 /// `~/.sage/sessions` is not refused. A command can always reach a file some other way: this
 /// catches the usual spellings, it is no sandbox.
 fn shell_reaches_keys(cmd: &str) -> bool {
+    if reaches_keys_as_written(cmd) {
+        return true;
+    }
+    // A path spelled with `.` or `..` leads there all the same: `~/.sage/sessions/../config.json`.
+    cmd.split(|c: char| c.is_whitespace() || "'\"`;&|()<>=".contains(c))
+        .filter_map(from_home)
+        .any(|path| reaches_keys_as_written(&crate::workspace::normalize(&path).to_string_lossy()))
+}
+
+/// `word` as an absolute path, with a leading `~`, `$HOME` or `${HOME}` put in its place.
+fn from_home(word: &str) -> Option<std::path::PathBuf> {
+    for home in ["~", "$HOME", "${HOME}"] {
+        if let Some(rest) = word
+            .strip_prefix(home)
+            .filter(|rest| rest.is_empty() || rest.starts_with(['/', '\\']))
+        {
+            return Some(crate::util::home_dir().join(rest.trim_start_matches(['/', '\\'])));
+        }
+    }
+    std::path::Path::new(word)
+        .is_absolute()
+        .then(|| std::path::PathBuf::from(word))
+}
+
+/// `shell_reaches_keys`, for the command exactly as it is spelled.
+fn reaches_keys_as_written(cmd: &str) -> bool {
     if names_key_file(cmd) {
         return true;
     }
@@ -2353,6 +2379,14 @@ mod tests {
             (
                 "shell",
                 json!({"cmd": format!("cd {d} && cat config.json")}),
+            ),
+            (
+                "shell",
+                json!({"cmd": format!("cat {d}/sessions/../config.json")}),
+            ),
+            (
+                "shell",
+                json!({"cmd": format!("cat '{d}/sessions/./../conf.json' {d}/x/../conf*")}),
             ),
         ]
         .into_iter()

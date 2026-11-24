@@ -514,6 +514,8 @@ pub struct Session {
     pub deadline: Option<Instant>,
     /// Per-session scratch directory for `TMPDIR`, outside `dir` so `$TMPDIR/..` never exposes `exam/`.
     scratch: PathBuf,
+    /// The API keys the harness knows of (`Config::secrets`): taken out of all the model is sent.
+    pub secrets: Vec<String>,
 }
 
 impl Drop for Session {
@@ -564,6 +566,7 @@ impl Session {
             shell_env,
             deadline: None,
             scratch,
+            secrets: Vec::new(),
         })
     }
 

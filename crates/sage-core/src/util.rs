@@ -112,6 +112,20 @@ pub fn private_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// What stands in for a secret that was taken out of a text.
+pub const REDACTED: &str = "[redacted]";
+
+/// `text` with every one of `secrets` replaced by `[redacted]`. Borrowed when none is in it.
+pub fn redact<'a>(text: &'a str, secrets: &[String]) -> std::borrow::Cow<'a, str> {
+    let mut out = std::borrow::Cow::Borrowed(text);
+    for secret in secrets.iter().filter(|s| !s.is_empty()) {
+        if out.contains(secret.as_str()) {
+            out = std::borrow::Cow::Owned(out.replace(secret.as_str(), REDACTED));
+        }
+    }
+    out
+}
+
 /// Cut `s` to at most `max` chars, marking how much was dropped.
 pub fn truncate_chars(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
@@ -171,6 +185,19 @@ mod tests {
     fn weekday_known_values() {
         assert_eq!(weekday(0), 3); // 1970-01-01 was a Thursday
         assert_eq!(weekday(1_794_339_533), 1); // 2026-11-10 is a Tuesday
+    }
+
+    #[test]
+    fn secrets_are_redacted_wherever_they_appear() {
+        let secrets = ["sk-one-1234".to_string(), "key-two-5678".to_string()];
+        assert_eq!(
+            redact("a sk-one-1234 b key-two-5678 sk-one-1234", &secrets),
+            "a [redacted] b [redacted] [redacted]"
+        );
+        assert!(matches!(
+            redact("nothing here", &secrets),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]

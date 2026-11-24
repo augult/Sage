@@ -15,6 +15,8 @@ pub struct Context {
     prev_wire: Option<String>,
     prev_prompt: u64,
     pub(crate) revision: u64,
+    /// The keys the harness knows of: taken out of every message before it is kept or sent.
+    secrets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,39 @@ impl Context {
             prev_wire: None,
             prev_prompt: 0,
             revision: 0,
+            secrets: Vec::new(),
+        }
+    }
+
+    /// From now on, `secrets` are replaced by `[redacted]` in every message, and in those already
+    /// here: a conversation stored before may hold a key a command printed.
+    pub fn set_secrets(&mut self, secrets: Vec<String>) {
+        self.secrets = secrets;
+        let mut messages = std::mem::take(&mut self.messages);
+        for m in &mut messages {
+            self.clean(m);
+        }
+        self.messages = messages;
+        for stub in self.stubs.iter_mut().flatten() {
+            *stub = crate::util::redact(stub, &self.secrets).into_owned();
+        }
+    }
+
+    fn clean(&self, m: &mut Message) {
+        if self.secrets.is_empty() {
+            return;
+        }
+        let redact = |text: &mut String| {
+            if let std::borrow::Cow::Owned(clean) = crate::util::redact(text, &self.secrets) {
+                *text = clean;
+            }
+        };
+        redact(&mut m.content);
+        if let Some(reasoning) = m.reasoning.as_mut() {
+            redact(reasoning);
+        }
+        for call in &mut m.tool_calls {
+            redact(&mut call.arguments);
         }
     }
 
@@ -44,6 +79,7 @@ impl Context {
             prev_wire: None,
             prev_prompt: 0,
             revision: 0,
+            secrets: Vec::new(),
         }
     }
 
@@ -88,20 +124,25 @@ impl Context {
         answered
     }
 
-    pub fn push(&mut self, message: Message) {
+    pub fn push(&mut self, mut message: Message) {
+        self.clean(&mut message);
         self.messages.push(message);
         self.stubs.push(None);
     }
 
     pub fn push_tool(&mut self, call_id: &str, content: String, stub: String) {
-        self.messages.push(Message::tool(call_id, content));
-        self.stubs.push(Some(stub));
+        let mut message = Message::tool(call_id, content);
+        self.clean(&mut message);
+        self.messages.push(message);
+        self.stubs
+            .push(Some(crate::util::redact(&stub, &self.secrets).into_owned()));
     }
 
     /// Appends text to the most recent message (used for harness remarks on the last observation).
     pub fn append_to_last(&mut self, text: &str) {
+        let text = crate::util::redact(text, &self.secrets);
         if let Some(last) = self.messages.last_mut() {
-            last.content.push_str(text);
+            last.content.push_str(&text);
         }
     }
 
@@ -302,6 +343,32 @@ mod tests {
         );
         assert!(c.check_prefix(wire(&c)), "and stable again afterwards");
         assert_eq!(c.decay(0).messages, 0, "nothing left worth shrinking");
+    }
+
+    #[test]
+    fn keys_never_enter_the_conversation() {
+        let key = "sk-test-0123456789".to_string();
+        let mut c = Context::restored(
+            vec![
+                Message::system("sys"),
+                Message::tool("old", format!("KEY={key}")),
+            ],
+            vec![None, Some(format!("[stub {key}]"))],
+        );
+        c.set_secrets(vec![key.clone()]);
+        c.push(Message::user(format!("use {key}")));
+        c.push_tool(
+            "a",
+            format!("DEEPSEEK_API_KEY={key}"),
+            format!("stub {key}"),
+        );
+        c.append_to_last(&format!(" and {key}"));
+        let all = serde_json::to_string(&(&c.messages, c.stubs())).unwrap();
+        assert!(!all.contains(&key), "{all}");
+        assert!(
+            all.contains("DEEPSEEK_API_KEY=[redacted] and [redacted]"),
+            "{all}"
+        );
     }
 
     #[test]

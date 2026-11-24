@@ -98,6 +98,7 @@ pub async fn exec(
                 masked = true;
             }
             failed_before_end = noted_failure(&spill_path);
+            super::jobs::redact_spill(&spill_path, &sess.secrets);
             ExecEnd::Exited(exit)
         }
         Waited::Cancelled => {
