@@ -611,6 +611,38 @@ async fn stops_on_cancel_and_on_the_turn_limit() {
 }
 
 #[tokio::test]
+async fn a_key_a_command_prints_never_reaches_the_model_or_the_log() {
+    let key = "sk-test-SECRET-0123456789";
+    let print = fixed(MockTurn::calls(
+        "",
+        vec![(
+            "shell",
+            json!({"cmd": format!("echo DEEPSEEK_API_KEY={key}")}),
+        )],
+    ));
+    let done = fixed(MockTurn::calls(
+        "",
+        vec![(
+            "finish",
+            json!({"summary": "done", "unverified": "nothing to check"}),
+        )],
+    ));
+    let mut cfg = AgentConfig::new("mock");
+    cfg.max_turns = 5;
+    let mut r = rig("agent-redact", cfg, vec![print, done]);
+    r.agent.ctx.set_secrets(vec![key.to_string()]);
+    r.agent.sess.secrets = vec![key.to_string()];
+    r.agent.run("x".into(), &CancellationToken::new()).await;
+    let sent = serde_json::to_string(&requests(&r)).unwrap();
+    assert!(
+        !sent.contains(key) && sent.contains("DEEPSEEK_API_KEY=[redacted]"),
+        "{sent}"
+    );
+    let kept = serde_json::to_string(&r.agent.ctx.messages).unwrap();
+    assert!(!kept.contains(key));
+}
+
+#[tokio::test]
 async fn a_run_that_finished_is_given_no_advice_about_replies_it_will_not_have() {
     // A limit of three replies and `finish` in the second: the third would have been the last.
     let mut cfg = AgentConfig::new("mock");

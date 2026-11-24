@@ -278,11 +278,12 @@ impl Agent {
         sink: Arc<dyn Sink>,
         approvals: Arc<Approvals>,
     ) -> Self {
-        let ctx = Context::new(
+        let mut ctx = Context::new(
             cfg.system
                 .as_deref()
                 .unwrap_or_else(|| prompt::system_prompt(&cfg.features)),
         );
+        ctx.set_secrets(sess.secrets.clone());
         let effort = cfg.effort.start();
         Self {
             provider: Arc::new(provider),
@@ -1451,9 +1452,14 @@ impl Agent {
         } else {
             "not tracked in classic mode".to_string()
         };
+        // The check is a request of its own, outside the conversation: keys are taken out here.
+        let secrets = &self.sess.secrets;
+        let summary = crate::util::redact(&outcome.summary, secrets).into_owned();
+        let changes = changes.map(|c| crate::util::redact(&c, secrets).into_owned());
+        let goal_text = crate::util::redact(&text, secrets).into_owned();
         let material = goal::Material {
-            goal: &text,
-            summary: &outcome.summary,
+            goal: &goal_text,
+            summary: &summary,
             evidence: &evidence,
             watches: &self.sess.watches,
             changes: changes.as_deref(),
@@ -1690,6 +1696,8 @@ impl Agent {
         sess.restore(snap.session);
         let mut agent = Self::new(provider, sess, cfg, sink, approvals);
         agent.ctx = Context::restored(snap.messages, snap.stubs);
+        // Stored by an older Sage, the conversation may hold a key a command printed.
+        agent.ctx.set_secrets(agent.sess.secrets.clone());
         let answered = agent.ctx.answer_dangling(INTERRUPTED);
         // A step the restart cut off may have changed files after the last check.
         if answered > 0 {

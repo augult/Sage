@@ -218,6 +218,8 @@ struct Live {
     /// Released by the worker after its last write and job cleanup.
     lock: Mutex<Option<SessionLock>>,
     storage_warned: AtomicBool,
+    /// The API keys the harness knows of: taken out of every event before it is logged or shown.
+    secrets: Vec<String>,
 }
 
 /// What the worker of a session is sent.
@@ -280,21 +282,42 @@ impl Live {
     }
 }
 
+/// The event and its log line with every key in `secrets` taken out. A key can be anywhere in an
+/// event (the output of a command, a file that was read, what the model wrote), so the line is
+/// searched whole, and the event is read back from it where a key was found.
+fn redacted(event: &mut Event, line: String, secrets: &[String]) -> String {
+    let std::borrow::Cow::Owned(clean) = crate::util::redact(&line, secrets) else {
+        return line;
+    };
+    match serde_json::from_str::<Event>(&clean) {
+        Ok(back) => *event = back,
+        // Not to be: an event that does not read back is not kept whole, key and all.
+        Err(_) => {
+            event.kind = EventKind::Error {
+                message: "an event that held an API key was left out".into(),
+            }
+        }
+    }
+    serde_json::to_string(event).unwrap_or(clean)
+}
+
 impl Sink for Live {
     fn emit(&self, kind: EventKind) {
         let transient = kind.transient();
         // Holding the backlog lock across the broadcast lets `subscribe` take a snapshot and a
         // receiver with nothing lost or duplicated in between.
         let mut backlog = self.events.lock().unwrap();
-        let event = Event {
+        let mut event = Event {
             seq: self.seq.fetch_add(1, Ordering::SeqCst) + 1,
             ts: now_ms(),
             kind,
         };
         let mut storage_error = None;
         if !transient {
+            let line =
+                serde_json::to_string(&event).map(|line| redacted(&mut event, line, &self.secrets));
             if let Some(file) = self.log.lock().unwrap().as_mut() {
-                let result = serde_json::to_string(&event)
+                let result = line
                     .map_err(std::io::Error::other)
                     .and_then(|line| writeln!(file, "{line}"));
                 storage_error = result
@@ -510,6 +533,38 @@ fn spawn_worker(worker: Arc<Live>, mut agent: Agent, mut inbox: mpsc::UnboundedR
     });
 }
 
+/// The shell state a session saved before 0.4.1 holds the whole environment its commands ran in,
+/// the provider keys with it, where a command can read it. Its lines that name a key variable or
+/// hold a known key are dropped, once.
+fn scrub_saved_keys(data_dir: &Path, secrets: &[String]) {
+    let sessions = data_dir.join("sessions");
+    let done = sessions.join(".keys-scrubbed");
+    if done.exists() || !sessions.is_dir() {
+        return;
+    }
+    let names: Vec<String> = crate::config::key_env_vars()
+        .map(|name| format!("declare -x {name}="))
+        .collect();
+    for entry in std::fs::read_dir(&sessions).into_iter().flatten().flatten() {
+        let path = entry.path().join("shell.env");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let kept: String = text
+            .lines()
+            .filter(|line| {
+                !names.iter().any(|name| line.starts_with(name.as_str()))
+                    && !secrets.iter().any(|key| line.contains(key.as_str()))
+            })
+            .map(|line| format!("{line}\n"))
+            .collect();
+        if kept.len() != text.len() {
+            let _ = resume::write_atomic(&path, kept.as_bytes());
+        }
+    }
+    let _ = std::fs::write(done, "");
+}
+
 fn read_text(path: &Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
@@ -541,6 +596,7 @@ impl Harness {
 
     pub fn at(data_dir: PathBuf) -> Self {
         let config = Config::load(&data_dir.join("config.json"));
+        scrub_saved_keys(&data_dir, &config.secrets());
         let auto_retry = Arc::new(AtomicBool::new(config.auto_retry));
         Self {
             inner: Arc::new(Inner {
@@ -984,8 +1040,10 @@ impl Harness {
         let cwd = ws.root.to_string_lossy().into_owned();
         // Closing the folder above them covers the sessions stored before theirs were private.
         let _ = crate::util::private_dir(&self.inner.data_dir.join("sessions"));
-        let sess = Session::new(ws, dir.clone(), features, prices_for(model))
+        let mut sess = Session::new(ws, dir.clone(), features, prices_for(model))
             .map_err(|e| format!("could not create the session directory: {e}"))?;
+        let secrets = self.config().secrets();
+        sess.secrets = secrets.clone();
         let lock = SessionLock::acquire(&dir).map_err(|e| format!("session {id}: {e}"))?;
 
         let mut cfg = AgentConfig::new(model);
@@ -1039,6 +1097,7 @@ impl Harness {
             approvals: approvals.clone(),
             lock: Mutex::new(Some(lock)),
             storage_warned: AtomicBool::new(false),
+            secrets: secrets.clone(),
         });
         live.save_meta(&meta)?;
         live.emit(EventKind::SessionStart {
@@ -1649,8 +1708,10 @@ impl Harness {
         })
         .map_err(cannot)?;
         let _ = crate::util::private_dir(&self.inner.data_dir.join("sessions"));
-        let sess = Session::new(ws, dir.clone(), features, prices_for(&meta.model))
+        let mut sess = Session::new(ws, dir.clone(), features, prices_for(&meta.model))
             .map_err(|e| cannot(format!("could not open the session directory: {e}")))?;
+        let secrets = self.config().secrets();
+        sess.secrets = secrets.clone();
         let mut cfg = AgentConfig::new(&meta.model);
         cfg.features = features;
         let setup = Setup {
@@ -1703,6 +1764,7 @@ impl Harness {
             approvals: approvals.clone(),
             lock: Mutex::new(Some(lock)),
             storage_warned: AtomicBool::new(false),
+            secrets: secrets.clone(),
         });
         let goal = live.meta.lock().unwrap().goal.clone();
         let sink: Arc<dyn Sink> = live.clone();
@@ -1732,6 +1794,30 @@ mod persistence_tests {
 
     fn scratch() -> PathBuf {
         std::env::temp_dir().join(format!("sage-persistence-{}", rand_hex(8)))
+    }
+
+    #[test]
+    fn keys_saved_with_an_old_session_s_shell_state_are_dropped_once() {
+        let dir = scratch();
+        let old = dir.join("sessions/20261120-000000-abcd");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(
+            dir.join("config.json"),
+            r#"{"keys":{"openrouter":"sk-or-stored-0123456789"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            old.join("shell.env"),
+            "declare -x DEEPSEEK_API_KEY=\"sk-env\"\ndeclare -x MY_TOKEN=\"sk-or-stored-0123456789\"\ndeclare -x KEEP=\"yes\"\n",
+        )
+        .unwrap();
+        let _ = Harness::at(dir.clone());
+        assert_eq!(
+            std::fs::read_to_string(old.join("shell.env")).unwrap(),
+            "declare -x KEEP=\"yes\"\n"
+        );
+        assert!(dir.join("sessions/.keys-scrubbed").exists());
+        assert!(Harness::at(dir).list().is_empty(), "the mark is no session");
     }
 
     #[test]

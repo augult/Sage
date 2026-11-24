@@ -93,7 +93,8 @@ lists the rest.
 > start it with `--ask`). It stops before commands that would wipe a home or root directory, but
 > that is a tripwire, not a sandbox: use it in a git repository you can reset, or in a container.
 > The commands it runs do not see the provider API keys in your environment (`OPENAI_API_KEY`,
-> `DEEPSEEK_API_KEY` and the rest), so that their output cannot carry them to the model.
+> `DEEPSEEK_API_KEY` and the rest), and any key Sage knows of is replaced by `[redacted]` in
+> whatever goes to the model or into a session's files, however a command came by it.
 
 ## Scripts and CI
 

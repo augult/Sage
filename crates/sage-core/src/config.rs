@@ -287,6 +287,24 @@ impl Config {
             .filter(|k| !k.is_empty())
     }
 
+    /// Every key the harness can know of: those in this file and those in the environment variables
+    /// keys are read from. They are taken out of whatever goes to a model or into a session's log.
+    /// Too short a value is no key, and would only blot out ordinary text.
+    pub fn secrets(&self) -> Vec<String> {
+        let mut secrets: Vec<String> = self
+            .keys
+            .values()
+            .cloned()
+            .chain(key_env_vars().filter_map(|name| std::env::var(name).ok()))
+            .map(|key| key.trim().to_string())
+            .filter(|key| key.len() >= 8)
+            .collect();
+        // The longer first: one key that holds another is replaced whole.
+        secrets.sort_by(|a, b| b.len().cmp(&a.len()).then(a.cmp(b)));
+        secrets.dedup();
+        secrets
+    }
+
     pub fn has_key(&self, def: &ProviderDef) -> bool {
         self.key_for(def.id, def.key_env).is_some()
     }

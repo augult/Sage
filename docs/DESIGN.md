@@ -135,7 +135,7 @@ the notes in the workflow's publish job, push to `main`, and dispatch the workfl
 website's download button (augult/Harness) asks GitHub for the latest release, so it needs no change
 unless the files are renamed.
 
-## Status (24 November 2026, version 0.4.1)
+## Status (24 November 2026, version 0.4.2)
 
 - **Engine and CLI**: implemented; `cargo test --workspace` runs the unit tests of every module
   and end-to-end agent runs against a scripted model. CI runs them, Clippy with warnings as
@@ -156,9 +156,10 @@ unless the files are renamed.
 - **Walkthrough**: a scripted session through the real harness (`Harness::demo`), kept for tests and
   the desktop app's `SAGE_UI_AUTODEMO` screenshot hook. No command or menu offers it to users.
 - Not implemented: OS-level sandboxing of commands (there is a tripwire for catastrophic commands,
-  nothing more). Commands do not see the provider API keys of the environment Sage runs in, so that
-  their output cannot carry them to the model; one that goes looking for them elsewhere can still
-  find them.
+  nothing more). Commands do not see the provider API keys of the environment Sage runs in, and every
+  key Sage knows of (in its config file or in those variables) is replaced by `[redacted]` in all
+  that goes to the model, the session's log, its stored conversation and its saved outputs. A
+  command that prints a key in another form (encoded, or cut in pieces) is not caught.
 
 ## Background
 

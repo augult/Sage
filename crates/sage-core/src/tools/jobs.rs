@@ -239,6 +239,26 @@ pub fn masked_failure(spill: &Path, cmd: &str) -> Option<i32> {
         .map(|(_, c)| *c)
 }
 
+/// The largest saved output whose keys are taken out once its command has ended.
+const REDACT_SPILL_UP_TO: u64 = 64 * 1024 * 1024;
+
+/// Takes `secrets` out of a saved output once its command has ended: the file is the command's
+/// output as it printed it, kept in the session's folder.
+pub fn redact_spill(spill: &Path, secrets: &[String]) {
+    if secrets.is_empty()
+        || std::fs::metadata(spill).map_or(true, |md| md.len() > REDACT_SPILL_UP_TO)
+    {
+        return;
+    }
+    let Ok(bytes) = std::fs::read(spill) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    if let std::borrow::Cow::Owned(clean) = crate::util::redact(&text, secrets) {
+        let _ = std::fs::write(spill, clean);
+    }
+}
+
 fn pipe_file(spill: &Path) -> std::path::PathBuf {
     spill.with_extension("pipe")
 }
@@ -685,6 +705,17 @@ mod tests {
         };
         let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         (exit.code, text)
+    }
+
+    #[test]
+    fn a_saved_output_loses_the_keys_in_it() {
+        let log = spill("saved.log");
+        std::fs::write(&log, "KEY=sk-saved-0123456789\nok\n").unwrap();
+        redact_spill(&log, &["sk-saved-0123456789".to_string()]);
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "KEY=[redacted]\nok\n"
+        );
     }
 
     #[cfg(unix)]
