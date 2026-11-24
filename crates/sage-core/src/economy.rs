@@ -20,10 +20,15 @@ pub struct Prices {
     pub out: f64,
 }
 
-/// List prices as published by the vendors (checked 2026-11-10). Gateways may differ; override in config.
+/// List prices as published by the vendors (checked 2026-11-10; GPT-6 Luna 2026-11-24). Gateways may
+/// charge otherwise. A model that is not listed is unpriced: its cost is not shown, and old output is
+/// trimmed only at the context limit.
 pub fn prices_for(model: &str) -> Option<Prices> {
     let m = model.to_ascii_lowercase();
     let p = |hit, miss, out| Some(Prices { hit, miss, out });
+    if m.contains("gpt-6-luna") {
+        return p(0.01, 0.10, 0.50);
+    }
     if m.contains("deepseek") {
         return if m.contains("pro") {
             p(0.022, 0.66, 1.98)
@@ -68,17 +73,6 @@ impl Prices {
         (u.cached as f64 * self.hit + fresh as f64 * self.miss + u.output as f64 * self.out) / 1e6
     }
 
-    /// How many fresh input tokens the harness may attach unasked to save one model turn.
-    ///
-    /// Attaching `n` tokens costs `n × miss`. If they turn out to be what the model would have asked
-    /// for (probability `p_useful`) a turn of roughly `turn_output` output tokens is avoided.
-    pub fn speculation_budget(&self, p_useful: f64, turn_output: f64) -> f64 {
-        if self.miss <= 0.0 {
-            return f64::INFINITY;
-        }
-        p_useful * turn_output * self.out / self.miss
-    }
-
     /// Whether dropping `droppable` tokens of old observations pays for itself.
     ///
     /// Rewriting history invalidates the provider's cache from that point on, so the `suffix` tokens
@@ -114,6 +108,14 @@ mod tests {
         assert_eq!(prices_for("z-ai/glm-5.3"), Some(GLM));
         assert_eq!(prices_for("glm-5.3-flash").unwrap().out, 0.50);
         assert_eq!(prices_for("glm-5.3-flashx").unwrap().out, 1.25);
+        let luna = Prices {
+            hit: 0.01,
+            miss: 0.10,
+            out: 0.50,
+        };
+        assert_eq!(prices_for("gpt-6-luna"), Some(luna));
+        assert_eq!(prices_for("openai/gpt-6-luna"), Some(luna));
+        assert_eq!(prices_for("gpt-6.1-sol"), None);
         assert_eq!(prices_for("kimi-k2.7-code"), None);
     }
 
@@ -142,13 +144,6 @@ mod tests {
             1.0
         ); // Saturday
         assert_eq!(peak_multiplier("glm-5.3", tue_0230), 1.0);
-    }
-
-    #[test]
-    fn speculation_is_generous_when_output_is_dear() {
-        // A 50% chance of saving a 1500-token turn justifies ~3000 unasked input tokens on both models.
-        assert!((DEEPSEEK.speculation_budget(0.5, 1500.0) - 3000.0).abs() < 1e-6);
-        assert!(GLM.speculation_budget(0.5, 1500.0) > 2300.0);
     }
 
     #[test]

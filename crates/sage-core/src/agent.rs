@@ -1186,16 +1186,18 @@ impl Agent {
             };
             let mut footer = result.footer.clone();
             let mut notes = self.stall_notes(&result);
+            // A reply that finished or asked ends the run here: advice on how to go on would be
+            // read after the next message, in a run of its own. Should the finish not stand, the
+            // budget notes go with the message that sends the model back.
+            let ends = result.finished.is_some() || result.asked.is_some();
+            if ends {
+                notes.clear();
+            }
             // Advice on how to spend replies is for a run that has some left.
             let closing = landing || self.last_reply(run_started, turns_used, slowest);
             // Models are trained to wait for each result. Show, on their own behaviour, that here
             // they need not: twice at most, then it is their call.
-            if features.scripts
-                && self.chain_hints > 0
-                && result.finished.is_none()
-                && !result.surprised
-                && !closing
-            {
+            if features.scripts && self.chain_hints > 0 && !ends && !result.surprised && !closing {
                 use crate::tools::Tool;
                 let tools: Vec<Tool> = calls.iter().filter_map(|c| c.tool).collect();
                 let only_changes = !tools.is_empty()
@@ -1237,6 +1239,7 @@ impl Agent {
                 && self.solo_streak >= 4
                 && !result.surprised
                 && !closing
+                && !ends
             {
                 self.solo_hints -= 1;
                 self.solo_streak = 0;
@@ -1245,7 +1248,9 @@ impl Agent {
                     self.cfg.max_turns
                 ));
             }
-            notes.extend(self.budget_notes(run_started, turns_used, slowest));
+            if !ends {
+                notes.extend(self.budget_notes(run_started, turns_used, slowest));
+            }
             for n in &notes {
                 self.note("harness", n);
             }
@@ -1297,6 +1302,14 @@ impl Agent {
                 {
                     Ending::End(outcome) => break outcome,
                     Ending::Carry(message) => {
+                        let notes = self.budget_notes(run_started, turns_used, slowest);
+                        for n in &notes {
+                            self.note("harness", n);
+                        }
+                        let message = std::iter::once(message)
+                            .chain(notes)
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         self.send_back(&message, run_started, elapsed_before);
                         continue;
                     }

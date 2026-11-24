@@ -27,14 +27,14 @@ bills, with fewer requests, fewer tokens and less waiting than a conventional ag
 Python and Rust exercises from the Exercism polyglot set, every task run twice per harness. Same
 model, same tasks.
 
-| Model | Harness | Solved | Cost | Median time per run |
+| Model | Harness | Solved | Cost at list price | Median time per run |
 |---|---|---|---|---|
 | DeepSeek V4.1 Flash | **Sage** | **45/60** | **$0.207** | **55 s** |
 | | OpenCode 1.19.5 | 40/60 | $0.274 | 86 s |
-| GPT-6 Luna | **Sage** | **30/60** | **$0.212** | **41 s** |
-| | OpenCode 1.19.5 | 24/60 | $0.369 | 61 s |
+| GPT-6 Luna | **Sage** | **30/60** | **$0.137** | **41 s** |
+| | OpenCode 1.19.5 | 24/60 | $0.174 | 61 s |
 
-Sage solved more with both models, for 24 to 43% less money and about a third less time. These
+Sage solved more with both models, for 21 to 24% less money and about a third less time. These
 were run by me on 22 November 2026; gaps of two or three runs are within chance, and on your own
 code the results can differ, in either direction, so the best test is your own work. Per-run data
 is in [`docs/results/`](docs/results/), and the method in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
@@ -92,6 +92,8 @@ lists the rest.
 > Sage edits files and runs shell commands without asking, unless you set `/permissions ask` (or
 > start it with `--ask`). It stops before commands that would wipe a home or root directory, but
 > that is a tripwire, not a sandbox: use it in a git repository you can reset, or in a container.
+> The commands it runs do not see the provider API keys in your environment (`OPENAI_API_KEY`,
+> `DEEPSEEK_API_KEY` and the rest), so that their output cannot carry them to the model.
 
 ## Scripts and CI
 

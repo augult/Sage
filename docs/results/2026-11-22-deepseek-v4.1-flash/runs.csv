@@ -100,9 +100,9 @@ deepseek-v4.1-flash-1017,polyblind,pgb-py-bowling,ext:opencode,2,0,done,6,0,4650
 deepseek-v4.1-flash-1017,polyblind,pgb-py-connect,ext:opencode,2,0,done,14,0,122122,109888,6114,4498,0.00583,0.01374,185.3
 deepseek-v4.1-flash-1017,polyblind,pgb-py-food-chain,ext:opencode,2,1,done,11,0,97529,84992,3561,2073,0.00427,0.01039,87.2
 deepseek-v4.1-flash-1017,polyblind,pgb-py-forth,ext:opencode,2,0,done,5,0,36018,25088,2513,1141,0.00322,0.00503,49.2
-deepseek-v4.1-flash-1017,polyblind,pgb-py-go-counting,ext:opencode,2,0,done,8,0,72296,57920,4525,2869,0.0048,0.00897,118.0
+deepseek-v4.1-flash-1017,polyblind,pgb-py-go-counting,ext:opencode,2,0,done,8,0,72296,57920,4525,2869,0.00505,0.00922,118.0
 deepseek-v4.1-flash-1017,polyblind,pgb-py-paasio,ext:opencode,2,0,done,9,0,77917,65408,4566,2472,0.00479,0.0095,103.0
-deepseek-v4.1-flash-1017,polyblind,pgb-py-phone-number,ext:opencode,2,0,done,4,0,27412,16960,1684,861,0.00267,0.00389,38.0
+deepseek-v4.1-flash-1017,polyblind,pgb-py-phone-number,ext:opencode,2,0,done,4,0,27412,16960,1684,861,0.00263,0.00385,38.0
 deepseek-v4.1-flash-1017,polyblind,pgb-py-pov,ext:opencode,2,0,done,5,0,36041,25344,1902,935,0.00283,0.00465,41.0
 deepseek-v4.1-flash-1017,polyblind,pgb-py-rest-api,ext:opencode,2,0,done,8,0,67137,55040,3634,1690,0.00416,0.00812,71.6
 deepseek-v4.1-flash-1017,polyblind,pgb-py-sgf-parsing,ext:opencode,2,1,done,7,0,65350,51712,4517,2073,0.00491,0.00863,87.4

@@ -158,6 +158,15 @@ pub const PROVIDERS: &[ProviderDef] = &[
     },
 ];
 
+/// The environment variables provider keys are read from. Commands the model runs never see them:
+/// whatever a command prints goes to the provider with the next request, and into the session's log.
+pub fn key_env_vars() -> impl Iterator<Item = &'static str> {
+    PROVIDERS
+        .iter()
+        .map(|d| d.key_env)
+        .chain(std::iter::once("SAGE_API_KEY"))
+}
+
 /// A user-defined OpenAI-compatible endpoint.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CustomProvider {
@@ -261,9 +270,17 @@ impl Config {
     }
 
     pub fn key_for(&self, id: &str, key_env: &str) -> Option<String> {
-        let env = (!self.env_off.contains(id))
-            .then(|| std::env::var(key_env).ok())
-            .flatten();
+        self.key_given(id, |name| std::env::var(name).ok(), key_env)
+    }
+
+    /// `key_for`, with the environment read through `var`.
+    fn key_given(
+        &self,
+        id: &str,
+        var: impl Fn(&str) -> Option<String>,
+        key_env: &str,
+    ) -> Option<String> {
+        let env = (!self.env_off.contains(id)).then(|| var(key_env)).flatten();
         env.filter(|k| !k.trim().is_empty())
             .or_else(|| self.keys.get(id).cloned())
             .map(|k| k.trim().to_string())
@@ -708,15 +725,27 @@ mod tests {
 
     #[test]
     fn a_removed_key_turns_off_the_environment_s_too() {
-        // A variable no other test or system sets.
-        let var = "SAGE_TEST_ENV_OFF_KEY";
-        unsafe { std::env::set_var(var, "from-env") };
+        // An environment of its own: setting a variable of the process while other tests read
+        // theirs is a race.
+        let env = |name: &str| (name == "P_API_KEY").then(|| "from-env".to_string());
         let mut c = Config::default();
-        assert_eq!(c.key_for("p", var).as_deref(), Some("from-env"));
+        assert_eq!(
+            c.key_given("p", env, "P_API_KEY").as_deref(),
+            Some("from-env")
+        );
         c.env_off.insert("p".into());
-        assert_eq!(c.key_for("p", var), None);
+        assert_eq!(c.key_given("p", env, "P_API_KEY"), None);
         c.keys.insert("p".into(), "stored".into());
-        assert_eq!(c.key_for("p", var).as_deref(), Some("stored"));
-        unsafe { std::env::remove_var(var) };
+        assert_eq!(
+            c.key_given("p", env, "P_API_KEY").as_deref(),
+            Some("stored")
+        );
+    }
+
+    #[test]
+    fn every_key_variable_is_one_commands_are_kept_from() {
+        let hidden: Vec<&str> = key_env_vars().collect();
+        assert!(PROVIDERS.iter().all(|d| hidden.contains(&d.key_env)));
+        assert!(hidden.contains(&"SAGE_API_KEY"));
     }
 }

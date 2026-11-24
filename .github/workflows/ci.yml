@@ -1,12 +1,14 @@
 name: CI
 
-# A change to the docs alone builds nothing, so it is not checked.
+# A change to the docs alone builds nothing, so it is not checked. Only the Markdown at the top
+# and in docs/ is docs: the system prompt, the skills and the benchmark tasks are Markdown too, and
+# they are built into the program and tested.
 on:
   pull_request:
-    paths-ignore: ['docs/**', '**.md']
+    paths-ignore: ['docs/**', '*.md']
   push:
     branches: [main]
-    paths-ignore: ['docs/**', '**.md']
+    paths-ignore: ['docs/**', '*.md']
   workflow_dispatch:
 
 permissions:
@@ -70,3 +72,9 @@ jobs:
         run: cargo clippy ${{ matrix.packages }} --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test ${{ matrix.packages }} --locked
+      # The chat in a terminal and `sage run`, against a local stand-in for a provider.
+      - name: Exercise the CLI entry points
+        if: runner.os != 'Windows'
+        run: |
+          cargo build -p sage-cli --locked
+          python3 crates/sage-cli/tests/cli_smoke.py target/debug/sage

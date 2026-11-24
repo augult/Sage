@@ -126,12 +126,27 @@ pub enum StateMode<'a> {
 #[cfg(unix)]
 const RESTORE: &str = r#"__ps="$SAGE_STATE"; __pp="$SAGE_PIPE"; unset SAGE_STATE SAGE_PIPE; [ -f "$__ps.env" ] && . "$__ps.env" >/dev/null 2>&1; "#;
 #[cfg(unix)]
-const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; [ -e "$__pp.detached" ] || { pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; }; exit $__rc' EXIT; "#;
+const SAVE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; trap - ERR; echo "$__pipe" > "$__pp" 2>/dev/null; [ -e "$__pp.detached" ] || { pwd > "$__ps.cwd" 2>/dev/null; export -p 2>/dev/null | grep -vE "^declare -x (PWD|OLDPWD|SHLVL|_)=" > "$__ps.env" 2>/dev/null; }; exit $__rc' EXIT; "#;
 #[cfg(unix)]
-const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT; "#;
+const NOTE_PIPE: &str = r#"trap '__rc=$? __pipe="${PIPESTATUS[*]}"; trap - ERR; echo "$__pipe" > "$__pp" 2>/dev/null; exit $__rc' EXIT; "#;
+// Every command that fails outside a condition (`if`, `&&`, `||`, `!`) is noted next to the spill
+// file. A line that exits 0 after a note had a command fail before its end (see `noted_failure`).
+// The trap leaves `$?` and `PIPESTATUS` as the failure left them.
+#[cfg(unix)]
+const NOTE_FAILURES: &str = r#"trap 'echo $? >> "$__pp.err" 2>/dev/null' ERR; "#;
 // Bash 3.2 does not take the OLDPWD that `spawn` gives it from the environment: `cd -` would fail.
 #[cfg(unix)]
 const HOME_OLDPWD: &str = "OLDPWD=$PWD; ";
+
+/// Unsets the provider keys again after the state file is sourced: one saved before they were
+/// left out of the environment still holds them.
+#[cfg(unix)]
+static HIDE_KEYS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "unset {}; ",
+        crate::config::key_env_vars().collect::<Vec<_>>().join(" ")
+    )
+});
 
 /// Whether the `bash` that runs commands numbers the lines of a `-c` string from 0, as bash 3.2
 /// does, rather than from 1. Asked once.
@@ -228,17 +243,28 @@ fn pipe_file(spill: &Path) -> std::path::PathBuf {
     spill.with_extension("pipe")
 }
 
+/// Whether a command of the line failed, where the line was run with a state file: each failure
+/// outside a condition is noted by the shell (`NOTE_FAILURES`). A line that exited 0 with a note
+/// had a command fail before its end.
+#[cfg(unix)]
+pub fn noted_failure(spill: &Path) -> bool {
+    let mut notes = pipe_file(spill).into_os_string();
+    notes.push(".err");
+    std::fs::metadata(notes).is_ok_and(|md| md.len() > 0)
+}
+
 #[cfg(unix)]
 fn shell_command(cmd: &str, state: StateMode<'_>) -> Command {
     let mut c = Command::new("bash");
+    let hide = HIDE_KEYS.as_str();
     let prelude = match state {
         StateMode::ReadWrite(p) => {
             c.env("SAGE_STATE", p);
-            format!("{RESTORE}{HOME_OLDPWD}{SAVE}")
+            format!("{RESTORE}{hide}{HOME_OLDPWD}{NOTE_FAILURES}{SAVE}")
         }
         StateMode::ReadOnly(p) => {
             c.env("SAGE_STATE", p);
-            format!("{RESTORE}{HOME_OLDPWD}{NOTE_PIPE}")
+            format!("{RESTORE}{hide}{HOME_OLDPWD}{NOTE_FAILURES}{NOTE_PIPE}")
         }
         StateMode::None => HOME_OLDPWD.to_string(),
     };
@@ -321,8 +347,11 @@ pub fn spawn(
     // Bash 4 and later take it from here; bash 3.2 sets its own (`HOME_OLDPWD`).
     c.env("OLDPWD", cwd);
     c.current_dir(cwd)
-        .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .stdin(Stdio::null())
+        .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    for key in crate::config::key_env_vars() {
+        c.env_remove(key);
+    }
+    c.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(false);
@@ -633,6 +662,80 @@ mod tests {
         );
         let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
         assert!(text.contains("out") && text.contains("err"));
+    }
+
+    /// Runs `cmd` to its end and gives back its exit code and output.
+    #[cfg(unix)]
+    async fn run_to_end(
+        cmd: &str,
+        envs: &[(String, String)],
+        state: StateMode<'_>,
+        log: &Path,
+    ) -> (Option<i32>, String) {
+        let mut run = spawn(cmd, &std::env::temp_dir(), envs, state, log).unwrap();
+        let waited = wait_exit(
+            &mut run.exit,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await;
+        drain(&mut run.readers).await;
+        let Waited::Exited(exit) = waited else {
+            panic!("{waited:?}")
+        };
+        let text = String::from_utf8(run.buf.lock().unwrap().snapshot().0).unwrap();
+        (exit.code, text)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn commands_never_see_the_provider_keys() {
+        // Handed down from the environment Sage was started in, and saved by an older Sage in
+        // the state file a session sources before every command.
+        let log = spill("keys.log");
+        let state = log.with_file_name("shell");
+        std::fs::write(
+            state.with_extension("env"),
+            "declare -x DEEPSEEK_API_KEY=\"sk-saved\"\ndeclare -x KEEP_ME=\"yes\"\n",
+        )
+        .unwrap();
+        let envs = [("OPENAI_API_KEY".to_string(), "sk-inherited".to_string())];
+        let show = "echo \"[$OPENAI_API_KEY][$DEEPSEEK_API_KEY][$KEEP_ME]\"";
+        let (code, text) = run_to_end(show, &envs, StateMode::ReadOnly(&state), &log).await;
+        assert_eq!((code, text.trim()), (Some(0), "[][][yes]"));
+        let (_, text) = run_to_end(show, &envs, StateMode::None, &spill("keys2.log")).await;
+        assert_eq!(text.trim(), "[][][]");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failure_before_the_end_of_a_line_is_noted_and_a_handled_one_is_not() {
+        let state = spill("state").with_file_name("shell");
+        for (cmd, noted) in [
+            ("false; echo after", true),
+            ("sh -c 'exit 3'; echo after", true),
+            (
+                "if false; then :; fi; false || true; ! false; echo after",
+                false,
+            ),
+            ("grep -q nothing /dev/null && echo found; echo after", false),
+            ("echo only", false),
+        ] {
+            let log = spill("noted.log");
+            let (code, text) = run_to_end(cmd, &[], StateMode::ReadWrite(&state), &log).await;
+            assert_eq!(code, Some(0), "{cmd}: {text}");
+            assert_eq!(noted_failure(&log), noted, "{cmd}");
+        }
+        // The trap leaves the status a script reads, and the one the line ends with, as they were.
+        let log = spill("status.log");
+        let (code, text) = run_to_end(
+            "false; echo \"$?\"; false",
+            &[],
+            StateMode::ReadWrite(&state),
+            &log,
+        )
+        .await;
+        assert_eq!((code, text.trim()), (Some(1), "1"));
     }
 
     #[cfg(unix)]

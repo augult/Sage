@@ -1935,8 +1935,8 @@
       "cached_tokens": 57920,
       "output_tokens": 4525,
       "reasoning_tokens": 2869,
-      "cost_ds": 0.0048,
-      "cost_oai": 0.00897,
+      "cost_ds": 0.00505,
+      "cost_oai": 0.00922,
       "seconds": 118.0,
       "verify_tail": "ImportError: WHITE"
     },
@@ -1973,8 +1973,8 @@
       "cached_tokens": 16960,
       "output_tokens": 1684,
       "reasoning_tokens": 861,
-      "cost_ds": 0.00267,
-      "cost_oai": 0.00389,
+      "cost_ds": 0.00263,
+      "cost_oai": 0.00385,
       "seconds": 38.0,
       "verify_tail": "pretty format hyphen"
     },

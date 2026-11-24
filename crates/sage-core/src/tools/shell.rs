@@ -37,6 +37,9 @@ pub struct Exec {
     pub spill: String,
     /// The reported exit code comes from an earlier stage of a pipeline whose last stage exited 0.
     pub masked: bool,
+    /// A command of the line failed before its end (`jobs::noted_failure`). `None` where the
+    /// shell does not note that (cmd.exe), or the command did not run to its end.
+    pub failed_before_end: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +71,7 @@ pub async fn exec(
             ms: 0,
             spill: String::new(),
             masked: false,
+            failed_before_end: None,
         });
     }
     let (spill, spill_path) = sess.next_spill();
@@ -81,6 +85,7 @@ pub async fn exec(
     let ms = run.started.elapsed().as_millis() as u64;
     let mut masked = false;
     let mut drained = false;
+    let mut failed_before_end = None;
     let end = match waited {
         Waited::Exited(mut exit) => {
             drained = drain(&mut run.readers).await;
@@ -92,6 +97,7 @@ pub async fn exec(
                 exit.code = Some(code);
                 masked = true;
             }
+            failed_before_end = noted_failure(&spill_path);
             ExecEnd::Exited(exit)
         }
         Waited::Cancelled => {
@@ -115,6 +121,7 @@ pub async fn exec(
                 ms,
                 spill,
                 masked: false,
+                failed_before_end: None,
             });
         }
     };
@@ -135,6 +142,7 @@ pub async fn exec(
         ms,
         spill,
         masked,
+        failed_before_end,
     })
 }
 
@@ -174,6 +182,18 @@ impl Exec {
         .await
         .ok()
         .flatten()
+    }
+}
+
+/// Whether a command of the line failed before its end, where the shell notes that (bash does,
+/// cmd.exe does not).
+fn noted_failure(spill: &Path) -> Option<bool> {
+    #[cfg(unix)]
+    return Some(super::jobs::noted_failure(spill));
+    #[cfg(not(unix))]
+    {
+        let _ = spill;
+        None
     }
 }
 
@@ -425,7 +445,11 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                 predicate_text.as_deref().unwrap_or(&ex.text),
                 ex.output_complete || predicate_text.is_some(),
             );
+            // A traceback printed by a command that then failed, with the line going on to exit 0.
+            // One that a program caught and printed itself is no failure: where the shell notes
+            // failures, a command has to have failed too.
             let masked_script_err = exit.code == Some(0)
+                && ex.failed_before_end != Some(false)
                 && (cmd.contains('\n') || cmd.contains(';'))
                 && (ex.text.contains("\nSyntaxError:")
                     || ex.text.contains("Traceback (most recent call last):"))
@@ -545,11 +569,6 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                     }
                 );
                 if sess.features.expand {
-                    let budget = sess
-                        .prices
-                        .map(|p| p.speculation_budget(0.5, 1500.0) as usize * 4)
-                        .unwrap_or(usize::MAX)
-                        .min(sess.limits.expand_chars);
                     let step = sess.step;
                     let block = locate::expand(
                         &ex.text,
@@ -558,7 +577,7 @@ pub async fn run(sess: &mut Session, args: &Value, cancel: &CancellationToken) -
                         step,
                         sess.limits.expand_radius,
                         sess.limits.expand_windows,
-                        budget,
+                        sess.limits.expand_chars,
                     );
                     if !block.is_empty() {
                         obs.push_str(
@@ -764,6 +783,38 @@ mod tests {
         )));
         assert_eq!(out.violations, vec!["expected exit 0, got exit 1"]);
         assert!(!out.shell.unwrap().ok);
+    }
+
+    #[tokio::test]
+    async fn an_unhandled_error_before_the_end_is_a_failure_and_a_handled_one_is_not() {
+        let mut s = test_session("masked-error", Features::sage());
+        std::fs::write(
+            s.ws.root.join("handled.py"),
+            "import traceback\ntry:\n    1/0\nexcept ZeroDivisionError:\n    traceback.print_exc()\nprint('handled')\n",
+        )
+        .unwrap();
+        std::fs::write(s.ws.root.join("broken.py"), "1/0\n").unwrap();
+        // The error ends `broken.py`, and the line goes on to exit 0: that is a failure.
+        let out = sh(
+            &mut s,
+            json!({"cmd": "python3 broken.py; echo done", "expect_exit": "0"}),
+        )
+        .await;
+        assert_eq!(out.status, StepStatus::Surprise, "{}", out.observation);
+        assert!(out.observation.contains("unhandled Python error"));
+        // A program that catches the error and prints its traceback has not failed.
+        for cmd in [
+            "python3 handled.py; echo done",
+            "python3 -c \"import traceback\ntry:\n    1/0\nexcept ZeroDivisionError:\n    traceback.print_exc()\nprint('handled')\"",
+        ] {
+            let out = sh(
+                &mut s,
+                json!({"cmd": cmd, "expect_exit": "0", "expect_has": "handled"}),
+            )
+            .await;
+            assert_eq!(out.status, StepStatus::Ok, "{cmd}: {}", out.observation);
+            assert!(out.shell.unwrap().held_explicit, "{cmd}");
+        }
     }
 
     #[tokio::test]
