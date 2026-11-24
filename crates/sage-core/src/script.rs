@@ -356,6 +356,97 @@ fn stage_is_inspection(stage: &str) -> bool {
     }
 }
 
+/// Whether `cmd` only loads or compiles the code (`python3 -c "import calc"`, `cargo build`,
+/// `go vet`, `node --check app.js`) and runs none of it. That the code loads says nothing about the
+/// rules a spec sets, so such a run never stands for checking them. Parts that cannot fail (`cd`,
+/// `echo`) are passed over.
+fn loads_only(cmd: &str) -> bool {
+    let mut loads = false;
+    for (part, _) in top_level(cmd) {
+        let stage = part.trim();
+        if stage.is_empty() || !stage_can_fail(stage) {
+            continue;
+        }
+        if !stage_loads_only(stage) {
+            return false;
+        }
+        loads = true;
+    }
+    loads
+}
+
+fn stage_loads_only(stage: &str) -> bool {
+    let words: Vec<&str> = stage
+        .split_whitespace()
+        .skip_while(|w| {
+            w.split_once('=').is_some_and(|(k, _)| {
+                !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }) || matches!(*w, "env" | "time" | "npx" | "command")
+        })
+        .collect();
+    let Some(first) = words.first() else {
+        return false;
+    };
+    let program = first.rsplit('/').next().unwrap_or(first);
+    // The subcommand: the first word after the program that is no flag or toolchain (`+nightly`).
+    let sub = words[1..]
+        .iter()
+        .find(|w| !w.starts_with('-') && !w.starts_with('+'))
+        .copied()
+        .unwrap_or("");
+    if program.starts_with("python") || program.starts_with("pypy") {
+        if let Some(i) = words.iter().position(|w| *w == "-m") {
+            return matches!(words.get(i + 1).copied(), Some("py_compile" | "compileall"));
+        }
+        return stage
+            .split_once(" -c ")
+            .is_some_and(|(_, code)| imports_only(unquoted(code.trim())));
+    }
+    match program {
+        "cargo" => matches!(sub, "build" | "b" | "check" | "c"),
+        "go" => matches!(sub, "build" | "vet"),
+        "tsc" => true,
+        "node" => words.contains(&"--check") || words.contains(&"-c"),
+        "bash" | "sh" | "zsh" => words.contains(&"-n"),
+        "ruby" => words.contains(&"-c"),
+        "php" => words.contains(&"-l"),
+        _ => false,
+    }
+}
+
+/// The text inside the quotes `code` starts with, or all of it when it is not quoted.
+fn unquoted(code: &str) -> &str {
+    match code.chars().next() {
+        Some(q @ ('"' | '\'')) => code[1..].rfind(q).map_or(&code[1..], |end| &code[1..=end]),
+        _ => code,
+    }
+}
+
+/// Python that only imports, perhaps saying so: `import calc`, `from calc import f; print("ok")`.
+fn imports_only(code: &str) -> bool {
+    let literal = |s: &str| {
+        let s = s.trim();
+        s.len() >= 2
+            && matches!(s.as_bytes()[0], b'"' | b'\'')
+            && s.as_bytes()[s.len() - 1] == s.as_bytes()[0]
+            && !s[1..s.len() - 1].contains(['"', '\''])
+    };
+    let statements: Vec<&str> = code
+        .split(['\n', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    !statements.is_empty()
+        && statements.iter().all(|s| {
+            s.starts_with("import ")
+                || (s.starts_with("from ") && s.contains(" import "))
+                || *s == "pass"
+                || s.strip_prefix("print(")
+                    .and_then(|rest| rest.strip_suffix(')'))
+                    .is_some_and(literal)
+        })
+}
+
 /// Whether a command or a path names the file the harness keeps API keys in: `config.json` in its
 /// data folder, wherever that is, or in the usual `~/.sage`.
 fn names_key_file(text: &str) -> bool {
@@ -788,6 +879,7 @@ impl Runner<'_> {
                 && meta.ok
                 && !proves_nothing(&meta.cmd)
                 && !inspection_only(&meta.cmd)
+                && !loads_only(&meta.cmd)
                 && !empty_test_run
                 && self.sess.evidence.epoch == epoch_before
                 && !self.sess.watches.is_auto_cmd(&meta.cmd, &self.sess.ws.cwd)
@@ -2414,5 +2506,62 @@ mod tests {
                 .1
                 .starts_with("[review] Not accepted yet")
         );
+
+        // Nor does a check that only loads the code: it says nothing about the spec's rules.
+        let mut s5 = test_session("script-spec-import-only", Features::sage());
+        s5.task = "Implement the exercise described in README.md.".into();
+        std::fs::write(s5.ws.root.join("README.md"), "# Leap\nRules.\n").unwrap();
+        let (res5, _, _) = run(
+            &mut s5,
+            &[
+                (
+                    "write",
+                    json!({"path": "leap.py", "content": "def is_leap(y):\n    return y % 4 == 0\n"}),
+                ),
+                (
+                    "shell",
+                    json!({"cmd": "python3 -c \"import leap\"", "expect_exit": "0"}),
+                ),
+                ("finish", json!({"summary": "implemented"})),
+            ],
+        )
+        .await;
+        assert!(res5.finished.is_none());
+        assert!(
+            res5.observations[2]
+                .1
+                .starts_with("[review] Not accepted yet"),
+            "{}",
+            res5.observations[2].1
+        );
+    }
+
+    #[test]
+    fn a_command_that_only_loads_the_code_is_told_from_one_that_runs_it() {
+        for cmd in [
+            "python3 -c \"import leap\"",
+            "python3 -c 'from leap import is_leap; print(\"ok\")'",
+            "cd src && python -m py_compile leap.py && echo compiled",
+            "cargo build --release",
+            "cargo +nightly check",
+            "go vet ./...",
+            "npx tsc --noEmit",
+            "node --check app.js",
+            "bash -n run.sh",
+        ] {
+            assert!(loads_only(cmd), "{cmd}");
+        }
+        for cmd in [
+            "python3 -c \"import leap; print(leap.is_leap(1900))\"",
+            "python3 -c \"import leap\" && python3 test_leap.py",
+            "python3 leap.py",
+            "python3 -m pytest -q",
+            "cargo test",
+            "go test ./...",
+            "node --test",
+            "echo done",
+        ] {
+            assert!(!loads_only(cmd), "{cmd}");
+        }
     }
 }

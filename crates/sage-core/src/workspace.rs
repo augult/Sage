@@ -436,15 +436,11 @@ const RACY_MAX_FILE: u64 = 1024 * 1024;
 const RACY_MAX_TOTAL: u64 = 16 * 1024 * 1024;
 
 /// Every file of a small workspace, relative to `root` and sorted. `None` when there are more than
-/// `max_files`: a larger tree is for the model to explore.
+/// `max_files`: a larger tree is for the model to explore. What the project ignores (`.gitignore`,
+/// `.ignore`) is left out, as in `fingerprint`: build output, logs and caches are nobody's source.
 pub fn small_tree(root: &Path, max_files: usize) -> Option<Vec<PathBuf>> {
     let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .parents(false)
         .follow_links(false)
         .filter_entry(|e| {
             !e.file_name()
@@ -1107,6 +1103,27 @@ mod tests {
         assert!(same(&f0, &fingerprint(&root)));
         fs::write(root.join("a.txt"), "two").unwrap();
         assert!(!same(&f0, &fingerprint(&root)));
+    }
+
+    #[test]
+    fn a_small_tree_leaves_out_what_the_repository_ignores() {
+        let root = tmp("tree-ignored");
+        git(&root, &["init", "-q"]);
+        fs::write(root.join(".gitignore"), "build/\n*.log\n").unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("src/app.py"), "print(1)\n").unwrap();
+        fs::write(root.join("build/out.js"), "var x;\n").unwrap();
+        fs::write(root.join("debug.log"), "ran\n").unwrap();
+        assert_eq!(
+            small_tree(&root, 10),
+            Some(vec![PathBuf::from("src").join("app.py")])
+        );
+        // Ignored files do not count towards the cap either.
+        for n in 0..20 {
+            fs::write(root.join("build").join(format!("{n}.js")), "x").unwrap();
+        }
+        assert!(small_tree(&root, 2).is_some());
     }
 
     #[test]

@@ -611,6 +611,34 @@ async fn stops_on_cancel_and_on_the_turn_limit() {
 }
 
 #[tokio::test]
+async fn a_run_that_finished_is_given_no_advice_about_replies_it_will_not_have() {
+    // A limit of three replies and `finish` in the second: the third would have been the last.
+    let mut cfg = AgentConfig::new("mock");
+    cfg.max_turns = 3;
+    let look = fixed(MockTurn::calls(
+        "",
+        vec![("shell", json!({"cmd": "true", "expect_exit": "0"}))],
+    ));
+    let done = fixed(MockTurn::calls(
+        "",
+        vec![("finish", json!({"summary": "nothing needed changing"}))],
+    ));
+    let mut r = rig("agent-no-late-notes", cfg, vec![look, done]);
+    let out = r.agent.run("x".into(), &CancellationToken::new()).await;
+    assert_eq!((out.status, r.agent.stats.turns), (FinishStatus::Done, 2));
+    let notes: Vec<String> = events(&r)
+        .iter()
+        .filter_map(|e| match e {
+            EventKind::Note { kind, text, .. } if kind == "harness" => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(notes.is_empty(), "{notes:?}");
+    let last = &r.agent.ctx.messages.last().unwrap().content;
+    assert!(!last.contains("--- harness ---"), "{last}");
+}
+
+#[tokio::test]
 async fn the_last_reply_of_the_budget_is_the_report_whatever_it_holds() {
     let edit = || {
         fixed(MockTurn::calls(

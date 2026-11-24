@@ -773,13 +773,20 @@ async fn main() -> ExitCode {
         Some("key") => match args.get(1) {
             None => fail("usage: sage key <provider>   (the key is read from stdin)".into()),
             Some(provider) => {
-                if std::io::stdin().is_terminal() {
-                    eprint!("API key for {provider} (input is not hidden): ");
-                }
-                let mut key = String::new();
-                if std::io::stdin().read_line(&mut key).is_err() {
-                    return fail("could not read the key from stdin".into());
-                }
+                // Typed at a terminal, the key is not shown; piped in, it is read as a line.
+                let key = if std::io::stdin().is_terminal() {
+                    eprint!("API key for {provider} (hidden; Esc cancels): ");
+                    match chat::read_secret() {
+                        Some(key) => key,
+                        None => return fail("cancelled: no key was stored".into()),
+                    }
+                } else {
+                    let mut line = String::new();
+                    if std::io::stdin().read_line(&mut line).is_err() {
+                        return fail("could not read the key from stdin".into());
+                    }
+                    line
+                };
                 match h.set_key(provider, &key) {
                     Ok(()) => {
                         eprintln!(

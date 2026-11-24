@@ -416,24 +416,34 @@ pub fn is_test_path(path: &str) -> bool {
         || file.contains(".spec.")
 }
 
-/// Whether the task or workspace has a specification or partial starter tests that require
-/// verification beyond the starter test watch.
+/// Whether the work is held to more than the tests the workspace has, so that passing them is not
+/// yet the task done: the task names a document of the workspace (a README, a spec, a plan), says
+/// that its tests are partial or held back, or the workspace has a `SPEC.md`.
 pub fn task_has_spec(task: &str, root: &std::path::Path) -> bool {
     let lower = task.to_ascii_lowercase();
-    let partial_or_spec = [
+    let partial = [
         "covers only",
+        "cover only",
         "only checks",
         "only tests",
         "does not cover",
+        "do not cover",
         "not cover every",
-        "spec.md",
-        "readme.md",
-        "migration.md",
-        "grader will supply",
+        "hidden tests",
+        "held-out tests",
+        "held out tests",
     ]
     .iter()
     .any(|needle| lower.contains(needle));
-    partial_or_spec || root.join("SPEC.md").is_file()
+    partial || names_a_document(task, root) || root.join("SPEC.md").is_file()
+}
+
+/// Whether the task names a Markdown file the workspace has.
+fn names_a_document(task: &str, root: &std::path::Path) -> bool {
+    task.split(|c: char| c.is_whitespace() || "`'\"()[]{}<>,;:".contains(c))
+        .map(|word| word.trim_end_matches(['.', '!', '?']))
+        .filter(|word| word.len() > 3 && word.to_ascii_lowercase().ends_with(".md"))
+        .any(|word| root.join(word).is_file())
 }
 
 /// What a stored session keeps of its `Session` (see `Session::checkpoint`).
@@ -805,5 +815,26 @@ mod tests {
         assert_eq!((h1.as_str(), h2.as_str()), ("out:1", "out:2"));
         assert_eq!(s.spill_path("out:1"), Some(p1));
         assert_eq!(s.spill_path("out:x"), None);
+    }
+
+    #[test]
+    fn a_task_is_held_to_a_document_it_names_or_to_tests_it_calls_partial() {
+        let s = test_session("spec", Features::sage());
+        let root = &s.ws.root;
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/api.md"), "# API\n").unwrap();
+        assert!(task_has_spec(
+            "Implement the endpoints in `docs/api.md`.",
+            root
+        ));
+        assert!(task_has_spec("Follow docs/api.md: every rule.", root));
+        // A document it names that is not there, or no document at all, is no spec.
+        assert!(!task_has_spec("Write NOTES.md for this.", root));
+        assert!(!task_has_spec("Fix the failing test in calc.py.", root));
+        // Tests said to be partial or held back.
+        assert!(task_has_spec("The tests cover only the happy path.", root));
+        assert!(task_has_spec("Hidden tests will check it.", root));
+        std::fs::write(root.join("SPEC.md"), "# Spec\n").unwrap();
+        assert!(task_has_spec("Fix calc.py.", root));
     }
 }

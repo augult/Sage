@@ -586,7 +586,7 @@ fn answer_key() -> Answer {
 }
 
 /// A secret typed or pasted without showing it. `None` when cancelled.
-fn read_secret() -> Option<String> {
+pub(crate) fn read_secret() -> Option<String> {
     let mut err = std::io::stderr();
     let _ = err.flush();
     if !std::io::stdin().is_terminal() || terminal::enable_raw_mode().is_err() {
