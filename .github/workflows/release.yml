@@ -99,13 +99,10 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: x86_64-linux
-            test: true
           - os: macos-latest
             platform: aarch64-macos
-            test: true
           - os: windows-latest
             platform: x86_64-windows
-            test: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -124,7 +121,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Test
-        if: matrix.test
         shell: bash
         run: cargo test -p sage-cli -p sage-core --locked
 
@@ -211,21 +207,23 @@ jobs:
           cat > release/RELEASE-NOTES.md <<'NOTES'
           # Sage @VERSION@
 
-          Sage now solves more tasks than OpenCode with every model tested, for less money and in less time. On the same 30 tasks with hidden tests (7 hard tasks, 23 Python and Rust exercises), 2 runs each:
+          A fix release: one security fix, a handful of bug fixes, and a system prompt that gives general advice.
 
-          | Model | Sage | OpenCode 1.19.5 | Sage's cost | Sage's time |
-          |---|---|---|---|---|
-          | DeepSeek V4.1 Flash | 45/60 | 40/60 | 24% lower | 36% lower (median) |
-          | GPT-6 Luna | 30/60 | 24/60 | 43% lower | 32% lower (median) |
+          ## Security
+          - **API keys stay out of the conversation.** The commands Sage runs no longer see the provider API keys in your environment (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY` and the rest). Before, a command such as `env` could send a key to the model and into the session's logs. A project whose own tests need one of these variables has to be given it another way.
 
-          Every run, the method and the raw results: [docs/BENCHMARKS.md](https://github.com/augult/Sage/blob/main/docs/BENCHMARKS.md).
+          ## Fixes
+          - **A handled Python error is no longer a failure.** A command that catches an exception and prints its traceback, then exits 0, is no longer reported as failed.
+          - **Loading the code is not checking it.** On a task held to a document (a README, a spec), a check that only imports or builds the code no longer stands for checking the document's rules: `finish` asks for that once first.
+          - **The first message leaves out ignored files.** Build output, logs and other files your `.gitignore` excludes are no longer attached to it, and no longer push real files out.
+          - **No stale budget note.** "Your next reply is the last one" is no longer added after a run has already finished.
+          - **`sage key` hides the key** as you type it.
+          - **GPT-6 Luna is priced**, so its cost is shown, at its list price.
+          - CI now checks changes to the system prompt, the skills and the benchmark tasks, and runs the command-line smoke test.
 
-          ## What changed
-          - **Passing the visible tests is no longer enough to finish a task with a spec.** When the task or its README states rules the tests in the project leave out, `finish` waits for one check of those rules first, sent in the same reply. Reading a file, `git status` or a search that cannot fail do not count as that check.
-          - **A test run that ran no tests proves nothing.** `Ran 0 tests`, `collected 0 items`, `running 0 tests`, `[no test files]` and the like no longer count as a passing check, and such a command is not watched.
-          - **An error hidden in a multi-line command is caught.** A command of several lines whose early part fails now counts as failed, even when its last line exits with 0.
-          - A sharper system prompt: which edge cases to check before finishing (error details, boundaries, end of input, ordering), and stricter rules for HTML and CSS (a small set of sizes and spacings, one button style, layouts that fit a phone).
-          - The two-circle logo is gone from the app: the start screen and About show the name only.
+          ## Changed
+          - **The system prompt is general advice.** The edge cases to check are general ones (empty and boundary inputs, end of input, ordering, splitting and joining, errors and the line they report); a check has to run the code on real inputs; text between tool calls stays short. The HTML and CSS advice stays.
+          - The benchmark pages price GPT-6 Luna at its list price: Sage is 21% cheaper than OpenCode with it (24% with DeepSeek V4.1 Flash), not 43%.
 
           ## Command line
           - **sage-@VERSION@-x86_64-linux.tar.gz**, **sage-@VERSION@-aarch64-macos.tar.gz**, **sage-@VERSION@-x86_64-windows.zip**: unpack and put `sage` on your PATH. On macOS, run `xattr -d com.apple.quarantine sage` once.
